@@ -1,0 +1,161 @@
+syntax = "proto2";
+
+package wayside;
+
+// The bounding box of each object in image.
+//
+// Each component is measured in ratio. We choose ratio rather than pixels is due to
+// the fact that actual image size may vary through out the data pipeline. The ratio
+// unit ease the extra work to re-compute the sizes.
+message BBox2D {
+    required double left = 1;
+    required double top = 2;
+    required double width = 3;
+    required double height = 4;
+}
+
+// The bounding box of each object in LiDAR coordinates.
+//
+// Each component is measured in meters.
+message BBox3D {
+    required double center_x = 1;
+    required double center_y = 2;
+    required double center_z = 3;
+    required double size_x = 4;
+    required double size_y = 5;
+    required double size_z = 6;
+    optional UnitQuaternion rotation = 7;
+}
+
+
+// Describes the rotation in 3-dimensional space.
+message UnitQuaternion {
+    required double x = 1;
+    required double y = 2;
+    required double z = 3;
+    required double w = 4;
+}
+
+// Image data along with meta data.
+//
+message Image {
+    // fourcc of the video
+    // Supported: "RGB3", "BGR3"
+    required bytes fourcc = 1;
+    // Height of the image
+    required uint64 height = 2;
+    // Width of the image
+    required uint64 width = 3;
+    // Number of channels of the image
+    // Supported: 3
+    required uint64 channels = 4;
+    // Image data (one channel per byte)
+    required bytes data = 5;
+}
+
+// Vanilla 2-dimensional point.
+message Point2D {
+    required double x = 1;
+    required double y = 2;
+}
+
+// Vanilla 3-dimensional point.
+message Point3D {
+    required double x = 1;
+    required double y = 2;
+    required double z = 3;
+}
+
+
+// 3-dimensional position in horizontal coordinates.
+message HorizontalCoord {
+    /// Distance from origin point.
+    required double distance = 1;
+    // Clockwise azimuthal angle starting from x axis in radians.
+    required double azimuth = 2;
+    // Angle measurement from horizon towards zenith. in radians
+    required double altitude = 3;
+}
+
+
+// Vanilla 2-dimensional vector.
+message Vector2D {
+    required double x = 1;
+    required double y = 2;
+}
+
+// Vanilla 3-dimensional vector.
+message Vector3D {
+    required double x = 1;
+    required double y = 2;
+    required double z = 3;
+}
+
+// for kalman filter prediction.
+message kfPred {
+    required double x = 1;
+    required double y = 2;
+    required double z = 3;
+}
+
+
+// Pair of adjusted timestamp and device/GPS timestamp.
+message RecordTime {
+    required uint64 timestamp = 1;
+    optional uint64 raw_timestamp = 2;
+}
+
+/// Rotation and translation.
+message Isometry3D {
+    required UnitQuaternion rotation = 1;
+    required Vector3D translation = 2;
+}
+
+/// The identifier of sensor device.
+message DevicePath {
+    // ID of the wayside sensors e.g. wayside_1, wayside_2
+    required string host = 1;
+    // ID of the sensor e.g. camera1, camera2
+    required string device = 2;
+}
+
+// 3-dimensional point with timestamp in nanoseconds.
+message LidarPoint {
+    // Position of the point
+    required double x = 1;
+    required double y = 2;
+    required double z = 3;
+    // Timestamp of the point
+    required uint64 timestamp_ns = 4;
+    // Intensity of the point (Measure by lidar)
+    optional double intensity = 5;
+    // Laser ID of this point. There are several lasers in one firing, and each laser will produce a point
+    optional uint32 laser_id = 6;
+    // Distance from the lidar to this point
+    optional double distance = 7;
+    // Azimuth angle of the firing that this point belongs to
+    optional double original_azimuth_angle = 8;
+    optional double corrected_azimuth_angle = 9;
+    // Column ID of this point in the lidar frame (firing ID)
+    optional uint64 col_idx = 10;
+    // Row ID of this point in the lidar frame (laser ID)
+    optional uint64 row_idx = 11;
+}
+
+
+// 3-dimensional point with timestamp in nanoseconds.
+message ProcessedPoint {
+    required Point3D position = 1;
+    // Whether this point is filtered by pcd-process
+    required bool is_active = 2;
+    required uint64 timestamp_ns = 3;
+    // ID of the device this point belongs to
+    required DevicePath device = 4;
+    optional double intensity = 5;
+    optional uint32 laser_id = 6;
+    optional double distance = 7;
+    optional double original_azimuth_angle = 8;
+    optional double corrected_azimuth_angle = 9;
+    // ID of the cluster this point belongs to. Cluster is generate by pcd-cluster
+    optional uint64 cluster_id = 10;
+}

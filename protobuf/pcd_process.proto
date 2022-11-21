@@ -1,0 +1,20 @@
+syntax = "proto2";
+import "common.proto";
+import "video_capture.proto";
+import "lidar_scan.proto";
+package wayside;
+
+// Message format produced by image/LiDAR frame matcher.
+//
+// It pairs up single point cloud frame with image frames of distinct cameras.
+// The timestamp difference of these frames is assumed to be small. (suggested <= 50ms)
+message PcdProcessMessage {
+    // The raw lidar scan messages
+    repeated LidarScanMessage point_cloud = 1;
+    // The raw image messages
+    repeated VideoCaptureMessage image = 2;
+    // The coordinate system basis on which fused_points based.
+    required DevicePath major_device = 3;
+    // The fused points from raw lidar points, which are in the same coordinate system
+    repeated LidarPoint fused_points = 4;
+}

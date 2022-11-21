@@ -1,0 +1,37 @@
+[package]
+name = "protobuf-types"
+version = "0.1.0"
+authors = ["jerry73204 <jerry73204@gmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+prost = "0.11.0"
+serde = { version = "1.0.140", features = ["derive"] }
+opencv = { version = "0.69.0", optional = true, default-features = false, features = ["imgproc"] }
+nalgebra = { version = "0.30.1", optional = true }
+image = { version = "0.24.3", optional = true }
+tch = { version = "0.8.0", optional = true }
+anyhow = "1.0.58"
+regex = "1.6.0"
+chrono = "0.4.19"
+serde-types = { version = "0.1.0", path = "../serde-types" }
+
+[build-dependencies]
+glob = "0.3.0"
+anyhow = "1.0.58"
+prost-build = "0.11.0"
+itertools = "0.10.3"
+
+[features]
+default = []
+full = ["with-tch", "with-opencv", "with-nalgebra", "with-image"]
+with-tch = ["tch"]
+with-opencv = ["opencv"]
+with-nalgebra = ["nalgebra"]
+with-image = ["image"]
+
+[dev-dependencies]
+approx = "0.5.1"
+rand = "0.8.5"

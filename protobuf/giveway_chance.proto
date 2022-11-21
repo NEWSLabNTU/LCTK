@@ -1,0 +1,17 @@
+syntax = "proto2";
+import "tracker.proto";
+package wayside;
+
+// Given 
+//     1. The category the vehicle belongs to
+//     2. The historical speed of the vehicle
+//     3. The historical speed of the pedestrian
+//     4. The distance between the pedestrian and the vehicle
+// Predict whether the pedestrain will yeild the car
+
+// Message produced by giveway_chance
+message ChanceMessage {
+  required double giveway_chance = 1; 
+  required TrackerObject pedestrain = 2;
+  required TrackerObject car = 3;
+}

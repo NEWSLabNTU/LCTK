@@ -1,0 +1,11 @@
+syntax = "proto2";
+import "common.proto";
+package wayside;
+
+message PcdGenMessage {
+    repeated Point3D points = 1;
+    required BBox3D roi = 2;
+    required uint64 height = 3;
+    required uint64 width = 4;
+    repeated BBox2D bboxes = 5;
+}

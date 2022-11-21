@@ -1,0 +1,17 @@
+syntax = "proto2";
+import "common.proto";
+package wayside;
+
+// Messages produced by video recorder.
+message VideoCaptureMessage {
+    required string source_id = 1;
+    // Device that delivers the messge
+    required DevicePath device = 7;
+    // Recording time of this message
+    required RecordTime timestamp = 4;
+    optional string path = 8;
+    // Frame index of this message
+    required uint64 frame_id = 5;
+    // Image data in this message
+    required Image image = 6;
+}

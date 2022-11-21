@@ -1,0 +1,20 @@
+{
+    // ArUco IDs x-major order by (x, y)
+    "marker_ids": [696, 64, 306, 195],
+    // the marker dictionary
+    "dictionary": "5x5",
+    // the length of marker board, including white margin
+    "board_size": "500mm",  // mm
+    // the width of white border
+    "board_border_size": "10mm",   // mm
+    // number of square areas along x and y axis
+    // the square of this number is total number of areas
+    // this paramter will determine the actual square size
+    "num_squares_per_side": 2,
+    // marker to square margin size ratio
+    // the marker size is square size times this ratio,
+    // while square size is determined by num_squares_per_side
+    "marker_square_size_ratio": 0.8,
+    "border_bits": 1,
+    "permute_axis": ["x", "y", "z"],
+}

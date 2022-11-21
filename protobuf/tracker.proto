@@ -1,0 +1,51 @@
+syntax = "proto2";
+import "common.proto";
+import "sensor_fuse.proto";
+import "lidar_scan.proto";
+package wayside;
+
+
+// Messaged produced by tracker.
+message TrackerMessage {
+    required string host_name = 1;
+    repeated LidarScanMessage point_cloud = 2;
+    repeated TrackerImage images = 3;
+    repeated TrackerAnnotation annotations = 4;
+    repeated ClusterRelation cluster_rel = 5;
+    repeated HomographyRelation homo_rel = 6;
+}
+
+// The image description produced by traker.
+message TrackerImage {
+    required string host_name = 1;
+    required string source_name = 2;
+    required RecordTime timestamp = 3;
+    required uint64 frame_id = 4;
+    required Image image = 5;
+    repeated TrackerObject objects = 6;
+}
+
+// The object description produced by tracker.
+message TrackerObject {
+    required FuserObject object = 1;
+    optional uint64 track = 2;
+    optional uint64 original_track = 3;
+    required Vector3D motion3d = 4;
+    required Vector2D motion2d = 5;
+    optional kfPred kfpred = 6;
+    optional uint64 homography_alias = 7;
+    optional uint64 track_age = 8;
+    optional uint64 cluster_id = 9;
+}
+
+// Physical object annotation.
+message TrackerAnnotation {
+    required uint64 cluster_id = 1;
+    optional uint64 track_id = 2;
+}
+
+// homography relation between original track ids
+message HomographyRelation {
+    required uint64 original_track_id_first = 1;
+    required uint64 original_track_id_second = 2;
+}

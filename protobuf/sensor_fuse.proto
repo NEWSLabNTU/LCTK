@@ -1,0 +1,62 @@
+syntax = "proto2";
+import "common.proto";
+import "detector.proto";
+import "lidar_scan.proto";
+package wayside;
+
+// Messages produced by (image and point cloud) fuser.
+message FuserMessage {
+    repeated LidarScanMessage point_cloud = 1;
+    repeated FuserImage images = 2;
+    repeated FuserPoint fused_points = 3;
+    repeated FilteredPoint filtered_points = 4;
+    repeated CoordTransform coord_transforms = 5;
+    repeated ClusterRelation cluster_rel = 6;
+}
+
+// The object description produced by fuser.
+message FuserObject {
+    required DetectorObject object = 1;
+    optional string bbox3d_host = 2;
+    optional string bbox3d_source = 3;
+    optional BBox3D bbox3d = 4;
+    optional uint64 cluster_id = 5;
+}
+
+// The cluster relation of cluster ids between frames
+message ClusterRelation {
+    required uint64 prev_cluster_id = 1;
+    required uint64 curr_cluster_id = 2;
+}
+
+// The image description produced by fuser.
+message FuserImage {
+    required string host_name = 1;
+    required string source_name = 2;
+    required RecordTime timestamp = 3;
+    required uint64 frame_id = 4;
+    required Image image = 5;
+    repeated FuserObject objects = 6;
+}
+
+message FuserPoint {
+    required string host_name = 1;
+    required string source_name = 2;
+    required Point3D coord = 3;
+    optional uint64 cluster_id = 4;
+}
+
+message FilteredPoint {
+    required string host_name = 1;
+    required string source_name = 2;
+    required Point3D coord = 3;
+}
+
+message CoordTransform {
+    required string from_host = 1;
+    required string from_source = 2;
+    required string to_host = 3;
+    required string to_source = 4;
+    required Isometry3D transform = 5;
+
+}

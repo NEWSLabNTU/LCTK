@@ -1,0 +1,19 @@
+syntax = "proto2";
+import "frame.proto";
+package wayside;
+
+// Object Oriented output format from Wayside-Filter
+message FilterMessage {
+    repeated Object3D object_3d_list = 1;
+}
+
+// // Object Oriented Representation
+// message Object3D {
+//     required RecordTime timestamp = 1;
+//     required uint64 track_id = 2;
+//     required string object_type = 3;
+//     required string host_name = 4;
+//     optional BBox3D bbox3d = 5;
+//     // repeated TrackerObject object_2d = 6;
+//     repeated ImageObject object_2d = 7;
+// }

@@ -1,0 +1,23 @@
+syntax = "proto2";
+import "common.proto";
+import "tracker.proto";
+package wayside;
+
+message TrackPredMessage {
+    required string host_name = 1;
+}
+
+
+// The image description produced by traker.
+message TrackPredImage {
+    required string source_name = 1;
+    required RecordTime timestamp = 2;
+    required uint64 frame_id = 3;
+    required Image image = 4;
+    repeated TrackPredObject objects = 5;
+}
+
+// The object description produced by tracker.
+message TrackPredObject {
+    required TrackerObject object = 1;
+}

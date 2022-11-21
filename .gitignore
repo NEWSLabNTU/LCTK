@@ -1,0 +1,29 @@
+# rust
+**/*.rs.bk
+/target
+/rust-bin/*/target
+/rust-lib/*/target
+Cargo.lock
+
+# editor
+*~
+.*~
+*.swp
+*.swo
+\#*#
+.vscode/
+
+# python
+/tracker/__pycache__
+*.pyc
+*.pyo
+__pycache__/
+/detectron_detector/__main__
+
+# ninja
+.ninja_deps
+.ninja_log
+
+/thi_output
+/deepsort-tracker/wayside_?_camera?/
+/config/files/*
