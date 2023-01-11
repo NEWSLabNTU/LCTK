@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "rust-bin/find-aruco-marker",
+    "rust-bin/find-hollow-board",
+    "rust-bin/pcd-tool",
+    "rust-bin/project-to-image",
+    "rust-bin/solve-extrinsic-params",
+    "rust-lib/aruco-config",
+    "rust-lib/aruco-detector",
+    "rust-lib/common-types",
+    "rust-lib/geom-algo",
+    "rust-lib/hollow-board-config",
+    "rust-lib/hollow-board-detector",
+    "rust-lib/kiss3d-utils",
+    "rust-lib/pcd-format",
+    "rust-lib/plane-estimator",
+    "rust-lib/pnp-solver",
+    "rust-lib/protobuf-types",
+    "rust-lib/serde-types",
+
+]
