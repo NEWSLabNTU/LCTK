@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use console::Term;
-use dialoguer::{Input, Select};
+use dialoguer::Select;
+//use dialoguer::Input;
 use iterator_ext::IteratorExt;
 use lidar_utils::velodyne::{self, FrameConverter as _};
 use num_traits::ToPrimitive;
@@ -48,41 +49,45 @@ where
     let output_dir = output_dir.as_ref();
 
     // Get some user informations
-    let term = Term::stdout();
-    let lidar_type = {
-        let choice = Select::new()
-            .with_prompt("What kind of lidar was used to collect this pcap?")
-            .items(&["Vlp16", "Vlp32"])
-            .default(1)
-            .interact_on(&term)?;
+    let lidar_type = LidarType::Vlp32;
+    let target_type = FileFormat::LibpclPcd;
+    let start_number = 1;
+    let number_of_frames = 1;
+    //let term = Term::stdout();
+    //let lidar_type = {
+    //    let choice = Select::new()
+    //        .with_prompt("What kind of lidar was used to collect this pcap?")
+    //        .items(&["Vlp16", "Vlp32"])
+    //        .default(1)
+    //        .interact_on(&term)?;
 
-        match choice {
-            0 => LidarType::Vlp16,
-            1 => LidarType::Vlp32,
-            _ => unreachable!(),
-        }
-    };
-    let target_type = {
-        let choice = Select::new()
-            .with_prompt("What type of file do you want to convert?")
-            .items(&["standard pcd", "newslab pcd"])
-            .default(0)
-            .interact_on(&term)?;
+    //    match choice {
+    //        0 => LidarType::Vlp16,
+    //        1 => LidarType::Vlp32,
+    //        _ => unreachable!(),
+    //    }
+    //};
+    //let target_type = {
+    //    let choice = Select::new()
+    //        .with_prompt("What type of file do you want to convert?")
+    //        .items(&["standard pcd", "newslab pcd"])
+    //        .default(0)
+    //        .interact_on(&term)?;
 
-        match choice {
-            0 => FileFormat::LibpclPcd,
-            1 => FileFormat::NewslabPcd,
-            _ => unreachable!(),
-        }
-    };
-    let start_number: usize = Input::new()
-        .with_prompt("Which frame number do you want to transform from?")
-        .default(0)
-        .interact()?;
-    let number_of_frames: usize = Input::new()
-        .with_prompt("How many frames do you want to transform (0 for all)?")
-        .default(0)
-        .interact()?;
+    //    match choice {
+    //        0 => FileFormat::LibpclPcd,
+    //        1 => FileFormat::NewslabPcd,
+    //        _ => unreachable!(),
+    //    }
+    //};
+    // let start_number: usize = Input::new()
+    //     .with_prompt("Which frame number do you want to transform from?")
+    //     .default(1)
+    //     .interact()?;
+    // let number_of_frames: usize = Input::new()
+    //     .with_prompt("How many frames do you want to transform (0 for all)?")
+    //     .default(1)
+    //     .interact()?;
 
     // prepare pcap capture handlers
     let mut cap = pcap::Capture::from_file(input_file)

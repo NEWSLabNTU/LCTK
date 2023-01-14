@@ -4,7 +4,7 @@ use std::{
     f64,
     path::{Path, PathBuf},
 };
-use structopt::StructOpt;
+use clap::Parser;
 
 mod types;
 mod utils;
@@ -12,7 +12,7 @@ use crate::types::FileFormat;
 
 // use types::FileFormat;
 
-#[derive(Debug, Clone, StructOpt)]
+#[derive(Debug, Clone, Parser)]
 enum Opts {
     Info {
         file: PathBuf,
@@ -28,7 +28,7 @@ enum Opts {
 }
 
 fn main() -> Result<()> {
-    let opts = Opts::from_args();
+    let opts = Opts::parse();
 
     match opts {
         Opts::Info { file } => {
