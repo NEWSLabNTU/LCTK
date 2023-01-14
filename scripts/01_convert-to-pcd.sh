@@ -6,7 +6,7 @@ cd "$script_dir"
 DATA_PATH=../data/sampledata
 MANIFEST_FILE=../rust-bin/pcd-tool/Cargo.toml
 
-for d in $DATA_PATH/{1..5}; do
+for d in $DATA_PATH/*; do
     echo $d
     rm -rf "$d/pcd"
 
