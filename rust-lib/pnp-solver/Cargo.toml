@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-opencv = { version = "0.69.0", default-features = false, features = ["calib3d"] }
+opencv = "0.69.0"
 common-types = { path = "../common-types", features = ["with-opencv", "with-nalgebra"] }
 cv-convert = { version = "0.21.0", default-features = false, features = ["opencv_0-69", "nalgebra_0-30"] }
 serde = { version = "1.0.145", features = ["derive"] }

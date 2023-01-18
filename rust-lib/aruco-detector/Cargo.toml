@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 serde-loader = { version = "0.1.4", features = ["json5"] }
 nalgebra = { version = "0.30.1", features = ["serde-serialize"] }
-opencv = { version = "0.69.0", default-features = false, features = ["aruco"] }
+opencv = "0.69.0"
 cv-convert = { version = "0.21.0", features = ["opencv_0-69", "nalgebra_0-30"] }
 measurements = "0.11.0"
 serde = { version = "1.0.140", features = ["derive"] }
