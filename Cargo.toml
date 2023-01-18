@@ -7,7 +7,6 @@ members = [
     "rust-bin/solve-extrinsic-params",
     "rust-lib/aruco-config",
     "rust-lib/aruco-detector",
-    "rust-lib/common-types",
     "rust-lib/geom-algo",
     "rust-lib/hollow-board-config",
     "rust-lib/hollow-board-detector",

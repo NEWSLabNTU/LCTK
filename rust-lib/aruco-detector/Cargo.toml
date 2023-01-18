@@ -15,7 +15,7 @@ serde = { version = "1.0.140", features = ["derive"] }
 anyhow = "1.0.58"
 indexmap = "1.9.1"
 log = "0.4.17"
-common-types = { version = "0.1.0", path = "../common-types", features = ["with-opencv"] }
+serde-types = { version = "0.1.0", path = "../serde-types", features = ["with-opencv"] }
 noisy_float = { version = "0.2.0", features = ["serde"] }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = "0.10.3"

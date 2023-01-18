@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 opencv = "0.69.0"
-common-types = { path = "../common-types", features = ["with-opencv", "with-nalgebra"] }
+serde-types = { path = "../serde-types", features = ["with-opencv", "with-nalgebra"] }
 cv-convert = { version = "0.21.0", default-features = false, features = ["opencv_0-69", "nalgebra_0-30"] }
 serde = { version = "1.0.145", features = ["derive"] }
 nalgebra = "0.30.1"
