@@ -1,10 +1,10 @@
 use anyhow::{bail, ensure, format_err, Result};
+use clap::Parser;
 use pcd_format::{LibpclPoint, NewslabV1Point};
 use std::{
     f64,
     path::{Path, PathBuf},
 };
-use clap::Parser;
 
 mod types;
 mod utils;

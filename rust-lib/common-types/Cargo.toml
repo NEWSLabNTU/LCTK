@@ -12,7 +12,6 @@ serde-types = { version = "0.1.0", path = "../serde-types" }
 [features]
 default = []
 full = ["serde-types/full", "protobuf-types/full"]
-with-tch = ["protobuf-types/with-tch"]
 with-opencv = ["serde-types/with-opencv", "protobuf-types/with-opencv"]
 with-nalgebra = ["serde-types/with-nalgebra", "protobuf-types/with-nalgebra"]
 with-prost = ["serde-types/with-prost"]
