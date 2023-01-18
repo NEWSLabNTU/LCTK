@@ -139,7 +139,7 @@ mod time_upper_bound {
         let nanos = duration.as_nanos();
         let secs = nanos / 1_000_000_000;
         let nsecs = nanos % 1_000_000_000;
-        NaiveDateTime::from_timestamp(secs as i64, nsecs as u32)
+        NaiveDateTime::from_timestamp_opt(secs as i64, nsecs as u32).unwrap()
     }
 }
 
@@ -415,14 +415,14 @@ mod with_chrono {
         pub fn timestamp_to_unix_naive_datetime(&self) -> NaiveDateTime {
             let secs = self.timestamp / 1_000_000_000;
             let nsecs = self.timestamp % 1_000_000_000;
-            NaiveDateTime::from_timestamp(secs as i64, nsecs as u32)
+            NaiveDateTime::from_timestamp_opt(secs as i64, nsecs as u32).unwrap()
         }
 
         pub fn raw_timestamp_to_unix_naive_datetime(&self) -> Option<NaiveDateTime> {
             let raw_timestamp = self.raw_timestamp?;
             let secs = raw_timestamp / 1_000_000_000;
             let nsecs = raw_timestamp % 1_000_000_000;
-            Some(NaiveDateTime::from_timestamp(secs as i64, nsecs as u32))
+            Some(NaiveDateTime::from_timestamp_opt(secs as i64, nsecs as u32).unwrap())
         }
     }
 }
