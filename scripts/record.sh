@@ -1,3 +1,10 @@
+function set_camera_env () {
+    dev=$1
+    shift
+    v4l2-ctl -c focus_auto=0 -d ${dev}
+    v4l2-ctl -c focus_absolute=5 -d ${dev} 
+}
+
 function run_recording () {
     hostname="$1"
     shift
@@ -10,7 +17,8 @@ function run_recording () {
     while read line
     do 
         array[$i]="/dev/v4l/by-id/$line"
-        let i=i+1
+	set_camera_env ${array[$i]}
+	let i=i+1
     done < "${camera_id_file}"
 
     # disk1="/media/newslab/e6d6cda2-f6a3-42ac-af1d-76742bd1a82a"

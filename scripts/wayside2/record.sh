@@ -11,4 +11,4 @@ script_dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd "$script_dir"
 
 source ../record.sh
-run_recording wayside3 "$timeout" camera-id.txt
+run_recording wayside2 "$timeout" camera-id.txt
