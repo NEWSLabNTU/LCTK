@@ -7,11 +7,11 @@ while read line
 do 
 	array[$i]="/dev/v4l/by-id/$line"
 	let i=i+1
-done < ../config/camera-id.txt
+done < camera-id.txt
 
 # disk1="/media/newslab/e6d6cda2-f6a3-42ac-af1d-76742bd1a82a"
 disk1="."
-dir="${disk1}/recording/wayside_1"
+dir="${disk1}/recording/wayside_2"
 time=$(date -Ins)
 videodir="$dir/video/$time"
 pcddir="$dir/pcd/$time"
