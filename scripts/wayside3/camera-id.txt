@@ -1,0 +1,3 @@
+usb-046d_Logitech_Webcam_C930e_0EC29BAE-video-index0
+usb-046d_Logitech_Webcam_C930e_C75E9BAE-video-index0
+usb-046d_Logitech_Webcam_C930e_55869BAE-video-index0
