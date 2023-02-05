@@ -6,7 +6,7 @@ cd "$script_dir"
 
 MANIFEST_FILE=../rust-bin/find-aruco-marker/Cargo.toml
 DATA_PATH=../data/sampledata
-for d in $DATA_PATH/{1..5}; do
+for d in $DATA_PATH/*; do
     echo $d
     rm -rf "$d/aruco"
     ! cargo run --release \

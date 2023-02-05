@@ -18,3 +18,4 @@ pcd-rs = "0.10.0"
 chrono = "0.4.19"
 pcap = "0.9.1"
 num-traits = "0.2.14"
+clap = { version = "4.0.32", features = ["derive"] }
