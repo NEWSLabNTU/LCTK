@@ -1,4 +1,3 @@
-use common_types::CameraIntrinsics;
 use cv_convert::{prelude::*, OpenCvPose};
 use log::warn;
 use nalgebra as na;
@@ -8,6 +7,7 @@ use opencv::{
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
+use serde_types::CameraIntrinsics;
 
 #[derive(
     Debug,

@@ -13,13 +13,13 @@ const EPS_F64: f64 = 1e-4;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardShape {
     /// The entire board rectangle size.
-    #[serde(with = "common_types::serde_length")]
+    #[serde(with = "serde_types::serde_length")]
     pub board_width: Length,
     /// The hole radius.
-    #[serde(with = "common_types::serde_length")]
+    #[serde(with = "serde_types::serde_length")]
     pub hole_radius: Length,
     /// The displacement of the hole center from the center of rectangle board.
-    #[serde(with = "common_types::serde_length")]
+    #[serde(with = "serde_types::serde_length")]
     pub hole_center_shift: Length,
 }
 

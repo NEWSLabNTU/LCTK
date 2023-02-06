@@ -1,6 +1,5 @@
 use anyhow::{ensure, Result};
 use aruco_config::multi_aruco::MultiArucoPattern;
-use common_types::CameraIntrinsics;
 use cv_convert::{FromCv, OpenCvPose, TryIntoCv};
 use indexmap::IndexSet;
 use itertools::{iproduct, izip};
@@ -16,6 +15,7 @@ use opencv::{
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
+use serde_types::CameraIntrinsics;
 use std::{collections::HashMap, ops::Div as _};
 
 /// An ArUco marker on an image.

@@ -15,7 +15,7 @@ glob = "0.3.0"
 json5 = "0.4.1"
 nalgebra = { version = "0.30.1", features = ["serde-serialize"] }
 noisy_float = { version = "0.2.0", features = ["serde"] }
-opencv = { version = "0.69.0", default-features = false, features = ["videoio", "aruco", "imgproc", "highgui", "calib3d"] }
+opencv = "0.69.0"
 pcd-rs = "0.10.0"
 serde = { version = "1.0.145", features = ["derive"] }
 serde-loader = { version = "0.1.4", features = ["json5"] }

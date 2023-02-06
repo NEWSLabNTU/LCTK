@@ -11,7 +11,7 @@ impl Default for BBox {
     fn default() -> Self {
         Self {
             pose: na::Isometry3::identity(),
-            size_xyz: [1.0, 1.0, 1.0],
+            size_xyz: [1.4, 0.4, 1.4],
         }
     }
 }
