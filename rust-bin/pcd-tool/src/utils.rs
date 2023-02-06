@@ -52,7 +52,7 @@ where
     let lidar_type = LidarType::Vlp32;
     let target_type = FileFormat::LibpclPcd;
     let start_number = 1;
-    let number_of_frames = 1;
+    let number_of_frames = 0;
     //let term = Term::stdout();
     //let lidar_type = {
     //    let choice = Select::new()

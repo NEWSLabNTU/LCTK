@@ -14,6 +14,6 @@ for d in $DATA_PATH/*; do
           -- \
           --gui \
           ../config/intrinsics.yaml \
-          $d/video.avi \
+          $d/camera2.mp4 \
           $d/aruco
 done
