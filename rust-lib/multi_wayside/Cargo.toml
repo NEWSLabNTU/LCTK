@@ -1,0 +1,36 @@
+[package]
+name = "multi_wayside"
+version = "0.1.0"
+authors = ["yahoo55025502 <yahoo55025502@gmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde-loader = { version = "0.1.4", features = ["json5"] }
+pcap = "0.11.0"
+tokio = { version = "1.20.1", features = ["sync", "rt-multi-thread", "macros"] }
+nalgebra = "0.30.1"
+futures = "0.3.21"
+serde = { version = "1.0.140", features = ["derive"] }
+kiss3d = "0.35.0"
+rand = { version = "0.8.5", features = ["getrandom"] }
+anyhow = "1.0.58"
+chrono = "0.4.19"
+json5 = "0.4.1"
+serde_json = "1.0.82"
+unzip-n = "0.1.2"
+common-types = { path = "../../rust-lib/common-types", features = ["with-nalgebra"] }
+wayside-params = { version = "0.1.0", path = "../../rust-lib/wayside-params" }
+serde-semver = "0.2.1"
+itertools = "0.10.3"
+velodyne-lidar = { version = "0.1.0", features = ["pcap"] }
+aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
+hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board-detector" }
+point-filter = { version = "0.1.0", path = "../../rust-lib/point-filter", features = ["with-kiss3d"] }
+hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
+clap = { version = "4.0.2", features = ["derive"] }
+async-rt = { version = "0.1.0", path = "../../rust-lib/async-rt" }
+
+[dev-dependencies]
+glob = "0.3.0"
