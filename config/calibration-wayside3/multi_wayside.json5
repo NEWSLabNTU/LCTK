@@ -1,0 +1,51 @@
+{
+    version: "0.4.0",
+    using_same_face_of_marker: false,
+    output_dir: 'output',
+    aruco_pattern: 'aruco_pattern.json5',
+    board_detector: 'board_detector.json5',
+    pcap1_config: {
+        sensor: 'vlp32c',
+        file_path: '/home/mark/Downloads/台北新生校正點雲/wayside_1/lidar1.pcap',
+        frame_selected: null,
+        filter: {
+            type: "all",
+            filters: [
+                {
+                    type: "planar_box",
+                    size_x: 3,
+                    size_y: 3,
+                    center_x: -4.5,
+                    center_y: 11,
+                    z_bound: {
+                        imin: -1,
+                        imax: 3,
+                    },
+                    azimuth_degrees: 0,
+                },
+            ],
+        },
+    },
+    pcap2_config: {
+        sensor: 'vlp32c',
+        file_path: '/home/mark/Downloads/台北新生校正點雲/wayside_2/lidar1.pcap',
+        frame_selected: null,
+        filter: {
+            type: "all",
+            filters: [
+                {
+                    type: "planar_box",
+                    size_x: 3,
+                    size_y: 3,
+                    center_x: -5.5,
+                    center_y: 0,
+                    z_bound: {
+                        imin: -0.7,
+                        imax: 3,
+                    },
+                    azimuth_degrees: 0,
+                },
+            ],
+        },
+    },
+}
