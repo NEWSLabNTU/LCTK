@@ -5,6 +5,7 @@ members = [
     "rust-bin/pcd-tool",
     "rust-bin/project-to-image",
     "rust-bin/solve-extrinsic-params",
+    "rust-bin/multi_wayside",
     "rust-lib/aruco-config",
     "rust-lib/aruco-detector",
     "rust-lib/geom-algo",
@@ -16,5 +17,4 @@ members = [
     "rust-lib/pnp-solver",
     "rust-lib/protobuf-types",
     "rust-lib/serde-types",
-
 ]
