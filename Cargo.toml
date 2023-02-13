@@ -17,4 +17,14 @@ members = [
     "rust-lib/pnp-solver",
     "rust-lib/protobuf-types",
     "rust-lib/serde-types",
+    "rust-lib/common-types",
+    "rust-lib/point-filter",
+    "rust-lib/wayside-params",
 ]
+
+[patch.crates-io]
+
+## lidar utils
+velodyne-lidar = { git = "https://github.com/jerry73204/rust-lidar-utils.git", rev = "6432f92a248cc8d0f506ccd26764d323eae824a5" }
+ouster-lidar = { git = "https://github.com/jerry73204/rust-lidar-utils.git", rev = "6432f92a248cc8d0f506ccd26764d323eae824a5" }
+
