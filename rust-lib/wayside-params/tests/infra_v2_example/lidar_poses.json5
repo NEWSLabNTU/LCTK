@@ -1,0 +1,23 @@
+[
+    {
+        type: "device_pose",
+        device: "wayside_1.lidar1",
+        roll_degrees: 0.60009646,
+        elevation_degrees: -1.1999717,
+        elevation_m: 1.60026,
+    },
+    {
+        type: "device_pose",
+        device: "wayside_2.lidar1",
+        roll_degrees: -1.2000097,
+        elevation_degrees: -0.39999002,
+        elevation_m: 0.90001005,
+    },
+    {
+        type: "device_pose",
+        device: "wayside_3.lidar1",
+        roll_degrees: 1.4000001,
+        elevation_degrees: 0.0,
+        elevation_m: 1.500759,
+    },
+]

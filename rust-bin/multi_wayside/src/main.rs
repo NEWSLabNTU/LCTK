@@ -13,7 +13,7 @@ struct Opts {
     pub config: PathBuf,
 }
 
-#[async_rt::main]
+#[tokio::main]
 async fn main() -> Result<()> {
     let opts = Opts::parse();
     crate::detector::detector(opts.config).unwrap();

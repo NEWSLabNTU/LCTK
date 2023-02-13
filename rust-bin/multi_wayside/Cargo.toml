@@ -30,7 +30,7 @@ hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board
 point-filter = { version = "0.1.0", path = "../../rust-lib/point-filter", features = ["with-kiss3d"] }
 hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
 clap = { version = "4.0.2", features = ["derive"] }
-async-rt = { version = "0.1.0", path = "../../rust-lib/async-rt" }
+# async-rt = { version = "0.1.0", path = "../../rust-lib/async-rt" }
 
 [dev-dependencies]
 glob = "0.3.0"

@@ -1,0 +1,8 @@
+{
+    "type": "DevicePose",
+    "host": "wayside_3",
+    "device": "lidar1",
+    "roll_degrees": 0.0,
+    "elevation_degrees": -0.7999997,
+    "elevation_m": 1.2499999
+}

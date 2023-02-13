@@ -1,0 +1,22 @@
+[
+    {
+        type: "import",
+        path: "camera_profiles.json5",
+    },
+    {
+        type: "import",
+        path: "lidar_profiles.json5",
+    },
+    {
+        type: "import",
+        path: "lidar_poses.json5",
+    },
+    {
+        type: "import",
+        path: "camera_intrinsics.json5",
+    },
+    {
+        type: "import",
+        path: "coord_transforms.json5",
+    },
+]

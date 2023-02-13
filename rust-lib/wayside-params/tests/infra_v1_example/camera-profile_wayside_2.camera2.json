@@ -1,0 +1,13 @@
+{
+    "type": "CameraProfile",
+    "host": "wayside_2",
+    "device": "camera2",
+    "profile": {
+        "type": "V4l",
+        "device": "/dev/v4l/by-id/usb-046d_Logitech_Webcam_C930e_6AC47C2E-video-index0",
+        "resolution": "1280x720",
+        "interval": "1/10",
+        "fourcc": "BGR3",
+        "rotate_180": true
+    }
+}
