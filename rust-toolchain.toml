@@ -1,0 +1,5 @@
+[toolchain]
+channel = "1.67.1"
+components = ["rust-docs", "rustfmt", "clippy"]
+# targets = ["x86_64-unknown-linux-gnu"]
+profile = "default"
