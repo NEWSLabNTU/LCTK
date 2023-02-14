@@ -4,7 +4,8 @@
 /rust-bin/*/target
 /rust-lib/*/target
 Cargo.lock
-
+#data
+data/
 # editor
 *~
 .*~
