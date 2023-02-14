@@ -17,12 +17,12 @@ mkdir -p ${new_dir}
 for i in {1..3}
 do
     wi=wayside${i}/
-    di=${dir}"recording/"${wi}
-    mkdir -p ${new_dir}${wi}
+    di=${dir}"/recording/"${wi}
+    mkdir -p ${new_dir}/${wi}
     for j in {1..3}
     do 
         cj=camera${j}/
-        mkdir -p ${new_dir}${wi}${cj}
+        mkdir -p ${new_dir}/${wi}/${cj}
     done
     for filename in ${di}"/video/"*
     do
@@ -31,8 +31,8 @@ do
         for j in {1..3}
         do 
             cj=camera${j}
-            mkdir -p ${new_dir}${wi}${cj}/${a}/
-            cp ${filename}/${cj}* ${new_dir}${wi}${cj}/${a}/
+            mkdir -p ${new_dir}/${wi}/${cj}/${a}/
+            cp ${filename}/${cj}* ${new_dir}/${wi}/${cj}/${a}/
         done
     done
     
@@ -43,7 +43,7 @@ do
         for j in {1..3}
         do 
             cj=camera${j}
-            cp ${filename}/lidar.pcap ${new_dir}${wi}${cj}/${a}/
+            cp ${filename}/lidar1.pcap ${new_dir}/${wi}/${cj}/${a}/
         done
     done
     #cd $di

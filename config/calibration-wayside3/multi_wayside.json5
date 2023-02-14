@@ -6,7 +6,7 @@
     board_detector: 'board_detector.json5',
     pcap1_config: {
         sensor: 'vlp32c',
-        file_path: '/home/mark/Downloads/台北新生校正點雲/wayside_1/lidar1.pcap',
+        file_path: '/home/newslab/LCTK/data/newdata/wayside3/camera1/2023-02-14T15:39:45+08:00/lidar.pcap',
         frame_selected: null,
         filter: {
             type: "all",
@@ -28,7 +28,7 @@
     },
     pcap2_config: {
         sensor: 'vlp32c',
-        file_path: '/home/mark/Downloads/台北新生校正點雲/wayside_2/lidar1.pcap',
+        file_path: '/home/newslab/LCTK/data/newdata/wayside1/camera1/2023-02-14T15:39:40+08:00/lidar.pcap',
         frame_selected: null,
         filter: {
             type: "all",

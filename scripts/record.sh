@@ -38,7 +38,7 @@ function run_recording () {
 
     sleepuntil "$since"
     parallel --lb <<EOF
-timeout ${timeout_secs} tshark -i enp7s0 -w $pcddir"/lidar.pcap" udp
+timeout ${timeout_secs} tshark -i enp7s0 -w $pcddir"/lidar1.pcap" udp
 echo $(date -Ins) > ${videodir}/camera1.txt; ffmpeg -y -f video4linux2 -input_format uyvy422 -framerate 30 -video_size 1280x720 -i ${array[0]} -t ${timeout_spec} -c:v libx264 -preset fast -vf transpose=2,transpose=2 "${videodir}/camera1.mp4"
 echo $(date -Ins) > ${videodir}/camera2.txt; ffmpeg -y -f video4linux2 -input_format uyvy422 -framerate 30 -video_size 1280x720 -i ${array[1]} -t ${timeout_spec} -c:v libx264 -preset fast -vf transpose=2,transpose=2 "${videodir}/camera2.mp4"
 echo $(date -Ins) > ${videodir}/camera3.txt; ffmpeg -y -f video4linux2 -input_format uyvy422 -framerate 30 -video_size 1280x720 -i ${array[2]} -t ${timeout_spec} -c:v libx264 -preset fast -vf transpose=2,transpose=2 "${videodir}/camera3.mp4"
