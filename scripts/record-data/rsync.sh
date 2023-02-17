@@ -25,10 +25,10 @@ shift || {
     exit 1
 }
 mkdir -p ~/2023-camera-calibration/recording
-rsync -azvP newslab@"${ip1}":/home/newslab/LCTK/scripts/wayside1/recording/ \
+rsync -azvP newslab@"${ip1}":/home/newslab/LCTK/scripts/record-data/wayside1/recording/ \
  ~/2023-camera-calibration/recording
- rsync -azvP newslab@"${ip2}":/home/newslab/LCTK/scripts/wayside2/recording/ \
+ rsync -azvP newslab@"${ip2}":/home/newslab/LCTK/scripts/record-data/wayside2/recording/ \
  ~/2023-camera-calibration/recording
- rsync -azvP newslab@"${ip3}":/home/newslab/LCTK/scripts/wayside3/recording/ \
+ rsync -azvP newslab@"${ip3}":/home/newslab/LCTK/scripts/record-data/wayside3/recording/ \
  ~/2023-camera-calibration/recording
 
