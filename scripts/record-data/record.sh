@@ -14,7 +14,8 @@ function run_recording () {
     shift
     camera_id_file="$1"
     shift
-
+    recname="$1"
+    shift
 
     timeout_spec=$(date "-d@$timeout_secs" -u +%H:%M:%S)
 
@@ -28,10 +29,10 @@ function run_recording () {
 
     # disk1="/media/newslab/e6d6cda2-f6a3-42ac-af1d-76742bd1a82a"
     disk1="."
-    dir="${disk1}/recording/${hostname}"
-    time=$(date -Is)
-    videodir="$dir/video/$time"
-    pcddir="$dir/pcd/$time"
+    time=$(date +"%Y-%m-%dT%H:%M")
+    dir="${disk1}/${recname}/${time}/${hostname}"
+    videodir="$dir/video/"
+    pcddir="$dir/pcd/"
 
     mkdir -p "$videodir"
     mkdir -p "$pcddir"
