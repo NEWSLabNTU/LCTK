@@ -2,12 +2,19 @@
 set -e
 
 function print_usage {
-    echo "example usage: $0 0900 3600"
-    echo "    to record for 1 hour since 09:00 AM"
+    echo "example usage: $0 --config <lidar-config-path>"
+    echo "    you have to checkout your lidar config file before executing this."
 }
 
+config="$1"
+shift || {
+    print_usage
+    exit 1
+}
 
-script_dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-cd "$script_dir"
-cd ../rust-bin/multi_wayside/
-cargo run --release -- --config $1
+MANIFEST_FILE=../../rust-bin/multi_wayside/Cargo.toml
+
+cargo run --release \
+          --manifest-path "$MANIFEST_FILE" \
+           -- \
+           --config ${config}
