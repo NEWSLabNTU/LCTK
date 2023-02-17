@@ -1,0 +1,10 @@
+[Unit]
+Description=GPSlog
+
+[Service]
+Type=Simple
+ExecStart=/bin/bash /opt/gpslog.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

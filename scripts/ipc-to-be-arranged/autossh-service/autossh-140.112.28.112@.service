@@ -1,0 +1,11 @@
+[Unit]
+Description=SSH tunnel to 140.112.28.112
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/autossh -i /home/newslab/.ssh/id_ed25519 -NR 0.0.0.0:%i:localhost:22 newslab@140.112.28.112
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

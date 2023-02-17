@@ -1,0 +1,65 @@
+{
+    "name": "aeon-cjs",
+    "clock": {
+        "RebasedMonotonicSteady": {
+      "rebase_every": "1d",
+        }
+    },
+    "video": [
+        {
+            "name": "camera1",
+            "enable_gui": true,
+            "lossy": true,
+            "source": {
+                "GStreamer": {
+                    "launch": "v4l2src device=/dev/v4l/by-id/usb-046d_Logitech_Webcam_C930e_B2FDD85E-video-index0 ! video/x-raw, framerate=10/1, width=1280, height=720 ! \
+                               videoflip method=rotate-180 ! \
+                               tee name=src ! \
+                               queue ! \
+                               videoconvert ! video/x-raw,format=BGR ! \
+                               appsink name=appsink"
+                }
+            }
+        },
+        {
+            "name": "camera2",
+            "enable_gui": true,
+            "lossy": true,
+            "source": {
+                "GStreamer": {
+                    "launch": "v4l2src device=/dev/v4l/by-id/usb-046d_Logitech_Webcam_C930e_13C47C2E-video-index0 ! video/x-raw, framerate=10/1, width=1280, height=720 ! \
+                               videoflip method=rotate-180 ! \
+                               tee name=src ! \
+                               queue ! \
+                               videoconvert ! video/x-raw,format=BGR ! \
+                               appsink name=appsink"
+                }
+            }
+        },
+        {
+            "name": "camera3",
+            "enable_gui": true,
+            "lossy": true,
+            "source": {
+                "GStreamer": {
+                    "launch": "v4l2src device=/dev/v4l/by-id/usb-046d_Logitech_Webcam_C930e_F7637C2E-video-index0 ! video/x-raw, framerate=10/1, width=1280, height=720 ! \
+                               videoflip method=rotate-180 ! \
+                               tee name=src ! \
+                               queue ! \
+                               videoconvert ! video/x-raw,format=BGR ! \
+                               appsink name=appsink"
+                }
+            }
+        },
+    ],
+    "amqp_producer": {
+        "enabled": false,
+        // uncomment to use non-default values
+        // "address": "amqp://127.0.0.1:5672/%2f",
+        // "exchange": "WAYSIDE_VIDEO_CAPTURE",
+    },
+    "logging": {
+        "enabled": true,
+        "output_dir": "/home/newslab/wayside-portal/recording/video",
+    }
+}

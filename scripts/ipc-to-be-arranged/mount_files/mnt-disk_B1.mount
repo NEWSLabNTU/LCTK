@@ -1,0 +1,10 @@
+[Unit]
+Description=External drive
+
+[Mount]
+What=/dev/disk/by-partuuid/d381c3b3-01
+Where=/mnt/disk_B1
+Options=rw,relatime,nofail,x-systemd.device-timeout=1ms
+
+[Install]
+WantedBy=multi-user.target

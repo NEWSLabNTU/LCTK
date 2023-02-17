@@ -1,0 +1,8 @@
+Description="Automount External Drive"
+
+[Automount]
+Where=/mnt/disk_C1
+
+[Install]
+WantedBy=multi-user.target
+
