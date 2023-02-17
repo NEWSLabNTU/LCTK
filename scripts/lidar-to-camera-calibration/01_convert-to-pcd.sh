@@ -14,6 +14,6 @@ for d in $DATA_PATH/*; do
           --manifest-path "$MANIFEST_FILE" \
           -- \
           convert \
-          "$d/lidar.pcap" \
+          "$d/lidar1.pcap" \
           "$d/pcd"
 done

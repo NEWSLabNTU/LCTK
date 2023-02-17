@@ -6,8 +6,9 @@ cd "$script_dir"
 
 Camera=camera1
 Wayside=1
-DATA_PATH=../data/newdata/wayside${Wayside}/${Camera}
-MANIFEST_FILE1=../rust-bin/pcd-tool/Cargo.toml
+Expname=exp1
+DATA_PATH=../../data/${Expname}/wayside${Wayside}/${Camera}
+MANIFEST_FILE1=../../rust-bin/pcd-tool/Cargo.toml
 #01
 for d in $DATA_PATH/*; do
     echo $d
@@ -17,7 +18,7 @@ for d in $DATA_PATH/*; do
           --manifest-path "$MANIFEST_FILE1" \
           -- \
           convert \
-          "$d/lidar.pcap" \
+          "$d/lidar1.pcap" \
           "$d/pcd"
 done
 #02
@@ -27,7 +28,7 @@ for d in $DATA_PATH/* ; do
     echo ffmpeg -i "$d/"${Camera}".mp4" "$d/image/%05d.jpg"
 done | parallel
 #03
-MANIFEST_FILE3=../rust-bin/find-hollow-board/Cargo.toml
+MANIFEST_FILE3=../../rust-bin/find-hollow-board/Cargo.toml
 for d in $DATA_PATH/*; do
     echo $d
     rm -rf "$d/boards"
@@ -51,7 +52,7 @@ done
 
 wait
 #04
-MANIFEST_FILE4=../rust-bin/find-aruco-marker/Cargo.toml
+MANIFEST_FILE4=../../rust-bin/find-aruco-marker/Cargo.toml
 for d in $DATA_PATH/*; do
     echo $d
     rm -rf "$d/aruco"
@@ -64,7 +65,7 @@ for d in $DATA_PATH/*; do
           $d/aruco
 done
 #05
-MANIFEST_FILE5=../rust-bin/solve-extrinsic-params/Cargo.toml
+MANIFEST_FILE5=../../rust-bin/solve-extrinsic-params/Cargo.toml
 i=0
 for file in $( ls $DATA_PATH/*/boards/000001.json5)
 do
@@ -90,7 +91,7 @@ cargo run --release \
       --manifest-path "$MANIFEST_FILE5" \
       -- \
       --method SQPNP \
-      --intrinsics-file ../config/intrinsics.yaml \
-      --output-file ../config/lidar${Wayside}_${Camera}_extrinsics.json5 \
+      --intrinsics-file ../../config/intrinsics.yaml \
+      --output-file ../../config/lidar${Wayside}_${Camera}_extrinsics.json5 \
       --boards "$boards_arg" \
       --arucos "$arucos_arg" 
