@@ -18,5 +18,7 @@ for d in $DATA_PATH/*; do
           -- \
           convert \
           "$d/lidar1.pcap" \
-          "$d/pcd"
+          "$d/pcd" \
+          10 \
+          3
 done

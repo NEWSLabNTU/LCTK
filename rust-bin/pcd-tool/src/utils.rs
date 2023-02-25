@@ -40,7 +40,7 @@ where
     Ok(())
 }
 
-pub fn pcap_to_pcd<I, O>(input_file: I, output_dir: O) -> Result<()>
+pub fn pcap_to_pcd<I, O>(input_file: I, output_dir: O, start_frame: usize, num: usize) -> Result<()>
 where
     I: AsRef<Path>,
     O: AsRef<Path>,
@@ -51,8 +51,9 @@ where
     // Get some user informations
     let lidar_type = LidarType::Vlp32;
     let target_type = FileFormat::LibpclPcd;
-    let start_number = 1;
-    let number_of_frames = 0;
+    //Only pick the frame begin with start_number of frame
+    let start_number = start_frame;
+    let number_of_frames = num;
     //let term = Term::stdout();
     //let lidar_type = {
     //    let choice = Select::new()
@@ -153,7 +154,7 @@ where
                         .collect(),
                 };
 
-                let pcd_file = output_dir.join(format!("{:06}.pcd", index));
+                let pcd_file = output_dir.join(format!("{:06}.pcd", index-start_number+1));
                 save_pcd(points, &pcd_file, pcd_rs::DataKind::Ascii).with_context(|| {
                     format!("failed to create the pcd file '{}'", pcd_file.display())
                 })?;
