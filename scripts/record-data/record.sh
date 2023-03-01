@@ -29,7 +29,7 @@ function run_recording () {
 
     # disk1="/media/newslab/e6d6cda2-f6a3-42ac-af1d-76742bd1a82a"
     disk1="."
-    time=$(date +"%Y-%m-%dT%H:%M")
+    time=$(date +"%Y-%m-%dT%H:%M:%S")
     dir="${disk1}/${recname}/${time}/${hostname}"
     videodir="$dir/video/"
     pcddir="$dir/pcd/"
