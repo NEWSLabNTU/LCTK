@@ -21,6 +21,8 @@ enum Opts {
     Convert {
         input_path: PathBuf,
         output_path: PathBuf,
+        start_number: usize,
+        number_of_frame: usize,
     },
     DeviceTime {
         file: PathBuf,
@@ -37,8 +39,10 @@ fn main() -> Result<()> {
         Opts::Convert {
             input_path,
             output_path,
+            start_number,
+            number_of_frame
         } => {
-            convert(input_path, output_path)?;
+            convert(input_path, output_path, start_number, number_of_frame)?;
         }
         Opts::DeviceTime { file } => {
             crate::utils::time(file)?;
@@ -74,7 +78,7 @@ fn info(file: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-fn convert(input_path: PathBuf, output_path: PathBuf) -> Result<()> {
+fn convert(input_path: PathBuf, output_path: PathBuf, start_number: usize, number_of_frame: usize) -> Result<()> {
     let input_format = guess_file_format(&input_path).ok_or_else(|| {
         format_err!(
             "cannot guess format of input file '{}'",
@@ -171,7 +175,7 @@ fn convert(input_path: PathBuf, output_path: PathBuf) -> Result<()> {
                     output_path.display()
                 );
             }
-            utils::pcap_to_pcd(input_path, output_path)?;
+            utils::pcap_to_pcd(input_path, output_path, start_number, number_of_frame)?;
         }
         (FileFormat::LibpclPcd, None) | (FileFormat::NewslabPcd, None) => {
             bail!("You must specify a output file when transforming pcd/newslab-pcd");

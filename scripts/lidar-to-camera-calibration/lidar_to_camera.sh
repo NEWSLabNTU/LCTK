@@ -19,7 +19,9 @@ for d in $DATA_PATH/*; do
           -- \
           convert \
           "$d/lidar1.pcap" \
-          "$d/pcd"
+          "$d/pcd" \
+          10 \
+          3
 done
 #02
 for d in $DATA_PATH/* ; do
@@ -60,7 +62,7 @@ for d in $DATA_PATH/*; do
           --manifest-path "$MANIFEST_FILE4" \
           -- \
           --gui \
-          ../config/intrinsics.yaml \
+          ../../config/intrinsics.yaml \
           $d/${Camera}".mp4" \
           $d/aruco
 done
@@ -92,6 +94,6 @@ cargo run --release \
       -- \
       --method SQPNP \
       --intrinsics-file ../../config/intrinsics.yaml \
-      --output-file ../../config/lidar${Wayside}_${Camera}_extrinsics.json5 \
+      --output-file ../../config/lidar_to_camera/lidar${Wayside}_${Camera}_extrinsics.json5 \
       --boards "$boards_arg" \
-      --arucos "$arucos_arg" 
+      --arucos "$arucos_arg"

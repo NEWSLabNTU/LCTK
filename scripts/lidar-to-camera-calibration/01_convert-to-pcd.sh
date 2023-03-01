@@ -3,8 +3,11 @@ set -e
 
 script_dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd "$script_dir"
-DATA_PATH=../data/sampledata
-MANIFEST_FILE=../rust-bin/pcd-tool/Cargo.toml
+Camera=camera1
+Wayside=1
+Expname=exp1
+DATA_PATH=../../data/${Expname}/wayside${Wayside}/${Camera}
+MANIFEST_FILE=../../rust-bin/pcd-tool/Cargo.toml
 
 for d in $DATA_PATH/*; do
     echo $d
@@ -15,5 +18,7 @@ for d in $DATA_PATH/*; do
           -- \
           convert \
           "$d/lidar1.pcap" \
-          "$d/pcd"
+          "$d/pcd" \
+          10 \
+          3
 done
