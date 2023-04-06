@@ -55,6 +55,10 @@ _./commands/backup.txt_
 rsync -Arxv ./outputs/ ./backup
 ```
 
+```bash
+./delegate-recipe.sh [./commands/backup.txt]
+```
+
 ## Data Collection
 
 The following script follows the the session config _session.json5_ and pull the data back via rsync.
