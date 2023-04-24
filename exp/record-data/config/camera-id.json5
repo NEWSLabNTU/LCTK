@@ -1,0 +1,19 @@
+{
+  "wayside1": [
+    "usb-046d_Logitech_Webcam_C930e_B2FDD85E-video-index0",
+    "usb-046d_Logitech_Webcam_C930e_13C47C2E-video-index0",
+    "usb-046d_Logitech_Webcam_C930e_F7637C2E-video-index0"
+  ],
+
+  "wayside2": [
+    "usb-046d_Logitech_Webcam_C930e_A9157C2E-video-index0",
+    "usb-046d_Logitech_Webcam_C930e_F5C47C2E-video-index0",
+    "usb-046d_Logitech_Webcam_C930e_5C457C2E-video-index0"
+  ],
+
+  "wayside3": [
+    "usb-046d_Logitech_Webcam_C930e_0EC29BAE-video-index0",
+    "usb-046d_Logitech_Webcam_C930e_C75E9BAE-video-index0",
+    "usb-046d_Logitech_Webcam_C930e_55869BAE-video-index0"
+  ],
+}
