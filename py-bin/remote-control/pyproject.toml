@@ -1,0 +1,28 @@
+[tool.pdm.scripts]
+launch = {call = "src.launch:main"}
+record = {call = "src.record:main"}
+delegate-recipe = {call = "src.delegate_recipe:main"}
+delegate-command = {call = "src.delegate_command:main"}
+sync = {call = "src.sync:main"}
+
+[project]
+name = "remote-control"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "yuanyuyuan", email = "yyyuanowo@gmail.com"},
+]
+dependencies = [
+    "libtmux>=0.21.0",
+    "dataclasses-json>=0.5.7",
+    "json5>=0.9.11",
+    "loguru>=0.6.0",
+    "ipdb>=0.13.11",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-pep517>=1.0"]
+build-backend = "pdm.pep517.api"

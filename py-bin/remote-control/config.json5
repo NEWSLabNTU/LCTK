@@ -1,0 +1,18 @@
+{
+  "tag": "session_name",
+  "sensors": [
+    {
+      "index": 1,
+      // "address": "newslab@10.8.0.22",
+      "address": "localhost",
+    },
+    {
+      "index": 2,
+      "address": "localhost",
+    },
+    {
+      "index": 3,
+      "address": "localhost",
+    },
+  ]
+}
