@@ -4,9 +4,9 @@ set -e
 script_dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd "$script_dir"
 
-Camera=camera1
-Wayside=1
-Expname=exp1
+Camera=camera2
+Wayside=2
+Expname=w2c2
 DATA_PATH=../../data/${Expname}/wayside${Wayside}/${Camera}
 MANIFEST_FILE1=../../rust-bin/pcd-tool/Cargo.toml
 #01
