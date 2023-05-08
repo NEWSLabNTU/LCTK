@@ -22,9 +22,15 @@ do
     timestamp=$(basename $filename)  
     for i in {1..3}
     do
-        wi=wayside${i}/
+        wi=wayside${i}
         di=${dir}/${timestamp}/${wi}
+
+	if [ ! -d ${di} ]; then
+		continue	
+	fi
+
         mkdir -p ${new_dir}/${wi}
+
         for j in {1..3}
         do 
             cj=camera${j}
