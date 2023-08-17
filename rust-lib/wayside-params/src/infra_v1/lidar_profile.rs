@@ -35,7 +35,7 @@ impl LidarProfile {
 
     pub fn as_ouster_os1(&self) -> Option<&OusterOs1Profile> {
         if let Self::OusterOs1(v) = self {
-            Some(&*v)
+            Some(v)
         } else {
             None
         }

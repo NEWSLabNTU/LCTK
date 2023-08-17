@@ -26,7 +26,7 @@ impl LidarKind {
 
     pub fn as_ouster_os1(&self) -> Option<&ouster::Profile> {
         if let Self::Ouster(v) = self {
-            Some(&*v)
+            Some(v)
         } else {
             None
         }

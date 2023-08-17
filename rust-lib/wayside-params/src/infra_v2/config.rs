@@ -31,7 +31,7 @@ mod main {
             let main_file: ParamList = Json5Path::open_and_take(file)
                 .with_context(|| format!("unable to open file '{}'", file.display()))?;
 
-            let output = main_file.into_params().into_iter().fold(
+            let output = main_file.into_params().fold(
                 Self {
                     coordinate_transform: IndexMap::new(),
                     camera_intrinsics: IndexMap::new(),

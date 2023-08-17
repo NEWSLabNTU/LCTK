@@ -45,7 +45,7 @@ pub fn detector(config_path: PathBuf) -> Result<()> {
 
     let exec_time = Local::now();
     let dir_name = exec_time.to_rfc3339();
-    let path = config.output_dir.join(&dir_name);
+    let path = config.output_dir.join(dir_name);
     fs::create_dir_all(&path)?;
     logging(pose_1, pose_2, config.using_same_face_of_marker, &path)
         .with_context(|| "Logging failed.")?;
