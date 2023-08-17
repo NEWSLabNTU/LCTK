@@ -182,7 +182,7 @@ pub fn fit_board_icp(
                         izip!(correspondings, losses.iter().cloned())
                             .filter_map(|((inlier_point, corresponding_point), loss)| {
                                 (loss < OUTLIER_THRESHOLD)
-                                    .then(|| (inlier_point, corresponding_point))
+                                    .then_some((inlier_point, corresponding_point))
                             })
                             .collect()
                     } else {

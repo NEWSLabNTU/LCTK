@@ -40,7 +40,7 @@ fn main() -> Result<()> {
             input_path,
             output_path,
             start_number,
-            number_of_frame
+            number_of_frame,
         } => {
             convert(input_path, output_path, start_number, number_of_frame)?;
         }
@@ -78,7 +78,12 @@ fn info(file: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-fn convert(input_path: PathBuf, output_path: PathBuf, start_number: usize, number_of_frame: usize) -> Result<()> {
+fn convert(
+    input_path: PathBuf,
+    output_path: PathBuf,
+    start_number: usize,
+    number_of_frame: usize,
+) -> Result<()> {
     let input_format = guess_file_format(&input_path).ok_or_else(|| {
         format_err!(
             "cannot guess format of input file '{}'",

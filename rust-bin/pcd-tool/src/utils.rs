@@ -154,7 +154,7 @@ where
                         .collect(),
                 };
 
-                let pcd_file = output_dir.join(format!("{:06}.pcd", index-start_number+1));
+                let pcd_file = output_dir.join(format!("{:06}.pcd", index - start_number + 1));
                 save_pcd(points, &pcd_file, pcd_rs::DataKind::Ascii).with_context(|| {
                     format!("failed to create the pcd file '{}'", pcd_file.display())
                 })?;

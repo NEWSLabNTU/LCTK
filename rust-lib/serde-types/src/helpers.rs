@@ -313,7 +313,7 @@ mod bound {
         }
     }
 
-    impl<'a, T> RawBound<T> {
+    impl<T> RawBound<T> {
         pub fn into_bound(self) -> Result<(Bound<T>, Bound<T>), &'static str> {
             let RawBound {
                 min,

@@ -31,8 +31,8 @@ where
         .map(|point| point.borrow() - target_centroid)
         .collect();
 
-    let input_matrix = na::Matrix3xX::from_columns(&*input_points);
-    let target_matrix = na::Matrix3xX::from_columns(&*target_points);
+    let input_matrix = na::Matrix3xX::from_columns(&input_points);
+    let target_matrix = na::Matrix3xX::from_columns(&target_points);
     let covariance = input_matrix * target_matrix.transpose();
 
     let svd = na::SVD::new(covariance, true, true);
@@ -76,8 +76,8 @@ where
         return None;
     }
 
-    let input_matrix = na::Matrix3xX::from_columns(&*input_points);
-    let target_matrix = na::Matrix3xX::from_columns(&*target_points);
+    let input_matrix = na::Matrix3xX::from_columns(&input_points);
+    let target_matrix = na::Matrix3xX::from_columns(&target_points);
     let covariance = input_matrix * target_matrix.transpose();
 
     let svd = na::SVD::new(covariance, true, true);

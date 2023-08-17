@@ -104,7 +104,7 @@ mod ident {
             D: Deserializer<'a>,
         {
             let name = String::deserialize(deserializer)?;
-            Ident::try_new(&name).map_err(|err| D::Error::custom(format!("{}", err)))
+            Ident::try_new(name).map_err(|err| D::Error::custom(format!("{}", err)))
         }
     }
 }
@@ -371,7 +371,7 @@ mod device_tuple {
                 let mut tokens = text.split(',');
                 let first = tokens.next()?;
                 let second = tokens.next()?;
-                tokens.next().is_none().then(|| (first, second))
+                tokens.next().is_none().then_some((first, second))
             })()
             .ok_or_else(|| anyhow!("invalid device tuple '{}'", text))?;
 
@@ -911,7 +911,7 @@ mod twd97 {
         {
             let Self { lon, lat } = *self;
 
-            self.check().map_err(|reason| S::Error::custom(&reason))?;
+            self.check().map_err(S::Error::custom)?;
 
             Twd97Unchecked { lon, lat }.serialize(serializer)
         }
@@ -926,7 +926,7 @@ mod twd97 {
 
             let lonlat = Twd97 { lon, lat };
 
-            lonlat.check().map_err(|reason| D::Error::custom(&reason))?;
+            lonlat.check().map_err(D::Error::custom)?;
             Ok(lonlat)
         }
     }
