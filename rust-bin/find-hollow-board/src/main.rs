@@ -6,7 +6,9 @@ use crate::bbox::BBox;
 use anyhow::ensure;
 use aruco_config::multi_aruco::MultiArucoPattern;
 use clap::Parser;
-use hollow_board_detector::{BoardDetection, BoardDetector, BoardDetectorConfig};
+use hollow_board_detector::{
+    Config as BoardDetectorConfig, Detection as BoardDetection, Detector as BoardDetector,
+};
 use nalgebra as na;
 use once_cell::sync::Lazy;
 use pcd_rs::DynReader;

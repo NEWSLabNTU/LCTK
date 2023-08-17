@@ -3,4 +3,4 @@ pub mod config;
 pub mod detection;
 pub mod detector;
 
-pub use crate::{config::Config, detection::BoardDetection, detector::Detector};
+pub use crate::{config::Config, detection::Detection, detector::Detector};

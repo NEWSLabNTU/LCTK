@@ -4,7 +4,7 @@ use plane_estimator::PlaneModel;
 use std::f64;
 
 #[derive(Debug, Clone)]
-pub struct BoardDetection {
+pub struct Detection {
     pub board_model: BoardModel,
     pub plane_ransac_data: PlaneRansacData,
     pub icp_data: IcpData,

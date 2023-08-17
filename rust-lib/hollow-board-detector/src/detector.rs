@@ -2,7 +2,7 @@ use crate::{
     algo::{fit_board_icp, fit_plane_ransac},
     config::Config,
     detection::{FitBoardIcp, FitPlaneRansac},
-    BoardDetection,
+    Detection,
 };
 use anyhow::Result;
 use aruco_config::multi_aruco::MultiArucoPattern;
@@ -24,7 +24,7 @@ impl Detector {
         }
     }
 
-    pub fn detect(&self, points: &[na::Point3<f64>]) -> Result<Option<BoardDetection>> {
+    pub fn detect(&self, points: &[na::Point3<f64>]) -> Result<Option<Detection>> {
         let Config {
             board_shape:
                 BoardShape {
@@ -68,7 +68,7 @@ impl Detector {
             }
         };
 
-        let detection = BoardDetection {
+        let detection = Detection {
             board_model: BoardModel {
                 pose: board_pose,
                 board_shape: BoardShape {

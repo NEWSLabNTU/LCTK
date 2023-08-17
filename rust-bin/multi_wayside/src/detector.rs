@@ -1,6 +1,6 @@
 use crate::{common::*, config, config::Config, fuse_gui, select_gui};
 use chrono::offset::Local;
-use hollow_board_detector::BoardDetection;
+use hollow_board_detector::Detection;
 use kiss3d::{
     camera::ArcBall,
     event::Key,
@@ -14,7 +14,7 @@ use velodyne_lidar::PointKindRef;
 use wayside_params::infra_v1;
 
 pub struct ResultStruct {
-    detection: BoardDetection,
+    detection: Detection,
     original_points: Vec<protos::LidarPoint>,
     filtered_points: Vec<protos::LidarPoint>,
 }
@@ -92,7 +92,7 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
         .build_converter()?
     };
 
-    let board_detector = hollow_board_detector::BoardDetector::new(
+    let board_detector = hollow_board_detector::Detector::new(
         (*config.board_detector).clone(),
         (*config.aruco_pattern).clone(),
     );
