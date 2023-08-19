@@ -1,2 +1,2 @@
 # LCTK
-Lidar calibration tool kit
+This is the repository for Lidar calibration.
