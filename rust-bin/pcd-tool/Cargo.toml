@@ -6,16 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.44"
-console = "0.15.0"
-dialoguer = "0.10.2"
-iterator-ext = "0.2.0"
-lidar-utils = "0.13.1"
-uom = "0.31.1"
+anyhow = "1.0.75"
+console = "0.15.7"
+dialoguer = "0.10.4"
+iterator-ext = "0.2.1"
+velodyne-lidar = { version = "0.2.0", features = ["pcap"] }
+uom = "0.35.0"
 pcd-format = { path = "../../rust-lib/pcd-format" }
-structopt = "0.3.25"
+structopt = "0.3.26"
 pcd-rs = "0.10.0"
-chrono = "0.4.19"
-pcap = "0.9.1"
-num-traits = "0.2.14"
-clap = { version = "4.0.32", features = ["derive"] }
+chrono = "0.4.26"
+pcap = "1.1.0"
+num-traits = "0.2.16"
+clap = { version = "4.3.23", features = ["derive"] }

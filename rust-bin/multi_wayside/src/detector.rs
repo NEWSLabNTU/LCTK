@@ -10,7 +10,10 @@ use kiss3d::{
 use rand::rngs::OsRng;
 use serde_loader::Json5Path;
 use std::f64::consts::{FRAC_PI_2, PI};
-use velodyne_lidar::PointKindRef;
+use velodyne_lidar::types::{
+    measurements::Measurement,
+    point::{Point, PointD, PointS},
+};
 use wayside_params::infra_v1;
 
 pub struct ResultStruct {
@@ -81,7 +84,7 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
         pcap_config.file_path.get().into()
     };
 
-    let converter = {
+    let lidar_config = {
         use config::SensorType as S;
         use velodyne_lidar::Config as C;
 
@@ -89,7 +92,6 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
             S::PuckHires => C::new_puck_hires_strongest(),
             S::Vlp32c => C::new_vlp_32c_strongest(),
         }
-        .build_converter()?
     };
 
     let board_detector = hollow_board_detector::Detector::new(
@@ -106,16 +108,14 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
             .frame_selected
             .unwrap_or_else(|| frame_selected + OsRng.gen_range(0..20));
 
-        let pcap_reader = velodyne_lidar::PcapFileReader::open(pcap_file.clone())?
-            .filter_map(|packet| packet.try_into_data().ok());
-
-        let frame = converter
-            .packet_iter_to_frame_xyz_iter(pcap_reader)
+        let mut frame_iter =
+            velodyne_lidar::iter::frame_xyz_iter_from_file(lidar_config.clone(), &pcap_file)?;
+        let frame = frame_iter
             .nth(frame_selected)
             .ok_or_else(|| anyhow!("frame at index {} does not exist", frame_selected))?;
 
-        let (original_points, points_in_lidar_point_format) = frame
-            .indexed_point_iter()
+        let (original_points, points_in_lidar_point_format) = frame?
+            .into_indexed_point_iter()
             .map(|((row, col), point)| transform_point(row, col, point))
             .map(|point| {
                 let position = na::Point3::new(point.x, point.y, point.z);
@@ -301,11 +301,10 @@ fn logging(
     Ok(())
 }
 
-fn transform_point(row: usize, col: usize, point: PointKindRef) -> protos::LidarPoint {
-    use velodyne_lidar::{point::PointKindRef as P, Measurement, PointDual, PointSingle};
+fn transform_point(row: usize, col: usize, point: Point) -> protos::LidarPoint {
     match point {
-        P::Single(point) => {
-            let PointSingle {
+        Point::Single(point) => {
+            let PointS {
                 laser_id,
                 time,
                 measurement:
@@ -317,7 +316,7 @@ fn transform_point(row: usize, col: usize, point: PointKindRef) -> protos::Lidar
                     },
                 azimuth,
                 ..
-            } = *point;
+            } = point;
             protos::LidarPoint {
                 x: x.as_meters(),
                 y: y.as_meters(),
@@ -332,14 +331,14 @@ fn transform_point(row: usize, col: usize, point: PointKindRef) -> protos::Lidar
                 col_idx: Some(col as u64),
             }
         }
-        P::Dual(point) => {
+        Point::Dual(point) => {
             // takes strongesst laser return
-            let PointDual {
+            let PointD {
                 laser_id,
                 time,
                 azimuth,
                 ..
-            } = *point;
+            } = point;
             let Measurement {
                 intensity,
                 xyz: [x, y, z],
