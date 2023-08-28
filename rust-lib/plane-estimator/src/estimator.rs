@@ -1,10 +1,11 @@
 use crate::model::PlaneModel;
 use nalgebra as na;
 use sample_consensus::Estimator;
+use simba::scalar::SubsetOf;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlaneEstimator {
-    _private: [u8; 0],
+    _private: (),
 }
 
 impl PlaneEstimator {
@@ -13,15 +14,24 @@ impl PlaneEstimator {
     }
 }
 
-impl Estimator<na::Point3<f64>> for PlaneEstimator {
+impl<T> Estimator<na::Point3<T>> for PlaneEstimator
+where
+    T: na::Scalar + na::ClosedSub + SubsetOf<f64>,
+{
     type Model = PlaneModel;
     type ModelIter = Option<Self::Model>;
+
     const MIN_SAMPLES: usize = 3;
 
-    fn estimate<I>(&self, mut data: I) -> Self::ModelIter
+    fn estimate<I>(&self, data: I) -> Self::ModelIter
     where
-        I: Iterator<Item = na::Point3<f64>> + Clone,
+        I: Iterator<Item = na::Point3<T>> + Clone,
     {
+        let mut data = data.map(|point| {
+            let point: na::Point3<f64> = na::convert(point);
+            point
+        });
+
         let center = data.next().unwrap();
         let p1 = data.next().unwrap();
         let vec1 = p1 - center;
@@ -55,5 +65,58 @@ impl Estimator<na::Point3<f64>> for PlaneEstimator {
         let model = PlaneModel { center, normal };
 
         Some(model)
+    }
+}
+
+impl<'a, T> Estimator<&'a na::Point3<T>> for PlaneEstimator
+where
+    T: na::Scalar + na::ClosedSub + SubsetOf<f64>,
+{
+    type Model = PlaneModel;
+    type ModelIter = Option<Self::Model>;
+
+    const MIN_SAMPLES: usize = 3;
+
+    fn estimate<I>(&self, data: I) -> Self::ModelIter
+    where
+        I: Iterator<Item = &'a na::Point3<T>> + Clone,
+    {
+        self.estimate(data.cloned())
+    }
+}
+
+impl<T> Estimator<[T; 3]> for PlaneEstimator
+where
+    T: na::Scalar + na::ClosedSub + SubsetOf<f64> + Copy,
+{
+    type Model = PlaneModel;
+    type ModelIter = Option<Self::Model>;
+
+    const MIN_SAMPLES: usize = 3;
+
+    fn estimate<I>(&self, data: I) -> Self::ModelIter
+    where
+        I: Iterator<Item = [T; 3]> + Clone,
+    {
+        let iter = data.map(|[x, y, z]| na::Point3::new(x, y, z));
+        self.estimate(iter)
+    }
+}
+
+impl<'a, T> Estimator<&'a [T; 3]> for PlaneEstimator
+where
+    T: na::Scalar + na::ClosedSub + SubsetOf<f64> + Copy,
+{
+    type Model = PlaneModel;
+    type ModelIter = Option<Self::Model>;
+
+    const MIN_SAMPLES: usize = 3;
+
+    fn estimate<I>(&self, data: I) -> Self::ModelIter
+    where
+        I: Iterator<Item = &'a [T; 3]> + Clone,
+    {
+        let iter = data.map(|&[x, y, z]| na::Point3::new(x, y, z));
+        self.estimate(iter)
     }
 }
