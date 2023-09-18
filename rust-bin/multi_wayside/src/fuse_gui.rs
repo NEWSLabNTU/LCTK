@@ -1,5 +1,5 @@
 use crate::common::*;
-use hollow_board_detector::BoardDetection;
+use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
     event::{Action, WindowEvent},
@@ -157,7 +157,7 @@ impl State for Gui {
 pub struct WindowState {
     pub points: Vec<Point3<f64>>,
     pub filtered_points: Vec<Point3<f64>>,
-    pub board_pose: BoardDetection,
+    pub board_pose: Detection,
 }
 
 impl WindowState {

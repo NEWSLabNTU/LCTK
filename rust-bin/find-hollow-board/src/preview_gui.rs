@@ -1,4 +1,4 @@
-use hollow_board_detector::BoardDetection;
+use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
     light::Light,
@@ -51,7 +51,7 @@ impl GuiHandle {
     pub fn update(
         self,
         points: Vec<na::Point3<f32>>,
-        detection: Option<BoardDetection>,
+        detection: Option<Detection>,
     ) -> Option<Self> {
         let result = self.tx.send(Message::Data(Data { points, detection }));
         result.is_ok().then(|| self)
@@ -72,13 +72,13 @@ enum Message {
 
 struct Data {
     pub points: Vec<na::Point3<f32>>,
-    pub detection: Option<BoardDetection>,
+    pub detection: Option<Detection>,
 }
 
 struct Gui {
     rx: Receiver<Message>,
     points: Vec<na::Point3<f32>>,
-    detection: Option<BoardDetection>,
+    detection: Option<Detection>,
     bbox: BBox,
     camera: ArcBall,
 }

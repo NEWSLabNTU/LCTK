@@ -12,7 +12,6 @@ fn main() -> Result<()> {
             .to_str()
             .ok_or_else(|| format_err!("the path is not unicode"))?,
     )?
-    .into_iter()
     .try_collect()?;
 
     // generate protobuf types

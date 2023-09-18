@@ -1,4 +1,4 @@
-#![cfg(all(feature = "with-nalgebra"))]
+#![cfg(feature = "with-nalgebra")]
 
 use anyhow::Result;
 use wayside_params::infra_v2;

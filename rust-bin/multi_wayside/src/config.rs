@@ -1,6 +1,6 @@
 use crate::common::*;
 use aruco_config::multi_aruco::MultiArucoPattern;
-use hollow_board_detector::BoardDetectorConfig;
+use hollow_board_detector::Config as BoardDetectorConfig;
 use serde::{Deserialize, Serialize};
 use serde_loader::{AbsPathBuf, Json5Path};
 

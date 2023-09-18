@@ -1,5 +1,5 @@
 use crate::{common::*, config};
-use hollow_board_detector::BoardDetection;
+use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
     event::{Action, Key, WindowEvent},
@@ -15,7 +15,7 @@ pub struct Gui {
     pub original_points: Vec<Point3<f64>>,
     pub points_in_point3_format: Vec<Point3<f64>>,
     pub points_in_lidar_point_format: Vec<protos::LidarPoint>,
-    pub det: Option<BoardDetection>,
+    pub det: Option<Detection>,
     pub press_key: Option<Key>,
     pub camera: ArcBall,
 }

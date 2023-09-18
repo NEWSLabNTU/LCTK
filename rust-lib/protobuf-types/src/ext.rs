@@ -160,7 +160,7 @@ impl Hash for BBoxPvrcnn {
     }
 }
 
-#[allow(clippy::derive_hash_xor_eq)]
+#[allow(clippy::derived_hash_with_manual_eq)]
 impl Hash for DevicePath {
     fn hash<H>(&self, state: &mut H)
     where
@@ -204,7 +204,7 @@ impl VideoCaptureMessage {
 impl BBox2D {
     pub fn from_tlhw(tlhw: [f64; 4]) -> Option<Self> {
         let [t, l, h, w] = tlhw;
-        (w >= 0.0 && h >= 0.0).then(|| Self {
+        (w >= 0.0 && h >= 0.0).then_some(Self {
             left: l,
             top: t,
             width: w,
