@@ -1,5 +1,5 @@
-use crate::common::*;
 use common_types::DevicePathV1;
+use serde::{Deserialize, Serialize};
 use serde_loader::AbsPathBuf;
 
 pub use camera_focus::*;
@@ -68,7 +68,7 @@ fn default_rotate_180() -> bool {
 }
 
 mod camera_focus {
-    use super::*;
+    use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum CameraFocus {
@@ -109,7 +109,9 @@ mod camera_focus {
 }
 
 mod camera_interval {
-    use super::*;
+    use serde::{
+        de::Error as _, ser::Error as _, Deserialize, Deserializer, Serialize, Serializer,
+    };
 
     /// The camera interval that encodes into `NUMERATOR/DENOMINATOR` string,
     /// for example, `1/10` means 10 frames per second.
@@ -166,7 +168,7 @@ mod camera_interval {
 }
 
 mod camera_resolution {
-    use super::*;
+    use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 
     /// The resolution of the camera that encodes into `WIDTHxHEIGHT` string,
     /// for example, `1024x768`.

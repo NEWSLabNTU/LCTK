@@ -1,5 +1,5 @@
-use crate::common::*;
 use common_types::DevicePathV2;
+use serde::{Deserialize, Serialize};
 
 pub type CameraKind = crate::infra_v1::CameraProfile;
 

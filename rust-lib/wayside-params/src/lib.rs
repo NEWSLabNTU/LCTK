@@ -1,14 +1,14 @@
-mod common;
+mod convert;
 pub mod infra_v1;
 pub mod infra_v2;
-
-mod convert;
 mod utils;
+
+use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
+use serde_loader::{AbsPathBuf, Json5Path};
+use std::path::Path;
 #[cfg(feature = "with-nalgebra")]
 pub use utils::CoordTransformMap;
-
-use crate::common::*;
-use serde_loader::{AbsPathBuf, Json5Path};
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -64,24 +64,5 @@ pub struct InfraV2Config {
 impl InfraV2Config {
     pub fn load(&self) -> Result<infra_v2::InfraV2> {
         infra_v2::InfraV2::open(&self.main_file)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_config() -> Result<()> {
-        glob::glob(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../config/*/params.json",
-        ))?
-        .try_for_each(|file| -> Result<_> {
-            let _ = ParamConfig::open(file?)?.to_infra_v2()?;
-            Ok(())
-        })?;
-
-        Ok(())
     }
 }

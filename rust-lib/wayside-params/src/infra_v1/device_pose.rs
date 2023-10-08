@@ -1,7 +1,8 @@
-use crate::common::*;
 use common_types::DevicePathV1;
 #[cfg(feature = "with-nalgebra")]
 use nalgebra as na;
+use noisy_float::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DevicePose {

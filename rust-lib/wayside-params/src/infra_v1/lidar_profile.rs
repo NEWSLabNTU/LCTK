@@ -1,6 +1,7 @@
-use crate::common::*;
 use common_types::DevicePathV1;
+use serde::{Deserialize, Serialize};
 use serde_loader::{AbsPathBuf, JsonPrettyPath};
+use std::net::{IpAddr, SocketAddr};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LidarConfig {

@@ -1,6 +1,5 @@
-use crate::common::*;
 use common_types::DevicePathV2;
-use serde_loader::{AbsPathBuf, JsonPrettyPath};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LidarProfile {
@@ -54,7 +53,9 @@ impl From<ouster::Profile> for LidarKind {
 }
 
 pub mod velodyne {
-    use super::*;
+    use serde::{Deserialize, Serialize};
+    use serde_loader::AbsPathBuf;
+    use std::net::{IpAddr, SocketAddr};
 
     /// The Velodyne LiDAR configuration.
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -117,7 +118,9 @@ pub mod velodyne {
 }
 
 pub mod ouster {
-    use super::*;
+    use serde::{Deserialize, Serialize};
+    use serde_loader::{AbsPathBuf, JsonPrettyPath};
+    use std::net::SocketAddr;
 
     /// The Ouster LiDAR configuration.
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
