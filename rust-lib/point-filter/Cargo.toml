@@ -17,7 +17,7 @@ common-types = { version = "0.1.0", path = "../common-types" }
 
 [dependencies.kiss3d-utils]
 git = "https://github.com/NEWSLabNTU/kiss3d-utils.git"
-rev = "2cb2803c4e02d5dc103383f37ab2ca3d6c5f9591"
+tag = "v0.1.0"
 optional = true
 
 [features]
