@@ -8,11 +8,18 @@ use arrsac::Arrsac;
 use aruco_config::multi_aruco::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
 use itertools::izip;
-use nalgebra as na;
+use nalgebra::{Isometry3, Point3, Quaternion, Translation3, UnitQuaternion, Vector3};
+use newslab_geom_algo::{self, centroid_of_points, kabsch, IJKW, XYZ};
 use noisy_float::prelude::*;
 use plane_estimator::{PlaneEstimator, PlaneModel};
 use sample_consensus::Consensus;
-use std::{borrow::Borrow, f64};
+use std::{
+    borrow::Borrow,
+    f64::{
+        self,
+        consts::{FRAC_PI_2, FRAC_PI_4, PI},
+    },
+};
 
 unzip_n::unzip_n!(2);
 
@@ -21,7 +28,7 @@ const EPS_F64: f64 = 1e-4;
 /// Fits a plane in a point set using RANSAC algorithm.
 pub fn fit_plane_ransac<'a>(
     board_detector: &Config,
-    points: &'a [na::Point3<f64>],
+    points: &'a [Point3<f64>],
 ) -> Result<Option<FitPlaneRansac<'a>>> {
     let Config {
         plane_ransac_inlier_threshold,
@@ -57,7 +64,7 @@ pub fn fit_board_icp(
     board_detector: &Config,
     aruco_detector: &MultiArucoPattern,
     plane_model: &PlaneModel,
-    plane_inlier_points: &[impl Borrow<na::Point3<f64>>],
+    plane_inlier_points: &[impl Borrow<Point3<f64>>],
 ) -> Result<Option<FitBoardIcp>> {
     // find board by modified ICP algoirthm
     const GOOD_FIT_THRESHOLD: f64 = 0.015; // velodyne 32-MR
@@ -80,14 +87,18 @@ pub fn fit_board_icp(
 
     let (board_pose, icp_losses, viz_msg) = {
         let init_pose = {
-            let inlier_centroid =
-                geom_algo::centroid(plane_inlier_points.iter().map(|point| point.borrow()))
-                    .unwrap();
+            let inlier_centroid: Point3<f64> =
+                centroid_of_points(plane_inlier_points.iter().map(|point| {
+                    let point: [f64; 3] = (*point.borrow()).into();
+                    point
+                }))
+                .unwrap()
+                .into();
 
             // obtain the plane normal vector that points towards the origin
             let plane_normal = {
-                let normal: na::Vector3<f64> = na::convert(*plane_model.normal);
-                if (na::Point3::origin() - inlier_centroid).dot(&normal) < 0.0 {
+                let normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
+                if (Point3::origin() - inlier_centroid).dot(&normal) < 0.0 {
                     -normal
                 } else {
                     normal
@@ -97,33 +108,32 @@ pub fn fit_board_icp(
             // let the xy-plane projections of board normal and plane normal overlap
             // it decreases the chance of falling into local minimum
             let rotation = {
-                let lifting_rotation =
-                    na::UnitQuaternion::from_euler_angles(0.0, -f64::consts::FRAC_PI_2, 0.0)
-                        * na::UnitQuaternion::from_euler_angles(0.0, 0.0, -f64::consts::FRAC_PI_4);
-                let lifted_normal = lifting_rotation * na::Vector3::z_axis();
+                let lifting_rotation = UnitQuaternion::from_euler_angles(0.0, -FRAC_PI_2, 0.0)
+                    * UnitQuaternion::from_euler_angles(0.0, 0.0, -FRAC_PI_4);
+                let lifted_normal = lifting_rotation * Vector3::z_axis();
                 debug_assert!(abs_diff_eq!(
-                    (*lifted_normal + *na::Vector3::x_axis()).norm(),
+                    (*lifted_normal + *Vector3::x_axis()).norm(),
                     0.0,
                     epsilon = EPS_F64
                 ));
 
                 let planar_rotation = {
-                    let planar_plane_normal = na::Vector3::new(plane_normal.x, plane_normal.y, 0.0);
-                    na::UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
+                    let planar_plane_normal = Vector3::new(plane_normal.x, plane_normal.y, 0.0);
+                    UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
                         .unwrap_or_else(|| {
                             if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
-                                na::UnitQuaternion::identity()
+                                UnitQuaternion::identity()
                             } else {
-                                na::UnitQuaternion::from_euler_angles(0.0, 0.0, f64::consts::PI)
+                                UnitQuaternion::from_euler_angles(0.0, 0.0, PI)
                             }
                         })
                 };
                 planar_rotation * lifting_rotation
             };
 
-            na::Isometry3::from_parts(na::Translation3::identity(), rotation)
+            Isometry3::from_parts(Translation3::identity(), rotation)
         };
-        let init_inlier_points: Vec<&na::Point3<_>> = plane_inlier_points
+        let init_inlier_points: Vec<&Point3<_>> = plane_inlier_points
             .iter()
             .map(|point| point.borrow())
             .collect();
@@ -196,31 +206,43 @@ pub fn fit_board_icp(
                 };
 
                 // compute transformation
-                // let align_pose: na::Isometry3<_> = geom_algo::kabsch(izip!(
-                //     good_corresponding_points.iter().cloned(),
-                //     good_inlier_points.iter().cloned()
-                // ))
-                // .unwrap();
-
-                let align_pose: na::Isometry3<_> = {
-                    let align_translation = {
-                        let input_centroid: na::Point3<f64> =
-                            geom_algo::centroid(good_inlier_points.iter().map(|point| **point))
-                                .unwrap();
-                        let model_centroid: na::Point3<f64> =
-                            geom_algo::centroid(good_corresponding_points.iter()).unwrap();
-                        na::Translation3::from(input_centroid - model_centroid)
-                    };
-
-                    let align_quaternion = {
-                        let input_target_pairs = good_corresponding_points
+                let align_pose: Isometry3<_> = {
+                    // let lhs = good_inlier_points.into_iter().map(<[f64; 3]>::from);
+                    let pairs = izip!(
+                        good_inlier_points
                             .iter()
-                            .map(|point| align_translation * point)
-                            .zip(good_inlier_points.iter().copied());
+                            .map(|&&p| -> [f64; 3] { p.into() }),
+                        good_corresponding_points
+                            .iter()
+                            .map(|&p| -> [f64; 3] { p.into() }),
+                    );
 
-                        geom_algo::fit_rotation(input_target_pairs).unwrap()
-                    };
-                    align_quaternion * align_translation
+                    match kabsch(pairs) {
+                        Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => Isometry3 {
+                            rotation: UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
+                            translation: Translation3::new(x, y, z),
+                        },
+                        None => Isometry3::identity(),
+                    }
+
+                    // let align_translation = {
+                    //     let input_centroid: Point3<f64> =
+                    //         geom_algo::centroid_of_points(good_inlier_points.iter().map(|point| **point))
+                    //             .unwrap();
+                    //     let model_centroid: Point3<f64> =
+                    //         geom_algo::centroid_of_points(good_corresponding_points.iter()).unwrap();
+                    //     Translation3::from(input_centroid - model_centroid)
+                    // };
+
+                    // let align_quaternion = {
+                    //     let input_target_pairs = good_corresponding_points
+                    //         .iter()
+                    //         .map(|point| align_translation * point)
+                    //         .zip(good_inlier_points.iter().copied());
+
+                    //     geom_algo::fit_rotation(input_target_pairs).unwrap()
+                    // };
+                    // align_quaternion * align_translation
                 };
 
                 // check termination criteria
@@ -267,9 +289,7 @@ pub fn fit_board_icp(
 
             let correspondences: Vec<_> = izip!(
                 inlier_points.iter().map(|point| (*point).to_owned()),
-                corresponding_points
-                    .iter()
-                    .map(|point| point.borrow().to_owned())
+                corresponding_points.iter().map(|point| point.to_owned())
             )
             .collect();
 

@@ -19,8 +19,7 @@ unzip-n = "0.1.2"
 hollow-board-config = { version = "0.1.0", path = "../hollow-board-config" }
 aruco-config = { version = "0.1.0", path = "../aruco-config" }
 plane-estimator = { version = "0.1.0", path = "../plane-estimator" }
-geom-algo = { version = "0.1.0", path = "../geom-algo", features = ["with-nalgebra"] }
 
-[dev-dependencies]
-
-[features]
+[dependencies.newslab-geom-algo]
+git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
+tag = "v0.2.1"
