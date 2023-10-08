@@ -9,12 +9,16 @@ edition = "2021"
 [dependencies]
 serde-loader = { version = "0.2.0", features = ["json5"] }
 kiss3d = { version = "0.35.0", optional = true }
-kiss3d-utils = { version = "0.1.0", path = "../kiss3d-utils", optional = true }
 log = { version = "0.4.20", optional = true }
 nalgebra = "0.30.1"
 noisy_float = { version = "0.2.0", features = ["serde"] }
 serde = { version = "1.0.188", features = ["derive"] }
 common-types = { version = "0.1.0", path = "../common-types" }
+
+[dependencies.kiss3d-utils]
+git = "https://github.com/NEWSLabNTU/kiss3d-utils.git"
+rev = "2cb2803c4e02d5dc103383f37ab2ca3d6c5f9591"
+optional = true
 
 [features]
 with-kiss3d = ["kiss3d", "kiss3d-utils", "log"]

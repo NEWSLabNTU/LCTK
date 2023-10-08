@@ -12,7 +12,6 @@ members = [
     "rust-lib/geom-algo",
     "rust-lib/hollow-board-config",
     "rust-lib/hollow-board-detector",
-    "rust-lib/kiss3d-utils",
     "rust-lib/pcd-format",
     "rust-lib/plane-estimator",
     "rust-lib/pnp-solver",
