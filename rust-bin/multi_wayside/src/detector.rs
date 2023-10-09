@@ -1,5 +1,6 @@
 use crate::{common::*, config, config::Config, fuse_gui, select_gui};
 use chrono::offset::Local;
+use generic_point_filter::Pt64;
 use hollow_board_detector::Detection;
 use kiss3d::{
     camera::ArcBall,
@@ -7,6 +8,7 @@ use kiss3d::{
     light::Light,
     window::{State, Window},
 };
+use protos::LidarPoint;
 use rand::rngs::OsRng;
 use serde_loader::Json5Path;
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -194,13 +196,25 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
 
 fn preprocess_points(
     points: &[protos::LidarPoint],
-    filter: &point_filter::PointFilter,
+    filter: &generic_point_filter::Filter,
 ) -> Vec<protos::LidarPoint> {
-    points
+    let points: Vec<_> = points
         .iter()
         .cloned()
-        .filter(|point| filter.contains(&point.to_na_point(), point.intensity))
-        .collect()
+        .filter(|point| {
+            let LidarPoint {
+                x, y, z, intensity, ..
+            } = *point;
+
+            let point = Pt64 {
+                xyz: [x, y, z],
+                intensity,
+            };
+            filter.contains(&point)
+        })
+        .collect();
+    filter.step();
+    points
 }
 
 pub fn fuse_points(

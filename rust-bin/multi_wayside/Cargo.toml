@@ -27,10 +27,13 @@ itertools = "0.11.0"
 velodyne-lidar = { version = "0.2.0", features = ["pcap"] }
 aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
 hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board-detector" }
-point-filter = { version = "0.1.0", path = "../../rust-lib/point-filter", features = ["with-kiss3d"] }
 hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
 clap = { version = "4.4.6", features = ["derive"] }
-# async-rt = { version = "0.1.0", path = "../../rust-lib/async-rt" }
+
+[dependencies.generic-point-filter]
+git = "https://github.com/NEWSLabNTU/point-cloud-filter.git"
+tag = "v0.3.0"
+features = ["with-kiss3d"]
 
 [dev-dependencies]
 glob = "0.3.1"
