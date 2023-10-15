@@ -17,7 +17,6 @@ members = [
     "rust-lib/protobuf-types",
     "rust-lib/serde-types",
     "rust-lib/common-types",
-    "rust-lib/point-filter",
     "rust-lib/wayside-params",
 ]
 
