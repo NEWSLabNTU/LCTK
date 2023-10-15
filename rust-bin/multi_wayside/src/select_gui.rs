@@ -1,4 +1,4 @@
-use crate::{common::*, config};
+use crate::{config, LidarPoint};
 use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
@@ -14,7 +14,7 @@ pub struct Gui {
     pub pcap_config: config::PcapConfig,
     pub original_points: Vec<na30::Point3<f64>>,
     pub points_in_point3_format: Vec<na30::Point3<f64>>,
-    pub points_in_lidar_point_format: Vec<protos::LidarPoint>,
+    pub points_in_lidar_point_format: Vec<LidarPoint>,
     pub det: Option<Detection>,
     pub press_key: Option<Key>,
     pub camera: ArcBall,

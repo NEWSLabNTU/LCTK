@@ -1,4 +1,4 @@
-use crate::{common::*, utils::p32_to_p30};
+use crate::utils::p32_to_p30;
 use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
@@ -10,7 +10,7 @@ use kiss3d::{
     window::{State, Window},
 };
 use nalgebra as na;
-use std::f64::consts::PI;
+use std::{f64::consts::PI, process};
 
 #[derive(Debug, Clone, Copy)]
 pub enum WindowName {
