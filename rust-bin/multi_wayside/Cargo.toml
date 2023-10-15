@@ -32,7 +32,7 @@ clap = { version = "4.4.6", features = ["derive"] }
 
 [dependencies.generic-point-filter]
 git = "https://github.com/NEWSLabNTU/point-cloud-filter.git"
-tag = "v0.3.0"
+tag = "v0.3.1"
 features = ["with-kiss3d"]
 
 [dev-dependencies]
