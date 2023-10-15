@@ -3,10 +3,7 @@ mod fuse_gui;
 mod select_gui;
 mod utils;
 
-use crate::{
-    config::Config,
-    utils::{isometry3_32_to_30, p30_to_p32_vec},
-};
+use crate::{config::Config, utils::p32_to_p30_vec};
 use anyhow::{anyhow, Context, Result};
 use chrono::{offset::Local, DateTime};
 use clap::Parser;
@@ -16,14 +13,13 @@ use kiss3d::{
     camera::ArcBall,
     event::Key,
     light::Light,
-    nalgebra as na,
+    nalgebra as na30,
     window::{State, Window},
 };
-use nalgebra as na32;
+use nalgebra as na;
 use rand::{prelude::*, rngs::OsRng};
 use serde_loader::Json5Path;
 use std::{
-    borrow::Cow,
     f64::consts::{FRAC_PI_2, PI},
     fs,
     path::{Path, PathBuf},
@@ -96,7 +92,7 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
         PcapNumber::Second => &config.pcap2_config,
     };
 
-    let pcap_file: Cow<'_, Path> = if pcap_config.file_path.is_dir() {
+    let pcap_file = if pcap_config.file_path.is_dir() {
         let latest_pcap_file = fs::read_dir(&pcap_config.file_path)?
             .filter_map(|entry| {
                 let entry = entry.ok()?;
@@ -111,9 +107,9 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
             .ok_or_else(|| anyhow!("This directory has no pcap directory."))?;
 
         eprintln!("Selected the file: {}", latest_pcap_file.display());
-        latest_pcap_file.into()
+        latest_pcap_file
     } else {
-        pcap_config.file_path.get().into()
+        pcap_config.file_path.get().to_path_buf()
     };
 
     let lidar_config = {
@@ -163,7 +159,7 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
             .map(|point| point.xyz.into())
             .collect();
 
-        let det = board_detector.detect(&p30_to_p32_vec(&points_in_point3_format))?;
+        let det = board_detector.detect(&points_in_point3_format)?;
 
         let mut window = Window::new_with_size(
             &format!("detection_result_with_frame{}", frame_selected),
@@ -171,16 +167,16 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
             1000,
         );
         let mut camera = ArcBall::new(
-            na::Point3::new(0.0, -80.0, 32.0),
-            na::Point3::new(0.0, 0.0, 0.0),
+            na30::Point3::new(0.0, -80.0, 32.0),
+            na30::Point3::new(0.0, 0.0, 0.0),
         );
 
-        camera.set_up_axis(na::Vector3::new(0.0, 0.0, 1.0));
+        camera.set_up_axis(na30::Vector3::new(0.0, 0.0, 1.0));
         window.set_light(Light::StickToCamera);
 
-        gui.original_points = original_points;
+        gui.original_points = p32_to_p30_vec(&original_points);
         gui.points_in_lidar_point_format = points_in_lidar_point_format.clone();
-        gui.points_in_point3_format = points_in_point3_format;
+        gui.points_in_point3_format = p32_to_p30_vec(&points_in_point3_format);
         gui.det = det;
 
         while window.render_with_camera(&mut camera) {
@@ -196,10 +192,10 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
                     .iter()
                     .map(|point| point.xyz.into())
                     .collect();
-                let det = board_detector.detect(&p30_to_p32_vec(&points_in_point3_format))?;
+                let det = board_detector.detect(&points_in_point3_format)?;
                 gui.det = det;
                 gui.pcap_config = pcap_config.clone();
-                gui.points_in_point3_format = points_in_point3_format;
+                gui.points_in_point3_format = p32_to_p30_vec(&points_in_point3_format);
                 gui.press_key = None;
             }
             gui.step(&mut window);
@@ -253,13 +249,11 @@ pub fn fuse_points(
     det2: ResultStruct,
     using_same_face_of_marker: bool,
 ) -> Result<(na::Isometry3<f64>, na::Isometry3<f64>)> {
-    let points1: Vec<na32::Point3<f64>> =
-        det1.original_points.iter().map(|p| p.xyz.into()).collect();
-    let points2: Vec<na32::Point3<f64>> =
-        det2.original_points.iter().map(|p| p.xyz.into()).collect();
-    let filtered_points1: Vec<na32::Point3<f64>> =
+    let points1: Vec<na::Point3<f64>> = det1.original_points.iter().map(|p| p.xyz.into()).collect();
+    let points2: Vec<na::Point3<f64>> = det2.original_points.iter().map(|p| p.xyz.into()).collect();
+    let filtered_points1: Vec<na::Point3<f64>> =
         det1.filtered_points.iter().map(|p| p.xyz.into()).collect();
-    let filtered_points2: Vec<na32::Point3<f64>> =
+    let filtered_points2: Vec<na::Point3<f64>> =
         det2.filtered_points.iter().map(|p| p.xyz.into()).collect();
 
     let mut gui = fuse_gui::Gui {
@@ -276,10 +270,10 @@ pub fn fuse_points(
         },
         camera: {
             let mut camera = ArcBall::new(
-                na::Point3::new(0.0, -80.0, 32.0),
-                na::Point3::new(0.0, 0.0, 0.0),
+                na30::Point3::new(0.0, -80.0, 32.0),
+                na30::Point3::new(0.0, 0.0, 0.0),
             );
-            camera.set_up_axis(na::Vector3::new(0.0, 0.0, 1.0));
+            camera.set_up_axis(na30::Vector3::new(0.0, 0.0, 1.0));
             camera
         },
         using_same_face_of_marker,
@@ -291,8 +285,8 @@ pub fn fuse_points(
     while window.render_with_state(&mut gui) {}
 
     Ok((
-        isometry3_32_to_30(gui.window1.board_pose.board_model.pose),
-        isometry3_32_to_30(gui.window2.board_pose.board_model.pose),
+        gui.window1.board_pose.board_model.pose,
+        gui.window2.board_pose.board_model.pose,
     ))
 }
 
