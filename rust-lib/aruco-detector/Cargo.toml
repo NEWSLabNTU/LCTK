@@ -7,8 +7,6 @@ edition = "2021"
 
 [dependencies]
 serde-loader = { version = "0.2.0", features = ["json5"] }
-nalgebra = { version = "0.30.1", features = ["serde-serialize"] }
-opencv = "0.83.0"
 cv-convert = { version = "0.24.1", default-features = false, features = ["opencv_0-83", "nalgebra_0-30"] }
 measurements = "0.11.0"
 serde = { version = "1.0.188", features = ["derive"] }
@@ -19,6 +17,25 @@ serde-types = { version = "0.1.0", path = "../serde-types", features = ["with-op
 noisy_float = { version = "0.2.0", features = ["serde"] }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = "0.11.0"
-geom-algo = { version = "0.1.0", path = "../geom-algo", features = ["with-nalgebra"] }
+# geom-algo = { version = "0.1.0", path = "../geom-algo", features = ["with-nalgebra"] }
+
+[dependencies.opencv]
+version = "0.83.0"
+default-features = false
+features = ["aruco"]
+
+[dependencies.nalgebra30]
+package = "nalgebra"
+version = "0.30.1"
+features = ["serde-serialize"]
+
+[dependencies.nalgebra32]
+package = "nalgebra"
+version = "0.32.3"
+features = ["serde-serialize"]
+
+[dependencies.newslab-geom-algo]
+git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
+tag = "v0.2.1"
 
 [features]

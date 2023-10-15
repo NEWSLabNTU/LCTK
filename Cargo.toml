@@ -9,7 +9,6 @@ members = [
     "rust-bin/multi_wayside",
     "rust-lib/aruco-config",
     "rust-lib/aruco-detector",
-    "rust-lib/geom-algo",
     "rust-lib/hollow-board-config",
     "rust-lib/hollow-board-detector",
     "rust-lib/pcd-format",
