@@ -11,12 +11,10 @@ aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
 aruco-detector = { version = "0.1.0", path = "../../rust-lib/aruco-detector" }
 clap = { version = "4.4.6", features = ["derive"] }
 cv-convert = { version = "0.25.0", default-features = false, features = ["opencv_0-83", "nalgebra_0-32"] }
-glob = "0.3.1"
 json5 = "0.4.1"
 nalgebra = { version = "0.32.3", features = ["serde-serialize"] }
 noisy_float = { version = "0.2.0", features = ["serde"] }
 opencv = "0.83.0"
-pcd-rs = "0.10.0"
 serde = { version = "1.0.188", features = ["derive"] }
 serde-loader = { version = "0.2.0", features = ["json5"] }
 serde-types = { version = "0.1.0", path = "../../rust-lib/serde-types", features = ["with-opencv"] }

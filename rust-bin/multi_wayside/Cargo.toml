@@ -9,8 +9,6 @@ edition = "2021"
 [dependencies]
 serde-loader = { version = "0.2.0", features = ["json5"] }
 pcap = "1.1.0"
-tokio = { version = "1.32.0", features = ["sync", "rt-multi-thread", "macros"] }
-futures = "0.3.28"
 serde = { version = "1.0.188", features = ["derive"] }
 kiss3d = "0.35.0"
 rand = { version = "0.8.5", features = ["getrandom"] }
@@ -19,7 +17,6 @@ chrono = "0.4.31"
 json5 = "0.4.1"
 serde_json = "1.0.107"
 unzip-n = "0.1.2"
-serde-semver = "0.2.1"
 itertools = "0.11.0"
 velodyne-lidar = { version = "0.2.0", features = ["pcap"] }
 aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
@@ -40,10 +37,3 @@ features = ["serde-serialize"]
 git = "https://github.com/NEWSLabNTU/point-cloud-filter.git"
 tag = "v0.3.1"
 features = ["with-kiss3d"]
-
-[dependencies.newslab-serde]
-git = "https://github.com/NEWSLabNTU/newslab-serde.git"
-tag = "v0.1.0"
-
-[dev-dependencies]
-glob = "0.3.1"
