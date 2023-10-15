@@ -1,4 +1,10 @@
-use crate::{common::*, config, config::Config, fuse_gui, select_gui};
+use crate::{
+    common::*,
+    config,
+    config::Config,
+    fuse_gui, select_gui,
+    utils::{isometry3_30_to_32, isometry3_32_to_30, p30_to_p32_vec},
+};
 use chrono::offset::Local;
 use generic_point_filter::Pt64;
 use hollow_board_detector::Detection;
@@ -6,8 +12,10 @@ use kiss3d::{
     camera::ArcBall,
     event::Key,
     light::Light,
+    nalgebra as na,
     window::{State, Window},
 };
+use nalgebra as na32;
 use protos::LidarPoint;
 use rand::rngs::OsRng;
 use serde_loader::Json5Path;
@@ -133,7 +141,7 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
             .map(|point| na::Point3::new(point.x, point.y, point.z))
             .collect();
 
-        let det = board_detector.detect(&points_in_point3_format)?;
+        let det = board_detector.detect(&p30_to_p32_vec(&points_in_point3_format))?;
 
         let mut window = Window::new_with_size(
             &format!("detection_result_with_frame{}", frame_selected),
@@ -167,7 +175,7 @@ fn pcap_to_pose(config_path: PathBuf, pcap_number: PcapNumber) -> Result<ResultS
                     .iter()
                     .map(|point| na::Point3::new(point.x, point.y, point.z))
                     .collect();
-                let det = board_detector.detect(&points_in_point3_format)?;
+                let det = board_detector.detect(&p30_to_p32_vec(&points_in_point3_format))?;
                 gui.det = det;
                 gui.pcap_config = pcap_config;
                 gui.points_in_point3_format = points_in_point3_format;
@@ -222,10 +230,30 @@ pub fn fuse_points(
     det2: ResultStruct,
     using_same_face_of_marker: bool,
 ) -> Result<(na::Isometry3<f64>, na::Isometry3<f64>)> {
-    let points1: Vec<_> = det1.original_points.iter().map(na::Point3::from).collect();
-    let points2: Vec<_> = det2.original_points.iter().map(na::Point3::from).collect();
-    let filtered_points1: Vec<_> = det1.filtered_points.iter().map(na::Point3::from).collect();
-    let filtered_points2: Vec<_> = det2.filtered_points.iter().map(na::Point3::from).collect();
+    let points1: Vec<_> = det1
+        .original_points
+        .iter()
+        .map(na32::Point3::from)
+        // .map(p32_to_p30)
+        .collect();
+    let points2: Vec<_> = det2
+        .original_points
+        .iter()
+        .map(na32::Point3::from)
+        // .map(p32_to_p30)
+        .collect();
+    let filtered_points1: Vec<_> = det1
+        .filtered_points
+        .iter()
+        .map(na32::Point3::from)
+        // .map(p32_to_p30)
+        .collect();
+    let filtered_points2: Vec<_> = det2
+        .filtered_points
+        .iter()
+        .map(na32::Point3::from)
+        // .map(p32_to_p30)
+        .collect();
 
     let mut gui = fuse_gui::Gui {
         state: fuse_gui::WindowName::FusingWindow,
@@ -256,8 +284,8 @@ pub fn fuse_points(
     while window.render_with_state(&mut gui) {}
 
     Ok((
-        gui.window1.board_pose.board_model.pose,
-        gui.window2.board_pose.board_model.pose,
+        isometry3_32_to_30(gui.window1.board_pose.board_model.pose),
+        isometry3_32_to_30(gui.window2.board_pose.board_model.pose),
     ))
 }
 
@@ -294,13 +322,15 @@ fn logging(
     let lidar1_to_lidar2: infra_v1::ParameterConfig = infra_v1::CoordinateTransform {
         from: from_device.clone().into(),
         to: to_device.clone().into(),
-        transform: common_types::serde_types::Isometry3D::from(&lidar1_to_lidar2),
+        transform: common_types::serde_types::Isometry3D::from(&isometry3_30_to_32(
+            lidar1_to_lidar2,
+        )),
     }
     .into();
     let lidar2_to_lidar1: infra_v1::ParameterConfig = infra_v1::CoordinateTransform {
         from: to_device.into(),
         to: from_device.into(),
-        transform: (&lidar2_to_lidar1).into(),
+        transform: isometry3_30_to_32(lidar2_to_lidar1).into(),
     }
     .into();
 

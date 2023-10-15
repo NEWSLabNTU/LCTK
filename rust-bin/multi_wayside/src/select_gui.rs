@@ -3,17 +3,17 @@ use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
     event::{Action, Key, WindowEvent},
+    nalgebra as na30,
     planar_camera::PlanarCamera,
     post_processing::PostProcessingEffect,
     text::Font,
     window::{State, Window},
 };
-use na::Point3;
 
 pub struct Gui {
     pub pcap_config: config::PcapConfig,
-    pub original_points: Vec<Point3<f64>>,
-    pub points_in_point3_format: Vec<Point3<f64>>,
+    pub original_points: Vec<na30::Point3<f64>>,
+    pub points_in_point3_format: Vec<na30::Point3<f64>>,
     pub points_in_lidar_point_format: Vec<protos::LidarPoint>,
     pub det: Option<Detection>,
     pub press_key: Option<Key>,
@@ -31,10 +31,10 @@ impl Gui {
             press_key: None,
             camera: {
                 let mut camera = ArcBall::new(
-                    na::Point3::new(0.0, -80.0, 32.0),
-                    na::Point3::new(0.0, 0.0, 0.0),
+                    na30::Point3::new(0.0, -80.0, 32.0),
+                    na30::Point3::new(0.0, 0.0, 0.0),
                 );
-                camera.set_up_axis(na::Vector3::new(0.0, 0.0, 1.0));
+                camera.set_up_axis(na30::Vector3::new(0.0, 0.0, 1.0));
                 camera
             },
         }
@@ -46,68 +46,68 @@ impl State for Gui {
         // draw texts
         window.draw_text(
             "Instructions:",
-            &na::Point2::origin(),
+            &na30::Point2::origin(),
             50.0,
             &Font::default(),
-            &Point3::new(1.0, 1.0, 1.0),
+            &na30::Point3::new(1.0, 1.0, 1.0),
         );
         window.draw_text(
             "Return key: save result",
-            &na::Point2::new(0.0, 50.0),
+            &na30::Point2::new(0.0, 50.0),
             50.0,
             &Font::default(),
-            &Point3::new(1.0, 1.0, 1.0),
+            &na30::Point3::new(1.0, 1.0, 1.0),
         );
         window.draw_text(
             "Esc: skip to next result",
-            &na::Point2::new(0.0, 100.0),
+            &na30::Point2::new(0.0, 100.0),
             50.0,
             &Font::default(),
-            &Point3::new(1.0, 1.0, 1.0),
+            &na30::Point3::new(1.0, 1.0, 1.0),
         );
         window.draw_text(
             "Ctrl-Q: terminate process",
-            &na::Point2::new(0.0, 150.0),
+            &na30::Point2::new(0.0, 150.0),
             50.0,
             &Font::default(),
-            &Point3::new(1.0, 1.0, 1.0),
+            &na30::Point3::new(1.0, 1.0, 1.0),
         );
         window.draw_text(
             "Ctrl-U: Update config content",
-            &na::Point2::new(0.0, 200.0),
+            &na30::Point2::new(0.0, 200.0),
             50.0,
             &Font::default(),
-            &Point3::new(1.0, 1.0, 1.0),
+            &na30::Point3::new(1.0, 1.0, 1.0),
         );
 
         // draw points
         for point in &self.original_points {
-            let point: Point3<f32> = na::convert_ref(point);
-            window.draw_point(&point, &Point3::new(0.0, 0.7, 0.0));
+            let point: na30::Point3<f32> = na30::convert_ref(point);
+            window.draw_point(&point, &na30::Point3::new(0.0, 0.7, 0.0));
         }
         for point in &self.points_in_point3_format {
-            let point: Point3<f32> = na::convert_ref(point);
-            window.draw_point(&point, &Point3::new(1.0, 1.0, 1.0));
+            let point: na30::Point3<f32> = na30::convert_ref(point);
+            window.draw_point(&point, &na30::Point3::new(1.0, 1.0, 1.0));
         }
 
         // draw the origin and axis
         window.set_point_size(2.0);
         window.set_line_width(2.0);
-        window.draw_point(&Point3::origin(), &Point3::new(0.0, 0.0, 1.0));
+        window.draw_point(&na30::Point3::origin(), &na30::Point3::new(0.0, 0.0, 1.0));
         window.draw_line(
-            &Point3::origin(),
-            &Point3::new(1.0, 0.0, 0.0),
-            &Point3::new(1.0, 0.0, 0.0),
+            &na30::Point3::origin(),
+            &na30::Point3::new(1.0, 0.0, 0.0),
+            &na30::Point3::new(1.0, 0.0, 0.0),
         );
         window.draw_line(
-            &Point3::origin(),
-            &Point3::new(0.0, 1.0, 0.0),
-            &Point3::new(1.0, 1.0, 0.0),
+            &na30::Point3::origin(),
+            &na30::Point3::new(0.0, 1.0, 0.0),
+            &na30::Point3::new(1.0, 1.0, 0.0),
         );
         window.draw_line(
-            &Point3::origin(),
-            &Point3::new(0.0, 0.0, 1.0),
-            &Point3::new(0.0, 0.0, 1.0),
+            &na30::Point3::origin(),
+            &na30::Point3::new(0.0, 0.0, 1.0),
+            &na30::Point3::new(0.0, 0.0, 1.0),
         );
 
         // draw filter

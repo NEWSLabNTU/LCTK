@@ -2,6 +2,7 @@ use hollow_board_detector::Detection;
 use kiss3d::{
     camera::{ArcBall, Camera},
     light::Light,
+    nalgebra as na30,
     planar_camera::PlanarCamera,
     post_processing::PostProcessingEffect,
     window::{State, Window},
@@ -13,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use crate::bbox::BBox;
+use crate::bbox::{BBox, BBox30};
 
 pub fn start(bbox: BBox) -> GuiHandle {
     let (tx, rx) = sync_channel(4);
@@ -22,15 +23,15 @@ pub fn start(bbox: BBox) -> GuiHandle {
         let mut window = Window::new(env!("CARGO_PKG_NAME"));
         window.set_light(Light::StickToCamera);
         let mut camera = ArcBall::new(
-            na::Point3::new(0.0, -80.0, 32.0),
-            na::Point3::new(0.0, 0.0, 0.0),
+            na30::Point3::new(0.0, -80.0, 32.0),
+            na30::Point3::new(0.0, 0.0, 0.0),
         );
-        camera.set_up_axis(na::Vector3::new(0.0, 0.0, 1.0));
+        camera.set_up_axis(na30::Vector3::new(0.0, 0.0, 1.0));
         let gui = Gui {
             rx,
             points: vec![],
             detection: None,
-            bbox,
+            bbox: bbox.into(),
             camera,
         };
         window.render_loop(gui);
@@ -53,6 +54,13 @@ impl GuiHandle {
         points: Vec<na::Point3<f32>>,
         detection: Option<Detection>,
     ) -> Option<Self> {
+        let points: Vec<na30::Point3<f32>> = points
+            .into_iter()
+            .map(|p| {
+                let p: [f32; 3] = p.into();
+                p.into()
+            })
+            .collect();
         let result = self.tx.send(Message::Data(Data { points, detection }));
         result.is_ok().then(|| self)
     }
@@ -71,15 +79,15 @@ enum Message {
 }
 
 struct Data {
-    pub points: Vec<na::Point3<f32>>,
+    pub points: Vec<na30::Point3<f32>>,
     pub detection: Option<Detection>,
 }
 
 struct Gui {
     rx: Receiver<Message>,
-    points: Vec<na::Point3<f32>>,
+    points: Vec<na30::Point3<f32>>,
     detection: Option<Detection>,
-    bbox: BBox,
+    bbox: BBox30,
     camera: ArcBall,
 }
 
@@ -96,11 +104,11 @@ impl Gui {
         } = self;
 
         {
-            let in_color = na::Point3::new(0.0, 1.0, 0.0);
-            let out_color = na::Point3::new(0.5, 0.5, 0.5);
+            let in_color = na30::Point3::new(0.0, 1.0, 0.0);
+            let out_color = na30::Point3::new(0.5, 0.5, 0.5);
 
             points.iter().for_each(|position| {
-                let point_f64: na::Point3<f64> = na::convert_ref(position);
+                let point_f64: na30::Point3<f64> = na30::convert_ref(position);
                 let color = if self.bbox.contains_point(&point_f64) {
                     &in_color
                 } else {

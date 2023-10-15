@@ -3,6 +3,7 @@ mod config;
 mod detector;
 mod fuse_gui;
 mod select_gui;
+mod utils;
 
 use crate::common::*;
 use clap::Parser as _;

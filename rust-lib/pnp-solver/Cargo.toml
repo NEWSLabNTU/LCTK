@@ -8,8 +8,8 @@ edition = "2021"
 [dependencies]
 opencv = "0.83.0"
 serde-types = { path = "../serde-types", features = ["with-opencv", "with-nalgebra"] }
-cv-convert = { version = "0.25.0", default-features = false, features = ["opencv_0-83", "nalgebra_0-30"] }
+cv-convert = { version = "0.25.0", default-features = false, features = ["opencv_0-83", "nalgebra_0-32"] }
 serde = { version = "1.0.188", features = ["derive"] }
-nalgebra = "0.30.1"
+nalgebra = "0.32.3"
 log = "0.4.20"
 strum = { version = "0.25.0", features = ["derive"] }

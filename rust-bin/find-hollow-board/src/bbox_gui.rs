@@ -2,6 +2,7 @@ use kiss3d::{
     camera::{ArcBall, Camera},
     event::{Action, Key, Modifiers, WindowEvent},
     light::Light,
+    nalgebra as na30,
     planar_camera::PlanarCamera,
     post_processing::PostProcessingEffect,
     window::{State, Window},
@@ -17,7 +18,7 @@ use std::{
     thread::{spawn, JoinHandle},
 };
 
-use crate::bbox::BBox;
+use crate::bbox::{BBox, BBox30};
 
 pub fn start(points: Vec<na::Point3<f32>>, bbox: BBox) -> GuiHandle {
     let (tx, rx) = sync_channel(1);
@@ -30,16 +31,24 @@ pub fn start(points: Vec<na::Point3<f32>>, bbox: BBox) -> GuiHandle {
             let mut window = Window::new(env!("CARGO_PKG_NAME"));
             window.set_light(Light::StickToCamera);
             let mut camera = ArcBall::new(
-                na::Point3::new(0.0, -80.0, 32.0),
-                na::Point3::new(0.0, 0.0, 0.0),
+                na30::Point3::new(0.0, -80.0, 32.0),
+                na30::Point3::new(0.0, 0.0, 0.0),
             );
-            camera.set_up_axis(na::Vector3::new(0.0, 0.0, 1.0));
+            camera.set_up_axis(na30::Vector3::new(0.0, 0.0, 1.0));
+
+            let points: Vec<na30::Point3<f32>> = points
+                .into_iter()
+                .map(|p| {
+                    let p: [f32; 3] = p.into();
+                    p.into()
+                })
+                .collect();
 
             let gui = Gui {
                 tx: Some(tx),
                 points,
                 notify_close,
-                bbox,
+                bbox: bbox.into(),
                 camera,
             };
             window.render_loop(gui);
@@ -75,8 +84,8 @@ impl Drop for GuiHandle {
 struct Gui {
     notify_close: Arc<AtomicBool>,
     tx: Option<SyncSender<BBox>>,
-    points: Vec<na::Point3<f32>>,
-    bbox: BBox,
+    points: Vec<na30::Point3<f32>>,
+    bbox: BBox30,
     camera: ArcBall,
 }
 
@@ -91,7 +100,7 @@ impl Gui {
 
                     match event {
                         Some(GuiEvent::Finish) => {
-                            let _ = self.tx.take().unwrap().send(self.bbox.clone());
+                            let _ = self.tx.take().unwrap().send(self.bbox.clone().into());
                             return false;
                         }
                         Some(GuiEvent::Cancel) => {
@@ -123,14 +132,14 @@ impl Gui {
         let lrot: f64 = 10f64.to_radians();
         let srot: f64 = 1f64.to_radians();
 
-        let lroll = na::UnitQuaternion::from_euler_angles(lrot, 0.0, 0.0);
-        let sroll = na::UnitQuaternion::from_euler_angles(srot, 0.0, 0.0);
+        let lroll = na30::UnitQuaternion::from_euler_angles(lrot, 0.0, 0.0);
+        let sroll = na30::UnitQuaternion::from_euler_angles(srot, 0.0, 0.0);
 
-        let lpitch = na::UnitQuaternion::from_euler_angles(0.0, lrot, 0.0);
-        let spitch = na::UnitQuaternion::from_euler_angles(0.0, srot, 0.0);
+        let lpitch = na30::UnitQuaternion::from_euler_angles(0.0, lrot, 0.0);
+        let spitch = na30::UnitQuaternion::from_euler_angles(0.0, srot, 0.0);
 
-        let lyaw = na::UnitQuaternion::from_euler_angles(0.0, 0.0, lrot);
-        let syaw = na::UnitQuaternion::from_euler_angles(0.0, 0.0, srot);
+        let lyaw = na30::UnitQuaternion::from_euler_angles(0.0, 0.0, lrot);
+        let syaw = na30::UnitQuaternion::from_euler_angles(0.0, 0.0, srot);
 
         let control = !(mods & M::Control).is_empty();
         let shift = !(mods & M::Shift).is_empty();
@@ -344,15 +353,15 @@ impl Gui {
         let Self { points, bbox, .. } = self;
 
         // Draw axis
-        window.draw_axes(na::Isometry3::identity(), 1.0);
+        window.draw_axes(na30::Isometry3::identity(), 1.0);
 
         // draw points
         {
-            let in_color = na::Point3::new(0.0, 1.0, 0.0);
-            let out_color = na::Point3::new(0.5, 0.5, 0.5);
+            let in_color = na30::Point3::new(0.0, 1.0, 0.0);
+            let out_color = na30::Point3::new(0.5, 0.5, 0.5);
 
             points.iter().for_each(|position| {
-                let point_f64: na::Point3<f64> = na::convert_ref(position);
+                let point_f64: na30::Point3<f64> = na30::convert_ref(position);
                 let color = if self.bbox.contains_point(&point_f64) {
                     &in_color
                 } else {
@@ -364,8 +373,8 @@ impl Gui {
 
         // draw bbox
         {
-            let color = na::Point3::new(1.0, 1.0, 0.0);
-            let pose: na::Isometry3<f32> = na::convert_ref(&self.bbox.pose);
+            let color = na30::Point3::new(1.0, 1.0, 0.0);
+            let pose: na30::Isometry3<f32> = na30::convert_ref(&self.bbox.pose);
             window.draw_box(bbox.size_xyz, pose, color);
         }
     }

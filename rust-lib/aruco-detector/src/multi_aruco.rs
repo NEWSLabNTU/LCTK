@@ -1,12 +1,11 @@
 use anyhow::{ensure, Result};
 use aruco_config::multi_aruco::MultiArucoPattern;
-use cv_convert::{FromCv, OpenCvPose, TryIntoCv};
+use cv_convert::{OpenCvPose, TryIntoCv};
 use indexmap::IndexSet;
 use itertools::{iproduct, izip};
 use log::info;
 use measurements::Length;
-use nalgebra30 as na30;
-use nalgebra32 as na32;
+use nalgebra::{Isometry3, Point2, Point3};
 use noisy_float::prelude::*;
 use opencv::{
     aruco,
@@ -23,12 +22,12 @@ use std::{collections::HashMap, ops::Div as _};
 #[derive(Clone, Debug)]
 pub struct Detection {
     pub id: i32,
-    pub corners: [na30::Point2<f32>; 4],
-    pub pose: na30::Isometry3<f64>,
+    pub corners: [Point2<f32>; 4],
+    pub pose: Isometry3<f64>,
 }
 
 impl Detection {
-    pub fn center(&self) -> na30::Point3<f64> {
+    pub fn center(&self) -> Point3<f64> {
         self.pose.translation.vector.into()
     }
 }
@@ -37,15 +36,15 @@ impl Detection {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageMarker {
     pub id: i32,
-    pub corners: [na30::Point2<f32>; 4],
+    pub corners: [Point2<f32>; 4],
 }
 
 /// An ArUco marker on an image with pose estimation.
 #[derive(Clone, Debug)]
 pub struct ImagePoseMarker {
     pub id: i32,
-    pub corners: [na30::Point2<f32>; 4],
-    pub pose: na30::Isometry3<f64>,
+    pub corners: [Point2<f32>; 4],
+    pub pose: Isometry3<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -64,10 +63,8 @@ unsafe impl Sync for ImageDetection {}
 impl ImageDetection {
     pub fn markers(&self) -> impl Iterator<Item = ImageMarker> + '_ {
         izip!(&self.corners, &self.id).map(|(corners, id)| {
-            let corners: Vec<na30::Point2<f32>> = corners
-                .into_iter()
-                .map(|p| na30::Point2::new(p.x, p.y))
-                .collect();
+            let corners: Vec<Point2<f32>> =
+                corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
 
             ImageMarker {
                 id,
@@ -126,11 +123,9 @@ impl PoseEstimation {
             &self.tvec
         )
         .map(|(corners, id, rvec, tvec)| {
-            let corners: Vec<na30::Point2<f32>> = corners
-                .into_iter()
-                .map(na30::Point2::<f32>::from_cv)
-                .collect();
-            let pose: na30::Isometry3<f64> = OpenCvPose { rvec, tvec }.try_into_cv().unwrap();
+            let corners: Vec<Point2<f32>> =
+                corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
+            let pose: Isometry3<f64> = OpenCvPose { rvec, tvec }.try_into_cv().unwrap();
 
             ImagePoseMarker {
                 id,
@@ -166,7 +161,7 @@ impl PoseEstimation {
             iproduct!(0..num_squares_per_side, 0..num_squares_per_side).map(|(row, col)| {
                 let x = (col as f64 - num_squares_per_side as f64 / 2.0 + 0.5) * square_size;
                 let y = (row as f64 - num_squares_per_side as f64 / 2.0 + 0.5) * square_size;
-                na30::Point3::new(x.as_meters(), y.as_meters(), 0.0)
+                Point3::new(x.as_meters(), y.as_meters(), 0.0)
             })
         };
 
@@ -174,14 +169,10 @@ impl PoseEstimation {
         // let icp_pose_weight_threshold = 5e-13;
         const TERMINATION_STEP: usize = 16;
 
-        let target_points: Vec<_> = tvec
-            .iter()
-            .map(|p| na30::Point3::new(p.x, p.y, p.z))
-            .collect();
+        let target_points: Vec<_> = tvec.iter().map(|p| Point3::new(p.x, p.y, p.z)).collect();
 
-        let (pose, icp_losses, _) = (0..max_icp_iterations).fold(
-            (na30::Isometry3::identity(), vec![], 0),
-            |state, _step| {
+        let (pose, icp_losses, _) =
+            (0..max_icp_iterations).fold((Isometry3::identity(), vec![], 0), |state, _step| {
                 // check step count
                 let (_, _, termination_count) = state;
                 if termination_count > TERMINATION_STEP {
@@ -190,34 +181,18 @@ impl PoseEstimation {
 
                 let (pose, mut losses, termination_count) = state;
 
-                let align_pose: na30::Isometry3<f64> = {
+                let align_pose: Isometry3<f64> = {
                     let source_points = init_source_points().map(|p| {
                         let p: [f64; 3] = p.into();
-                        na32::Point3::from(p)
+                        Point3::from(p)
                     });
                     let target_points = target_points.iter().map(|&p| {
                         let p: [f64; 3] = p.into();
-                        na32::Point3::from(p)
+                        Point3::from(p)
                     });
 
                     let pairs = izip!(source_points, target_points);
-                    let na32::Isometry3 {
-                        rotation,
-                        translation,
-                    } = newslab_geom_algo::kabsch_na(pairs).unwrap();
-
-                    let rotation = {
-                        let quat: [f64; 4] = rotation.quaternion().coords.into();
-                        na30::UnitQuaternion::from_quaternion(na30::Quaternion::from(quat))
-                    };
-                    let translation = {
-                        let [x, y, z] = translation.vector.into();
-                        na30::Translation3::new(x, y, z)
-                    };
-                    na30::Isometry3 {
-                        rotation,
-                        translation,
-                    }
+                    newslab_geom_algo::kabsch_na(pairs).unwrap()
                 };
 
                 let new_termination_count = {
@@ -250,8 +225,7 @@ impl PoseEstimation {
                 losses.push(loss);
 
                 (new_pose, losses, new_termination_count)
-            },
-        );
+            });
 
         let min_icp_loss = icp_losses.iter().cloned().map(r64).min().map(R64::raw);
 
@@ -271,7 +245,7 @@ impl PoseEstimation {
 #[derive(Clone, Debug)]
 pub struct IcpRegression {
     pose_est: PoseEstimation,
-    pose: Option<na30::Isometry3<f64>>,
+    pose: Option<Isometry3<f64>>,
     min_icp_loss: Option<f64>,
     icp_losses: Vec<f64>,
 }
@@ -282,7 +256,7 @@ impl IcpRegression {
     }
 
     /// Get the icp regression's pose.
-    pub fn pose(&self) -> Option<na30::Isometry3<f64>> {
+    pub fn pose(&self) -> Option<Isometry3<f64>> {
         self.pose
     }
 

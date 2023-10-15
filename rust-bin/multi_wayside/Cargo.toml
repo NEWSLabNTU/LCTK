@@ -10,7 +10,7 @@ edition = "2021"
 serde-loader = { version = "0.2.0", features = ["json5"] }
 pcap = "1.1.0"
 tokio = { version = "1.32.0", features = ["sync", "rt-multi-thread", "macros"] }
-nalgebra = "0.30.1"
+nalgebra = "0.32.3"
 futures = "0.3.28"
 serde = { version = "1.0.188", features = ["derive"] }
 kiss3d = "0.35.0"
