@@ -10,7 +10,6 @@ serde-loader = { version = "0.2.0", features = ["json5"] }
 measurements = "0.11.0"
 noisy_float = { version = "0.2.0", features = ["serde"] }
 serde = { version = "1.0.188", features = ["derive"] }
-serde-types = { version = "0.1.0", path = "../serde-types", features = ["with-measurements"] }
 anyhow = "1.0.75"
 strum = { version = "0.25.0", features = ["derive"] }
 
@@ -19,6 +18,10 @@ version = "0.83.0"
 optional = true
 default-features = false
 features = ["aruco", "calib3d"]
+
+[dependencies.newslab-serde-measurements]
+git = "https://github.com/NEWSLabNTU/newslab-serde.git"
+tag = "v0.1.0"
 
 
 [features]

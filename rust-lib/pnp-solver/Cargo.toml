@@ -13,3 +13,8 @@ serde = { version = "1.0.188", features = ["derive"] }
 nalgebra = "0.32.3"
 log = "0.4.20"
 strum = { version = "0.25.0", features = ["derive"] }
+
+[dependencies.newslab-serde-cv]
+git = "https://github.com/NEWSLabNTU/newslab-serde.git"
+tag = "v0.1.0"
+features = ["with-opencv"]

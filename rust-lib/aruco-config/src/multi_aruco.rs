@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 pub struct MultiArucoPattern {
     pub marker_ids: Vec<u32>,
     pub dictionary: ArucoDictionary,
-    #[serde(with = "serde_types::serde_length")]
+    #[serde(with = "newslab_serde_measurements::length")]
     pub board_size: Length,
-    #[serde(with = "serde_types::serde_length")]
+    #[serde(with = "newslab_serde_measurements::length")]
     pub board_border_size: Length,
     pub marker_square_size_ratio: R64,
     pub num_squares_per_side: u32,

@@ -13,20 +13,20 @@ const EPS_F64: f64 = 1e-4;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardShape {
     /// The entire board rectangle size.
-    #[serde(with = "serde_types::serde_length")]
+    #[serde(with = "newslab_serde_measurements::length")]
     pub board_width: Length,
     /// The hole radius.
-    #[serde(with = "serde_types::serde_length")]
+    #[serde(with = "newslab_serde_measurements::length")]
     pub hole_radius: Length,
     /// The displacement of the hole center from the center of rectangle board.
-    #[serde(with = "serde_types::serde_length")]
+    #[serde(with = "newslab_serde_measurements::length")]
     pub hole_center_shift: Length,
 }
 
 /// The model of a square board with three holes on it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoardModel {
-    #[serde(with = "serde_types::serde_euler_isometry3")]
+    #[serde(with = "newslab_serde_nalgebra::isometry3_as_euler_angles")]
     pub pose: na::Isometry3<f64>,
     /// The marker size on the board.
     pub marker_paper_size: Length,
