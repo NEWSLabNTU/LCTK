@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Result;
 use approx::abs_diff_eq;
 use arrsac::Arrsac;
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
 use itertools::izip;
 use nalgebra::{Isometry3, Point3, Quaternion, Translation3, UnitQuaternion, Vector3};

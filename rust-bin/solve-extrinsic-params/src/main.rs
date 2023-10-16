@@ -1,5 +1,5 @@
 use anyhow::{ensure, Context};
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use aruco_detector::multi_aruco::ImageMarker;
 use clap::Parser;
 use cv_convert::prelude::*;

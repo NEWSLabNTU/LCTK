@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use cv_convert::{OpenCvPose, TryIntoCv};
 use indexmap::IndexSet;
 use itertools::{iproduct, izip};
@@ -342,7 +342,7 @@ impl Detector {
             ..
         } = *pattern;
 
-        let dictionary: Ptr<Dictionary> = dictionary.try_into()?;
+        let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
         let camera_matrix: Mat = (&camera_intrinsic.camera_matrix).into();
         let distortion_coefs: Mat = (&camera_intrinsic.distortion_coefs).into();
         let mut canvas = Mat::default();

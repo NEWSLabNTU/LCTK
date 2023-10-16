@@ -5,7 +5,7 @@ use crate::{
     Detection,
 };
 use anyhow::Result;
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
 use na::coordinates::XYZ;
 use nalgebra as na;

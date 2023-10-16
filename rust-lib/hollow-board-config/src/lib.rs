@@ -2,7 +2,7 @@
 mod with_kiss3d;
 
 use approx::abs_diff_eq;
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use measurements::Length;
 use nalgebra as na;
 use serde::{Deserialize, Serialize};

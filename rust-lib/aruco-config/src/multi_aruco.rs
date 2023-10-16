@@ -1,3 +1,4 @@
+use crate::ArucoDictionary;
 use measurements::Length;
 use noisy_float::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -32,61 +33,5 @@ impl MultiArucoPattern {
 
     pub fn marker_size(&self) -> Length {
         self.square_size() * self.marker_square_size_ratio.raw()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ArucoDictionary {
-    #[serde(rename = "original")]
-    Original,
-    #[serde(rename = "4x4")]
-    D4x4,
-    #[serde(rename = "5x5")]
-    D5x5,
-    #[serde(rename = "6x6")]
-    D6x6,
-    #[serde(rename = "7x7")]
-    D7x7,
-}
-
-#[cfg(feature = "with-opencv")]
-mod with_opencv {
-    use super::*;
-    use opencv::{aruco, core::Ptr};
-
-    impl TryFrom<&ArucoDictionary> for Ptr<aruco::Dictionary> {
-        type Error = opencv::Error;
-
-        fn try_from(from: &ArucoDictionary) -> Result<Self, Self::Error> {
-            let dict_name: aruco::PREDEFINED_DICTIONARY_NAME = From::from(from);
-            let dict = aruco::get_predefined_dictionary(dict_name)?;
-            Ok(dict)
-        }
-    }
-
-    impl TryFrom<ArucoDictionary> for Ptr<aruco::Dictionary> {
-        type Error = opencv::Error;
-
-        fn try_from(from: ArucoDictionary) -> Result<Self, Self::Error> {
-            TryFrom::try_from(&from)
-        }
-    }
-
-    impl From<&ArucoDictionary> for aruco::PREDEFINED_DICTIONARY_NAME {
-        fn from(from: &ArucoDictionary) -> Self {
-            match from {
-                ArucoDictionary::Original => aruco::PREDEFINED_DICTIONARY_NAME::DICT_ARUCO_ORIGINAL,
-                ArucoDictionary::D4x4 => aruco::PREDEFINED_DICTIONARY_NAME::DICT_4X4_1000,
-                ArucoDictionary::D5x5 => aruco::PREDEFINED_DICTIONARY_NAME::DICT_5X5_1000,
-                ArucoDictionary::D6x6 => aruco::PREDEFINED_DICTIONARY_NAME::DICT_6X6_1000,
-                ArucoDictionary::D7x7 => aruco::PREDEFINED_DICTIONARY_NAME::DICT_7X7_1000,
-            }
-        }
-    }
-
-    impl From<ArucoDictionary> for aruco::PREDEFINED_DICTIONARY_NAME {
-        fn from(from: ArucoDictionary) -> Self {
-            aruco::PREDEFINED_DICTIONARY_NAME::from(&from)
-        }
     }
 }

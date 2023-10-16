@@ -1,5 +1,5 @@
 use anyhow::ensure;
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use clap::Parser;
 use opencv::{
     aruco, calib3d,

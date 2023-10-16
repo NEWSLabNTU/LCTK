@@ -1,4 +1,4 @@
-use aruco_config::multi_aruco::MultiArucoPattern;
+use aruco_config::MultiArucoPattern;
 use hollow_board_detector::Config as BoardDetectorConfig;
 use serde::Deserialize;
 use serde_loader::{AbsPathBuf, Json5Path};
