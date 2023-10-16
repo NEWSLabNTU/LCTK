@@ -7,6 +7,7 @@ members = [
     "rust-bin/project-to-image",
     "rust-bin/solve-extrinsic-params",
     "rust-bin/multi_wayside",
+    "rust-bin/aruco-generator",
     "rust-lib/aruco-config",
     "rust-lib/aruco-detector",
     "rust-lib/hollow-board-config",
