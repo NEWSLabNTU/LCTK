@@ -29,3 +29,10 @@ supporting librariesx.
   ArUco board image according to the configuration described by
   [aruco-config](rust-lib/aruco-config/README.md).
 
+
+## Authors
+
+This software is created and maintained by NEWSLAB, National Taiwan
+University. It was contributed by the following authors.
+
+- Lin Hsiang-Jui (2022-)
