@@ -1,5 +1,4 @@
 [workspace]
-authors = ['philly12399 <philly12399@gmail.com>']
 resolver = "2"
 members = [
     "rust-bin/find-aruco-marker",
