@@ -12,7 +12,6 @@ members = [
     "rust-lib/aruco-detector",
     "rust-lib/hollow-board-config",
     "rust-lib/hollow-board-detector",
-    "rust-lib/pcd-format",
     "rust-lib/plane-estimator",
     "rust-lib/pnp-solver",
     "rust-lib/serde-types",
