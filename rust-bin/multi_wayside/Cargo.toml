@@ -1,6 +1,6 @@
 [package]
 name = "multi_wayside"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["yahoo55025502 <yahoo55025502@gmail.com>"]
 edition = "2021"
 
