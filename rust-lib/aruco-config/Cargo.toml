@@ -23,7 +23,9 @@ features = ["aruco", "calib3d"]
 git = "https://github.com/NEWSLabNTU/newslab-serde.git"
 tag = "v0.1.0"
 
-
 [features]
-# default = ["with-opencv"]
 with-opencv = ["opencv"]
+
+[[example]]
+name = "multi_aruco"
+required-features = ["with-opencv"]
