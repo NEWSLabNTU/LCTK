@@ -17,7 +17,6 @@ serde-types = { version = "0.1.0", path = "../serde-types", features = ["with-op
 noisy_float = { version = "0.2.0", features = ["serde"] }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = "0.11.0"
-# geom-algo = { version = "0.1.0", path = "../geom-algo", features = ["with-nalgebra"] }
 
 [dependencies.opencv]
 version = "0.83.0"
@@ -32,4 +31,10 @@ features = ["serde-serialize"]
 git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
 tag = "v0.2.1"
 
-[features]
+[dev-dependencies.opencv]
+version = "0.83.0"
+default-features = false
+features = ["aruco", "imgcodecs"]
+
+[dev-dependencies]
+clap = { version = "4.4.6", features = ["derive"] }
