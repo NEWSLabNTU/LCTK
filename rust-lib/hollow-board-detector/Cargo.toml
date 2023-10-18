@@ -23,3 +23,8 @@ plane-estimator = { version = "0.1.0", path = "../plane-estimator" }
 [dependencies.newslab-geom-algo]
 git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
 tag = "v0.2.1"
+
+[dev-dependencies]
+clap = { version = "4.4.6", features = ["derive"] }
+json5 = "0.4.1"
+pcd-rs = "0.10.0"
