@@ -97,12 +97,14 @@ where
             };
 
             velodyne_lidar::iter::frame_xyz_iter_from_file(config, input_file)?
-                .take(num)
                 .enumerate()
+                .filter(|(index, frame)| *index >= start_number && *index < start_number + num)
                 .try_for_each(|(index, frame)| -> Result<_> {
                     let frame = frame?;
-                    println!("transforming frame number {}", index);
-
+                    println!("transforming frame number {}",index);
+                    // if(index%10==0){
+                    //     println!("transforming frame number {}~{}",index-9, index);
+                    // }
                     let points: Vec<_> = frame
                         .into_point_iter()
                         .map(|point| {
@@ -112,19 +114,20 @@ where
                         })
                         .collect();
 
-                    let pcd_file = output_dir.join(format!("{:06}.pcd", index - start_number + 1));
+                    let pcd_file = output_dir.join(format!("{:06}.pcd", index));
                     save_pcd(points, &pcd_file, pcd_rs::DataKind::Ascii).with_context(|| {
                         format!("failed to create the pcd file '{}'", pcd_file.display())
                     })?;
-
                     Ok(())
                 })?;
         }
         FileFormat::NewslabPcd => {
+
             todo!()
         }
         _ => unreachable!(),
     }
+
     Ok(())
 }
 
