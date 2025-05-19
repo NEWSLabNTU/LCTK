@@ -13,7 +13,7 @@ itertools = "0.11.0"
 json5 = "0.4.1"
 nalgebra = { version = "0.32.3", features = ["serde-serialize"] }
 noisy_float = { version = "0.2.0", features = ["serde"] }
-opencv = "0.83.0"
+opencv = { version = "0.83.0", default-features = false, features = ["calib3d", "highgui", "imgcodecs", "imgproc"] }
 palette = "0.7.3"
 pcd-rs = "0.10.0"
 serde = { version = "1.0.188", features = ["derive"] }

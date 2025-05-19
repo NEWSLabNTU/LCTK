@@ -21,7 +21,7 @@ itertools = "0.11.0"
 [dependencies.opencv]
 version = "0.83.0"
 default-features = false
-features = ["aruco"]
+features = ["aruco", "calib3d"]
 
 [dependencies.nalgebra]
 version = "0.32.3"
