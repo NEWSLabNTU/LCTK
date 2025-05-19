@@ -9,7 +9,7 @@ use nalgebra::{Isometry3, Point2, Point3};
 use noisy_float::prelude::*;
 use opencv::{
     aruco,
-    aruco::{Dictionary, EstimateParameters},
+    aruco::Dictionary,
     calib3d, core as core_cv,
     core::{Mat, Point2f, Point3d, Ptr, Vector},
     prelude::*,
@@ -86,7 +86,7 @@ impl ImageDetection {
             &mut rvec,
             &mut tvec,
             &mut core_cv::no_array(),
-            EstimateParameters::create()?,
+            // EstimateParameters::create()?,
         )?;
 
         Ok(PoseEstimation {
@@ -379,6 +379,8 @@ impl Detector {
                 &mut ids,
                 &parameters,
                 &mut core_cv::no_array(), // rejected_img_points
+                &mut core_cv::no_array(),
+                &mut core_cv::no_array(),
             )?;
 
             if !ids.is_empty() {

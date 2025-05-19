@@ -19,9 +19,6 @@ pub struct Isometry3D {
 }
 
 #[cfg(all(feature = "with-opencv", feature = "with-nalgebra"))]
-pub use with_opencv_nalgebra::*;
-
-#[cfg(all(feature = "with-opencv", feature = "with-nalgebra"))]
 mod with_opencv_nalgebra {
     use crate::Isometry3D;
     use nalgebra as na;
@@ -40,9 +37,6 @@ mod with_opencv_nalgebra {
         }
     }
 }
-
-#[cfg(feature = "with-nalgebra")]
-pub use with_nalgebra::*;
 
 #[cfg(feature = "with-nalgebra")]
 mod with_nalgebra {

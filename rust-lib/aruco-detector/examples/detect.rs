@@ -4,8 +4,7 @@ use aruco_detector::multi_aruco::Builder;
 use clap::Parser;
 use measurements::Length;
 use noisy_float::prelude::*;
-use opencv::imgcodecs::imread;
-use opencv::imgcodecs::IMREAD_GRAYSCALE;
+use opencv::imgcodecs::{imread, IMREAD_GRAYSCALE};
 use serde_types::CameraIntrinsics;
 
 /// Detect the multi-aruco pattern board in an image.
