@@ -17,6 +17,6 @@ strum = "0.25.0"
 clap = { version = "4.4.6", features = ["derive"] }
 
 [dependencies.opencv]
-version = "0.83.0"
+version = "0.84.5"
 default-features = false
-features = ["aruco", "highgui", "imgcodecs", "calib3d"]
+features = ["aruco", "highgui", "imgcodecs", "calib3d", "clang-runtime"]
