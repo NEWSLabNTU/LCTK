@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
     strum::AsRefStr,
     strum::EnumString,
     strum::FromRepr,
-    strum::EnumVariantNames,
+    strum::VariantNames,
 )]
 #[allow(non_camel_case_types)]
 #[repr(u8)]

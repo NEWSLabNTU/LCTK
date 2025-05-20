@@ -109,7 +109,7 @@ impl ExtrinsicsData {
     }
 
     pub fn to_opencv(&self) -> Result<OpenCvPose<Mat>> {
-        let pose = self.to_na().try_into_cv()?;
+        let pose = self.to_na().try_to_cv()?;
         Ok(pose)
     }
 }

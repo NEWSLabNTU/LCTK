@@ -120,7 +120,7 @@ fn main() -> Result<(), anyhow::Error> {
                 .multi_marker_corners(&aruco_pattern)
                 .into_iter()
                 .flatten()
-                .map(Point3d::from_cv)
+                .map(|p| -> Point3d { p.to_cv() })
                 .collect();
             let image_points: Vec<Point2d> = markers
                 .into_iter()
@@ -129,7 +129,7 @@ fn main() -> Result<(), anyhow::Error> {
                         .corners
                         .iter()
                         .map(|corner| {
-                            let point2f: Point2f = corner.into_cv();
+                            let point2f: Point2f = corner.to_cv();
                             let point2d: Point2d = point2f.to().unwrap();
                             point2d
                         })

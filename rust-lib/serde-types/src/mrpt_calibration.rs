@@ -1,7 +1,7 @@
 use crate::{CameraIntrinsics, CameraMatrix, DistortionCoefs};
 use anyhow::{ensure, Result};
 #[cfg(all(feature = "with-opencv", feature = "with-nalgebra"))]
-use cv_convert::{OpenCvPose, TryIntoCv};
+use cv_convert::{OpenCvPose, TryToCv};
 #[cfg(feature = "with-nalgebra")]
 use nalgebra as na;
 use noisy_float::prelude::*;
@@ -151,7 +151,7 @@ impl ExtrinsicsData {
 
     #[cfg(all(feature = "with-opencv", feature = "with-nalgebra"))]
     pub fn to_opencv(&self) -> Result<OpenCvPose<Mat>> {
-        let pose = self.to_na().try_into_cv()?;
+        let pose = self.to_na().try_to_cv()?;
         Ok(pose)
     }
 }

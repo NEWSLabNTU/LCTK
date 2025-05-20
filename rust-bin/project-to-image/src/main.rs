@@ -117,7 +117,10 @@ fn main() -> Result<()> {
                     camera_point.z >= camera_depth_thresh
                 }
             })
-            .map(|point| (point, Point3d::from_cv(point)))
+            .map(|point| {
+                let cv_point: Point3d = point.to_cv();
+                (point, cv_point)
+            })
             .unzip();
 
         let mut image_points = Vector::<Point2d>::new();
@@ -125,7 +128,7 @@ fn main() -> Result<()> {
         if opencv_points.is_empty() {
             (pcd_points, image_points)
         } else {
-            let OpenCvPose::<Mat> { rvec, tvec } = pose.try_into_cv()?;
+            let OpenCvPose::<Mat> { rvec, tvec } = pose.try_to_cv()?;
 
             // lidar_points must be non-empty, otherwise it panics
 

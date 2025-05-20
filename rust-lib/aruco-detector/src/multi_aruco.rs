@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use aruco_config::MultiArucoPattern;
-use cv_convert::{OpenCvPose, TryIntoCv};
+use cv_convert::{OpenCvPose, TryToCv};
 use indexmap::IndexSet;
 use itertools::{iproduct, izip};
 use log::info;
@@ -125,7 +125,7 @@ impl PoseEstimation {
         .map(|(corners, id, rvec, tvec)| {
             let corners: Vec<Point2<f32>> =
                 corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
-            let pose: Isometry3<f64> = OpenCvPose { rvec, tvec }.try_into_cv().unwrap();
+            let pose: Isometry3<f64> = OpenCvPose { rvec, tvec }.try_to_cv().unwrap();
 
             ImagePoseMarker {
                 id,

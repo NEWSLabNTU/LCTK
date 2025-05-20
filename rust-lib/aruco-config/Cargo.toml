@@ -11,10 +11,10 @@ measurements = "0.11.0"
 noisy_float = { version = "0.2.0", features = ["serde"] }
 serde = { version = "1.0.188", features = ["derive"] }
 anyhow = "1.0.75"
-strum = { version = "0.25.0", features = ["derive"] }
+strum = { version = "0.26.0", features = ["derive"] }
 
 [dependencies.opencv]
-version = "0.84.5"
+workspace = true
 optional = true
 default-features = false
 features = ["aruco", "calib3d"]

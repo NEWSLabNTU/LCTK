@@ -26,8 +26,8 @@ mod with_opencv_nalgebra {
 
     impl From<&Isometry3D> for cv_convert::OpenCvPose<core_cv::Mat> {
         fn from(from: &Isometry3D) -> Self {
-            use cv_convert::TryIntoCv;
-            na::Isometry3::<f64>::from(from).try_into_cv().unwrap()
+            use cv_convert::TryToCv;
+            na::Isometry3::<f64>::from(from).try_to_cv().unwrap()
         }
     }
 

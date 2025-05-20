@@ -13,10 +13,10 @@ indexmap = "2.0.2"
 aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config", features = ["with-opencv"] }
 measurements = "0.11.0"
 noisy_float = "0.2.0"
-strum = "0.25.0"
+strum = "0.26.0"
 clap = { version = "4.4.6", features = ["derive"] }
 
 [dependencies.opencv]
-version = "0.84.5"
+workspace = true
 default-features = false
 features = ["aruco", "highgui", "imgcodecs", "calib3d", "clang-runtime"]

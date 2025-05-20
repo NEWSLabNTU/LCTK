@@ -97,7 +97,7 @@ impl PnpSolver {
             return None;
         }
 
-        let transform: na::Isometry3<f64> = OpenCvPose { rvec, tvec }.try_into_cv().unwrap();
+        let transform: na::Isometry3<f64> = OpenCvPose { rvec, tvec }.try_to_cv().unwrap();
 
         Some(transform)
     }

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 serde-loader = { version = "0.2.0", features = ["json5"] }
-cv-convert = { version = "0.25.0", default-features = false, features = ["opencv_0-84", "nalgebra_0-32"] }
+cv-convert = { workspace = true, features = ["nalgebra"] }
 measurements = "0.11.0"
 serde = { version = "1.0.188", features = ["derive"] }
 anyhow = "1.0.75"
@@ -19,7 +19,7 @@ aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-
 itertools = "0.11.0"
 
 [dependencies.opencv]
-version = "0.84.5"
+workspace = true
 default-features = false
 features = ["aruco", "calib3d"]
 
@@ -32,7 +32,7 @@ git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
 tag = "v0.2.1"
 
 [dev-dependencies.opencv]
-version = "0.84.5"
+workspace = true
 default-features = false
 features = ["aruco", "imgcodecs"]
 
