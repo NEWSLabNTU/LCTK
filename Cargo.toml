@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "rust-bin/find-aruco-marker",
     "rust-bin/find-hollow-board",
-    "rust-bin/pcd-tool",
     "rust-bin/project-to-image",
     "rust-bin/solve-extrinsic-params",
     "rust-bin/multi_wayside",
