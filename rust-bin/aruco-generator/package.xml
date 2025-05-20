@@ -1,0 +1,16 @@
+<package format="3">
+  <name>aruco_generator</name>
+  <version>0.1.0</version>
+  <description>ROS 2 node for generating ArUco marker patterns</description>
+  <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
+  <license>MIT</license>
+
+  <depend>rclrs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>

@@ -1,0 +1,19 @@
+<package format="3">
+  <name>solve_extrinsic_params</name>
+  <version>0.1.0</version>
+  <description>ROS 2 node for solving extrinsic parameters between LiDAR and camera</description>
+  <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
+  <license>MIT</license>
+
+  <depend>rclrs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>vision_msgs</depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>

@@ -1,0 +1,18 @@
+<package format="3">
+  <name>find_aruco_marker</name>
+  <version>0.1.0</version>
+  <description>ROS 2 node for ArUco marker detection in camera images</description>
+  <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
+  <license>MIT</license>
+
+  <depend>rclrs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>vision_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>
