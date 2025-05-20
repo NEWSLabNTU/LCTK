@@ -28,3 +28,8 @@ __pycache__/
 /thi_output
 /deepsort-tracker/wayside_?_camera?/
 /config/files/*
+
+# colcon
+/build/
+/install/
+/log/
