@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
+aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
 clap = { workspace = true }
 glob = "0.3.1"
-hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
-hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board-detector" }
+hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config", features = ["kiss3d"] }
+hollow-board-detector = { version = "0.1.0", path = "../../lib/hollow-board-detector" }
 json5 = { workspace = true }
 kiss3d = { workspace = true }
 once_cell = { workspace = true }

@@ -10,7 +10,7 @@ dialoguer = "0.11.0"
 rand = { workspace = true }
 console = "0.15.7"
 indexmap = { workspace = true }
-aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config", features = ["with-opencv"] }
+aruco-config = { version = "0.1.0", path = "../../lib/aruco-config", features = ["with-opencv"] }
 measurements = { workspace = true }
 noisy_float = { workspace = true }
 strum = { workspace = true }

@@ -8,7 +8,9 @@
   <depend>rclrs</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
 
   <export>
     <build_type>ament_cargo</build_type>

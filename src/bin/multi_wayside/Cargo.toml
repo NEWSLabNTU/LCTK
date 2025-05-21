@@ -19,9 +19,9 @@ serde_json = { workspace = true }
 unzip-n = { workspace = true }
 itertools = { workspace = true }
 velodyne-lidar = { version = "0.2.0", features = ["pcap"] }
-aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
-hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board-detector" }
-hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
+aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
+hollow-board-detector = { version = "0.1.0", path = "../../lib/hollow-board-detector" }
+hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config", features = ["kiss3d"] }
 clap = { workspace = true }
 
 [dependencies.nalgebra]

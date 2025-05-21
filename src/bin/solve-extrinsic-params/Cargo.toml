@@ -7,20 +7,20 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
-aruco-detector = { version = "0.1.0", path = "../../rust-lib/aruco-detector" }
+aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
+aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
 clap = { workspace = true }
 cv-convert = { workspace = true, features = ["nalgebra"] }
-hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config" }
+hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config" }
 itertools = { workspace = true }
 json5 = { workspace = true }
 nalgebra = { workspace = true }
 noisy_float = { workspace = true }
 once_cell = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["calib3d", "imgproc", "clang-runtime"] }  # imgproc is not used but is required to fix compile error
-pnp-solver = { version = "0.1.0", path = "../../rust-lib/pnp-solver" }
+pnp-solver = { version = "0.1.0", path = "../../lib/pnp-solver" }
 serde = { workspace = true }
 serde-loader = { workspace = true }
-serde-types = { version = "0.1.0", path = "../../rust-lib/serde-types" }
+serde-types = { version = "0.1.0", path = "../../lib/serde-types" }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

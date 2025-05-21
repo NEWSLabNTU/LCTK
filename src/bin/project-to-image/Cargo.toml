@@ -17,6 +17,6 @@ opencv = { workspace = true, default-features = false, features = ["calib3d", "h
 palette = "0.7.3"
 pcd-rs = { workspace = true }
 serde = { workspace = true }
-serde-types = { version = "0.1.0", path = "../../rust-lib/serde-types", features = ["with-opencv"] }
+serde-types = { version = "0.1.0", path = "../../lib/serde-types", features = ["with-opencv"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

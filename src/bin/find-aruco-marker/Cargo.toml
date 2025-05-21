@@ -7,8 +7,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
-aruco-detector = { version = "0.1.0", path = "../../rust-lib/aruco-detector" }
+aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
+aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
 clap = { workspace = true }
 cv-convert = { workspace = true, features = ["nalgebra"] }
 json5 = { workspace = true }
@@ -17,6 +17,6 @@ noisy_float = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgproc", "videoio", "clang-runtime"] }
 serde = { workspace = true }
 serde-loader = { workspace = true }
-serde-types = { version = "0.1.0", path = "../../rust-lib/serde-types", features = ["with-opencv"] }
+serde-types = { version = "0.1.0", path = "../../lib/serde-types", features = ["with-opencv"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
