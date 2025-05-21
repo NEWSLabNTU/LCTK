@@ -1,9 +1,7 @@
 [package]
-name = "find-aruco-marker"
+name = "aruco-locator"
 version = "0.1.1"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = { workspace = true }
@@ -14,7 +12,7 @@ cv-convert = { workspace = true, features = ["nalgebra"] }
 json5 = { workspace = true }
 nalgebra = { workspace = true }
 noisy_float = { workspace = true }
-opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgproc", "videoio", "clang-runtime"] }
+opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
 serde = { workspace = true }
 serde-loader = { workspace = true }
 serde-types = { version = "0.1.0", path = "../../lib/serde-types", features = ["with-opencv"] }

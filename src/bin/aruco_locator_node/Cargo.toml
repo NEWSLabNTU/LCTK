@@ -1,0 +1,20 @@
+[package]
+name = "aruco_locator_node"
+version = "0.1.1"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
+serde_json = { workspace = true }
+aruco-locator = { version = "0.1.0", path = "../../lib/aruco-locator" }
+aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
+serde-types = { version = "0.1.0", path = "../../lib/serde-types" }
+serde-loader = { workspace = true }
+noisy_float = { workspace = true }
+
+# ROS 2 dependencies
+rclrs = { version = "*" }
+sensor_msgs = { version = "*" }
+std_msgs = { version = "*" }
+aruco_locator_msgs = { version = "*", path = "../../../install/aruco_locator_msgs/share/aruco_locator_msgs/rust" }
