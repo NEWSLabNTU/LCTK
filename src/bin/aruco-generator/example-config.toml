@@ -1,0 +1,44 @@
+# Example configuration for aruco-generator
+# This file demonstrates how to configure different types of ArUco marker generation
+
+# Example 1: Multiple ArUco markers arranged in a grid
+type = "multiple_arucos"
+dictionary = "DICT_5X5_1000"
+num_squares_per_side = 2
+board_size_mm = 500.0
+board_border_size_mm = 10.0
+marker_square_size_ratio = 0.8
+border_bits = 1
+dpi = 300.0
+
+# Use random marker IDs
+[marker_ids]
+type = "random"
+
+# Or use specific marker IDs:
+# [marker_ids]
+# type = "specific"
+# ids = [149, 391, 385, 482]
+
+# Optional: specify output path (otherwise auto-generated)
+# output_path = "custom_aruco_pattern.jpg"
+
+# Example 2: Single ChArUco board
+# To use this configuration, replace the above with:
+#
+# type = "single_charuco"
+# dictionary = "DICT_5X5_1000"
+# squares_per_side = 2
+# border_bits = 1
+# marker_to_square_length_ratio = 0.8
+# paper_size_mm = 500.0
+# margin_size_mm = 50.0
+# dpi = 300.0
+# output_path = "charuco_board.jpg"
+
+# Example 3: Single ArUco marker
+# To use this configuration, replace the above with:
+#
+# type = "single_aruco"
+# dictionary = "DICT_5X5_1000"
+# output_path = "single_aruco.jpg"
