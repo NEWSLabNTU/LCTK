@@ -183,6 +183,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "aruco-generator"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "aruco-config",
+ "clap",
+ "console",
+ "dialoguer",
+ "indexmap 2.9.0",
+ "measurements",
+ "noisy_float",
+ "opencv",
+ "rand",
+ "serde",
+ "strum 0.26.3",
+ "toml 0.8.22",
+]
+
+[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1039,25 +1058,6 @@ name = "gcd"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
-
-[[package]]
-name = "generate-multi-aruco"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "aruco-config",
- "clap",
- "console",
- "dialoguer",
- "indexmap 2.9.0",
- "measurements",
- "noisy_float",
- "opencv",
- "rand",
- "serde",
- "strum 0.26.3",
- "toml 0.8.22",
-]
 
 [[package]]
 name = "generic-array"

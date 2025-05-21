@@ -1,5 +1,5 @@
 [package]
-name = "generate-multi-aruco"
+name = "aruco-generator"
 version = "0.1.1"
 authors = ["jerry73204 <jerry73204@gmail.com>"]
 edition = "2021"
