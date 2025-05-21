@@ -3,7 +3,7 @@
 default: build
 
 build:
-	cargo build --release --all-targets
+	colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 clean:
-	cargo clean
+	rm -rf build install log
