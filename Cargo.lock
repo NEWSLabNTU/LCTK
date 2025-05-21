@@ -202,6 +202,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aruco_generator_node"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "aruco-generator",
+ "clap",
+]
+
+[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,10 @@
+[package]
+name = "aruco_generator_node"
+version = "0.1.1"
+authors = ["jerry73204 <jerry73204@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+aruco-generator = { version = "0.1.0", path = "../../lib/aruco-generator" }
+anyhow.workspace = true
+clap = { version = "4.0", features = ["derive"] }

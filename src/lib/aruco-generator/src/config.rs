@@ -115,7 +115,7 @@ impl Config {
 
     /// Generate the output image based on the configuration
     pub fn generate_image(&self, preview: bool) -> Result<()> {
-        use crate::{generate_multiple_arucos_image, generate_single_charuco_image};
+        use crate::ArucoGenerator;
 
         match self {
             Config::SingleAruco(_config) => {
@@ -123,10 +123,10 @@ impl Config {
                 todo!("Single ArUco generation not yet implemented");
             }
             Config::SingleCharuco(config) => {
-                generate_single_charuco_image(config, preview)?;
+                ArucoGenerator::generate_single_charuco_image(config, preview)?;
             }
             Config::MultipleArucos(config) => {
-                generate_multiple_arucos_image(config, preview)?;
+                ArucoGenerator::generate_multiple_arucos_image(config, preview)?;
             }
         }
         Ok(())
