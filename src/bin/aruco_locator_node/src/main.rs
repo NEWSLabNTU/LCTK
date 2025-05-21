@@ -1,5 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
+use aruco_locator_msgs::msg::{ArucoDetection, ArucoMarker, Point2D};
+use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use noisy_float::prelude::*;
 use opencv::{core::CV_8UC3, prelude::*};
 use rclrs::{log_error, log_info, log_warn, *};
@@ -10,7 +12,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use std_msgs::msg::String as StringMsg;
+use std_msgs::msg::Header;
 
 // Binary name for logging
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
@@ -43,11 +45,120 @@ fn camera_info_to_intrinsics(camera_info: &CameraInfo) -> Result<CameraIntrinsic
     })
 }
 
+/// Convert aruco_locator::DetectionResult to ArucoDetection message
+fn convert_detection_result(
+    result: &aruco_locator::DetectionResult,
+    header: Header,
+) -> ArucoDetection {
+    let mut aruco_detection = ArucoDetection {
+        header,
+        markers_found: result.markers_found,
+        marker_count: result.marker_ids.len() as u32,
+        markers: Vec::new(),
+        processing_time_ms: 0.0, // TODO: Add timing measurement
+    };
+
+    // Convert each detected marker
+    if result.markers_found {
+        for (i, &marker_id) in result.marker_ids.iter().enumerate() {
+            if let Some(marker_data) = result.markers.get(i) {
+                let aruco_marker = match convert_marker_data(marker_id, marker_data) {
+                    Ok(marker) => marker,
+                    Err(e) => {
+                        log_warn!(LOGGER_NAME, "Failed to convert marker {marker_id}: {e}");
+                        continue;
+                    }
+                };
+                aruco_detection.markers.push(aruco_marker);
+            }
+        }
+    }
+
+    aruco_detection
+}
+
+/// Convert a single marker from JSON to ArucoMarker message
+fn convert_marker_data(marker_id: i32, marker_data: &serde_json::Value) -> Result<ArucoMarker> {
+    // Extract corners from the JSON data
+    let corners = if let Some(corners_array) = marker_data.get("corners") {
+        if let Some(corners_vec) = corners_array.as_array() {
+            let mut corners: Vec<Point2D> = Vec::new();
+            for corner in corners_vec {
+                if let (Some(x), Some(y)) = (corner.get("x"), corner.get("y")) {
+                    if let (Some(x_val), Some(y_val)) = (x.as_f64(), y.as_f64()) {
+                        corners.push(Point2D { x: x_val, y: y_val });
+                    }
+                }
+            }
+
+            if corners.len() == 4 {
+                [
+                    corners[0].clone(),
+                    corners[1].clone(),
+                    corners[2].clone(),
+                    corners[3].clone(),
+                ]
+            } else {
+                // Default corners if parsing fails
+                [
+                    Point2D { x: 0.0, y: 0.0 },
+                    Point2D { x: 0.0, y: 0.0 },
+                    Point2D { x: 0.0, y: 0.0 },
+                    Point2D { x: 0.0, y: 0.0 },
+                ]
+            }
+        } else {
+            // Default corners
+            [
+                Point2D { x: 0.0, y: 0.0 },
+                Point2D { x: 0.0, y: 0.0 },
+                Point2D { x: 0.0, y: 0.0 },
+                Point2D { x: 0.0, y: 0.0 },
+            ]
+        }
+    } else {
+        // Default corners
+        [
+            Point2D { x: 0.0, y: 0.0 },
+            Point2D { x: 0.0, y: 0.0 },
+            Point2D { x: 0.0, y: 0.0 },
+            Point2D { x: 0.0, y: 0.0 },
+        ]
+    };
+
+    // Extract pose if available (for now, we'll set pose_valid to false as the current
+    // DetectionResult doesn't include pose information in a structured way)
+    let pose_valid = false;
+    let pose = PoseWithCovariance {
+        pose: Pose {
+            position: Point {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            orientation: Quaternion {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            },
+        },
+        covariance: [0.0; 36], // 6x6 covariance matrix
+    };
+
+    Ok(ArucoMarker {
+        id: marker_id,
+        corners,
+        pose_valid,
+        pose,
+    })
+}
+
 /// ArUco detection ROS 2 node
 pub struct ArucoLocatorNode {
     _camera_info_subscription: Subscription<CameraInfo>,
     image_subscription: Option<Subscription<ImageMsg>>,
-    detection_publisher: Publisher<StringMsg>,
+    detection_publisher: Publisher<ArucoDetection>,
     _camera_namespace: String,
     detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
 }
@@ -69,22 +180,22 @@ impl ArucoLocatorNode {
             }
         };
 
-        log_info!(LOGGER_NAME, "Using camera namespace: {}", camera_namespace);
+        log_info!(LOGGER_NAME, "Using camera namespace: {camera_namespace}");
 
         // Form the camera_info topic name with namespace
-        let camera_info_topic = format!("{}/camera_info", camera_namespace);
+        let camera_info_topic = format!("{camera_namespace}/camera_info");
 
         // Define potential image topics in priority order
         let potential_image_topics = vec![
-            format!("{}/image_rect_color", camera_namespace),
-            format!("{}/image_rect", camera_namespace),
-            format!("{}/image_color", camera_namespace),
-            format!("{}/image", camera_namespace),
-            format!("{}/image_raw", camera_namespace),
+            format!("{camera_namespace}/image_rect_color"),
+            format!("{camera_namespace}/image_rect"),
+            format!("{camera_namespace}/image_color"),
+            format!("{camera_namespace}/image"),
+            format!("{camera_namespace}/image_raw"),
         ];
 
         // Create detection publisher
-        let detection_publisher = node.create_publisher::<StringMsg>("aruco_detections")?;
+        let detection_publisher = node.create_publisher::<ArucoDetection>("aruco_detections")?;
 
         // Subscribe to camera_info
         let detector_state_camera_info = Arc::clone(&detector_state);
@@ -95,11 +206,10 @@ impl ArucoLocatorNode {
             },
         )?;
 
-        log_info!(LOGGER_NAME, "Camera namespace: {}", camera_namespace);
+        log_info!(LOGGER_NAME, "Camera namespace: {camera_namespace}");
         log_info!(
             LOGGER_NAME,
-            "Waiting for camera_info on topic: {}",
-            camera_info_topic
+            "Waiting for camera_info on topic: {camera_info_topic}"
         );
 
         // Create the node instance
@@ -136,7 +246,7 @@ impl ArucoLocatorNode {
         let camera_intrinsics = match camera_info_to_intrinsics(&camera_info) {
             Ok(intrinsics) => intrinsics,
             Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to convert camera info: {}", e);
+                log_error!(LOGGER_NAME, "Failed to convert camera info: {e}");
                 return;
             }
         };
@@ -144,7 +254,7 @@ impl ArucoLocatorNode {
         let aruco_pattern = match Self::load_aruco_pattern() {
             Ok(pattern) => pattern,
             Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to load ArUco pattern: {}", e);
+                log_error!(LOGGER_NAME, "Failed to load ArUco pattern: {e}");
                 return;
             }
         };
@@ -157,7 +267,7 @@ impl ArucoLocatorNode {
         let detector = match ArucoDetector::new(config) {
             Ok(detector) => detector,
             Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to create ArUco detector: {}", e);
+                log_error!(LOGGER_NAME, "Failed to create ArUco detector: {e}");
                 return;
             }
         };
@@ -165,7 +275,7 @@ impl ArucoLocatorNode {
         let mut state = match detector_state.lock() {
             Ok(state) => state,
             Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to lock detector state: {}", e);
+                log_error!(LOGGER_NAME, "Failed to lock detector state: {e}");
                 return;
             }
         };
@@ -224,27 +334,22 @@ impl ArucoLocatorNode {
                         Self::image_callback(msg, Arc::clone(&detector_state), &publisher);
                     }) {
                         Ok(sub) => {
-                            log_info!(LOGGER_NAME, "Subscribed to image topic: {}", topic);
+                            log_info!(LOGGER_NAME, "Subscribed to image topic: {topic}");
                             return Some(sub);
                         }
                         Err(e) => {
-                            log_warn!(LOGGER_NAME, "Failed to subscribe to {}: {}", topic, e);
+                            log_warn!(LOGGER_NAME, "Failed to subscribe to {topic}: {e}");
                             continue;
                         }
                     }
                 }
                 Ok(_) => {
                     // Topic exists but has no publishers
-                    log_info!(LOGGER_NAME, "Topic {} has no publishers", topic);
+                    log_info!(LOGGER_NAME, "Topic {topic} has no publishers");
                     continue;
                 }
                 Err(e) => {
-                    log_error!(
-                        LOGGER_NAME,
-                        "Error checking publishers for {}: {}",
-                        topic,
-                        e
-                    );
+                    log_error!(LOGGER_NAME, "Error checking publishers for {topic}: {e}");
                     continue;
                 }
             }
@@ -256,7 +361,7 @@ impl ArucoLocatorNode {
     fn image_callback(
         msg: ImageMsg,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
-        publisher: &Publisher<StringMsg>,
+        publisher: &Publisher<ArucoDetection>,
     ) {
         // Get detector
         let detector = {
@@ -265,8 +370,7 @@ impl ArucoLocatorNode {
                 Err(e) => {
                     log_error!(
                         LOGGER_NAME,
-                        "Failed to lock detector state in image_callback: {}",
-                        e
+                        "Failed to lock detector state in image_callback: {e}"
                     );
                     return;
                 }
@@ -284,23 +388,22 @@ impl ArucoLocatorNode {
         // Process the image
         match Self::process_image(&msg, &detector) {
             Ok(detection_result) => {
-                // Serialize the detection result
-                let result_json = match serde_json::to_string(&detection_result) {
-                    Ok(json) => json,
-                    Err(e) => {
-                        log_error!(LOGGER_NAME, "Failed to serialize detection result: {}", e);
-                        return;
-                    }
+                // Create message header
+                let header = Header {
+                    stamp: msg.header.stamp.clone(),
+                    frame_id: msg.header.frame_id.clone(),
                 };
 
+                // Convert detection result to ArUco detection message
+                let detection_msg = convert_detection_result(&detection_result, header);
+
                 // Publish the detection result
-                let detection_msg = StringMsg { data: result_json };
                 if let Err(e) = publisher.publish(detection_msg) {
-                    log_error!(LOGGER_NAME, "Failed to publish detection result: {}", e);
+                    log_error!(LOGGER_NAME, "Failed to publish detection result: {e}");
                 }
             }
             Err(e) => {
-                log_error!(LOGGER_NAME, "Detection failed: {}", e);
+                log_error!(LOGGER_NAME, "Detection failed: {e}");
             }
         }
     }
@@ -311,23 +414,17 @@ pub fn run_node() -> Result<()> {
     // Initialize ROS 2
     let context = Context::new(std::env::args(), InitOptions::new())?;
     let mut executor = context.create_basic_executor();
-
     let node = executor.create_node("aruco_locator_node")?;
 
     // Create the node (automatically creates all its components)
     let _aruco_node = ArucoLocatorNode::new(&node)?;
-
-    log_info!(LOGGER_NAME, "ArUco Locator ROS 2 node started");
-    log_info!(
-        LOGGER_NAME,
-        "Publishing ArUco detections to: /aruco_detections"
-    );
+    log_info!(LOGGER_NAME, "ArUco Locator node started");
 
     // Spin the executor
     executor
         .spin(SpinOptions::default())
         .first_error()
-        .map_err(|err| anyhow::anyhow!("Failed to spin executor: {}", err))
+        .map_err(|err| anyhow!("Failed to spin executor: {err}"))
 }
 
 fn main() -> Result<()> {

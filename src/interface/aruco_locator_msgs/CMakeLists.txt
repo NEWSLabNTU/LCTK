@@ -9,12 +9,19 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
-# Generate service interfaces
+# Generate message and service interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Point2D.msg"
+  "msg/ArucoMarker.msg"
+  "msg/ArucoDetection.msg"
   "srv/DetectAruco.srv"
   DEPENDENCIES
   sensor_msgs
+  std_msgs
+  geometry_msgs
 )
 
 if(BUILD_TESTING)
