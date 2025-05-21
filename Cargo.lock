@@ -1054,7 +1054,9 @@ dependencies = [
  "noisy_float",
  "opencv",
  "rand",
+ "serde",
  "strum 0.26.3",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -2710,7 +2712,7 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d6ea3c4595b96363c13943497db34af4460fb474a95c43f4446ad341b8c9785"
 dependencies = [
- "toml",
+ "toml 0.5.11",
 ]
 
 [[package]]
@@ -3168,6 +3170,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87607cb1398ed59d48732e575a4c28a7a8ebf2454b964fe3f224f2afc07909e1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_yaml"
 version = "0.9.34+deprecated"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3551,6 +3562,47 @@ checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "toml"
+version = "0.8.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05ae329d1f08c4d17a59bed7ff5b5a769d062e64a62d34a3261b219e62cd5aae"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3da5db5a963e24bc68be8b17b6fa82814bb22ee8660f192bb182771d498f09a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "310068873db2c5b3e7659d2cc35d21855dbafa50d1ce336397c666e3cb08137e"
+dependencies = [
+ "indexmap 2.9.0",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_write"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfb942dfe1d8e29a7ee7fcbde5bd2b9a25fb89aa70caea2eba3bee836ff41076"
 
 [[package]]
 name = "ttf-parser"
@@ -4110,6 +4162,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "winnow"
+version = "0.7.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c06928c8748d81b05c9be96aad92e1b6ff01833332f281e8cfca3be4b35fc9ec"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "wit-bindgen-rt"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4266,3 +4327,115 @@ dependencies = [
  "quote",
  "syn 2.0.101",
 ]
+
+[[patch.unused]]
+name = "action_msgs"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "actionlib_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "builtin_interfaces"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "composition_interfaces"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "diagnostic_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "example_interfaces"
+version = "0.9.3"
+
+[[patch.unused]]
+name = "examples_rclrs_message_demo"
+version = "0.4.1"
+
+[[patch.unused]]
+name = "examples_rclrs_minimal_client_service"
+version = "0.4.1"
+
+[[patch.unused]]
+name = "examples_rclrs_minimal_pub_sub"
+version = "0.4.1"
+
+[[patch.unused]]
+name = "geometry_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "lifecycle_msgs"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "nav_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "rcl_interfaces"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "rclrs"
+version = "0.4.1"
+
+[[patch.unused]]
+name = "rclrs_example_msgs"
+version = "0.4.1"
+
+[[patch.unused]]
+name = "rosgraph_msgs"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "rosidl_runtime_rs"
+version = "0.4.1"
+
+[[patch.unused]]
+name = "rust_pubsub"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "sensor_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "shape_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "statistics_msgs"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "std_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "std_srvs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "stereo_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "test_msgs"
+version = "1.2.1"
+
+[[patch.unused]]
+name = "trajectory_msgs"
+version = "4.8.0"
+
+[[patch.unused]]
+name = "unique_identifier_msgs"
+version = "2.2.1"
+
+[[patch.unused]]
+name = "visualization_msgs"
+version = "4.8.0"
