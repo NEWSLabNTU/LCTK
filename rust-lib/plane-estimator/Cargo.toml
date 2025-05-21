@@ -4,13 +4,13 @@ version = "0.1.1"
 edition = "2021"
 
 [dependencies]
-nalgebra = "0.32.3"
+nalgebra = { workspace = true }
 sample-consensus = "1.0.2"
 simba = "0.8.1"
 
 [dev-dependencies]
-anyhow = "1.0.75"
-clap = { version = "4.4.6", features = ["derive"] }
-itertools = "0.11.0"
-kiss3d = "0.35.0"
-pcd-rs = "0.10.0"
+anyhow = { workspace = true }
+clap = { workspace = true }
+itertools = { workspace = true }
+kiss3d = { workspace = true }
+pcd-rs = { workspace = true }

@@ -6,17 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde-loader = { version = "0.2.0", features = ["json5"] }
+serde-loader = { workspace = true }
 cv-convert = { workspace = true, features = ["nalgebra"] }
-measurements = "0.11.0"
-serde = { version = "1.0.188", features = ["derive"] }
-anyhow = "1.0.75"
-indexmap = "2.0.2"
-log = "0.4.20"
+measurements = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+indexmap = { workspace = true }
+log = { workspace = true }
 serde-types = { version = "0.1.0", path = "../serde-types", features = ["with-opencv"] }
-noisy_float = { version = "0.2.0", features = ["serde"] }
+noisy_float = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
-itertools = "0.11.0"
+itertools = { workspace = true }
 
 [dependencies.opencv]
 workspace = true
@@ -24,8 +24,7 @@ default-features = false
 features = ["aruco", "calib3d"]
 
 [dependencies.nalgebra]
-version = "0.32.3"
-features = ["serde-serialize"]
+workspace = true
 
 [dependencies.newslab-geom-algo]
 git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
@@ -37,4 +36,4 @@ default-features = false
 features = ["aruco", "imgcodecs"]
 
 [dev-dependencies]
-clap = { version = "4.4.6", features = ["derive"] }
+clap = { workspace = true }

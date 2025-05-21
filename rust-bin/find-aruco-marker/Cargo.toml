@@ -6,17 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
 aruco-detector = { version = "0.1.0", path = "../../rust-lib/aruco-detector" }
-clap = { version = "4.4.6", features = ["derive"] }
+clap = { workspace = true }
 cv-convert = { workspace = true, features = ["nalgebra"] }
-json5 = "0.4.1"
-nalgebra = { version = "0.32.3", features = ["serde-serialize"] }
-noisy_float = { version = "0.2.0", features = ["serde"] }
+json5 = { workspace = true }
+nalgebra = { workspace = true }
+noisy_float = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgproc", "videoio", "clang-runtime"] }
-serde = { version = "1.0.188", features = ["derive"] }
-serde-loader = { version = "0.2.0", features = ["json5"] }
+serde = { workspace = true }
+serde-loader = { workspace = true }
 serde-types = { version = "0.1.0", path = "../../rust-lib/serde-types", features = ["with-opencv"] }
-serde_json = "1.0.107"
-serde_yaml = "0.9.25"
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }

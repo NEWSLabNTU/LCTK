@@ -9,10 +9,10 @@ edition = "2021"
 opencv = { workspace = true, default-features = false, features = ["calib3d", "imgproc"] }  # imgproc is not used but is required to fix compile error
 serde-types = { path = "../serde-types", features = ["with-opencv", "with-nalgebra"] }
 cv-convert = { workspace = true, features = ["nalgebra"] }
-serde = { version = "1.0.188", features = ["derive"] }
-nalgebra = "0.32.3"
-log = "0.4.20"
-strum = { version = "0.26.0", features = ["derive"] }
+serde = { workspace = true }
+nalgebra = { workspace = true }
+log = { workspace = true }
+strum = { workspace = true }
 
 [dependencies.newslab-serde-cv]
 git = "https://github.com/NEWSLabNTU/newslab-serde.git"

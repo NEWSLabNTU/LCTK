@@ -7,26 +7,25 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde-loader = { version = "0.2.0", features = ["json5"] }
+serde-loader = { workspace = true }
 pcap = "1.1.0"
-serde = { version = "1.0.188", features = ["derive"] }
-kiss3d = "0.35.0"
-rand = { version = "0.8.5", features = ["getrandom"] }
-anyhow = "1.0.75"
-chrono = "0.4.31"
-json5 = "0.4.1"
-serde_json = "1.0.107"
-unzip-n = "0.1.2"
-itertools = "0.11.0"
+serde = { workspace = true }
+kiss3d = { workspace = true }
+rand = { workspace = true, features = ["getrandom"] }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+json5 = { workspace = true }
+serde_json = { workspace = true }
+unzip-n = { workspace = true }
+itertools = { workspace = true }
 velodyne-lidar = { version = "0.2.0", features = ["pcap"] }
 aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
 hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board-detector" }
 hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
-clap = { version = "4.4.6", features = ["derive"] }
+clap = { workspace = true }
 
 [dependencies.nalgebra]
-version = "0.32.3"
-features = ["serde-serialize"]
+workspace = true
 
 [dependencies.nalgebra30]
 package = "nalgebra"

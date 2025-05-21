@@ -6,25 +6,25 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.75"
-approx = "0.5.1"
-chrono = "0.4.31"
+anyhow = { workspace = true }
+approx = { workspace = true }
+chrono = { workspace = true }
 humantime = "2.1.0"
-indexmap = { version = "2.0.2", features = ["serde"] }
-noisy_float = { version = "0.2.0", features = ["serde"] }
-serde = { version = "1.0.188", features = ["derive"] }
+indexmap = { workspace = true, features = ["serde"] }
+noisy_float = { workspace = true }
+serde = { workspace = true }
 serde_bytes = "0.11.12"
-serde_json = "1.0.107"
+serde_json = { workspace = true }
 url = { version = "2.4.1", features = ["serde"] }
 slice-of-array = "0.3.2"
 derivative = "2.2.0"
-json5 = "0.4.1"
+json5 = { workspace = true }
 num-derive = "0.4.1"
 num-traits = "0.2.17"
-serde-loader = { version = "0.2.0", features = ["json", "json5"] }
-nalgebra = { version = "0.32.3", optional = true }
+serde-loader = { workspace = true, features = ["json", "json5"] }
+nalgebra = { workspace = true, optional = true }
 opencv = { workspace = true, default-features = false, features = [], optional = true }
-measurements = { version = "0.11.0", optional = true }
+measurements = { workspace = true, optional = true }
 cv-convert = { workspace = true, optional = true }
 prost = { version = "0.12.1", optional = true }
 gcd = "2.3.0"

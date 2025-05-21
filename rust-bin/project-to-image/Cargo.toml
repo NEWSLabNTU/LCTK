@@ -6,17 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.75"
-clap = { version = "4.4.6", features = ["derive"] }
+anyhow = { workspace = true }
+clap = { workspace = true }
 cv-convert = { workspace = true, features = ["opencv", "nalgebra"] }
-itertools = "0.11.0"
-json5 = "0.4.1"
-nalgebra = { version = "0.32.3", features = ["serde-serialize"] }
-noisy_float = { version = "0.2.0", features = ["serde"] }
+itertools = { workspace = true }
+json5 = { workspace = true }
+nalgebra = { workspace = true }
+noisy_float = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
 palette = "0.7.3"
-pcd-rs = "0.10.0"
-serde = { version = "1.0.188", features = ["derive"] }
+pcd-rs = { workspace = true }
+serde = { workspace = true }
 serde-types = { version = "0.1.0", path = "../../rust-lib/serde-types", features = ["with-opencv"] }
-serde_json = "1.0.107"
-serde_yaml = "0.9.25"
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }

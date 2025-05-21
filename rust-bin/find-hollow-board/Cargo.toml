@@ -6,27 +6,25 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../rust-lib/aruco-config" }
-clap = { version = "4.4.6", features = ["derive"] }
+clap = { workspace = true }
 glob = "0.3.1"
 hollow-board-config = { version = "0.1.0", path = "../../rust-lib/hollow-board-config", features = ["kiss3d"] }
 hollow-board-detector = { version = "0.1.0", path = "../../rust-lib/hollow-board-detector" }
-json5 = "0.4.1"
-kiss3d = "0.35.0"
-once_cell = "1.18.0"
-pcd-rs = "0.10.0"
-serde = { version = "1.0.188", features = ["derive"] }
-serde_json = "1.0.107"
+json5 = { workspace = true }
+kiss3d = { workspace = true }
+once_cell = { workspace = true }
+pcd-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dependencies.kiss3d-utils]
 git = "https://github.com/NEWSLabNTU/kiss3d-utils.git"
 tag = "v0.1.0"
 
 [dependencies.nalgebra]
-package = "nalgebra"
-version = "0.32.3"
-features = ["serde-serialize"]
+workspace = true
 
 [dependencies.nalgebra30]
 package = "nalgebra"
