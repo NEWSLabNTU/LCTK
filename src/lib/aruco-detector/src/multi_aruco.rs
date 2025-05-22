@@ -421,4 +421,76 @@ impl Detector {
             pattern: pattern.clone(),
         }))
     }
+
+    pub fn detect_single_aruco(&self, mat: &Mat) -> Result<Vec<ImageMarker>> {
+        let Self {
+            ref pattern,
+            ref camera_intrinsic,
+            ..
+        } = *self;
+        let MultiArucoPattern {
+            dictionary,
+            border_bits,
+            ..
+        } = *pattern;
+
+        let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
+        let camera_matrix: Mat = (&camera_intrinsic.camera_matrix).into();
+        let distortion_coefs: Mat = (&camera_intrinsic.distortion_coefs).into();
+        let mut canvas = Mat::default();
+
+        // undistort image
+        calib3d::undistort(
+            mat,
+            &mut canvas,
+            &camera_matrix,
+            &distortion_coefs,
+            &core_cv::no_array(),
+        )?;
+
+        // find aruco markers
+        let mut corners_vec = Vector::<Vector<Point2f>>::new();
+        let mut ids = Vector::<i32>::new();
+
+        let parameters = {
+            let mut params = aruco::DetectorParameters::create()?;
+            params.set_marker_border_bits(border_bits as i32);
+            params.set_adaptive_thresh_win_size_min(13);
+            params.set_adaptive_thresh_win_size_max(33);
+            params.set_adaptive_thresh_win_size_step(2);
+            params.set_adaptive_thresh_win_size_step(10);
+            params.set_corner_refinement_min_accuracy(0.01);
+            params
+        };
+
+        aruco::detect_markers(
+            &canvas,
+            &dictionary,
+            &mut corners_vec,
+            &mut ids,
+            &parameters,
+            &mut core_cv::no_array(),
+            &mut core_cv::no_array(),
+            &mut core_cv::no_array(),
+        )?;
+
+        if !ids.is_empty() {
+            info!("found ArUco IDs: {:?}", ids.to_vec());
+        }
+
+        // convert to ImageMarker
+        let markers: Vec<ImageMarker> = izip!(&corners_vec, &ids)
+            .map(|(corners, id)| {
+                let corners: Vec<Point2<f32>> =
+                    corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
+
+                ImageMarker {
+                    id,
+                    corners: corners.try_into().unwrap(),
+                }
+            })
+            .collect();
+
+        Ok(markers)
+    }
 }

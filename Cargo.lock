@@ -371,6 +371,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
+name = "calibration_board_locator"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "aruco-config",
+ "geometry_msgs",
+ "hollow-board-config",
+ "hollow-board-detector",
+ "json5",
+ "nalgebra 0.32.6",
+ "once_cell",
+ "pcd-rs",
+ "rclrs",
+ "sensor_msgs",
+ "serde",
+ "serde_json",
+ "std_msgs",
+ "vision_msgs",
+]
+
+[[package]]
 name = "calloop"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1027,27 +1048,6 @@ dependencies = [
  "pest",
  "pest_derive",
  "serde",
-]
-
-[[package]]
-name = "find-hollow-board"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "aruco-config",
- "clap",
- "glob",
- "hollow-board-config",
- "hollow-board-detector",
- "json5",
- "kiss3d",
- "kiss3d-utils 0.1.0 (git+https://github.com/NEWSLabNTU/kiss3d-utils.git?tag=v0.1.0)",
- "nalgebra 0.30.1",
- "nalgebra 0.32.6",
- "once_cell",
- "pcd-rs",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1868,17 +1868,6 @@ dependencies = [
  "serde_derive",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "kiss3d-utils"
-version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/kiss3d-utils.git?tag=v0.1.0#2cb2803c4e02d5dc103383f37ab2ca3d6c5f9591"
-dependencies = [
- "itertools 0.11.0",
- "kiss3d",
- "nalgebra 0.30.1",
- "simba 0.7.3",
 ]
 
 [[package]]
@@ -2996,7 +2985,7 @@ dependencies = [
  "filter-expr",
  "itertools 0.11.0",
  "kiss3d",
- "kiss3d-utils 0.1.0 (git+https://github.com/NEWSLabNTU/kiss3d-utils.git?rev=v0.1.0)",
+ "kiss3d-utils",
  "log",
  "nalgebra 0.30.1",
  "nalgebra 0.32.6",

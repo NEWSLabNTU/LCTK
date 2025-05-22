@@ -8,25 +8,18 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
-clap = { workspace = true }
-glob = "0.3.1"
+geometry_msgs = "4.8.0"
 hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config", features = ["kiss3d"] }
 hollow-board-detector = { version = "0.1.0", path = "../../lib/hollow-board-detector" }
 json5 = { workspace = true }
-kiss3d = { workspace = true }
 once_cell = { workspace = true }
 pcd-rs = { workspace = true }
+rclrs = "0.4.0"
+sensor_msgs = "4.8.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-[dependencies.kiss3d-utils]
-git = "https://github.com/NEWSLabNTU/kiss3d-utils.git"
-tag = "v0.1.0"
+std_msgs = "4.8.0"
+vision_msgs = "4.1.1"
 
 [dependencies.nalgebra]
 workspace = true
-
-[dependencies.nalgebra30]
-package = "nalgebra"
-version = "0.30.1"
-features = ["serde-serialize"]
