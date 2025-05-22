@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Result};
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
-use aruco_locator_msgs::msg::{ArucoDetection, ArucoMarker, Point2D};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use noisy_float::prelude::*;
 use opencv::{core::CV_8UC3, prelude::*};
@@ -13,6 +12,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 use std_msgs::msg::Header;
+use vision_msgs::msg::{
+    BoundingBox2D, Detection2D, Detection2DArray, ObjectHypothesis, ObjectHypothesisWithPose,
+    Point2D, Pose2D,
+};
 
 // Binary name for logging
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
@@ -45,91 +48,51 @@ fn camera_info_to_intrinsics(camera_info: &CameraInfo) -> Result<CameraIntrinsic
     })
 }
 
-/// Convert aruco_locator::DetectionResult to ArucoDetection message
+/// Convert aruco_locator::DetectionResult to Detection2DArray message
 fn convert_detection_result(
     result: &aruco_locator::DetectionResult,
     header: Header,
-) -> ArucoDetection {
-    let mut aruco_detection = ArucoDetection {
-        header,
-        markers_found: result.markers_found,
-        marker_count: result.marker_ids.len() as u32,
-        markers: Vec::new(),
-        processing_time_ms: 0.0, // TODO: Add timing measurement
-    };
+) -> Detection2DArray {
+    let mut detections = Vec::new();
 
     // Convert each detected marker
     if result.markers_found {
         for (i, &marker_id) in result.marker_ids.iter().enumerate() {
             if let Some(marker_data) = result.markers.get(i) {
-                let aruco_marker = match convert_marker_data(marker_id, marker_data) {
-                    Ok(marker) => marker,
+                match convert_marker_to_detection2d(marker_id, marker_data, &header) {
+                    Ok(detection) => detections.push(detection),
                     Err(e) => {
                         log_warn!(LOGGER_NAME, "Failed to convert marker {marker_id}: {e}");
                         continue;
                     }
-                };
-                aruco_detection.markers.push(aruco_marker);
+                }
             }
         }
     }
 
-    aruco_detection
+    Detection2DArray { header, detections }
 }
 
-/// Convert a single marker from JSON to ArucoMarker message
-fn convert_marker_data(marker_id: i32, marker_data: &serde_json::Value) -> Result<ArucoMarker> {
+/// Convert a single marker from JSON to Detection2D message
+fn convert_marker_to_detection2d(
+    marker_id: i32,
+    marker_data: &serde_json::Value,
+    header: &Header,
+) -> Result<Detection2D> {
     // Extract corners from the JSON data
-    let corners = if let Some(corners_array) = marker_data.get("corners") {
-        if let Some(corners_vec) = corners_array.as_array() {
-            let mut corners: Vec<Point2D> = Vec::new();
-            for corner in corners_vec {
-                if let (Some(x), Some(y)) = (corner.get("x"), corner.get("y")) {
-                    if let (Some(x_val), Some(y_val)) = (x.as_f64(), y.as_f64()) {
-                        corners.push(Point2D { x: x_val, y: y_val });
-                    }
-                }
-            }
+    let corners = extract_corners_from_json(marker_data)?;
 
-            if corners.len() == 4 {
-                [
-                    corners[0].clone(),
-                    corners[1].clone(),
-                    corners[2].clone(),
-                    corners[3].clone(),
-                ]
-            } else {
-                // Default corners if parsing fails
-                [
-                    Point2D { x: 0.0, y: 0.0 },
-                    Point2D { x: 0.0, y: 0.0 },
-                    Point2D { x: 0.0, y: 0.0 },
-                    Point2D { x: 0.0, y: 0.0 },
-                ]
-            }
-        } else {
-            // Default corners
-            [
-                Point2D { x: 0.0, y: 0.0 },
-                Point2D { x: 0.0, y: 0.0 },
-                Point2D { x: 0.0, y: 0.0 },
-                Point2D { x: 0.0, y: 0.0 },
-            ]
-        }
-    } else {
-        // Default corners
-        [
-            Point2D { x: 0.0, y: 0.0 },
-            Point2D { x: 0.0, y: 0.0 },
-            Point2D { x: 0.0, y: 0.0 },
-            Point2D { x: 0.0, y: 0.0 },
-        ]
+    // Calculate bounding box from corners
+    let bbox = calculate_bounding_box(&corners);
+
+    // Create object hypothesis with marker ID
+    let hypothesis = ObjectHypothesis {
+        class_id: marker_id.to_string(),
+        score: 1.0, // ArUco detections are binary (detected or not)
     };
 
-    // Extract pose if available (for now, we'll set pose_valid to false as the current
-    // DetectionResult doesn't include pose information in a structured way)
-    let pose_valid = false;
-    let pose = PoseWithCovariance {
+    // Create pose (placeholder for now - would need actual pose estimation)
+    let pose_with_covariance = PoseWithCovariance {
         pose: Pose {
             position: Point {
                 x: 0.0,
@@ -146,19 +109,96 @@ fn convert_marker_data(marker_id: i32, marker_data: &serde_json::Value) -> Resul
         covariance: [0.0; 36], // 6x6 covariance matrix
     };
 
-    Ok(ArucoMarker {
-        id: marker_id,
-        corners,
-        pose_valid,
-        pose,
+    let object_hypothesis_with_pose = ObjectHypothesisWithPose {
+        hypothesis,
+        pose: pose_with_covariance,
+    };
+
+    Ok(Detection2D {
+        header: header.clone(),
+        results: vec![object_hypothesis_with_pose],
+        bbox,
+        id: format!("aruco_{}", marker_id),
     })
+}
+
+/// Extract corner points from JSON marker data
+fn extract_corners_from_json(marker_data: &serde_json::Value) -> Result<Vec<Point2D>> {
+    let corners_array = marker_data
+        .get("corners")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow!("Missing or invalid corners array"))?;
+
+    let mut corners = Vec::new();
+    for corner in corners_array {
+        let x = corner
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow!("Missing or invalid corner x coordinate"))?;
+        let y = corner
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow!("Missing or invalid corner y coordinate"))?;
+
+        corners.push(Point2D { x, y });
+    }
+
+    if corners.len() != 4 {
+        bail!("Expected 4 corners, got {}", corners.len());
+    }
+
+    Ok(corners)
+}
+
+/// Calculate bounding box from corner points
+fn calculate_bounding_box(corners: &[Point2D]) -> BoundingBox2D {
+    if corners.is_empty() {
+        return BoundingBox2D {
+            center: Pose2D {
+                position: Point2D { x: 0.0, y: 0.0 },
+                theta: 0.0,
+            },
+            size_x: 0.0,
+            size_y: 0.0,
+        };
+    }
+
+    // Find min/max x and y coordinates
+    let min_x = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+    let max_x = corners
+        .iter()
+        .map(|p| p.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+    let max_y = corners
+        .iter()
+        .map(|p| p.y)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    // Calculate center and size
+    let center_x = (min_x + max_x) / 2.0;
+    let center_y = (min_y + max_y) / 2.0;
+    let size_x = max_x - min_x;
+    let size_y = max_y - min_y;
+
+    BoundingBox2D {
+        center: Pose2D {
+            position: Point2D {
+                x: center_x,
+                y: center_y,
+            },
+            theta: 0.0, // TODO: Calculate actual rotation if needed
+        },
+        size_x,
+        size_y,
+    }
 }
 
 /// ArUco detection ROS 2 node
 pub struct ArucoLocatorNode {
     _camera_info_subscription: Subscription<CameraInfo>,
     image_subscription: Option<Subscription<ImageMsg>>,
-    detection_publisher: Publisher<ArucoDetection>,
+    detection_publisher: Publisher<Detection2DArray>,
     _camera_namespace: String,
     detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
 }
@@ -195,7 +235,7 @@ impl ArucoLocatorNode {
         ];
 
         // Create detection publisher
-        let detection_publisher = node.create_publisher::<ArucoDetection>("aruco_detections")?;
+        let detection_publisher = node.create_publisher::<Detection2DArray>("aruco_detections")?;
 
         // Subscribe to camera_info
         let detector_state_camera_info = Arc::clone(&detector_state);
@@ -361,7 +401,7 @@ impl ArucoLocatorNode {
     fn image_callback(
         msg: ImageMsg,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
-        publisher: &Publisher<ArucoDetection>,
+        publisher: &Publisher<Detection2DArray>,
     ) {
         // Get detector
         let detector = {
@@ -394,7 +434,7 @@ impl ArucoLocatorNode {
                     frame_id: msg.header.frame_id.clone(),
                 };
 
-                // Convert detection result to ArUco detection message
+                // Convert detection result to vision_msgs Detection2DArray
                 let detection_msg = convert_detection_result(&detection_result, header);
 
                 // Publish the detection result

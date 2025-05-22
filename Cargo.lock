@@ -231,26 +231,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "aruco_locator_msgs"
-version = "0.1.1"
-dependencies = [
- "builtin_interfaces",
- "geometry_msgs",
- "rosidl_runtime_rs",
- "sensor_msgs",
- "serde",
- "serde-big-array",
- "std_msgs",
-]
-
-[[package]]
 name = "aruco_locator_node"
 version = "0.1.1"
 dependencies = [
  "anyhow",
  "aruco-config",
  "aruco-locator",
- "aruco_locator_msgs",
  "geometry_msgs",
  "noisy_float",
  "opencv",
@@ -260,6 +246,7 @@ dependencies = [
  "serde-types",
  "serde_json",
  "std_msgs",
+ "vision_msgs",
 ]
 
 [[package]]
@@ -351,8 +338,6 @@ name = "builtin_interfaces"
 version = "1.2.1"
 dependencies = [
  "rosidl_runtime_rs",
- "serde",
- "serde-big-array",
 ]
 
 [[package]]
@@ -1301,8 +1286,6 @@ version = "4.8.0"
 dependencies = [
  "builtin_interfaces",
  "rosidl_runtime_rs",
- "serde",
- "serde-big-array",
  "std_msgs",
 ]
 
@@ -3135,7 +3118,6 @@ name = "rosidl_runtime_rs"
 version = "0.4.1"
 dependencies = [
  "cfg-if 1.0.0",
- "serde",
 ]
 
 [[package]]
@@ -3283,8 +3265,6 @@ dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
  "rosidl_runtime_rs",
- "serde",
- "serde-big-array",
  "std_msgs",
 ]
 
@@ -3619,8 +3599,6 @@ version = "4.8.0"
 dependencies = [
  "builtin_interfaces",
  "rosidl_runtime_rs",
- "serde",
- "serde-big-array",
 ]
 
 [[package]]
@@ -3939,6 +3917,16 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vision_msgs"
+version = "4.1.1"
+dependencies = [
+ "builtin_interfaces",
+ "geometry_msgs",
+ "rosidl_runtime_rs",
+ "std_msgs",
+]
 
 [[package]]
 name = "walkdir"

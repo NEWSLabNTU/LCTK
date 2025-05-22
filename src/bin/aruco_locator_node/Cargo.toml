@@ -18,4 +18,4 @@ rclrs = { version = "*" }
 sensor_msgs = { version = "*" }
 std_msgs = { version = "*" }
 geometry_msgs = { version = "*" }
-aruco_locator_msgs = { version = "*", path = "../../../install/aruco_locator_msgs/share/aruco_locator_msgs/rust" }
+vision_msgs = { version = "*" }
