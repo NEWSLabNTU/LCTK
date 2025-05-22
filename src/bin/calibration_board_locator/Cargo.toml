@@ -1,5 +1,5 @@
 [package]
-name = "find-hollow-board"
+name = "calibration_board_locator"
 version = "0.1.1"
 edition = "2021"
 
