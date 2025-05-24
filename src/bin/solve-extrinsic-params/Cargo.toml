@@ -9,18 +9,22 @@ edition = "2021"
 anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
 aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
-clap = { workspace = true }
 cv-convert = { workspace = true, features = ["nalgebra"] }
+geometry_msgs = "4.8.0"
 hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config" }
 itertools = { workspace = true }
 json5 = { workspace = true }
+measurements = { workspace = true }
 nalgebra = { workspace = true }
 noisy_float = { workspace = true }
 once_cell = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["calib3d", "imgproc", "clang-runtime"] }  # imgproc is not used but is required to fix compile error
 pnp-solver = { version = "0.1.0", path = "../../lib/pnp-solver" }
+rclrs = "0.4.0"
 serde = { workspace = true }
 serde-loader = { workspace = true }
 serde-types = { version = "0.1.0", path = "../../lib/serde-types" }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+std_msgs = "4.8.0"
+vision_msgs = "4.1.1"
