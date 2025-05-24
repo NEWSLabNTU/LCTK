@@ -8,19 +8,11 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 builtin_interfaces = "*"
-cv-convert = { workspace = true, features = ["opencv", "nalgebra"] }
 geometry_msgs = "*"
-itertools = { workspace = true }
-json5 = { workspace = true }
 nalgebra = { workspace = true }
-noisy_float = { workspace = true }
-opencv = { workspace = true, default-features = false, features = ["calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
 palette = "0.7.3"
-pcd-rs = { workspace = true }
 rclrs = "*"
+rerun = { version = "0.18", features = ["web_viewer"] }
 sensor_msgs = "*"
-serde = { workspace = true }
-serde-types = { version = "0.1.0", path = "../../lib/serde-types", features = ["with-opencv"] }
-serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 std_msgs = "*"
+unzip-n.workspace = true

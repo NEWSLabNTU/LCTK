@@ -1,27 +1,22 @@
 use anyhow::{anyhow, ensure, Result};
 use builtin_interfaces::msg::Time;
-use cv_convert::{prelude::*, OpenCvPose};
 use geometry_msgs::msg::TransformStamped;
-use itertools::izip;
 use nalgebra as na;
-use opencv::{
-    calib3d,
-    core::{no_array, Point2d, Point2i, Point3d, Scalar, Vector},
-    imgproc,
-    imgproc::LINE_8,
-    prelude::*,
-};
 use palette::{Hsv, IntoColor, RgbHue, Srgb};
 use rclrs::{
-    log_info, log_warn, Context, CreateBasicExecutor, InitOptions, Node, Publisher,
-    RclrsErrorFilter, SpinOptions, Subscription, ToLogParams,
+    log_info, log_warn, Context, CreateBasicExecutor, InitOptions, Node, RclrsErrorFilter,
+    SpinOptions, Subscription, ToLogParams,
 };
+use rerun::{ChannelDatatype, ColorModel, Image as RerunImage, Pinhole, Points3D, RecordingStream};
 use sensor_msgs::msg::{CameraInfo, Image, PointCloud2};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
+use unzip_n::unzip_n;
+
+unzip_n!(3);
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
@@ -60,16 +55,17 @@ struct PointcloudImageOverlayState {
     synchronized_messages: Mutex<HashMap<String, SynchronizedMessages>>,
     // Timeout for message matching (in seconds)
     message_timeout: u64,
+    // Rerun recording stream for visualization
+    rerun_rec: OnceLock<RecordingStream>,
 }
 
 pub struct PointcloudImageOverlayNode {
-    _state: Arc<PointcloudImageOverlayState>,
+    state: Arc<PointcloudImageOverlayState>,
     _node: Node,
     _pointcloud_subscription: Subscription<PointCloud2>,
     _image_subscription: Subscription<Image>,
     _camera_info_subscription: Subscription<CameraInfo>,
     _transform_subscription: Subscription<TransformStamped>,
-    _overlay_publisher: Publisher<Image>,
 }
 
 impl PointcloudImageOverlayNode {
@@ -116,30 +112,26 @@ impl PointcloudImageOverlayNode {
             keep_back_points,
             synchronized_messages: Mutex::new(HashMap::new()),
             message_timeout: message_timeout as u64,
+            rerun_rec: OnceLock::new(),
         });
-
-        // Create publisher for overlay images
-        let overlay_publisher = node.create_publisher::<Image>("pointcloud_image_overlay")?;
 
         // Create subscribers for synchronized messages from synchronizer
         let pointcloud_subscription = {
             let state = Arc::clone(&state);
-            let overlay_publisher = overlay_publisher.clone();
 
             node.create_subscription::<PointCloud2, _>(
                 "input_pointcloud",
                 move |msg: PointCloud2| {
-                    Self::pointcloud_callback(msg, &state, &overlay_publisher);
+                    Self::pointcloud_callback(msg, &state);
                 },
             )?
         };
 
         let image_subscription = {
             let state = Arc::clone(&state);
-            let overlay_publisher = overlay_publisher.clone();
 
             node.create_subscription::<Image, _>("input_image", move |msg: Image| {
-                Self::image_callback(msg, &state, &overlay_publisher);
+                Self::image_callback(msg, &state);
             })?
         };
 
@@ -153,12 +145,11 @@ impl PointcloudImageOverlayNode {
 
         let transform_subscription = {
             let state = Arc::clone(&state);
-            let overlay_publisher = overlay_publisher.clone();
 
             node.create_subscription::<TransformStamped, _>(
                 "extrinsic_transform",
                 move |msg: TransformStamped| {
-                    Self::transform_callback(msg, &state, &overlay_publisher);
+                    Self::transform_callback(msg, &state);
                 },
             )?
         };
@@ -170,21 +161,16 @@ impl PointcloudImageOverlayNode {
         );
 
         Ok(Self {
-            _state: state,
+            state,
             _node: node,
             _pointcloud_subscription: pointcloud_subscription,
             _image_subscription: image_subscription,
             _camera_info_subscription: camera_info_subscription,
             _transform_subscription: transform_subscription,
-            _overlay_publisher: overlay_publisher,
         })
     }
 
-    fn pointcloud_callback(
-        msg: PointCloud2,
-        state: &Arc<PointcloudImageOverlayState>,
-        overlay_publisher: &Publisher<Image>,
-    ) {
+    fn pointcloud_callback(msg: PointCloud2, state: &Arc<PointcloudImageOverlayState>) {
         // Extract correlation ID from frame_id
         let correlation_id = msg.header.frame_id.clone();
         let timestamp = Self::ros_time_to_timestamp(&msg.header.stamp);
@@ -212,14 +198,10 @@ impl PointcloudImageOverlayNode {
         Self::cleanup_old_messages(state);
 
         // Try to process overlay with matching correlation ID
-        Self::try_process_overlay_with_correlation(&correlation_id, state, overlay_publisher);
+        Self::try_process_overlay_with_correlation(&correlation_id, state);
     }
 
-    fn image_callback(
-        msg: Image,
-        state: &Arc<PointcloudImageOverlayState>,
-        overlay_publisher: &Publisher<Image>,
-    ) {
+    fn image_callback(msg: Image, state: &Arc<PointcloudImageOverlayState>) {
         // Extract correlation ID from frame_id
         let correlation_id = msg.header.frame_id.clone();
         let timestamp = Self::ros_time_to_timestamp(&msg.header.stamp);
@@ -247,7 +229,7 @@ impl PointcloudImageOverlayNode {
         Self::cleanup_old_messages(state);
 
         // Try to process overlay with matching correlation ID
-        Self::try_process_overlay_with_correlation(&correlation_id, state, overlay_publisher);
+        Self::try_process_overlay_with_correlation(&correlation_id, state);
     }
 
     fn camera_info_callback(msg: CameraInfo, state: &Arc<PointcloudImageOverlayState>) {
@@ -258,11 +240,7 @@ impl PointcloudImageOverlayNode {
         );
     }
 
-    fn transform_callback(
-        msg: TransformStamped,
-        state: &Arc<PointcloudImageOverlayState>,
-        overlay_publisher: &Publisher<Image>,
-    ) {
+    fn transform_callback(msg: TransformStamped, state: &Arc<PointcloudImageOverlayState>) {
         // Convert ROS transform to nalgebra isometry
         let translation = na::Vector3::new(
             msg.transform.translation.x,
@@ -306,7 +284,7 @@ impl PointcloudImageOverlayNode {
         Self::cleanup_old_messages(state);
 
         // Try to process overlay with matching correlation ID
-        Self::try_process_overlay_with_correlation(&correlation_id, state, overlay_publisher);
+        Self::try_process_overlay_with_correlation(&correlation_id, state);
 
         log_info!(
             LOGGER_NAME,
@@ -318,7 +296,6 @@ impl PointcloudImageOverlayNode {
     fn try_process_overlay_with_correlation(
         correlation_id: &str,
         state: &Arc<PointcloudImageOverlayState>,
-        overlay_publisher: &Publisher<Image>,
     ) {
         // Try to find synchronized messages for this correlation ID
         let synchronized_msg = state
@@ -352,23 +329,23 @@ impl PointcloudImageOverlayNode {
                 };
 
                 if time_diff_pc_img <= max_time_diff && time_diff_pc_tf <= max_time_diff {
-                    if let Err(e) = Self::process_overlay(
+                    if let Err(e) = Self::process_overlay_with_rerun(
                         pc_msg.message.clone(),
                         img_msg.message.clone(),
                         cam_info,
                         tf_msg.message,
                         state,
-                        overlay_publisher,
+                        correlation_id,
                     ) {
                         log_warn!(
                             LOGGER_NAME,
-                            "Failed to process overlay for correlation {}: {e}",
+                            "Failed to process Rerun overlay for correlation {}: {e}",
                             correlation_id
                         );
                     } else {
                         log_info!(
                             LOGGER_NAME,
-                            "Successfully processed overlay for correlation: {}",
+                            "Successfully processed Rerun overlay for correlation: {}",
                             correlation_id
                         );
 
@@ -411,155 +388,134 @@ impl PointcloudImageOverlayNode {
         (stamp.sec as u64) * 1_000_000_000 + (stamp.nanosec as u64)
     }
 
-    fn process_overlay(
+    fn process_overlay_with_rerun(
         pointcloud: PointCloud2,
         image: Image,
         camera_info: CameraInfo,
         transform: na::Isometry3<f64>,
         state: &PointcloudImageOverlayState,
-        overlay_publisher: &Publisher<Image>,
+        correlation_id: &str,
     ) -> Result<()> {
-        // Convert CameraInfo to OpenCV format
-        let camera_matrix = Mat::from_slice_2d(&[
-            [camera_info.k[0], camera_info.k[1], camera_info.k[2]],
-            [camera_info.k[3], camera_info.k[4], camera_info.k[5]],
-            [camera_info.k[6], camera_info.k[7], camera_info.k[8]],
-        ])?;
+        // Get the Rerun recording stream
+        let rec = state
+            .rerun_rec
+            .get()
+            .ok_or_else(|| anyhow!("Rerun recording stream not initialized"))?;
 
-        let dist_coefs = if camera_info.d.is_empty() {
-            Mat::zeros(1, 5, opencv::core::CV_64F)?.to_mat()?
-        } else {
-            Mat::from_slice(&camera_info.d)?
-        };
+        // Log the camera image as background
+        let (width, height, tensor_data) = Self::ros_image_to_rerun_data(&image)?;
+        rec.log(
+            "camera/image",
+            &RerunImage::from_color_model_and_bytes(
+                tensor_data,
+                [width, height],
+                ColorModel::RGB,
+                ChannelDatatype::U8,
+            ),
+        )?;
 
-        // Convert ROS Image to OpenCV Mat
-        let mut cv_image = Self::ros_image_to_opencv(&image)?;
-        let image_h = cv_image.rows();
-        let image_w = cv_image.cols();
+        // Log camera intrinsics for proper projection
+        let focal_length = [camera_info.k[0] as f32, camera_info.k[4] as f32]; // fx, fy
+        let resolution = [image.width as f32, image.height as f32];
+        let principal_point = [camera_info.k[2] as f32, camera_info.k[5] as f32]; // cx, cy
 
-        // Extract points from PointCloud2
+        rec.log(
+            "camera",
+            &Pinhole::from_focal_length_and_resolution(focal_length, resolution)
+                .with_principal_point(principal_point),
+        )?;
+
+        // Extract and transform points
         let input_points = Self::extract_points_from_pointcloud(&pointcloud)?;
-
         let distance_range = state.min_distance..=state.max_distance;
-        let width_range = 0.0..=(image_w as f64);
-        let height_range = 0.0..=(image_h as f64);
 
-        let (pcd_points, image_points) = {
-            let (pcd_points, opencv_points): (Vec<_>, Vector<Point3d>) = input_points
-                .iter()
-                .filter(|&pcd_point| {
-                    let distance = na::distance(&na::Point3::origin(), pcd_point);
-                    distance_range.contains(&distance)
-                })
-                .filter(|&pcd_point| {
-                    state.keep_back_points || {
-                        let camera_point = transform * pcd_point;
-                        camera_point.z >= state.camera_depth_thresh
-                    }
-                })
-                .map(|point| {
-                    let cv_point: Point3d = point.to_cv();
-                    (point, cv_point)
-                })
-                .unzip();
+        // Filter and collect points with colors
+        let (positions, colors, radii): (Vec<[f32; 3]>, Vec<u32>, Vec<f32>) = input_points
+            .iter()
+            .filter(|&point| {
+                let distance = na::distance(&na::Point3::origin(), point);
+                distance_range.contains(&distance)
+            })
+            .filter(|&point| {
+                state.keep_back_points || {
+                    let camera_point = transform * point;
+                    camera_point.z >= state.camera_depth_thresh
+                }
+            })
+            .map(|point| {
+                let camera_point = transform * point;
+                let distance = na::distance(&na::Point3::origin(), point);
 
-            let mut image_points = Vector::<Point2d>::new();
-
-            if opencv_points.is_empty() {
-                (pcd_points, image_points)
-            } else {
-                let OpenCvPose::<Mat> { rvec, tvec } = transform.try_to_cv()?;
-
-                calib3d::project_points(
-                    &opencv_points,
-                    &rvec,
-                    &tvec,
-                    &camera_matrix,
-                    &dist_coefs,
-                    &mut image_points,
-                    &mut no_array(),
-                    0.0,
-                )?;
-
-                (pcd_points, image_points)
-            }
-        };
-
-        // Draw points on image
-        izip!(pcd_points, image_points)
-            .filter(|(_pt3, pt2)| width_range.contains(&pt2.x) && height_range.contains(&pt2.y))
-            .for_each(|(pt3, pt2)| {
-                let distance = na::distance(&na::Point3::origin(), &pt3);
-                let color = {
-                    let ratio =
-                        (distance - state.min_distance) / (state.max_distance - state.min_distance);
-                    if (0.0..=1.0).contains(&ratio) {
-                        let hue = RgbHue::from_degrees(ratio as f32 * 270.0);
-                        let hsv = Hsv::new(hue, 0.8, 1.0);
-                        let srgb: Srgb = hsv.into_color();
-                        let (r, g, b) = srgb.into_components();
-                        Scalar::new(
-                            (b * 255.0) as f64,
-                            (g * 255.0) as f64,
-                            (r * 255.0) as f64,
-                            0.0,
-                        )
-                    } else {
-                        Scalar::new(100.0, 100.0, 100.0, 0.0)
-                    }
+                // Distance-based color (same HSV mapping as before)
+                let ratio =
+                    (distance - state.min_distance) / (state.max_distance - state.min_distance);
+                let color = if (0.0..=1.0).contains(&ratio) {
+                    let hue = ratio as f32 * 270.0;
+                    let hsv = Hsv::new(RgbHue::from_degrees(hue), 0.8, 1.0);
+                    let srgb: Srgb = hsv.into_color();
+                    let (r, g, b) = srgb.into_components();
+                    let r = (r * 255.0) as u8;
+                    let g = (g * 255.0) as u8;
+                    let b = (b * 255.0) as u8;
+                    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32) | 0xFF000000
+                } else {
+                    0xFF646464 // Gray color
                 };
 
-                let position: Point2i = pt2.to().unwrap();
-                imgproc::circle(&mut cv_image, position, 1, color, 1, LINE_8, 0).unwrap();
-            });
+                (
+                    [
+                        camera_point.x as f32,
+                        camera_point.y as f32,
+                        camera_point.z as f32,
+                    ],
+                    color,
+                    2.0f32, // Point size
+                )
+            })
+            .unzip_n();
 
-        // Convert back to ROS Image and publish
-        let output_image = Self::opencv_to_ros_image(&cv_image, &image)?;
-        if let Err(e) = overlay_publisher.publish(output_image) {
-            log_warn!(LOGGER_NAME, "Failed to publish overlay image: {e}");
+        // Log the 3D points (Rerun automatically projects them onto camera view)
+        if !positions.is_empty() {
+            rec.log(
+                format!("camera/points/{}", correlation_id),
+                &Points3D::new(positions)
+                    .with_colors(colors)
+                    .with_radii(radii),
+            )?;
         }
 
         Ok(())
     }
 
-    fn ros_image_to_opencv(image: &Image) -> Result<Mat> {
-        // Convert ROS Image to OpenCV Mat
-        // This is a simplified conversion - you may need cv_bridge for proper conversion
-        let rows = image.height as i32;
-        let cols = image.width as i32;
+    fn ros_image_to_rerun_data(image: &Image) -> Result<(u32, u32, Vec<u8>)> {
+        let height = image.height;
+        let width = image.width;
 
-        // Assuming BGR8 encoding for now
-        if image.encoding == "bgr8" {
-            let mat = unsafe {
-                Mat::new_rows_cols_with_data(
-                    rows,
-                    cols,
-                    opencv::core::CV_8UC3,
-                    image.data.as_ptr() as *mut std::ffi::c_void,
-                    opencv::core::Mat_AUTO_STEP,
-                )?
-            };
-            Ok(mat.clone())
-        } else {
-            Err(anyhow!("Unsupported image encoding: {}", image.encoding))
+        // Convert image data based on encoding
+        match image.encoding.as_str() {
+            "bgr8" => {
+                // BGR8 format - convert to RGB for Rerun
+                let mut rgb_data = Vec::with_capacity(image.data.len());
+                for chunk in image.data.chunks_exact(3) {
+                    rgb_data.push(chunk[2]); // R
+                    rgb_data.push(chunk[1]); // G
+                    rgb_data.push(chunk[0]); // B
+                }
+                Ok((width, height, rgb_data))
+            }
+            "rgb8" => Ok((width, height, image.data.clone())),
+            "mono8" => {
+                // Convert mono to RGB by replicating the single channel
+                let mut rgb_data = Vec::with_capacity(image.data.len() * 3);
+                for &pixel in &image.data {
+                    rgb_data.push(pixel); // R
+                    rgb_data.push(pixel); // G
+                    rgb_data.push(pixel); // B
+                }
+                Ok((width, height, rgb_data))
+            }
+            _ => Err(anyhow!("Unsupported image encoding: {}", image.encoding)),
         }
-    }
-
-    fn opencv_to_ros_image(cv_image: &Mat, template: &Image) -> Result<Image> {
-        // Convert OpenCV Mat back to ROS Image
-        let mut output = template.clone();
-
-        // Get image data as bytes
-        let data_size = (cv_image.rows() * cv_image.cols() * cv_image.channels()) as usize;
-        let mut data_vec = vec![0u8; data_size];
-
-        unsafe {
-            let src_ptr = cv_image.ptr(0)? as *const u8;
-            std::ptr::copy_nonoverlapping(src_ptr, data_vec.as_mut_ptr(), data_size);
-        }
-
-        output.data = data_vec;
-        Ok(output)
     }
 
     fn extract_points_from_pointcloud(pointcloud: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
@@ -622,9 +578,21 @@ fn main() -> Result<()> {
     let context = Context::new(std::env::args(), InitOptions::default())?;
     let mut executor = context.create_basic_executor();
     let node = executor.create_node("pointcloud_image_overlay")?;
-    let _overlay_node = PointcloudImageOverlayNode::new(node)?;
+    let overlay_node = PointcloudImageOverlayNode::new(node)?;
 
-    log_info!(LOGGER_NAME, "Pointcloud image overlay node started");
+    // Initialize Rerun recording stream
+    let rec = RecordingStream::global(rerun::StoreKind::Recording)
+        .ok_or_else(|| anyhow!("Failed to create Rerun recording stream"))?;
+    overlay_node
+        .state
+        .rerun_rec
+        .set(rec)
+        .map_err(|_| anyhow!("Failed to set Rerun recording stream"))?;
+
+    log_info!(
+        LOGGER_NAME,
+        "Pointcloud image overlay node started with Rerun visualization"
+    );
 
     // Spin the executor
     executor
