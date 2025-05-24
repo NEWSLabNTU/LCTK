@@ -1,0 +1,3 @@
+[submodule "src/lib/multi-stream-synchronizer"]
+	path = src/lib/multi-stream-synchronizer
+	url = https://github.com/NEWSLabNTU/multi-stream-synchronizer.git
