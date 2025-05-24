@@ -2989,6 +2989,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "pointcloud_image_overlay"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "builtin_interfaces",
+ "cv-convert 0.26.0",
+ "geometry_msgs",
+ "itertools 0.11.0",
+ "json5",
+ "nalgebra 0.32.6",
+ "noisy_float",
+ "opencv",
+ "palette",
+ "pcd-rs",
+ "rclrs",
+ "sensor_msgs",
+ "serde",
+ "serde-types",
+ "serde_json",
+ "serde_yaml",
+ "std_msgs",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3032,26 +3056,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02b3e5e68a3a1a02aad3ec490a98007cbc13c37cbe84a3cd7b8e406d76e7f778"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "project-to-image"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "clap",
- "cv-convert 0.26.0",
- "itertools 0.11.0",
- "json5",
- "nalgebra 0.32.6",
- "noisy_float",
- "opencv",
- "palette",
- "pcd-rs",
- "serde",
- "serde-types",
- "serde_json",
- "serde_yaml",
 ]
 
 [[package]]
