@@ -2511,6 +2511,7 @@ dependencies = [
  "opencv",
  "pnp-solver",
  "rclrs",
+ "sensor_msgs",
  "serde",
  "serde-loader 0.2.0",
  "serde-types",

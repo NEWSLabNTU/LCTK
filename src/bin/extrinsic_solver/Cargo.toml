@@ -21,6 +21,7 @@ once_cell = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["calib3d", "imgproc", "clang-runtime"] }  # imgproc is not used but is required to fix compile error
 pnp-solver = { version = "0.1.0", path = "../../lib/pnp-solver" }
 rclrs = "0.4.0"
+sensor_msgs = "4.8.0"
 serde = { workspace = true }
 serde-loader = { workspace = true }
 serde-types = { version = "0.1.0", path = "../../lib/serde-types" }
