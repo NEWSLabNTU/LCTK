@@ -1,5 +1,5 @@
 <package format="3">
-  <name>project_to_image</name>
+  <name>pointcloud_image_overlay</name>
   <version>0.1.0</version>
   <description>ROS 2 node for projecting 3D points to camera images</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
