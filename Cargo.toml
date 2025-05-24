@@ -4,6 +4,9 @@ members = [
     "src/bin/*",
     "src/lib/*",
 ]
+exclude = [
+    "src/bin/calib_launch",  # Launch-only package without Cargo.toml
+]
 
 [workspace.dependencies]
 # Computer vision
