@@ -18,3 +18,4 @@ serde-loader = { workspace = true }
 serde-types = { version = "0.1.0", path = "../../lib/serde-types", features = ["with-opencv"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+sensor_msgs = { version = "*" }

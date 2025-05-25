@@ -6,8 +6,8 @@ use opencv::{
     core::{Mat, Point2d, Point3d, Vector, CV_64FC1},
     prelude::*,
 };
-use serde::{Deserialize, Serialize};
 use sensor_msgs::msg::CameraInfo;
+use serde::{Deserialize, Serialize};
 
 #[derive(
     Debug,

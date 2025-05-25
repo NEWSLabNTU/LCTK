@@ -7,15 +7,16 @@ use opencv::{
     imgproc::{self, HersheyFonts, LINE_8},
     prelude::*,
 };
+use sensor_msgs::msg::CameraInfo;
 use serde::{Deserialize, Serialize};
 use serde_loader::Json5Path;
-use serde_types::{CameraIntrinsics, MrptCalibration};
+use serde_types::MrptCalibration;
 use std::{fs, path::Path};
 
 /// ArUco detector configuration
 #[derive(Debug, Clone)]
 pub struct ArucoDetectorConfig {
-    pub camera_intrinsics: CameraIntrinsics,
+    pub camera_info: CameraInfo,
     pub aruco_pattern: MultiArucoPattern,
 }
 
@@ -25,13 +26,42 @@ impl ArucoDetectorConfig {
         // Load camera intrinsics
         let yaml_text = fs::read_to_string(intrinsics_file)?;
         let mrpt_calib: MrptCalibration = serde_yaml::from_str(&yaml_text)?;
-        let camera_intrinsics = mrpt_calib.intrinsic_params()?;
+        let intrinsics = mrpt_calib.intrinsic_params()?;
+
+        // Convert to CameraInfo
+        let mut camera_info = CameraInfo::default();
+
+        // Convert camera matrix to K array (row-major 3x3)
+        let cm = intrinsics.camera_matrix.0;
+        camera_info.k = [
+            cm[0][0].raw(),
+            cm[0][1].raw(),
+            cm[0][2].raw(),
+            cm[1][0].raw(),
+            cm[1][1].raw(),
+            cm[1][2].raw(),
+            cm[2][0].raw(),
+            cm[2][1].raw(),
+            cm[2][2].raw(),
+        ];
+
+        // Convert distortion coefficients
+        let dc = intrinsics.distortion_coefs.0;
+        camera_info.d = vec![
+            dc[0].raw(),
+            dc[1].raw(),
+            dc[2].raw(),
+            dc[3].raw(),
+            dc[4].raw(),
+        ];
+
+        camera_info.distortion_model = "plumb_bob".to_string();
 
         // Load ArUco pattern
         let aruco_pattern: MultiArucoPattern = Json5Path::open_and_take(pattern_file)?;
 
         Ok(Self {
-            camera_intrinsics,
+            camera_info,
             aruco_pattern,
         })
     }
@@ -56,7 +86,7 @@ impl ArucoDetector {
     pub fn new(config: ArucoDetectorConfig) -> Result<Self> {
         let detector = aruco_detector::multi_aruco::Builder {
             pattern: config.aruco_pattern.clone(),
-            camera_intrinsic: config.camera_intrinsics.clone(),
+            camera_info: config.camera_info.clone(),
         }
         .build()?;
 
@@ -102,8 +132,10 @@ impl ArucoDetector {
     /// Create visualization of detection results
     pub fn create_visualization(&self, image: &Mat, result: &DetectionResult) -> Result<Mat> {
         let mut display_image = Mat::default();
-        let camera_matrix: Mat = (&self.config.camera_intrinsics.camera_matrix).into();
-        let dist_coeffs: Mat = (&self.config.camera_intrinsics.distortion_coefs).into();
+
+        // Convert CameraInfo to OpenCV matrices
+        let camera_matrix = Mat::from_slice(&self.config.camera_info.k)?.reshape(1, 3)?;
+        let dist_coeffs = Mat::from_slice(&self.config.camera_info.d)?;
 
         // Undistort the image
         calib3d::undistort(
@@ -169,9 +201,9 @@ impl ArucoDetector {
         Ok(())
     }
 
-    /// Get camera intrinsics
-    pub fn camera_intrinsics(&self) -> &CameraIntrinsics {
-        &self.config.camera_intrinsics
+    /// Get camera info
+    pub fn camera_info(&self) -> &CameraInfo {
+        &self.config.camera_info
     }
 
     /// Get ArUco pattern

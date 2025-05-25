@@ -17,6 +17,7 @@ serde-types = { version = "0.1.0", path = "../serde-types", features = ["with-op
 noisy_float = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = { workspace = true }
+sensor_msgs = { version = "*" }
 
 [dependencies.opencv]
 workspace = true
@@ -37,3 +38,5 @@ features = ["aruco", "imgcodecs"]
 
 [dev-dependencies]
 clap = { workspace = true }
+sensor_msgs = { version = "*" }
+std_msgs = { version = "*" }

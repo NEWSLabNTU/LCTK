@@ -5,7 +5,7 @@ use clap::Parser;
 use measurements::Length;
 use noisy_float::prelude::*;
 use opencv::imgcodecs::{imread, IMREAD_GRAYSCALE};
-use serde_types::CameraIntrinsics;
+use sensor_msgs::msg::CameraInfo;
 
 /// Detect the multi-aruco pattern board in an image.
 #[derive(Parser)]
@@ -28,9 +28,17 @@ fn main() -> Result<()> {
         num_squares_per_side: 2,
         border_bits: 1,
     };
+    // Create a default CameraInfo for testing
+    let mut camera_info = CameraInfo::default();
+    camera_info.k = [1000.0, 0.0, 640.0, 0.0, 1000.0, 480.0, 0.0, 0.0, 1.0];
+    camera_info.d = vec![0.0; 5];
+    camera_info.width = 1280;
+    camera_info.height = 960;
+    camera_info.distortion_model = "plumb_bob".to_string();
+
     let detector = Builder {
         pattern,
-        camera_intrinsic: CameraIntrinsics::default(),
+        camera_info,
     }
     .build()?;
 

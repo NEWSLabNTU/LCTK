@@ -1,12 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
-use noisy_float::prelude::*;
 use opencv::{core::CV_8UC3, prelude::*};
 use rclrs::{log_error, log_info, log_warn, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use serde_loader::Json5Path;
-use serde_types::{CameraIntrinsics, CameraMatrix, DistortionCoefs};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -22,31 +20,6 @@ const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
 const ARUCO_PATTERN_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/config/aruco_pattern.json5");
-
-/// Convert ROS CameraInfo message to CameraIntrinsics
-fn camera_info_to_intrinsics(camera_info: &CameraInfo) -> Result<CameraIntrinsics> {
-    let k = &camera_info.k;
-    let d = &camera_info.d;
-
-    // CameraInfo K matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
-    let camera_matrix = CameraMatrix([
-        [r64(k[0]), r64(k[1]), r64(k[2])],
-        [r64(k[3]), r64(k[4]), r64(k[5])],
-        [r64(k[6]), r64(k[7]), r64(k[8])],
-    ]);
-
-    // Ensure we have at least 5 distortion coefficients, pad with zeros if needed
-    let mut distortion = [r64(0.0); 5];
-    for (i, &coef) in d.iter().take(5).enumerate() {
-        distortion[i] = r64(coef);
-    }
-    let distortion_coefs = DistortionCoefs(distortion);
-
-    Ok(CameraIntrinsics {
-        camera_matrix,
-        distortion_coefs,
-    })
-}
 
 /// Convert aruco_locator::DetectionResult to Detection2DArray message
 fn convert_detection_result(
@@ -283,14 +256,6 @@ impl ArucoLocatorNode {
         camera_info: CameraInfo,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
     ) {
-        let camera_intrinsics = match camera_info_to_intrinsics(&camera_info) {
-            Ok(intrinsics) => intrinsics,
-            Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to convert camera info: {e}");
-                return;
-            }
-        };
-
         let aruco_pattern = match Self::load_aruco_pattern() {
             Ok(pattern) => pattern,
             Err(e) => {
@@ -300,7 +265,7 @@ impl ArucoLocatorNode {
         };
 
         let config = ArucoDetectorConfig {
-            camera_intrinsics,
+            camera_info,
             aruco_pattern,
         };
 
@@ -321,10 +286,7 @@ impl ArucoLocatorNode {
         };
 
         *state = Some(Arc::new(detector));
-        log_info!(
-            LOGGER_NAME,
-            "Camera intrinsics updated from camera_info topic"
-        );
+        log_info!(LOGGER_NAME, "Camera info updated from camera_info topic");
     }
 
     /// Load ArUco pattern from config file

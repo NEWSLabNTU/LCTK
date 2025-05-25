@@ -14,8 +14,8 @@ use opencv::{
     core::{Mat, Point2f, Point3d, Ptr, Vector},
     prelude::*,
 };
+use sensor_msgs::msg::CameraInfo;
 use serde::{Deserialize, Serialize};
-use serde_types::CameraIntrinsics;
 use std::{collections::HashMap, ops::Div as _};
 
 /// An ArUco marker on an image.
@@ -278,17 +278,17 @@ pub struct Params {
     pub icp_rejection_threshold: R64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Builder {
     pub pattern: MultiArucoPattern,
-    pub camera_intrinsic: CameraIntrinsics,
+    pub camera_info: CameraInfo,
 }
 
 impl Builder {
     pub fn build(self) -> Result<Detector> {
         let Self {
             pattern,
-            camera_intrinsic,
+            camera_info,
         } = self;
 
         let MultiArucoPattern {
@@ -312,7 +312,7 @@ impl Builder {
 
         Ok(Detector {
             pattern,
-            camera_intrinsic,
+            camera_info,
             marker_size,
             marker_ids,
         })
@@ -322,7 +322,7 @@ impl Builder {
 #[derive(Debug, Clone)]
 pub struct Detector {
     pattern: MultiArucoPattern,
-    camera_intrinsic: CameraIntrinsics,
+    camera_info: CameraInfo,
     marker_size: Length,
     marker_ids: IndexSet<u32>,
 }
@@ -331,7 +331,7 @@ impl Detector {
     pub fn detect_markers(&self, mat: &Mat) -> Result<Option<ImageDetection>> {
         let Self {
             ref pattern,
-            ref camera_intrinsic,
+            ref camera_info,
             ref marker_ids,
             marker_size,
             ..
@@ -343,8 +343,10 @@ impl Detector {
         } = *pattern;
 
         let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
-        let camera_matrix: Mat = (&camera_intrinsic.camera_matrix).into();
-        let distortion_coefs: Mat = (&camera_intrinsic.distortion_coefs).into();
+
+        // Convert CameraInfo to OpenCV matrices
+        let camera_matrix = Mat::from_slice(&camera_info.k)?.reshape(1, 3)?;
+        let distortion_coefs = Mat::from_slice(&camera_info.d)?;
         let mut canvas = Mat::default();
 
         // undistord image
@@ -425,7 +427,7 @@ impl Detector {
     pub fn detect_single_aruco(&self, mat: &Mat) -> Result<Vec<ImageMarker>> {
         let Self {
             ref pattern,
-            ref camera_intrinsic,
+            ref camera_info,
             ..
         } = *self;
         let MultiArucoPattern {
@@ -435,8 +437,10 @@ impl Detector {
         } = *pattern;
 
         let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
-        let camera_matrix: Mat = (&camera_intrinsic.camera_matrix).into();
-        let distortion_coefs: Mat = (&camera_intrinsic.distortion_coefs).into();
+
+        // Convert CameraInfo to OpenCV matrices
+        let camera_matrix = Mat::from_slice(&camera_info.k)?.reshape(1, 3)?;
+        let distortion_coefs = Mat::from_slice(&camera_info.d)?;
         let mut canvas = Mat::default();
 
         // undistort image
