@@ -10262,10 +10262,6 @@ name = "actionlib_msgs"
 version = "4.8.0"
 
 [[patch.unused]]
-name = "aruco_generator_node"
-version = "0.1.1"
-
-[[patch.unused]]
 name = "composition_interfaces"
 version = "1.2.1"
 
@@ -10296,10 +10292,6 @@ version = "1.2.1"
 [[patch.unused]]
 name = "mrpt_msgs"
 version = "0.5.0"
-
-[[patch.unused]]
-name = "multi_wayside"
-version = "0.1.1"
 
 [[patch.unused]]
 name = "nav_msgs"
@@ -10336,10 +10328,6 @@ version = "4.8.0"
 [[patch.unused]]
 name = "stereo_msgs"
 version = "4.8.0"
-
-[[patch.unused]]
-name = "synchronizer"
-version = "0.1.1"
 
 [[patch.unused]]
 name = "test_msgs"
