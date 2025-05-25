@@ -5,7 +5,9 @@ members = [
     "src/lib/*",
 ]
 exclude = [
-    "src/bin/calib_launch",  # Launch-only package without Cargo.toml
+    # Launch-only package without Cargo.toml
+    "src/bin/calib_launch",
+    "src/bin/rosbag_deck",
 ]
 
 [workspace.dependencies]
