@@ -33,8 +33,8 @@ impl ArucoDetectorConfig {
         let camera_info: CameraInfo = mrpt_calib.to_camera_info()?;
         let aruco_pattern: MultiArucoPattern = {
             let json5_text = fs::read_to_string(pattern_file)?;
-	    json5::from_str(&json5_text)?
-	};
+            json5::from_str(&json5_text)?
+        };
 
         Ok(Self {
             camera_info,

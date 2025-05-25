@@ -4,11 +4,7 @@ use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use opencv::{core::CV_8UC3, prelude::*};
 use rclrs::{log_error, log_info, log_warn, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
-use serde_loader::Json5Path;
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use std_msgs::msg::Header;
 use vision_msgs::msg::{
     BoundingBox2D, Detection2D, Detection2DArray, ObjectHypothesis, ObjectHypothesisWithPose,
@@ -291,9 +287,9 @@ impl ArucoLocatorNode {
 
     /// Load ArUco pattern from config file
     fn load_aruco_pattern() -> Result<aruco_config::MultiArucoPattern> {
-        Ok(Json5Path::open_and_take(&PathBuf::from(
-            ARUCO_PATTERN_CONFIG,
-        ))?)
+        let json5_text = std::fs::read_to_string(ARUCO_PATTERN_CONFIG)?;
+        let pattern = json5::from_str(&json5_text)?;
+        Ok(pattern)
     }
 
     /// Process the incoming image

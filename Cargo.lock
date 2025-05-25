@@ -346,7 +346,6 @@ dependencies = [
  "noisy_float",
  "opencv",
  "serde",
- "serde-loader 0.2.0",
  "strum 0.26.3",
 ]
 
@@ -368,8 +367,6 @@ dependencies = [
  "opencv",
  "sensor_msgs",
  "serde",
- "serde-loader 0.2.0",
- "serde-types",
  "std_msgs",
 ]
 
@@ -428,12 +425,10 @@ dependencies = [
  "aruco-config",
  "aruco-locator",
  "geometry_msgs",
- "noisy_float",
+ "json5",
  "opencv",
  "rclrs",
  "sensor_msgs",
- "serde-loader 0.2.0",
- "serde-types",
  "serde_json",
  "std_msgs",
  "vision_msgs",
@@ -2514,8 +2509,6 @@ dependencies = [
  "rclrs",
  "sensor_msgs",
  "serde",
- "serde-loader 0.2.0",
- "serde-types",
  "serde_json",
  "serde_yaml",
  "std_msgs",
@@ -2856,12 +2849,6 @@ dependencies = [
  "pin-utils",
  "slab",
 ]
-
-[[package]]
-name = "gcd"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
 
 [[package]]
 name = "generic-array"
@@ -3366,7 +3353,6 @@ dependencies = [
  "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
  "newslab-serde-nalgebra 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
  "serde",
- "serde-loader 0.2.0",
 ]
 
 [[package]]
@@ -3764,15 +3750,6 @@ name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -5773,29 +5750,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deb1435c188b76130da55f17a466d252ff7b1418b2ad3e037d127b94e3411f29"
-dependencies = [
- "bytes",
- "prost-derive",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
-dependencies = [
- "anyhow",
- "itertools 0.12.1",
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "puffin"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7676,35 +7630,6 @@ dependencies = [
  "derivative",
  "json5",
  "serde",
- "serde_json",
-]
-
-[[package]]
-name = "serde-types"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "approx 0.5.1",
- "chrono",
- "cv-convert",
- "derivative",
- "gcd",
- "humantime",
- "indexmap 2.9.0",
- "json5",
- "measurements",
- "nalgebra 0.32.6",
- "noisy_float",
- "num-derive",
- "num-traits",
- "opencv",
- "prost",
- "serde",
- "serde-loader 0.2.0",
- "serde_bytes",
- "serde_json",
- "slice-of-array",
- "url",
 ]
 
 [[package]]

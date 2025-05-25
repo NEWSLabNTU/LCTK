@@ -9,9 +9,6 @@ opencv = { workspace = true, default-features = false, features = ["aruco", "cal
 serde_json = { workspace = true }
 aruco-locator = { version = "0.1.0", path = "../../lib/aruco-locator" }
 aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
-serde-types = { version = "0.1.0", path = "../../lib/serde-types" }
-serde-loader = { workspace = true }
-noisy_float = { workspace = true }
 
 # ROS 2 dependencies
 rclrs = { version = "*" }
@@ -19,3 +16,4 @@ sensor_msgs = { version = "*" }
 std_msgs = { version = "*" }
 geometry_msgs = { version = "*" }
 vision_msgs = { version = "*" }
+json5.workspace = true
