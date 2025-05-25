@@ -366,9 +366,11 @@ dependencies = [
  "newslab-geom-algo",
  "noisy_float",
  "opencv",
+ "sensor_msgs",
  "serde",
  "serde-loader 0.2.0",
  "serde-types",
+ "std_msgs",
 ]
 
 [[package]]
@@ -403,6 +405,7 @@ dependencies = [
  "nalgebra 0.32.6",
  "noisy_float",
  "opencv",
+ "sensor_msgs",
  "serde",
  "serde-loader 0.2.0",
  "serde-types",
@@ -10196,6 +10199,10 @@ name = "lifecycle_msgs"
 version = "1.2.1"
 
 [[patch.unused]]
+name = "mrpt_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "nav_msgs"
 version = "4.8.0"
 
@@ -10230,6 +10237,10 @@ version = "4.8.0"
 [[patch.unused]]
 name = "stereo_msgs"
 version = "4.8.0"
+
+[[patch.unused]]
+name = "synchronizer"
+version = "0.1.1"
 
 [[patch.unused]]
 name = "test_msgs"
