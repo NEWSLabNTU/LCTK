@@ -5,5 +5,5 @@
 	path = src/bin/rosbag_deck
 	url = https://github.com/jerry73204/rosbag_deck.git
 [submodule "src/ros2_rust_ws"]
-	path = src/ros2_rust_ws
+	path = ros2_rust_ws
 	url = https://github.com/jerry73204/ros2_rust_ws.git
