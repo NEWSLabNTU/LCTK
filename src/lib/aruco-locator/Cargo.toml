@@ -11,11 +11,9 @@ clap = { workspace = true }
 cv-convert = { workspace = true, features = ["nalgebra"] }
 json5 = { workspace = true }
 nalgebra = { workspace = true }
-noisy_float = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
 serde = { workspace = true }
-serde-loader = { workspace = true }
-serde-types = { version = "0.1.0", path = "../../lib/serde-types", features = ["with-opencv"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 sensor_msgs = { version = "*" }
+slice-of-array = "0.3.2"

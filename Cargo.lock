@@ -403,14 +403,12 @@ dependencies = [
  "cv-convert",
  "json5",
  "nalgebra 0.32.6",
- "noisy_float",
  "opencv",
  "sensor_msgs",
  "serde",
- "serde-loader 0.2.0",
- "serde-types",
  "serde_json",
  "serde_yaml",
+ "slice-of-array",
 ]
 
 [[package]]
@@ -10291,7 +10289,7 @@ version = "1.2.1"
 
 [[patch.unused]]
 name = "mrpt_msgs"
-version = "0.5.0"
+version = "0.3.4"
 
 [[patch.unused]]
 name = "nav_msgs"

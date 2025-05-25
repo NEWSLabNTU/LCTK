@@ -1,5 +1,8 @@
+pub mod config;
+
 use anyhow::{bail, Result};
 use aruco_config::MultiArucoPattern;
+use config::MrptCalibration;
 use opencv::{
     aruco, calib3d,
     core::{no_array, Point2i, Scalar},
@@ -9,8 +12,6 @@ use opencv::{
 };
 use sensor_msgs::msg::CameraInfo;
 use serde::{Deserialize, Serialize};
-use serde_loader::Json5Path;
-use serde_types::MrptCalibration;
 use std::{fs, path::Path};
 
 /// ArUco detector configuration
@@ -24,41 +25,16 @@ impl ArucoDetectorConfig {
     /// Load configuration from intrinsics file and pattern file
     pub fn from_files(intrinsics_file: &Path, pattern_file: &Path) -> Result<Self> {
         // Load camera intrinsics
-        let yaml_text = fs::read_to_string(intrinsics_file)?;
-        let mrpt_calib: MrptCalibration = serde_yaml::from_str(&yaml_text)?;
-        let intrinsics = mrpt_calib.intrinsic_params()?;
+        let mrpt_calib: MrptCalibration = {
+            let yaml_text = fs::read_to_string(intrinsics_file)?;
+            serde_yaml::from_str(&yaml_text)?
+        };
 
-        // Convert to CameraInfo
-        let mut camera_info = CameraInfo::default();
-
-        // Convert camera matrix to K array (row-major 3x3)
-        let cm = intrinsics.camera_matrix.0;
-        camera_info.k = [
-            cm[0][0].raw(),
-            cm[0][1].raw(),
-            cm[0][2].raw(),
-            cm[1][0].raw(),
-            cm[1][1].raw(),
-            cm[1][2].raw(),
-            cm[2][0].raw(),
-            cm[2][1].raw(),
-            cm[2][2].raw(),
-        ];
-
-        // Convert distortion coefficients
-        let dc = intrinsics.distortion_coefs.0;
-        camera_info.d = vec![
-            dc[0].raw(),
-            dc[1].raw(),
-            dc[2].raw(),
-            dc[3].raw(),
-            dc[4].raw(),
-        ];
-
-        camera_info.distortion_model = "plumb_bob".to_string();
-
-        // Load ArUco pattern
-        let aruco_pattern: MultiArucoPattern = Json5Path::open_and_take(pattern_file)?;
+        let camera_info: CameraInfo = mrpt_calib.to_camera_info()?;
+        let aruco_pattern: MultiArucoPattern = {
+            let json5_text = fs::read_to_string(pattern_file)?;
+	    json5::from_str(&json5_text)?
+	};
 
         Ok(Self {
             camera_info,
