@@ -4563,20 +4563,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "newslab-serde-cv"
-version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0#a15a03c9587a1dee428104df9e55049972e4b7b3"
-dependencies = [
- "anyhow",
- "approx 0.5.1",
- "cv-convert",
- "noisy_float",
- "opencv",
- "serde",
- "slice-of-array",
-]
-
-[[package]]
 name = "newslab-serde-measurements"
 version = "0.1.0"
 source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0#a15a03c9587a1dee428104df9e55049972e4b7b3"
@@ -5590,10 +5576,9 @@ dependencies = [
  "cv-convert",
  "log",
  "nalgebra 0.32.6",
- "newslab-serde-cv",
  "opencv",
+ "sensor_msgs",
  "serde",
- "serde-types",
  "strum 0.26.3",
 ]
 

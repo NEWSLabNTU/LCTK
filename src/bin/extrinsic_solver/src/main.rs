@@ -14,7 +14,6 @@ use rclrs::{
     RclrsErrorFilter, SpinOptions, Subscription, ToLogParams,
 };
 use sensor_msgs::msg::CameraInfo;
-use serde_types::{CameraIntrinsics, CameraMatrix, DistortionCoefs};
 use std::{
     collections::HashMap,
     fs,
@@ -43,7 +42,7 @@ struct DetectionPair {
 struct ExtrinsicSolverState {
     pending_detections: Mutex<HashMap<u64, DetectionPair>>,
     aruco_pattern: MultiArucoPattern,
-    camera_intrinsics: Mutex<Option<CameraIntrinsics>>,
+    camera_info: Mutex<Option<CameraInfo>>,
     pnp_method: PnpMethod,
     parent_frame: Arc<str>,
     child_frame: Arc<str>,
@@ -96,7 +95,7 @@ impl ExtrinsicSolverNode {
         let state = Arc::new(ExtrinsicSolverState {
             pending_detections: Mutex::new(HashMap::<u64, DetectionPair>::new()),
             aruco_pattern,
-            camera_intrinsics: Mutex::new(None),
+            camera_info: Mutex::new(None),
             pnp_method: method,
             parent_frame: parent_frame_param,
             child_frame: child_frame_param,
@@ -156,37 +155,15 @@ impl ExtrinsicSolverNode {
     }
 
     fn camera_info_callback(msg: CameraInfo, state: &Arc<ExtrinsicSolverState>) {
-        use noisy_float::prelude::*;
-
-        // Convert CameraInfo to CameraIntrinsics
-        let camera_matrix = CameraMatrix([
-            [r64(msg.k[0]), r64(msg.k[1]), r64(msg.k[2])], // fx, skew, cx
-            [r64(msg.k[3]), r64(msg.k[4]), r64(msg.k[5])], // 0, fy, cy
-            [r64(msg.k[6]), r64(msg.k[7]), r64(msg.k[8])], // 0, 0, 1
-        ]);
-
-        let distortion_coefs = DistortionCoefs([
-            r64(msg.d.get(0).copied().unwrap_or(0.0)), // k1
-            r64(msg.d.get(1).copied().unwrap_or(0.0)), // k2
-            r64(msg.d.get(2).copied().unwrap_or(0.0)), // p1
-            r64(msg.d.get(3).copied().unwrap_or(0.0)), // p2
-            r64(msg.d.get(4).copied().unwrap_or(0.0)), // k3
-        ]);
-
-        let camera_intrinsics = CameraIntrinsics {
-            camera_matrix,
-            distortion_coefs,
-        };
-
-        // Update state with new camera intrinsics
-        if let Ok(mut intrinsics) = state.camera_intrinsics.lock() {
-            *intrinsics = Some(camera_intrinsics);
+        // Store the CameraInfo directly
+        if let Ok(mut camera_info_guard) = state.camera_info.lock() {
+            *camera_info_guard = Some(msg);
             log_info!(
                 LOGGER_NAME,
-                "Updated camera intrinsics from CameraInfo topic"
+                "Updated camera info from CameraInfo topic"
             );
         } else {
-            log_warn!(LOGGER_NAME, "Failed to lock camera intrinsics mutex");
+            log_warn!(LOGGER_NAME, "Failed to lock camera info mutex");
         }
     }
 
@@ -311,26 +288,26 @@ impl ExtrinsicSolverNode {
         let board_model = Self::detection3d_to_board_model(&pair.board_detection.detections[0])?;
         let image_markers = Self::detection2d_array_to_image_markers(&pair.aruco_detection)?;
 
-        // Check if camera intrinsics are available
-        let camera_intrinsics = {
-            let intrinsics_guard = state
-                .camera_intrinsics
+        // Check if camera info is available
+        let camera_info = {
+            let camera_info_guard = state
+                .camera_info
                 .lock()
-                .map_err(|e| anyhow!("Failed to lock camera intrinsics mutex: {}", e))?;
-            match intrinsics_guard.as_ref() {
-                Some(intrinsics) => intrinsics.clone(),
+                .map_err(|e| anyhow!("Failed to lock camera info mutex: {}", e))?;
+            match camera_info_guard.as_ref() {
+                Some(info) => info.clone(),
                 None => {
                     log_warn!(
                         LOGGER_NAME,
-                        "Camera intrinsics not available - skipping detection pair processing"
+                        "Camera info not available - skipping detection pair processing"
                     );
                     return Ok(());
                 }
             }
         };
 
-        // Create PnP solver with current camera intrinsics
-        let pnp_solver = PnpSolver::new(&camera_intrinsics, state.pnp_method);
+        // Create PnP solver with current camera info
+        let pnp_solver = PnpSolver::new(&camera_info, state.pnp_method);
 
         // Solve PnP problem
         let point_pairs =

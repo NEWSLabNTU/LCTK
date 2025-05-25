@@ -7,7 +7,7 @@ use opencv::{
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
-use serde_types::CameraIntrinsics;
+use sensor_msgs::msg::CameraInfo;
 
 #[derive(
     Debug,
@@ -52,9 +52,27 @@ pub struct PnpSolver {
 unsafe impl Sync for PnpSolver {}
 
 impl PnpSolver {
-    pub fn new(intrinsics: &CameraIntrinsics, method: PnpMethod) -> Self {
-        let camera_matrix = Mat::from(&intrinsics.camera_matrix);
-        let distortion_coefs = Mat::from(&intrinsics.distortion_coefs);
+    pub fn new(camera_info: &CameraInfo, method: PnpMethod) -> Self {
+        // Convert CameraInfo K matrix (3x3) to OpenCV Mat
+        let camera_matrix = Mat::from_slice_2d(&[
+            &[camera_info.k[0], camera_info.k[1], camera_info.k[2]],
+            &[camera_info.k[3], camera_info.k[4], camera_info.k[5]],
+            &[camera_info.k[6], camera_info.k[7], camera_info.k[8]],
+        ])
+        .unwrap();
+
+        // Convert distortion coefficients to OpenCV Mat
+        // ROS uses plumb_bob distortion model: (k1, k2, p1, p2, k3, k4, k5, k6)
+        // OpenCV typically uses: (k1, k2, p1, p2, k3)
+        let d_len = camera_info.d.len();
+        let distortion_coefs = if d_len >= 5 {
+            Mat::from_slice(&camera_info.d[..5]).unwrap()
+        } else {
+            // If we have fewer than 5 coefficients, pad with zeros
+            let mut d_vec = camera_info.d.clone();
+            d_vec.resize(5, 0.0);
+            Mat::from_slice(&d_vec).unwrap()
+        };
 
         if method == PnpMethod::IPPE {
             warn!("By using IPPE method in PnP solver, object points must be coplanar.");
