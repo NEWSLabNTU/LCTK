@@ -245,12 +245,12 @@ dependencies = [
 
 [[package]]
 name = "anstyle-wincon"
-version = "3.0.7"
+version = "3.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca3534e77181a9cc07539ad51f2141fe32f6c3ffd4df76db8ad92346b003ae4e"
+checksum = "6680de5231bd6ee4c6191b8a1325daa282b415391ec9d3a37bd34f2060dc73fa"
 dependencies = [
  "anstyle",
- "once_cell",
+ "once_cell_polyfill",
  "windows-sys 0.59.0",
 ]
 
@@ -342,7 +342,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "measurements",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0)",
+ "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
  "noisy_float",
  "opencv",
  "serde",
@@ -357,7 +357,7 @@ dependencies = [
  "anyhow",
  "aruco-config",
  "clap",
- "cv-convert 0.26.0",
+ "cv-convert",
  "indexmap 2.9.0",
  "itertools 0.11.0",
  "log",
@@ -398,7 +398,7 @@ dependencies = [
  "aruco-config",
  "aruco-detector",
  "clap",
- "cv-convert 0.26.0",
+ "cv-convert",
  "json5",
  "nalgebra 0.32.6",
  "noisy_float",
@@ -824,7 +824,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1767,19 +1767,6 @@ checksum = "96a6ac251f4a2aca6b3f91340350eab87ae57c3f127ffeb585e92bd336717991"
 
 [[package]]
 name = "cv-convert"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e839f6e73a408683d5ca09409864585161b2c3388b626b4cf675af6edba28d7"
-dependencies = [
- "anyhow",
- "half",
- "num-traits",
- "opencv",
- "slice-of-array",
-]
-
-[[package]]
-name = "cv-convert"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db92c1bf9eaa4b7df16e84479d6c883e0c759412bbf35094c02a7189480d8cc4"
@@ -1998,7 +1985,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.8.7",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -2499,7 +2486,7 @@ dependencies = [
  "anyhow",
  "aruco-config",
  "aruco-detector",
- "cv-convert 0.26.0",
+ "cv-convert",
  "geometry_msgs",
  "hollow-board-config",
  "itertools 0.11.0",
@@ -3281,7 +3268,7 @@ dependencies = [
  "bitflags 2.9.1",
  "com",
  "libc",
- "libloading 0.8.7",
+ "libloading 0.7.4",
  "thiserror 1.0.69",
  "widestring",
  "winapi 0.3.9",
@@ -3362,8 +3349,8 @@ dependencies = [
  "kiss3d",
  "measurements",
  "nalgebra 0.32.6",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0)",
- "newslab-serde-nalgebra 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0)",
+ "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
+ "newslab-serde-nalgebra 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
  "serde",
  "serde-loader 0.2.0",
 ]
@@ -3985,7 +3972,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a793df0d7afeac54f95b471d3af7f0d4fb975699f972341a4b76988d49cdf0c"
 dependencies = [
  "cfg-if 1.0.0",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4578,11 +4565,11 @@ dependencies = [
 [[package]]
 name = "newslab-serde-cv"
 version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0#a54833aa5f270ab384ba3dca2d7c3fa3eda7716b"
+source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0#a15a03c9587a1dee428104df9e55049972e4b7b3"
 dependencies = [
  "anyhow",
  "approx 0.5.1",
- "cv-convert 0.24.1",
+ "cv-convert",
  "noisy_float",
  "opencv",
  "serde",
@@ -4592,7 +4579,7 @@ dependencies = [
 [[package]]
 name = "newslab-serde-measurements"
 version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0#a54833aa5f270ab384ba3dca2d7c3fa3eda7716b"
+source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0#a15a03c9587a1dee428104df9e55049972e4b7b3"
 dependencies = [
  "measurements",
  "nalgebra 0.32.6",
@@ -4614,11 +4601,11 @@ dependencies = [
 [[package]]
 name = "newslab-serde-nalgebra"
 version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0#a54833aa5f270ab384ba3dca2d7c3fa3eda7716b"
+source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0#a15a03c9587a1dee428104df9e55049972e4b7b3"
 dependencies = [
  "measurements",
  "nalgebra 0.32.6",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.1.0)",
+ "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
  "num",
  "serde",
 ]
@@ -5143,6 +5130,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
+name = "once_cell_polyfill"
+version = "1.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
+
+[[package]]
 name = "opencv"
 version = "0.84.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5594,7 +5587,7 @@ dependencies = [
 name = "pnp-solver"
 version = "0.1.1"
 dependencies = [
- "cv-convert 0.26.0",
+ "cv-convert",
  "log",
  "nalgebra 0.32.6",
  "newslab-serde-cv",
@@ -7553,9 +7546,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.20"
+version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eded382c5f5f786b989652c49544c4877d9f015cc22e145a5ea8ea66c2921cd2"
+checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
 
 [[package]]
 name = "ryu"
@@ -7680,7 +7673,7 @@ dependencies = [
  "anyhow",
  "approx 0.5.1",
  "chrono",
- "cv-convert 0.26.0",
+ "cv-convert",
  "derivative",
  "gcd",
  "humantime",
@@ -8592,7 +8585,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "static_assertions",
 ]
 
@@ -9193,9 +9186,9 @@ dependencies = [
 
 [[package]]
 name = "weezl"
-version = "0.1.8"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53a85b86a771b1c87058196170769dd264f66c0782acf1ae6cc51bfd64b39082"
+checksum = "a751b3277700db47d3e574514de2eced5e54dc8a5436a3bf7a0b248b2cee16f3"
 
 [[package]]
 name = "wgpu"
@@ -9210,7 +9203,7 @@ dependencies = [
  "js-sys",
  "log",
  "naga",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.3",
  "profiling",
  "raw-window-handle 0.6.2",
  "smallvec",
@@ -9239,7 +9232,7 @@ dependencies = [
  "log",
  "naga",
  "once_cell",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.3",
  "profiling",
  "raw-window-handle 0.6.2",
  "rustc-hash 1.1.0",
@@ -9272,14 +9265,14 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "libloading 0.8.7",
+ "libloading 0.7.4",
  "log",
  "metal",
  "naga",
  "ndk-sys 0.5.0+25.2.9519653",
  "objc",
  "once_cell",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.3",
  "profiling",
  "raw-window-handle 0.6.2",
  "renderdoc-sys",

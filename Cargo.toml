@@ -49,3 +49,8 @@ kiss3d = "0.35.0"
 
 # Random
 rand = "0.8.5"
+
+# newslab-serde crates
+newslab-serde-measurements = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }
+newslab-serde-nalgebra = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }
+newslab-serde-cv = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0", features = ["with-opencv"] }

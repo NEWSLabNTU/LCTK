@@ -14,7 +14,4 @@ nalgebra = { workspace = true }
 log = { workspace = true }
 strum = { workspace = true }
 
-[dependencies.newslab-serde-cv]
-git = "https://github.com/NEWSLabNTU/newslab-serde.git"
-tag = "v0.1.0"
-features = ["with-opencv"]
+newslab-serde-cv = { workspace = true }
