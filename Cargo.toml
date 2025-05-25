@@ -8,6 +8,7 @@ exclude = [
     # Launch-only package without Cargo.toml
     "src/bin/calib_launch",
     "src/bin/rosbag_deck",
+    "src/ros2_rust_ws",
 ]
 
 [workspace.dependencies]
