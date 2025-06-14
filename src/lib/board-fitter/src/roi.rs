@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::{
+    debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
     tracking::{TrackedBoard, TrackingStateInfo},
     types::{BoardId, BoundingBox, PointCloud, RegionOfInterest, RoiType},
 };
@@ -390,14 +391,73 @@ impl AdaptivePreprocessor {
 
     /// Apply preprocessing to point cloud based on ROI type
     pub fn preprocess(&self, point_cloud: &PointCloud, roi_type: RoiType) -> Result<PointCloud> {
+        self.preprocess_with_debug(point_cloud, roi_type, None)
+    }
+
+    /// Apply preprocessing to point cloud with optional debug context
+    pub fn preprocess_with_debug(
+        &self,
+        point_cloud: &PointCloud,
+        roi_type: RoiType,
+        mut debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<PointCloud> {
+        let start_time = Instant::now();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            ctx.start_stage(stages::ROI_MANAGEMENT);
+
+            // Emit input data
+            ctx.emit_point_cloud(stages::ROI_MANAGEMENT, point_cloud);
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert("input_points".to_string(), point_cloud.len().into());
+                    data.insert("roi_type".to_string(), format!("{:?}", roi_type).into());
+                    data.insert(
+                        "has_intensities".to_string(),
+                        point_cloud.intensities.is_some().into(),
+                    );
+                    data.insert(
+                        "has_colors".to_string(),
+                        point_cloud.colors.is_some().into(),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::ROI_MANAGEMENT, &debug_data);
+        }
+
         let default_config = PreprocessingConfig::default();
         let config = self.configs.get(&roi_type).unwrap_or(&default_config);
 
         let mut processed_cloud = point_cloud.clone();
+        let original_count = processed_cloud.len();
+        let mut voxel_filtered_count = original_count;
+        let mut outlier_removed_count = original_count;
 
         // Apply voxel grid filtering
         if config.voxel_size > 0.0 {
             processed_cloud = self.apply_voxel_filter(&processed_cloud, config.voxel_size)?;
+            voxel_filtered_count = processed_cloud.len();
+
+            if let Some(ref mut ctx) = debug_ctx {
+                let debug_data = DebugData::Generic {
+                    data: {
+                        let mut data = HashMap::new();
+                        data.insert("stage".to_string(), "voxel_filtering".into());
+                        data.insert("input_points".to_string(), original_count.into());
+                        data.insert("output_points".to_string(), voxel_filtered_count.into());
+                        data.insert("voxel_size".to_string(), config.voxel_size.into());
+                        data.insert(
+                            "reduction_ratio".to_string(),
+                            (voxel_filtered_count as f64 / original_count as f64).into(),
+                        );
+                        data
+                    },
+                };
+                ctx.emit_data(stages::ROI_MANAGEMENT, &debug_data);
+            }
         }
 
         // Apply statistical outlier removal
@@ -407,12 +467,85 @@ impl AdaptivePreprocessor {
                 config.outlier_removal_neighbors,
                 config.outlier_removal_std_dev,
             )?;
+            outlier_removed_count = processed_cloud.len();
+
+            if let Some(ref mut ctx) = debug_ctx {
+                let debug_data = DebugData::Generic {
+                    data: {
+                        let mut data = HashMap::new();
+                        data.insert("stage".to_string(), "outlier_removal".into());
+                        data.insert("input_points".to_string(), voxel_filtered_count.into());
+                        data.insert("output_points".to_string(), outlier_removed_count.into());
+                        data.insert(
+                            "neighbors".to_string(),
+                            config.outlier_removal_neighbors.into(),
+                        );
+                        data.insert(
+                            "std_dev_threshold".to_string(),
+                            config.outlier_removal_std_dev.into(),
+                        );
+                        data.insert(
+                            "outliers_removed".to_string(),
+                            (voxel_filtered_count - outlier_removed_count).into(),
+                        );
+                        data
+                    },
+                };
+                ctx.emit_data(stages::ROI_MANAGEMENT, &debug_data);
+            }
         }
 
         // Apply normal estimation if enabled
         if config.enable_normal_estimation {
             // Normal estimation not implemented yet - could use PCA on local neighborhoods
             // This would typically add normal vectors to the point cloud
+
+            if let Some(ref mut ctx) = debug_ctx {
+                let debug_data = DebugData::Generic {
+                    data: {
+                        let mut data = HashMap::new();
+                        data.insert("stage".to_string(), "normal_estimation".into());
+                        data.insert("status".to_string(), "not_implemented".into());
+                        data
+                    },
+                };
+                ctx.emit_data(stages::ROI_MANAGEMENT, &debug_data);
+            }
+        }
+
+        let duration = start_time.elapsed();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            // Emit final processed point cloud
+            ctx.emit_point_cloud(stages::ROI_MANAGEMENT, &processed_cloud);
+
+            // Emit metrics
+            let metrics = StageMetrics::new(original_count, processed_cloud.len(), duration);
+            ctx.emit_metrics(stages::ROI_MANAGEMENT, &metrics);
+
+            // Emit algorithm statistics
+            let mut algo_stats = AlgorithmStats::new("ROI_Preprocessing", 1, true);
+            algo_stats.add_stat("original_points", original_count as f64);
+            algo_stats.add_stat("voxel_filtered_points", voxel_filtered_count as f64);
+            algo_stats.add_stat("final_points", processed_cloud.len() as f64);
+            algo_stats.add_stat(
+                "voxel_reduction_ratio",
+                voxel_filtered_count as f64 / original_count as f64,
+            );
+            algo_stats.add_stat(
+                "outlier_reduction_ratio",
+                outlier_removed_count as f64 / voxel_filtered_count as f64,
+            );
+            algo_stats.add_stat(
+                "total_reduction_ratio",
+                processed_cloud.len() as f64 / original_count as f64,
+            );
+            algo_stats.add_stat("voxel_size", config.voxel_size);
+            algo_stats.add_stat("outlier_neighbors", config.outlier_removal_neighbors as f64);
+            algo_stats.add_stat("outlier_std_dev", config.outlier_removal_std_dev);
+            ctx.emit_algorithm_stats(stages::ROI_MANAGEMENT, &algo_stats);
+
+            ctx.end_stage(stages::ROI_MANAGEMENT);
         }
 
         Ok(processed_cloud)

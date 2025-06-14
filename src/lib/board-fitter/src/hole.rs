@@ -2,9 +2,13 @@
 
 use anyhow::Result;
 use nalgebra::{Point2, Point3, Vector2};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use crate::{
+    debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
     diamond::DiamondSquare,
     types::{DetectedHole, DetectionConfidence, PointCloud},
 };
@@ -65,33 +69,228 @@ impl HoleDetector {
         point_cloud: &PointCloud,
         square: &DiamondSquare,
     ) -> Result<Vec<DetectedHole>> {
+        self.detect_holes_in_square_with_debug(point_cloud, square, None)
+    }
+
+    /// Detect holes in a diamond square region with optional debug context
+    pub fn detect_holes_in_square_with_debug(
+        &self,
+        point_cloud: &PointCloud,
+        square: &DiamondSquare,
+        mut debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<Vec<DetectedHole>> {
+        let start_time = Instant::now();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            ctx.start_stage(stages::HOLE_DETECTION);
+
+            // Emit input square data
+            let mut metadata = HashMap::new();
+            metadata.insert("square_size".to_string(), square.size.to_string());
+            metadata.insert(
+                "square_center".to_string(),
+                format!(
+                    "[{}, {}, {}]",
+                    square.center.x, square.center.y, square.center.z
+                ),
+            );
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert("square_size".to_string(), square.size.into());
+                    data.insert(
+                        "square_center".to_string(),
+                        serde_json::json!([square.center.x, square.center.y, square.center.z]),
+                    );
+                    data.insert(
+                        "square_corners".to_string(),
+                        serde_json::json!(square
+                            .corners
+                            .iter()
+                            .map(|c| [c.x, c.y, c.z])
+                            .collect::<Vec<_>>()),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+        }
+
         // Filter points within the square region
         let square_points = self.filter_points_in_square(point_cloud, square);
 
         if square_points.is_empty() {
+            if let Some(ref mut ctx) = debug_ctx {
+                let mut algo_stats = AlgorithmStats::new("Hole_Detection", 0, false);
+                algo_stats.add_stat("no_points_in_square", 1.0);
+                ctx.emit_algorithm_stats(stages::HOLE_DETECTION, &algo_stats);
+                ctx.end_stage(stages::HOLE_DETECTION);
+            }
             return Ok(Vec::new());
+        }
+
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "points_in_square".to_string(),
+                square_points.len().to_string(),
+            );
+            metadata.insert("stage".to_string(), "point_filtering".to_string());
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "filtered_points_count".to_string(),
+                        square_points.len().into(),
+                    );
+                    data.insert("total_points".to_string(), point_cloud.len().into());
+                    data
+                },
+            };
+            ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
         }
 
         // Project points to 2D for hole detection
         let projected_points =
             self.project_points_to_square_plane(point_cloud, &square_points, square)?;
 
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "projected_points".to_string(),
+                projected_points.len().to_string(),
+            );
+            metadata.insert("stage".to_string(), "projection".to_string());
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "projected_points_count".to_string(),
+                        projected_points.len().into(),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+        }
+
         // Detect holes using different methods
         let mut holes = Vec::new();
+        let mut intensity_holes_count = 0;
+        let mut geometric_holes_count = 0;
 
         // Method 1: Intensity-based hole detection (if intensity data available)
         if point_cloud.intensities.is_some() {
             let intensity_holes =
                 self.detect_holes_by_intensity(&projected_points, point_cloud, &square_points)?;
+            intensity_holes_count = intensity_holes.len();
             holes.extend(intensity_holes);
+
+            if let Some(ref mut ctx) = debug_ctx {
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "intensity_holes".to_string(),
+                    intensity_holes_count.to_string(),
+                );
+                metadata.insert("stage".to_string(), "intensity_detection".to_string());
+
+                let debug_data = DebugData::Generic {
+                    data: {
+                        let mut data = HashMap::new();
+                        data.insert(
+                            "intensity_holes_count".to_string(),
+                            intensity_holes_count.into(),
+                        );
+                        data
+                    },
+                };
+                ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+            }
         }
 
         // Method 2: Geometric hole detection (negative space)
         let geometric_holes = self.detect_holes_by_geometry(&projected_points)?;
+        geometric_holes_count = geometric_holes.len();
         holes.extend(geometric_holes);
+
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "geometric_holes".to_string(),
+                geometric_holes_count.to_string(),
+            );
+            metadata.insert("stage".to_string(), "geometric_detection".to_string());
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "geometric_holes_count".to_string(),
+                        geometric_holes_count.into(),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+        }
 
         // Remove duplicates and validate
         let validated_holes = self.validate_and_deduplicate_holes(holes);
+
+        let duration = start_time.elapsed();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            // Emit final hole data
+            let debug_data = DebugData::CircleData {
+                holes: validated_holes.clone(),
+                fitting_residuals: validated_holes
+                    .iter()
+                    .map(|h| h.confidence.value())
+                    .collect(),
+                iteration_counts: vec![1; validated_holes.len()], // Placeholder
+                metadata: {
+                    let mut metadata = HashMap::new();
+                    metadata.insert(
+                        "final_holes_count".to_string(),
+                        validated_holes.len().to_string(),
+                    );
+                    metadata.insert(
+                        "intensity_holes_count".to_string(),
+                        intensity_holes_count.to_string(),
+                    );
+                    metadata.insert(
+                        "geometric_holes_count".to_string(),
+                        geometric_holes_count.to_string(),
+                    );
+                    metadata
+                },
+            };
+            ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+
+            // Emit metrics
+            let metrics = StageMetrics::new(square_points.len(), validated_holes.len(), duration);
+            ctx.emit_metrics(stages::HOLE_DETECTION, &metrics);
+
+            let mut algo_stats =
+                AlgorithmStats::new("Hole_Detection", 1, !validated_holes.is_empty());
+            algo_stats.add_stat("intensity_holes", intensity_holes_count as f64);
+            algo_stats.add_stat("geometric_holes", geometric_holes_count as f64);
+            algo_stats.add_stat("final_holes", validated_holes.len() as f64);
+            algo_stats.add_stat(
+                "has_intensity_data",
+                if point_cloud.intensities.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
+            ctx.emit_algorithm_stats(stages::HOLE_DETECTION, &algo_stats);
+
+            ctx.end_stage(stages::HOLE_DETECTION);
+        }
 
         Ok(validated_holes)
     }

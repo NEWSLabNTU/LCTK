@@ -15,8 +15,8 @@
 //! ## Quick Start
 //!
 //! ```rust
+//! use board_fitter::{DiamondBoardDetector, PointCloud};
 //! use board_fitter_config::{Config, Point2D, SquareBoard};
-//! use board_fitter_detector::{DiamondBoardDetector, PointCloud};
 //! use measurements::Length;
 //! use nalgebra::Point3;
 //!
@@ -61,8 +61,8 @@
 //! ## Advanced Usage
 //!
 //! ```rust
+//! use board_fitter::DiamondBoardDetector;
 //! use board_fitter_config::{Config, Point2D, SquareBoard};
-//! use board_fitter_detector::DiamondBoardDetector;
 //! use measurements::Length;
 //!
 //! // Create board configuration with holes
@@ -100,9 +100,12 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use board_fitter_config::Config;
 
+pub mod debug;
 pub mod detection;
 pub mod diamond;
 pub mod hole;
@@ -111,6 +114,10 @@ pub mod roi;
 pub mod tracking;
 pub mod types;
 
+pub use debug::{
+    AlgorithmStats, DataCallback, DebugConfig, DebugConfigBuilder, DebugContext, DebugData,
+    DebugVerbosity, MetricsCallback, StageMetrics, TimingCallback,
+};
 pub use detection::{BoardDetector, DetectionConfig, DetectionResult};
 pub use tracking::{BoardTracker, TrackedBoard, TrackingConfig};
 pub use types::{
@@ -131,6 +138,7 @@ pub const DEFAULT_MIN_CONFIDENCE: f64 = 0.5;
 pub struct DiamondBoardDetector {
     config: Config,
     detector: Box<dyn BoardDetector>,
+    debug_context: Option<debug::DebugContext>,
 }
 
 impl DiamondBoardDetector {
@@ -142,7 +150,11 @@ impl DiamondBoardDetector {
         let detector = Box::new(detection::DiamondDetector::with_board_config(
             config.clone(),
         ));
-        Ok(Self { config, detector })
+        Ok(Self {
+            config,
+            detector,
+            debug_context: None,
+        })
     }
 
     /// Validate board configuration for diamond detection
@@ -182,7 +194,10 @@ impl DiamondBoardDetector {
     }
 
     /// Detect boards in the given point cloud
-    pub fn detect(&mut self, point_cloud: &PointCloud) -> Result<Vec<BoardDetection>> {
+    pub fn detect_without_debug(
+        &mut self,
+        point_cloud: &PointCloud,
+    ) -> Result<Vec<BoardDetection>> {
         // Run the main detection pipeline through the detector
         let detection_result = self.detector.detect(point_cloud)?;
 
@@ -224,11 +239,56 @@ impl DiamondBoardDetector {
     pub fn builder() -> DiamondBoardDetectorBuilder {
         DiamondBoardDetectorBuilder::new()
     }
+
+    /// Configure debug context with callbacks (only available with debug feature)
+    pub fn with_debug_context(&mut self, context: debug::DebugContext) {
+        self.debug_context = Some(context);
+    }
+
+    /// Get a reference to the debug context (only available with debug feature)
+    pub fn debug_context(&self) -> Option<&debug::DebugContext> {
+        self.debug_context.as_ref()
+    }
+
+    /// Get a mutable reference to the debug context (only available with debug feature)
+    pub fn debug_context_mut(&mut self) -> Option<&mut debug::DebugContext> {
+        self.debug_context.as_mut()
+    }
+
+    /// Detect boards with debug instrumentation (only available with debug feature)
+    pub fn detect(&mut self, point_cloud: &PointCloud) -> Result<Vec<BoardDetection>> {
+        if let Some(debug_ctx) = &mut self.debug_context {
+            debug_ctx.start_stage(debug::stages::PREPROCESSING);
+            debug_ctx.emit_point_cloud(debug::stages::PREPROCESSING, point_cloud);
+
+            let result = self.detector.detect(point_cloud);
+
+            debug_ctx.end_stage(debug::stages::PREPROCESSING);
+
+            if let Ok(detection_result) = &result {
+                let debug_data = DebugData::DetectionResult {
+                    detections: detection_result.detections.clone(),
+                    confidence_scores: detection_result
+                        .detections
+                        .iter()
+                        .map(|d| d.confidence.value())
+                        .collect(),
+                    metadata: HashMap::new(),
+                };
+                debug_ctx.emit_data("main_detection", &debug_data);
+            }
+
+            result.map(|r| r.detections)
+        } else {
+            self.detect_without_debug(point_cloud)
+        }
+    }
 }
 
 /// Builder for DiamondBoardDetector with fluent API
 pub struct DiamondBoardDetectorBuilder {
     detection_config: DetectionConfig,
+    debug_config: Option<DebugConfig>,
 }
 
 impl DiamondBoardDetectorBuilder {
@@ -236,6 +296,7 @@ impl DiamondBoardDetectorBuilder {
     pub fn new() -> Self {
         Self {
             detection_config: DetectionConfig::default(),
+            debug_config: None,
         }
     }
 
@@ -263,6 +324,12 @@ impl DiamondBoardDetectorBuilder {
         self
     }
 
+    /// Set debug configuration (only available with debug feature)
+    pub fn with_debug(mut self, debug_config: DebugConfig) -> Self {
+        self.debug_config = Some(debug_config);
+        self
+    }
+
     /// Build the detector with the given board configuration
     pub fn build(self, board_config: Config) -> Result<DiamondBoardDetector> {
         // Validate configuration before creating detector
@@ -273,10 +340,19 @@ impl DiamondBoardDetectorBuilder {
             self.detection_config,
         ));
 
-        Ok(DiamondBoardDetector {
+        let mut detector_instance = DiamondBoardDetector {
             config: board_config,
             detector,
-        })
+            debug_context: None,
+        };
+
+        // Set up debug context if provided
+        if let Some(debug_config) = self.debug_config {
+            let debug_context = debug::DebugContext::new(debug_config);
+            detector_instance.debug_context = Some(debug_context);
+        }
+
+        Ok(detector_instance)
     }
 }
 

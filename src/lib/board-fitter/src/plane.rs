@@ -1,12 +1,16 @@
 //! Plane detection using RANSAC and related algorithms
 
+use crate::debug::{stages, AlgorithmStats, DebugData, StageMetrics};
 use anyhow::Result;
 use nalgebra::{Point3, Vector3};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
-use crate::types::{BoundingBox, DetectedPlane, PointCloud, ProcessingStage, ProcessingStats};
+use crate::{
+    debug::DebugContext,
+    types::{BoundingBox, DetectedPlane, PointCloud, ProcessingStage, ProcessingStats},
+};
 
 /// Configuration for plane detection algorithms
 #[derive(Debug, Clone)]
@@ -62,25 +66,64 @@ impl RansacPlaneDetector {
 
     /// Detect planes in a point cloud
     pub fn detect_planes(&mut self, point_cloud: &PointCloud) -> Result<Vec<DetectedPlane>> {
+        self.detect_planes_with_debug(point_cloud, None)
+    }
+
+    /// Detect planes in a point cloud with optional debug context
+    pub fn detect_planes_with_debug(
+        &mut self,
+        point_cloud: &PointCloud,
+        mut debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<Vec<DetectedPlane>> {
         let start_time = Instant::now();
 
+        if let Some(ref mut ctx) = debug_ctx {
+            ctx.start_stage(stages::PLANE_DETECTION);
+            ctx.emit_point_cloud(stages::PLANE_DETECTION, point_cloud);
+        }
+
         if point_cloud.is_empty() {
+            if let Some(ref mut ctx) = debug_ctx {
+                ctx.end_stage(stages::PLANE_DETECTION);
+            }
             return Ok(Vec::new());
         }
 
         let mut planes = Vec::new();
         let mut remaining_points: Vec<usize> = (0..point_cloud.len()).collect();
+        let mut total_iterations = 0;
 
-        for _ in 0..self.config.max_planes {
+        for plane_idx in 0..self.config.max_planes {
             if remaining_points.len() < self.config.min_inliers {
                 break;
             }
 
-            if let Some(plane) = self.detect_single_plane(point_cloud, &remaining_points)? {
+            if let Some((plane, iterations)) =
+                self.debug_single_plane(point_cloud, &remaining_points, debug_ctx.as_deref_mut())?
+            {
+                total_iterations += iterations;
+
                 // Remove inliers from remaining points for multi-plane detection
                 if self.config.multi_plane {
                     remaining_points.retain(|&idx| !plane.inliers.contains(&idx));
                 }
+
+                // Emit debug data for this plane
+                if let Some(ref mut ctx) = debug_ctx {
+                    let mut metadata = HashMap::new();
+                    metadata.insert("plane_index".to_string(), plane_idx.to_string());
+                    metadata.insert("inlier_count".to_string(), plane.inliers.len().to_string());
+                    metadata.insert("iterations".to_string(), iterations.to_string());
+
+                    let debug_data = DebugData::PlaneData {
+                        planes: vec![plane.clone()],
+                        inlier_counts: vec![plane.inliers.len()],
+                        quality_scores: vec![plane.score],
+                        metadata,
+                    };
+                    ctx.emit_data(stages::PLANE_DETECTION, &debug_data);
+                }
+
                 planes.push(plane);
 
                 if !self.config.multi_plane {
@@ -96,15 +139,40 @@ impl RansacPlaneDetector {
             .add_time(ProcessingStage::PlaneDetection, duration);
         self.stats.planes_detected = planes.len();
 
+        // Emit debug metrics and algorithm stats
+        if let Some(ref mut ctx) = debug_ctx {
+            let metrics = StageMetrics::new(point_cloud.len(), planes.len(), duration);
+            ctx.emit_metrics(stages::PLANE_DETECTION, &metrics);
+
+            let mut algo_stats = AlgorithmStats::new(
+                "RANSAC_Plane_Detection",
+                total_iterations,
+                !planes.is_empty(),
+            );
+            algo_stats.add_stat("planes_detected", planes.len());
+            algo_stats.add_stat(
+                "avg_iterations_per_plane",
+                if !planes.is_empty() {
+                    total_iterations as f64 / planes.len() as f64
+                } else {
+                    0.0
+                },
+            );
+            ctx.emit_algorithm_stats(stages::PLANE_DETECTION, &algo_stats);
+
+            ctx.end_stage(stages::PLANE_DETECTION);
+        }
+
         Ok(planes)
     }
 
-    /// Detect a single plane using RANSAC
-    fn detect_single_plane(
+    /// Detect a single plane using RANSAC with debug support
+    fn debug_single_plane(
         &mut self,
         point_cloud: &PointCloud,
         point_indices: &[usize],
-    ) -> Result<Option<DetectedPlane>> {
+        _debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<Option<(DetectedPlane, usize)>> {
         if point_indices.len() < 3 {
             return Ok(None);
         }
@@ -112,7 +180,7 @@ impl RansacPlaneDetector {
         let mut best_plane: Option<DetectedPlane> = None;
         let mut best_score = 0;
 
-        for _ in 0..self.config.ransac_iterations {
+        for _iteration in 0..self.config.ransac_iterations {
             // Sample 3 random points
             let sample = self.sample_three_points(point_indices);
             let p1 = point_cloud.points[sample[0]];
@@ -142,7 +210,7 @@ impl RansacPlaneDetector {
             }
         }
 
-        Ok(best_plane)
+        Ok(best_plane.map(|plane| (plane, self.config.ransac_iterations)))
     }
 
     /// Sample three random point indices

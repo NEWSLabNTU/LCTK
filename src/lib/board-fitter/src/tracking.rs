@@ -7,7 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::types::{BoardDetection, BoardId, BoundingBox, DetectionConfidence, RoiType};
+use crate::{
+    debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
+    types::{BoardDetection, BoardId, BoundingBox, DetectionConfidence, RoiType},
+};
 
 /// Configuration for board tracking
 #[derive(Debug, Clone)]
@@ -412,29 +415,124 @@ impl BoardTracker {
 
     /// Update tracker with new detections
     pub fn update(&mut self, detections: Vec<BoardDetection>) -> Result<Vec<TrackedBoard>> {
+        self.update_with_debug(detections, None)
+    }
+
+    /// Update tracker with new detections and optional debug context
+    pub fn update_with_debug(
+        &mut self,
+        detections: Vec<BoardDetection>,
+        mut debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<Vec<TrackedBoard>> {
+        let start_time = Instant::now();
         let now = Instant::now();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            ctx.start_stage(stages::BOARD_TRACKING);
+
+            // Emit input detection data
+            let debug_data = DebugData::DetectionResult {
+                detections: detections.clone(),
+                confidence_scores: detections.iter().map(|d| d.confidence.value()).collect(),
+                metadata: {
+                    let mut metadata = HashMap::new();
+                    metadata.insert("input_detections".to_string(), detections.len().to_string());
+                    metadata.insert(
+                        "existing_tracks".to_string(),
+                        self.tracked_boards.len().to_string(),
+                    );
+                    metadata
+                },
+            };
+            ctx.emit_data(stages::BOARD_TRACKING, &debug_data);
+        }
+
+        let initial_track_count = self.tracked_boards.len();
 
         // Predict current positions for all tracks
         self.predict_all_tracks(now);
 
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert("stage".to_string(), "prediction".to_string());
+            metadata.insert(
+                "predicted_tracks".to_string(),
+                self.tracked_boards.len().to_string(),
+            );
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "predicted_tracks_count".to_string(),
+                        self.tracked_boards.len().into(),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::BOARD_TRACKING, &debug_data);
+        }
+
         // Associate detections with existing tracks
         let associations = self.associate_detections(&detections);
 
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert("stage".to_string(), "association".to_string());
+            metadata.insert(
+                "matches".to_string(),
+                associations.matches.len().to_string(),
+            );
+            metadata.insert(
+                "unmatched_tracks".to_string(),
+                associations.unmatched_tracks.len().to_string(),
+            );
+            metadata.insert(
+                "unmatched_detections".to_string(),
+                associations.unmatched_detections.len().to_string(),
+            );
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "matches_count".to_string(),
+                        associations.matches.len().into(),
+                    );
+                    data.insert(
+                        "unmatched_tracks_count".to_string(),
+                        associations.unmatched_tracks.len().into(),
+                    );
+                    data.insert(
+                        "unmatched_detections_count".to_string(),
+                        associations.unmatched_detections.len().into(),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::BOARD_TRACKING, &debug_data);
+        }
+
         // Update associated tracks
+        let mut updated_tracks = 0;
         for (track_id, detection_idx) in associations.matches {
             if let Some(track) = self.tracked_boards.get_mut(&track_id) {
                 track.update(&detections[detection_idx], &self.config);
+                updated_tracks += 1;
             }
         }
 
         // Mark unassociated tracks as missed
+        let mut missed_tracks = 0;
         for track_id in associations.unmatched_tracks {
             if let Some(track) = self.tracked_boards.get_mut(&track_id) {
                 track.mark_missed(&self.config);
+                missed_tracks += 1;
             }
         }
 
         // Initialize new tracks for unassociated detections
+        let mut new_tracks = 0;
         for detection_idx in associations.unmatched_detections {
             let detection = &detections[detection_idx];
             if detection
@@ -443,16 +541,66 @@ impl BoardTracker {
             {
                 let track = TrackedBoard::new(detection.clone());
                 self.tracked_boards.insert(track.id, track);
+                new_tracks += 1;
             }
         }
 
         // Remove terminated tracks
+        let tracks_before_removal = self.tracked_boards.len();
         self.remove_terminated_tracks();
+        let removed_tracks = tracks_before_removal - self.tracked_boards.len();
 
         // Update ROI mode
+        let old_roi_mode = self.roi_mode;
         self.update_roi_mode();
+        let roi_mode_changed = old_roi_mode != self.roi_mode;
 
-        Ok(self.tracked_boards.values().cloned().collect())
+        let final_tracks: Vec<TrackedBoard> = self.tracked_boards.values().cloned().collect();
+        let duration = start_time.elapsed();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            // Emit final tracking state
+            let state_info = self.get_tracking_state();
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert("total_tracks".to_string(), state_info.total_tracks.into());
+                    data.insert("active_tracks".to_string(), state_info.active_tracks.into());
+                    data.insert(
+                        "predicted_tracks".to_string(),
+                        state_info.predicted_tracks.into(),
+                    );
+                    data.insert("lost_tracks".to_string(), state_info.lost_tracks.into());
+                    data.insert(
+                        "roi_mode".to_string(),
+                        format!("{:?}", state_info.roi_mode).into(),
+                    );
+                    data.insert("roi_mode_changed".to_string(), roi_mode_changed.into());
+                    data
+                },
+            };
+            ctx.emit_data(stages::BOARD_TRACKING, &debug_data);
+
+            // Emit metrics
+            let metrics = StageMetrics::new(detections.len(), final_tracks.len(), duration);
+            ctx.emit_metrics(stages::BOARD_TRACKING, &metrics);
+
+            // Emit algorithm statistics
+            let mut algo_stats = AlgorithmStats::new("Board_Tracking", 1, !final_tracks.is_empty());
+            algo_stats.add_stat("initial_tracks", initial_track_count as f64);
+            algo_stats.add_stat("input_detections", detections.len() as f64);
+            algo_stats.add_stat("updated_tracks", updated_tracks as f64);
+            algo_stats.add_stat("missed_tracks", missed_tracks as f64);
+            algo_stats.add_stat("new_tracks", new_tracks as f64);
+            algo_stats.add_stat("removed_tracks", removed_tracks as f64);
+            algo_stats.add_stat("final_tracks", final_tracks.len() as f64);
+            algo_stats.add_stat("roi_mode_changed", if roi_mode_changed { 1.0 } else { 0.0 });
+            ctx.emit_algorithm_stats(stages::BOARD_TRACKING, &algo_stats);
+
+            ctx.end_stage(stages::BOARD_TRACKING);
+        }
+
+        Ok(final_tracks)
     }
 
     /// Get current tracking state

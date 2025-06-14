@@ -2,9 +2,16 @@
 
 use anyhow::Result;
 use nalgebra::{Isometry3, Point2, Point3, Rotation3, Translation3, Vector2, Vector3};
-use std::f64::consts::{PI, SQRT_2};
+use std::{
+    collections::HashMap,
+    f64::consts::{PI, SQRT_2},
+    time::Instant,
+};
 
-use crate::types::{BoardDetection, BoundingBox, DetectedPlane, DetectionConfidence, PointCloud};
+use crate::{
+    debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
+    types::{BoardDetection, BoundingBox, DetectedPlane, DetectionConfidence, PointCloud},
+};
 use board_fitter_config::SquareBoard;
 
 /// Configuration for diamond square fitting
@@ -68,24 +75,178 @@ impl DiamondSquareFitter {
         point_cloud: &PointCloud,
         plane: &DetectedPlane,
     ) -> Result<Option<DiamondSquare>> {
+        self.fit_square_with_debug(point_cloud, plane, None)
+    }
+
+    /// Fit diamond square to detected plane with optional debug context
+    pub fn fit_square_with_debug(
+        &self,
+        point_cloud: &PointCloud,
+        plane: &DetectedPlane,
+        mut debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<Option<DiamondSquare>> {
+        let start_time = Instant::now();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            ctx.start_stage(stages::DIAMOND_FITTING);
+
+            // Emit input plane data
+            let mut metadata = HashMap::new();
+            metadata.insert("inlier_count".to_string(), plane.inliers.len().to_string());
+            metadata.insert("plane_score".to_string(), plane.score.to_string());
+
+            let debug_data = DebugData::PlaneData {
+                planes: vec![plane.clone()],
+                inlier_counts: vec![plane.inliers.len()],
+                quality_scores: vec![plane.score],
+                metadata,
+            };
+            ctx.emit_data(stages::DIAMOND_FITTING, &debug_data);
+        }
+
         if plane.inliers.len() < self.config.min_points {
+            if let Some(ref mut ctx) = debug_ctx {
+                let mut algo_stats = AlgorithmStats::new("Diamond_Square_Fitting", 0, false);
+                algo_stats.add_stat("insufficient_points", plane.inliers.len());
+                algo_stats.add_stat("min_required_points", self.config.min_points);
+                ctx.emit_algorithm_stats(stages::DIAMOND_FITTING, &algo_stats);
+                ctx.end_stage(stages::DIAMOND_FITTING);
+            }
             return Ok(None);
         }
 
         // Project points to 2D plane coordinate system
         let plane_points = self.project_to_plane(point_cloud, plane)?;
 
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "projected_points".to_string(),
+                plane_points.len().to_string(),
+            );
+            metadata.insert("stage".to_string(), "projection".to_string());
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert(
+                        "projected_points_count".to_string(),
+                        plane_points.len().into(),
+                    );
+                    data.insert(
+                        "plane_normal".to_string(),
+                        serde_json::json!([plane.normal.x, plane.normal.y, plane.normal.z]),
+                    );
+                    data.insert(
+                        "plane_point".to_string(),
+                        serde_json::json!([plane.point.x, plane.point.y, plane.point.z]),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::DIAMOND_FITTING, &debug_data);
+        }
+
         // Find boundary points using convex hull
         let boundary = self.compute_convex_hull(&plane_points);
 
+        if let Some(ref mut ctx) = debug_ctx {
+            let mut metadata = HashMap::new();
+            metadata.insert("hull_points".to_string(), boundary.len().to_string());
+            metadata.insert("stage".to_string(), "convex_hull".to_string());
+
+            let debug_data = DebugData::Generic {
+                data: {
+                    let mut data = HashMap::new();
+                    data.insert("hull_points_count".to_string(), boundary.len().into());
+                    data.insert(
+                        "hull_points".to_string(),
+                        serde_json::json!(boundary.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>()),
+                    );
+                    data
+                },
+            };
+            ctx.emit_data(stages::DIAMOND_FITTING, &debug_data);
+        }
+
         // Fit square to boundary points
+        let mut fitting_attempts = 0;
+        let mut fitting_success = false;
+        let mut validation_success = false;
+
         if let Some(square_2d) = self.fit_square_2d(&boundary)? {
+            fitting_attempts = 1;
+            fitting_success = true;
+
+            if let Some(ref mut ctx) = debug_ctx {
+                let mut metadata = HashMap::new();
+                metadata.insert("stage".to_string(), "square_fitting".to_string());
+                metadata.insert("fitting_success".to_string(), "true".to_string());
+
+                let debug_data = DebugData::Generic {
+                    data: {
+                        let mut data = HashMap::new();
+                        data.insert(
+                            "square_center".to_string(),
+                            serde_json::json!([square_2d.center.x, square_2d.center.y]),
+                        );
+                        data.insert("square_size".to_string(), square_2d.size.into());
+                        data.insert("square_angle".to_string(), square_2d.rotation.into());
+                        data
+                    },
+                };
+                ctx.emit_data(stages::DIAMOND_FITTING, &debug_data);
+            }
+
             // Validate square properties
             if self.validate_square(&square_2d) {
+                validation_success = true;
+
                 // Convert back to 3D
                 let square_3d = self.square_2d_to_3d(&square_2d, plane)?;
+
+                let duration = start_time.elapsed();
+
+                if let Some(ref mut ctx) = debug_ctx {
+                    // Emit final metrics
+                    let metrics = StageMetrics::new(plane.inliers.len(), 1, duration);
+                    ctx.emit_metrics(stages::DIAMOND_FITTING, &metrics);
+
+                    let mut algo_stats =
+                        AlgorithmStats::new("Diamond_Square_Fitting", fitting_attempts, true);
+                    algo_stats.add_stat("fitting_success", if fitting_success { 1.0 } else { 0.0 });
+                    algo_stats.add_stat(
+                        "validation_success",
+                        if validation_success { 1.0 } else { 0.0 },
+                    );
+                    algo_stats.add_stat("square_size", square_2d.size);
+                    algo_stats.add_stat("square_angle_degrees", square_2d.rotation.to_degrees());
+                    ctx.emit_algorithm_stats(stages::DIAMOND_FITTING, &algo_stats);
+
+                    ctx.end_stage(stages::DIAMOND_FITTING);
+                }
+
                 return Ok(Some(square_3d));
             }
+        }
+
+        let duration = start_time.elapsed();
+
+        if let Some(ref mut ctx) = debug_ctx {
+            // Emit failure metrics
+            let metrics = StageMetrics::new(plane.inliers.len(), 0, duration);
+            ctx.emit_metrics(stages::DIAMOND_FITTING, &metrics);
+
+            let mut algo_stats =
+                AlgorithmStats::new("Diamond_Square_Fitting", fitting_attempts, false);
+            algo_stats.add_stat("fitting_success", if fitting_success { 1.0 } else { 0.0 });
+            algo_stats.add_stat(
+                "validation_success",
+                if validation_success { 1.0 } else { 0.0 },
+            );
+            ctx.emit_algorithm_stats(stages::DIAMOND_FITTING, &algo_stats);
+
+            ctx.end_stage(stages::DIAMOND_FITTING);
         }
 
         Ok(None)
