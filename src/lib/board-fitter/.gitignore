@@ -1,0 +1,23 @@
+# Build artifacts
+/target/
+
+# Test data (download as needed)
+test_data/external/
+!test_data/external/.gitkeep
+
+# Benchmark results
+criterion/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Small committed test data (optional)
+# Uncomment to commit small verified datasets:
+# !test_data/external/small_samples/

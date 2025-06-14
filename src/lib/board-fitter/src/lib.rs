@@ -109,6 +109,7 @@ pub mod debug;
 pub mod detection;
 pub mod diamond;
 pub mod hole;
+pub mod io;
 pub mod plane;
 pub mod roi;
 pub mod tracking;
