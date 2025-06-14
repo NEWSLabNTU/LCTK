@@ -31,9 +31,14 @@ chrono = { version = "0.4", features = ["serde"] }
 [dev-dependencies]
 env_logger = "0.11"
 approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [features]
 default = []
 # Future features for optimization
 cuda = []
 opencl = []
+
+[[bench]]
+name = "detection_benchmark"
+harness = false
