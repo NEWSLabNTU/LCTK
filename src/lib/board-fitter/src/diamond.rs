@@ -7,6 +7,7 @@ use std::{
     f64::consts::{PI, SQRT_2},
     time::Instant,
 };
+use tracing::debug;
 
 use crate::{
     debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
@@ -152,18 +153,18 @@ impl DiamondSquareFitter {
         // Debug: show range of projected points
         if !plane_points.is_empty() {
             let (min_x, max_x, min_y, max_y) = self.compute_bounding_box(&plane_points);
-            println!("DEBUG: DiamondFitter - projected points bounding box: x=[{:.3}, {:.3}], y=[{:.3}, {:.3}], size={:.3}x{:.3}", 
+            debug!("DiamondFitter - projected points bounding box: x=[{:.3}, {:.3}], y=[{:.3}, {:.3}], size={:.3}x{:.3}", 
                 min_x, max_x, min_y, max_y, max_x - min_x, max_y - min_y);
         }
 
         // Find boundary points using convex hull
-        println!(
-            "DEBUG: DiamondFitter - computing convex hull for {} projected points",
+        debug!(
+            "DiamondFitter - computing convex hull for {} projected points",
             plane_points.len()
         );
         let boundary = self.compute_convex_hull(&plane_points);
-        println!(
-            "DEBUG: DiamondFitter - convex hull has {} boundary points",
+        debug!(
+            "DiamondFitter - convex hull has {} boundary points",
             boundary.len()
         );
 
@@ -191,12 +192,12 @@ impl DiamondSquareFitter {
         let mut fitting_success = false;
         let mut validation_success = false;
 
-        println!(
-            "DEBUG: DiamondFitter - attempting to fit square to {} boundary points",
+        debug!(
+            "DiamondFitter - attempting to fit square to {} boundary points",
             boundary.len()
         );
         if let Some(square_2d) = self.fit_square_2d(&boundary)? {
-            println!("DEBUG: DiamondFitter - square fitting succeeded");
+            debug!("DiamondFitter - square fitting succeeded");
             fitting_attempts = 1;
             fitting_success = true;
 
@@ -391,54 +392,54 @@ impl DiamondSquareFitter {
     /// Fit square to 2D boundary points
     fn fit_square_2d(&self, boundary: &[Point2<f64>]) -> Result<Option<Square2D>> {
         if boundary.len() < 4 {
-            println!(
-                "DEBUG: fit_square_2d - not enough boundary points: {}",
+            debug!(
+                "fit_square_2d - not enough boundary points: {}",
                 boundary.len()
             );
             return Ok(None);
         }
 
-        println!(
-            "DEBUG: fit_square_2d - fitting square to {} boundary points",
+        debug!(
+            "fit_square_2d - fitting square to {} boundary points",
             boundary.len()
         );
 
         // Try different fitting approaches
 
         // 1. PCA-based fitting for oriented squares
-        println!("DEBUG: fit_square_2d - trying PCA fitting");
+        debug!("fit_square_2d - trying PCA fitting");
         if let Some(square) = self.fit_square_pca(boundary)? {
-            println!("DEBUG: fit_square_2d - PCA fitting succeeded!");
+            debug!("fit_square_2d - PCA fitting succeeded!");
             return Ok(Some(square));
         }
-        println!("DEBUG: fit_square_2d - PCA fitting failed");
+        debug!("fit_square_2d - PCA fitting failed");
 
         // 2. Diamond-oriented fitting (45° rotation)
-        println!("DEBUG: fit_square_2d - trying diamond-specific fitting");
+        debug!("fit_square_2d - trying diamond-specific fitting");
         if let Some(square) = self.fit_diamond_square(boundary)? {
-            println!("DEBUG: fit_square_2d - diamond fitting succeeded!");
+            debug!("fit_square_2d - diamond fitting succeeded!");
             return Ok(Some(square));
         }
-        println!("DEBUG: fit_square_2d - diamond fitting failed");
+        debug!("fit_square_2d - diamond fitting failed");
 
         Ok(None)
     }
 
     /// Fit square using PCA (Principal Component Analysis)
     fn fit_square_pca(&self, points: &[Point2<f64>]) -> Result<Option<Square2D>> {
-        println!(
-            "DEBUG: fit_square_pca - attempting PCA fitting with {} points",
+        debug!(
+            "fit_square_pca - attempting PCA fitting with {} points",
             points.len()
         );
         if points.len() < 4 {
-            println!("DEBUG: fit_square_pca - not enough points (need at least 4)");
+            debug!("fit_square_pca - not enough points (need at least 4)");
             return Ok(None);
         }
 
         // Compute centroid
         let centroid = self.compute_centroid(points);
-        println!(
-            "DEBUG: fit_square_pca - centroid: ({:.3}, {:.3})",
+        debug!(
+            "fit_square_pca - centroid: ({:.3}, {:.3})",
             centroid.x, centroid.y
         );
 
@@ -514,15 +515,15 @@ impl DiamondSquareFitter {
 
         // Check if it's roughly square
         let aspect_ratio = width / height;
-        println!(
-            "DEBUG: fit_square_pca - bounding box: width={:.3}, height={:.3}, aspect_ratio={:.3}",
+        debug!(
+            "fit_square_pca - bounding box: width={:.3}, height={:.3}, aspect_ratio={:.3}",
             width, height, aspect_ratio
         );
         if aspect_ratio < self.config.min_aspect_ratio
             || aspect_ratio > self.config.max_aspect_ratio
         {
-            println!(
-                "DEBUG: fit_square_pca - aspect ratio {:.3} outside range [{:.3}, {:.3}]",
+            debug!(
+                "fit_square_pca - aspect ratio {:.3} outside range [{:.3}, {:.3}]",
                 aspect_ratio, self.config.min_aspect_ratio, self.config.max_aspect_ratio
             );
             return Ok(None);
@@ -532,15 +533,15 @@ impl DiamondSquareFitter {
 
         // Check size constraints
         let size_error = (size - self.config.expected_size).abs() / self.config.expected_size;
-        println!(
-            "DEBUG: fit_square_pca - size={:.3}m, expected={:.3}m, error={:.1}%",
+        debug!(
+            "fit_square_pca - size={:.3}m, expected={:.3}m, error={:.1}%",
             size,
             self.config.expected_size,
             size_error * 100.0
         );
         if size_error > self.config.size_tolerance {
-            println!(
-                "DEBUG: fit_square_pca - size error {:.1}% exceeds tolerance {:.1}%",
+            debug!(
+                "fit_square_pca - size error {:.1}% exceeds tolerance {:.1}%",
                 size_error * 100.0,
                 self.config.size_tolerance * 100.0
             );
@@ -556,14 +557,14 @@ impl DiamondSquareFitter {
 
     /// Fit diamond-oriented square (45° rotation)
     fn fit_diamond_square(&self, points: &[Point2<f64>]) -> Result<Option<Square2D>> {
-        println!(
-            "DEBUG: fit_diamond_square - attempting diamond fitting with {} points",
+        debug!(
+            "fit_diamond_square - attempting diamond fitting with {} points",
             points.len()
         );
         // Find centroid
         let centroid = self.compute_centroid(points);
-        println!(
-            "DEBUG: fit_diamond_square - centroid: ({:.3}, {:.3})",
+        debug!(
+            "fit_diamond_square - centroid: ({:.3}, {:.3})",
             centroid.x, centroid.y
         );
 
@@ -580,22 +581,22 @@ impl DiamondSquareFitter {
         let height = max_y - min_y;
         let size = (width + height) / 2.0; // Average for square
 
-        println!(
-            "DEBUG: fit_diamond_square - diamond space bounding box: width={:.3}, height={:.3}",
+        debug!(
+            "fit_diamond_square - diamond space bounding box: width={:.3}, height={:.3}",
             width, height
         );
 
         // Check if it matches expected size
         let size_error = (size - self.config.expected_size).abs() / self.config.expected_size;
-        println!(
-            "DEBUG: fit_diamond_square - size={:.3}m, expected={:.3}m, error={:.1}%",
+        debug!(
+            "fit_diamond_square - size={:.3}m, expected={:.3}m, error={:.1}%",
             size,
             self.config.expected_size,
             size_error * 100.0
         );
         if size_error > self.config.size_tolerance {
-            println!(
-                "DEBUG: fit_diamond_square - size error {:.1}% exceeds tolerance {:.1}%",
+            debug!(
+                "fit_diamond_square - size error {:.1}% exceeds tolerance {:.1}%",
                 size_error * 100.0,
                 self.config.size_tolerance * 100.0
             );
@@ -604,15 +605,12 @@ impl DiamondSquareFitter {
 
         // Check aspect ratio
         let aspect_ratio = width / height;
-        println!(
-            "DEBUG: fit_diamond_square - aspect_ratio={:.3}",
-            aspect_ratio
-        );
+        debug!("fit_diamond_square - aspect_ratio={:.3}", aspect_ratio);
         if aspect_ratio < self.config.min_aspect_ratio
             || aspect_ratio > self.config.max_aspect_ratio
         {
-            println!(
-                "DEBUG: fit_diamond_square - aspect ratio {:.3} outside range [{:.3}, {:.3}]",
+            debug!(
+                "fit_diamond_square - aspect ratio {:.3} outside range [{:.3}, {:.3}]",
                 aspect_ratio, self.config.min_aspect_ratio, self.config.max_aspect_ratio
             );
             return Ok(None);
@@ -704,22 +702,22 @@ impl DiamondSquareFitter {
         let angle_ok = angle_error <= self.config.angle_tolerance;
 
         // Debug output to understand validation failures
-        println!(
-            "DEBUG: validate_square - size={:.3}m (expected={:.3}m, error={:.1}%, ok={})",
+        debug!(
+            "validate_square - size={:.3}m (expected={:.3}m, error={:.1}%, ok={})",
             square.size,
             self.config.expected_size,
             size_error * 100.0,
             size_ok
         );
-        println!(
-            "DEBUG: validate_square - angle={:.1}° (expected=45°, error={:.1}°, ok={})",
+        debug!(
+            "validate_square - angle={:.1}° (expected=45°, error={:.1}°, ok={})",
             square.rotation.to_degrees(),
             angle_error.to_degrees(),
             angle_ok
         );
 
         let result = size_ok && angle_ok;
-        println!("DEBUG: validate_square - overall result: {}", result);
+        debug!("validate_square - overall result: {}", result);
 
         result
     }

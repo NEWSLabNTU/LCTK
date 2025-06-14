@@ -1,7 +1,7 @@
 //! Integration tests with external verified datasets
 
-use board_fitter::{io::load_point_cloud, DiamondBoardDetectorBuilder};
-use board_fitter_config::Config;
+use board_fitter::{io::load_point_cloud, BoardDetectorBuilder};
+use board_fitter_config::BoardConfig;
 use std::path::Path;
 
 #[path = "common/mod.rs"]
@@ -27,15 +27,15 @@ fn test_pcl_table_scene() {
 
     // Create a detector with relaxed parameters for real-world data
     let board_config = create_test_board_config(0.5); // Smaller board
-    let config = Config {
+    let config = BoardConfig {
         board: board_config,
         detection: None,
         metadata: None,
     };
 
-    let mut detector = DiamondBoardDetectorBuilder::new()
+    let mut detector = BoardDetectorBuilder::new(config)
         .min_confidence(0.3) // Lower confidence for real data
-        .build(config)
+        .build()
         .unwrap();
 
     // Attempt detection (may not find boards in this scene, but should not crash)
@@ -45,7 +45,8 @@ fn test_pcl_table_scene() {
         "Detection should not fail even without boards"
     );
 
-    let detections = result.unwrap();
+    let result = result.unwrap();
+    let detections = &result.detections;
     println!("PCL ISM cat detections: {}", detections.len());
 
     // This test verifies the pipeline works with real data, even if no boards are found
@@ -66,16 +67,16 @@ fn test_open3d_fragment() {
     println!("Loaded Open3D fragment: {} points", cloud.points.len());
 
     let board_config = create_test_board_config(0.3);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config,
         detection: None,
         metadata: None,
     };
 
-    let mut detector = DiamondBoardDetectorBuilder::new()
+    let mut detector = BoardDetectorBuilder::new(config)
         .min_confidence(0.2)
         .timeout_ms(5000) // Longer timeout for complex data
-        .build(config)
+        .build()
         .unwrap();
 
     let result = detector.detect(&cloud);
@@ -84,7 +85,8 @@ fn test_open3d_fragment() {
         "Detection should handle Open3D data gracefully"
     );
 
-    let detections = result.unwrap();
+    let result = result.unwrap();
+    let detections = &result.detections;
     println!("Open3D fragment detections: {}", detections.len());
 }
 
@@ -111,19 +113,20 @@ fn test_synthetic_calibration_data() {
         println!("Testing {}: {} points", data_path, cloud.points.len());
 
         let board_config = create_test_board_config(1.0);
-        let config = Config {
+        let config = BoardConfig {
             board: board_config,
             detection: None,
             metadata: None,
         };
 
-        let mut detector = DiamondBoardDetectorBuilder::new()
+        let mut detector = BoardDetectorBuilder::new(config)
             .min_confidence(0.4)
-            .build(config)
+            .build()
             .unwrap();
 
         let timer = PerfTimer::new(&format!("Detection: {}", data_path));
-        let detections = detector.detect(&cloud).unwrap();
+        let result = detector.detect(&cloud).unwrap();
+        let detections = &result.detections;
         let elapsed = timer.elapsed_ms();
 
         // Perfect board should be attempted (relaxed assertion for development)
@@ -178,20 +181,21 @@ fn test_performance_comparison() {
         };
 
         let board_config = create_test_board_config(1.0);
-        let config = Config {
+        let config = BoardConfig {
             board: board_config,
             detection: None,
             metadata: None,
         };
 
-        let mut detector = DiamondBoardDetectorBuilder::new()
+        let mut detector = BoardDetectorBuilder::new(config)
             .min_confidence(0.3)
             .timeout_ms(3000)
-            .build(config)
+            .build()
             .unwrap();
 
         let timer = PerfTimer::new(description);
-        let detections = detector.detect(&cloud).unwrap();
+        let result = detector.detect(&cloud).unwrap();
+        let detections = &result.detections;
         let elapsed = timer.elapsed_ms();
 
         println!(

@@ -731,11 +731,8 @@ impl Default for PreprocessingConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        tracking::{TrackedBoard, TrackingState},
-        types::DetectionConfidence,
-    };
-    use nalgebra::{Isometry3, Point3, Vector3};
+    use crate::{tracking::TrackedBoard, types::DetectionConfidence};
+    use nalgebra::{Isometry3, Vector3};
 
     fn create_test_tracked_board() -> TrackedBoard {
         let detection = crate::types::BoardDetection::new(

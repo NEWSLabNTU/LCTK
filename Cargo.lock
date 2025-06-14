@@ -954,7 +954,6 @@ dependencies = [
  "criterion",
  "env_logger 0.11.8",
  "indexmap 2.9.0",
- "log",
  "measurements",
  "nalgebra 0.33.2",
  "rand",
@@ -965,6 +964,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror 1.0.69",
+ "tracing",
  "uuid",
 ]
 

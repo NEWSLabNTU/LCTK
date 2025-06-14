@@ -1,7 +1,7 @@
 //! End-to-end pipeline integration tests
 
-use board_fitter::DiamondBoardDetectorBuilder;
-use board_fitter_config::Config;
+use board_fitter::BoardDetectorBuilder;
+use board_fitter_config::BoardConfig;
 use std::f64::consts::PI;
 
 #[path = "common/mod.rs"]
@@ -14,16 +14,16 @@ fn test_perfect_board_detection() {
     let board_config = create_test_board_config(1.0); // 1m board
 
     // Create detector
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
-    let mut detector = DiamondBoardDetectorBuilder::new().build(config).unwrap();
+    let mut detector = BoardDetectorBuilder::new(config).build().unwrap();
 
     // Generate perfect board at known pose
     let mut generator = TestDataGenerator::new(42);
-    let ground_truth_pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let ground_truth_pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let point_cloud = generator.generate_perfect_board(&board_config, &ground_truth_pose, 400);
 
     // Detect board
@@ -32,8 +32,11 @@ fn test_perfect_board_detection() {
     let elapsed = timer.elapsed_ms();
 
     // Verify results
-    assert!(!detections.is_empty(), "Should detect at least one board");
-    let detected = &detections[0];
+    assert!(
+        !detections.detections.is_empty(),
+        "Should detect at least one board"
+    );
+    let detected = &detections.detections[0];
 
     // Check accuracy
     let position_error =
@@ -69,15 +72,15 @@ fn test_perfect_board_detection() {
 #[test]
 fn test_noisy_board_detection() {
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
-    let mut detector = DiamondBoardDetectorBuilder::new().build(config).unwrap();
+    let mut detector = BoardDetectorBuilder::new(config).build().unwrap();
 
     let mut generator = TestDataGenerator::new(43);
-    let ground_truth_pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let ground_truth_pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
 
     // Test with different noise levels
     let noise_levels = [0.01, 0.02, 0.05]; // 1cm, 2cm, 5cm
@@ -92,8 +95,8 @@ fn test_noisy_board_detection() {
         let detections = detector.detect(&noisy_cloud).unwrap();
         let elapsed = timer.elapsed_ms();
 
-        if !detections.is_empty() {
-            let detected = &detections[0];
+        if !detections.detections.is_empty() {
+            let detected = &detections.detections[0];
             let position_error =
                 (detected.pose.translation.vector - ground_truth_pose.translation.vector).norm();
             let angle_error =
@@ -123,15 +126,15 @@ fn test_noisy_board_detection() {
 #[test]
 fn test_partial_occlusion() {
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
-    let mut detector = DiamondBoardDetectorBuilder::new().build(config).unwrap();
+    let mut detector = BoardDetectorBuilder::new(config).build().unwrap();
 
     let mut generator = TestDataGenerator::new(44);
-    let ground_truth_pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let ground_truth_pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let perfect_cloud = generator.generate_perfect_board(&board_config, &ground_truth_pose, 500);
 
     // Test with different occlusion levels
@@ -151,13 +154,13 @@ fn test_partial_occlusion() {
         if occlusion <= 0.3 {
             // Should still detect with up to 30% occlusion
             assert!(
-                !detections.is_empty(),
+                !detections.detections.is_empty(),
                 "Failed to detect board with {:.0}% occlusion",
                 occlusion * 100.0
             );
 
-            if !detections.is_empty() {
-                let detected = &detections[0];
+            if !detections.detections.is_empty() {
+                let detected = &detections.detections[0];
                 println!(
                     "  Detected with confidence: {:.2}",
                     detected.confidence.value()
@@ -171,34 +174,37 @@ fn test_partial_occlusion() {
 #[test]
 fn test_extreme_poses() {
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
-    let mut detector = DiamondBoardDetectorBuilder::new().build(config).unwrap();
+    let mut detector = BoardDetectorBuilder::new(config).build().unwrap();
 
     let mut generator = TestDataGenerator::new(45);
     let mut results = TestResults::new();
 
-    // Test various extreme orientations
+    // Test various extreme orientations (all tilted for diamond board filtering)
     let test_poses = [
-        ("Frontal", create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0)),
         (
-            "45° yaw",
-            create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, PI / 4.0),
+            "Frontal tilted",
+            create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0),
         ),
         (
-            "30° pitch",
-            create_board_pose(2.0, 0.0, 1.0, 0.0, PI / 6.0, 0.0),
+            "45° yaw + tilt",
+            create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, PI / 4.0),
         ),
         (
-            "60° pitch",
-            create_board_pose(2.0, 0.0, 1.0, 0.0, PI / 3.0, 0.0),
+            "30° pitch + tilt",
+            create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), PI / 6.0, 0.0),
         ),
         (
-            "Combined",
-            create_board_pose(2.0, 0.0, 1.0, PI / 6.0, PI / 4.0, PI / 6.0),
+            "60° pitch + tilt",
+            create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), PI / 3.0, 0.0),
+        ),
+        (
+            "Combined angles",
+            create_board_pose(2.0, 0.0, 1.0, PI / 4.0, PI / 6.0, PI / 6.0),
         ),
     ];
 
@@ -210,8 +216,8 @@ fn test_extreme_poses() {
         let detections = detector.detect(&point_cloud).unwrap();
         let elapsed = timer.elapsed_ms();
 
-        if !detections.is_empty() {
-            let detected = &detections[0];
+        if !detections.detections.is_empty() {
+            let detected = &detections.detections[0];
             let position_error =
                 (detected.pose.translation.vector - pose.translation.vector).norm();
             let angle_error = (detected.pose.rotation * pose.rotation.inverse()).angle();
@@ -237,28 +243,28 @@ fn test_extreme_poses() {
 #[test]
 fn test_multi_board_scene() {
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
-    let mut detector = DiamondBoardDetectorBuilder::new().build(config).unwrap();
+    let mut detector = BoardDetectorBuilder::new(config).build().unwrap();
 
     let mut generator = TestDataGenerator::new(46);
 
-    // Create scene with 3 boards at different positions
+    // Create scene with 3 boards at different positions (all tilted for diamond board filtering)
     let board_poses = vec![
         (
             board_config.clone(),
-            create_board_pose(1.0, -1.0, 1.0, 0.0, 0.0, 0.0),
+            create_board_pose(1.0, -1.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0),
         ),
         (
             board_config.clone(),
-            create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, PI / 4.0),
+            create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, PI / 4.0),
         ),
         (
             board_config.clone(),
-            create_board_pose(3.0, 1.0, 1.0, 0.0, PI / 6.0, 0.0),
+            create_board_pose(3.0, 1.0, 1.0, PI / 3.0, PI / 6.0, 0.0),
         ),
     ];
 
@@ -269,7 +275,8 @@ fn test_multi_board_scene() {
         scene.points.len()
     );
     let timer = PerfTimer::new("Multi-board detection");
-    let detections = detector.detect(&scene).unwrap();
+    let result = detector.detect(&scene).unwrap();
+    let detections = &result.detections;
     let elapsed = timer.elapsed_ms();
 
     println!("  Detected {} boards in {:.1}ms", detections.len(), elapsed);
@@ -295,12 +302,12 @@ fn test_multi_board_scene() {
 #[test]
 fn test_varying_distances() {
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
-    let mut detector = DiamondBoardDetectorBuilder::new().build(config).unwrap();
+    let mut detector = BoardDetectorBuilder::new(config).build().unwrap();
 
     let mut generator = TestDataGenerator::new(47);
     let mut results = TestResults::new();
@@ -311,7 +318,7 @@ fn test_varying_distances() {
     for &distance in &distances {
         println!("\nTesting at distance: {}m", distance);
 
-        let pose = create_board_pose(distance, 0.0, 1.0, 0.0, 0.0, 0.0);
+        let pose = create_board_pose(distance, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
 
         // Adjust point density based on distance (simulate LiDAR behavior)
         let point_density = (1000.0 / (distance * distance)) as usize;
@@ -322,7 +329,8 @@ fn test_varying_distances() {
         println!("  Generated {} points", point_cloud.points.len());
 
         let timer = PerfTimer::new(&format!("Detection at {}m", distance));
-        let detections = detector.detect(&point_cloud).unwrap();
+        let result = detector.detect(&point_cloud).unwrap();
+        let detections = &result.detections;
         let elapsed = timer.elapsed_ms();
 
         if !detections.is_empty() {

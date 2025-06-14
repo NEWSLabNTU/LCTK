@@ -6,6 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     time::Instant,
 };
+use tracing::debug;
 
 use crate::{
     debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
@@ -120,8 +121,8 @@ impl HoleDetector {
         // Filter points within the square region
         let square_points = self.filter_points_in_square(point_cloud, square);
 
-        println!(
-            "DEBUG: HoleDetector - filtered {} points within square region",
+        debug!(
+            "HoleDetector - filtered {} points within square region",
             square_points.len()
         );
 
@@ -187,14 +188,14 @@ impl HoleDetector {
         let mut intensity_holes_count = 0;
         let mut geometric_holes_count = 0;
 
-        println!(
-            "DEBUG: HoleDetector - {} projected points available for hole detection",
+        debug!(
+            "HoleDetector - {} projected points available for hole detection",
             projected_points.len()
         );
 
         // Method 1: Intensity-based hole detection (if intensity data available)
         if point_cloud.intensities.is_some() {
-            println!("DEBUG: HoleDetector - attempting intensity-based hole detection");
+            debug!("HoleDetector - attempting intensity-based hole detection");
             let intensity_holes =
                 self.detect_holes_by_intensity(&projected_points, point_cloud, &square_points)?;
             intensity_holes_count = intensity_holes.len();
@@ -223,12 +224,12 @@ impl HoleDetector {
         }
 
         // Method 2: Geometric hole detection (negative space)
-        println!("DEBUG: HoleDetector - attempting geometric hole detection");
+        debug!("HoleDetector - attempting geometric hole detection");
         let geometric_holes = self.detect_holes_by_geometry(&projected_points)?;
         geometric_holes_count = geometric_holes.len();
-        println!(
-            "DEBUG: HoleDetector - found {} geometric holes",
-            geometric_holes_count
+        debug!(
+            "HoleDetector - found {} geometric holes",
+            geometric_holes.len()
         );
         holes.extend(geometric_holes);
 
@@ -320,8 +321,11 @@ impl HoleDetector {
         detected_holes: &[DetectedHole],
         expected_pattern: &[CircleHole],
     ) -> Result<HoleMatchResult> {
-        println!("DEBUG: HoleDetector.match_pattern - matching {} detected holes against {} expected holes", 
-            detected_holes.len(), expected_pattern.len());
+        debug!(
+            "HoleDetector.match_pattern - matching {} detected holes against {} expected holes",
+            detected_holes.len(),
+            expected_pattern.len()
+        );
 
         let mut matches = HashMap::new();
         let mut unmatched_detected = detected_holes.to_vec();
@@ -344,20 +348,20 @@ impl HoleDetector {
                 let radius_error = (detected.radius - expected_radius).abs();
 
                 if i == 0 && expected.id.as_ref().map_or(false, |id| id == "top_hole") {
-                    println!("DEBUG: HoleDetector.match_pattern - checking top_hole:");
-                    println!(
+                    debug!("HoleDetector.match_pattern - checking top_hole:");
+                    debug!(
                         "  Expected pos: ({:.3}, {:.3}, {:.3}), radius: {:.3}m",
                         expected_pos.x, expected_pos.y, expected_pos.z, expected_radius
                     );
-                    println!(
+                    debug!(
                         "  Detected pos: ({:.3}, {:.3}, {:.3}), radius: {:.3}m",
                         detected.center.x, detected.center.y, detected.center.z, detected.radius
                     );
-                    println!(
+                    debug!(
                         "  Position error: {:.3}m (tolerance: {:.3}m)",
                         position_error, self.config.position_tolerance
                     );
-                    println!(
+                    debug!(
                         "  Radius error: {:.3}m (tolerance: {:.3}m)",
                         radius_error, self.config.radius_tolerance
                     );
@@ -501,15 +505,15 @@ impl HoleDetector {
         let grid_size = self.config.grid_resolution;
         let occupancy_grid = self.create_occupancy_grid(projected_points, grid_size)?;
 
-        println!(
-            "DEBUG: HoleDetector.geometry - created occupancy grid {}x{} with resolution {:.3}m",
+        debug!(
+            "HoleDetector.geometry - created occupancy grid {}x{} with resolution {:.3}m",
             occupancy_grid.width, occupancy_grid.height, grid_size
         );
 
         // Find empty circular regions using morphological operations
         let empty_regions = self.find_empty_circular_regions(&occupancy_grid)?;
-        println!(
-            "DEBUG: HoleDetector.geometry - found {} empty circular regions",
+        debug!(
+            "HoleDetector.geometry - found {} empty circular regions",
             empty_regions.len()
         );
 
@@ -521,21 +525,26 @@ impl HoleDetector {
             // Convert empty region to boundary points for circle fitting
             let boundary_points = self.extract_region_boundary(&region, grid_size);
 
-            println!("DEBUG: HoleDetector.geometry - processing circular region {} with {} cells, {} boundary points", 
+            debug!("HoleDetector.geometry - processing circular region {} with {} cells, {} boundary points", 
                 i, region.len(), boundary_points.len());
 
             if boundary_points.len() < 3 {
-                println!("DEBUG: HoleDetector.geometry - skipping region {} - not enough boundary points", i);
+                debug!(
+                    "HoleDetector.geometry - skipping region {} - not enough boundary points",
+                    i
+                );
                 continue;
             }
 
             // Try RANSAC circle fitting for robustness
             if let Some(circle) = circle_fitter.fit_circle_ransac(&boundary_points, 100) {
-                println!("DEBUG: HoleDetector.geometry - fitted circle: center=({:.3}, {:.3}), radius={:.3}m", 
-                    circle.center.x, circle.center.y, circle.radius);
+                debug!(
+                    "HoleDetector.geometry - fitted circle: center=({:.3}, {:.3}), radius={:.3}m",
+                    circle.center.x, circle.center.y, circle.radius
+                );
                 // Validate circle properties
                 if self.is_valid_hole_circle(&circle) {
-                    println!("DEBUG: HoleDetector.geometry - circle passed validation");
+                    debug!("HoleDetector.geometry - circle passed validation");
                     let hole = DetectedHole {
                         center: Point3::new(circle.center.x, circle.center.y, 0.0), // Will be transformed later
                         radius: circle.radius,
@@ -548,14 +557,14 @@ impl HoleDetector {
                     };
                     detected_holes.push(hole);
                 } else {
-                    println!(
-                        "DEBUG: HoleDetector.geometry - circle failed validation (radius={:.3}m)",
+                    debug!(
+                        "HoleDetector.geometry - circle failed validation (radius={:.3}m)",
                         circle.radius
                     );
                 }
             } else {
-                println!(
-                    "DEBUG: HoleDetector.geometry - failed to fit circle to region {}",
+                debug!(
+                    "HoleDetector.geometry - failed to fit circle to region {}",
                     i
                 );
             }
@@ -570,12 +579,12 @@ impl HoleDetector {
         holes: Vec<DetectedHole>,
         square: &DiamondSquare,
     ) -> Vec<DetectedHole> {
-        println!(
-            "DEBUG: HoleDetector - transforming {} holes from 2D to 3D coordinates",
+        debug!(
+            "HoleDetector - transforming {} holes from 2D to 3D coordinates",
             holes.len()
         );
-        println!(
-            "DEBUG: HoleDetector - square center: ({:.3}, {:.3}, {:.3})",
+        debug!(
+            "HoleDetector - square center: ({:.3}, {:.3}, {:.3})",
             square.center.x, square.center.y, square.center.z
         );
 
@@ -587,8 +596,8 @@ impl HoleDetector {
         let centroid_x = holes.iter().map(|h| h.center.x).sum::<f64>() / holes.len() as f64;
         let centroid_y = holes.iter().map(|h| h.center.y).sum::<f64>() / holes.len() as f64;
 
-        println!(
-            "DEBUG: HoleDetector - hole centroid: ({:.3}, {:.3})",
+        debug!(
+            "HoleDetector - hole centroid: ({:.3}, {:.3})",
             centroid_x, centroid_y
         );
 
@@ -607,9 +616,9 @@ impl HoleDetector {
                 id: hole.id,
             };
 
-            println!("DEBUG: HoleDetector - transformed hole:");
-            println!("  2D plane: ({:.3}, {:.3})", hole.center.x, hole.center.y);
-            println!(
+            debug!("HoleDetector - transformed hole:");
+            debug!("  2D plane: ({:.3}, {:.3})", hole.center.x, hole.center.y);
+            debug!(
                 "  Centered: ({:.3}, {:.3}, {:.3})",
                 centered_point.x, centered_point.y, centered_point.z
             );
@@ -730,8 +739,10 @@ impl HoleDetector {
 
         let total_cells = width * height;
         let empty_cells = total_cells - occupied_count;
-        println!("DEBUG: HoleDetector.occupancy - grid has {} occupied cells, {} empty cells out of {} total", 
-            occupied_count, empty_cells, total_cells);
+        debug!(
+            "HoleDetector.occupancy - grid has {} occupied cells, {} empty cells out of {} total",
+            occupied_count, empty_cells, total_cells
+        );
 
         Ok(grid)
     }
@@ -830,15 +841,17 @@ impl HoleDetector {
                             regions.push(region);
                         } else if region.len() >= 100 {
                             // Debug large non-circular regions
-                            println!("DEBUG: HoleDetector.geometry - large region with {} cells failed circularity test", region.len());
+                            debug!("HoleDetector.geometry - large region with {} cells failed circularity test", region.len());
                         }
                     }
                 }
             }
         }
 
-        println!("DEBUG: HoleDetector.geometry - found {} empty regions, {} large (>=10 cells), {} circular", 
-            region_count, large_regions, circular_regions);
+        debug!(
+            "HoleDetector.geometry - found {} empty regions, {} large (>=10 cells), {} circular",
+            region_count, large_regions, circular_regions
+        );
 
         Ok(regions)
     }

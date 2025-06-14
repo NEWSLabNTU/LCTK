@@ -140,6 +140,15 @@ fn load_pcd(path: &Path) -> Result<PointCloud> {
         .unwrap_or("unknown")
         .to_string();
 
+    // Validate point count matches header declaration
+    if points.len() != points_count {
+        return Err(anyhow!(
+            "Point count mismatch: header declares {} points but found {}",
+            points_count,
+            points.len()
+        ));
+    }
+
     Ok(PointCloud {
         points,
         intensities: if intensities.is_empty() {

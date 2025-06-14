@@ -1,7 +1,7 @@
 //! Test debug instrumentation functionality
 
-use board_fitter::{DiamondBoardDetectorBuilder, PointCloud};
-use board_fitter_config::Config;
+use board_fitter::{BoardDetectorBuilder, PointCloud};
+use board_fitter_config::BoardConfig;
 
 #[path = "common/mod.rs"]
 mod common;
@@ -16,17 +16,17 @@ fn test_debug_instrumentation_basic() {
     let board_config = create_test_board_config(1.0);
 
     // Create detector with debug instrumentation enabled
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
 
-    let mut detector = DiamondBoardDetectorBuilder::new()
+    let mut detector = BoardDetectorBuilder::new(config)
         .with_console_debug(false) // Non-verbose mode
         .min_confidence(0.1) // Lower threshold for testing
         .timeout_ms(5000)
-        .build(config)
+        .build()
         .expect("Failed to create detector with debug");
 
     // Generate test data - use a tilted board pose that will pass plane filtering
@@ -48,9 +48,9 @@ fn test_debug_instrumentation_basic() {
         Ok(detections) => {
             println!(
                 "Detection completed successfully with {} detections",
-                detections.len()
+                detections.detections.len()
             );
-            for (i, detection) in detections.iter().enumerate() {
+            for (i, detection) in detections.detections.iter().enumerate() {
                 println!(
                     "  Detection {}: confidence={:.3}, holes={}",
                     i,
@@ -74,18 +74,18 @@ fn test_debug_instrumentation_verbose() {
 
     let board_config = create_test_board_config(0.5); // Smaller board
 
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
 
-    let mut detector = DiamondBoardDetectorBuilder::new()
+    let mut detector = BoardDetectorBuilder::new(config)
         .with_console_debug(true) // Verbose mode
         .min_confidence(0.1)
         .max_detections(3)
         .timeout_ms(3000)
-        .build(config)
+        .build()
         .expect("Failed to create verbose debug detector");
 
     // Generate minimal test data
@@ -99,7 +99,7 @@ fn test_debug_instrumentation_verbose() {
 
     match result {
         Ok(detections) => {
-            println!("RESULT: {} detections found", detections.len());
+            println!("RESULT: {} detections found", detections.detections.len());
         }
         Err(e) => {
             println!("RESULT: Detection failed - {}", e);
@@ -115,22 +115,22 @@ fn test_debug_empty_cloud() {
     println!("\n=== Debug Empty Cloud Test ===");
 
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config,
         detection: None,
         metadata: None,
     };
 
-    let mut detector = DiamondBoardDetectorBuilder::new()
+    let mut detector = BoardDetectorBuilder::new(config)
         .with_console_debug(false)
-        .build(config)
+        .build()
         .expect("Failed to create detector");
 
     let empty_cloud = PointCloud::new(Vec::new(), "empty_test".to_string());
 
     let result = detector.detect(&empty_cloud);
     assert!(result.is_ok());
-    assert!(result.unwrap().is_empty());
+    assert!(result.unwrap().detections.is_empty());
 
     println!("=== End Empty Cloud Test ===\n");
 }
@@ -141,16 +141,16 @@ fn test_debug_noisy_data() {
     println!("\n=== Debug Noisy Data Test ===");
 
     let board_config = create_test_board_config(1.0);
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
     };
 
-    let mut detector = DiamondBoardDetectorBuilder::new()
+    let mut detector = BoardDetectorBuilder::new(config)
         .with_console_debug(false)
         .min_confidence(0.05) // Very low for noisy data
-        .build(config)
+        .build()
         .expect("Failed to create detector");
 
     let mut generator = TestDataGenerator::new(456);
@@ -164,7 +164,10 @@ fn test_debug_noisy_data() {
 
     match result {
         Ok(detections) => {
-            println!("Noisy detection result: {} detections", detections.len());
+            println!(
+                "Noisy detection result: {} detections",
+                detections.detections.len()
+            );
         }
         Err(e) => {
             println!("Noisy detection failed: {}", e);

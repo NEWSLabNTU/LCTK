@@ -44,7 +44,7 @@ pub struct DetectionConfig {
 
 /// Complete board fitter configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct BoardConfig {
     /// Square board model definition
     pub board: SquareBoard,
     /// Detection algorithm configuration

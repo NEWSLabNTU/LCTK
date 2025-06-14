@@ -1,8 +1,9 @@
-//! Debug infrastructure for board-fitter library
+//! Debug infrastructure for board-fitter library - focused on performance measurement and data collection
 //!
-//! This module provides comprehensive debugging features through a callback-based architecture
-//! that allows runtime configuration without recompilation. The debug system is designed to
-//! have zero runtime overhead when disabled.
+//! This module provides performance measurement and intermediate data collection features
+//! for debugging and profiling the board-fitter processing pipeline. All debug output
+//! is handled through the tracing crate - use RUST_LOG environment variable to control
+//! debug message visibility.
 
 use std::{
     collections::HashMap,
@@ -13,26 +14,7 @@ use std::{
 
 use crate::types::{BoardDetection, DetectedHole, DetectedPlane, PointCloud};
 
-/// Debug verbosity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DebugVerbosity {
-    /// No debug output
-    None,
-    /// Summary statistics only
-    Summary,
-    /// Detailed metrics and intermediate results
-    Detailed,
-    /// Verbose output with all available debug information
-    Verbose,
-}
-
-impl Default for DebugVerbosity {
-    fn default() -> Self {
-        DebugVerbosity::None
-    }
-}
-
-/// Configuration for debug output
+/// Configuration for debug data collection
 #[derive(Debug, Clone)]
 pub struct DebugConfig {
     /// Enable/disable performance timing measurements
@@ -41,8 +23,6 @@ pub struct DebugConfig {
     pub output_stages: Vec<String>,
     /// Optional directory for file outputs
     pub output_directory: Option<PathBuf>,
-    /// Debug verbosity level
-    pub verbosity_level: DebugVerbosity,
     /// Maximum number of intermediate point clouds to store
     pub max_point_clouds: usize,
     /// Whether to enable memory usage tracking
@@ -55,7 +35,6 @@ impl Default for DebugConfig {
             timing_enabled: false,
             output_stages: Vec::new(),
             output_directory: None,
-            verbosity_level: DebugVerbosity::None,
             max_point_clouds: 10,
             memory_tracking: false,
         }
@@ -101,12 +80,6 @@ impl DebugConfigBuilder {
     /// Set output directory for file-based debugging
     pub fn output_dir<P: Into<PathBuf>>(mut self, path: P) -> Self {
         self.config.output_directory = Some(path.into());
-        self
-    }
-
-    /// Set debug verbosity level
-    pub fn verbosity(mut self, level: DebugVerbosity) -> Self {
-        self.config.verbosity_level = level;
         self
     }
 
@@ -276,7 +249,7 @@ impl AlgorithmStats {
     }
 }
 
-/// Debug context that threads through the processing pipeline
+/// Debug context for performance measurement and data collection
 pub struct DebugContext {
     /// Debug configuration
     pub config: DebugConfig,
@@ -347,11 +320,10 @@ impl DebugContext {
         self
     }
 
-    /// Check if debugging is enabled for the given stage
+    /// Check if data capture is enabled for the given stage
     pub fn is_stage_enabled(&self, stage: &str) -> bool {
-        self.config.verbosity_level != DebugVerbosity::None
-            && (self.config.output_stages.is_empty()
-                || self.config.output_stages.contains(&stage.to_string()))
+        self.config.output_stages.is_empty()
+            || self.config.output_stages.contains(&stage.to_string())
     }
 
     /// Start timing for a pipeline stage
@@ -422,191 +394,6 @@ impl DebugContext {
     }
 }
 
-/// No-op implementation of TimingCallback for zero overhead
-#[derive(Debug)]
-pub struct NoOpTimingCallback;
-
-impl TimingCallback for NoOpTimingCallback {
-    fn on_stage_start(&self, _stage: &str, _timestamp: Instant) {}
-    fn on_stage_end(&self, _stage: &str, _duration: Duration, _memory_usage: Option<usize>) {}
-}
-
-/// No-op implementation of DataCallback for zero overhead
-#[derive(Debug)]
-pub struct NoOpDataCallback;
-
-impl DataCallback for NoOpDataCallback {
-    fn on_intermediate_data(&self, _stage: &str, _data: &DebugData) {}
-    fn on_point_cloud(&self, _stage: &str, _cloud: &PointCloud) {}
-}
-
-/// No-op implementation of MetricsCallback for zero overhead
-#[derive(Debug)]
-pub struct NoOpMetricsCallback;
-
-impl MetricsCallback for NoOpMetricsCallback {
-    fn on_metrics(&self, _stage: &str, _metrics: &StageMetrics) {}
-    fn on_algorithm_stats(&self, _stage: &str, _stats: &AlgorithmStats) {}
-}
-
-/// Console-based debug logger for development and testing
-#[derive(Debug)]
-pub struct ConsoleDebugLogger {
-    pub verbose: bool,
-}
-
-impl ConsoleDebugLogger {
-    pub fn new(verbose: bool) -> Self {
-        Self { verbose }
-    }
-}
-
-impl TimingCallback for ConsoleDebugLogger {
-    fn on_stage_start(&self, stage: &str, timestamp: Instant) {
-        if self.verbose {
-            println!("TIMING: Starting stage '{}' at {:?}", stage, timestamp);
-        }
-    }
-
-    fn on_stage_end(&self, stage: &str, duration: Duration, memory_usage: Option<usize>) {
-        println!(
-            "TIMING: Stage '{}' completed in {:.2}ms{}",
-            stage,
-            duration.as_secs_f64() * 1000.0,
-            if let Some(mem) = memory_usage {
-                format!(" ({}KB memory)", mem / 1024)
-            } else {
-                String::new()
-            }
-        );
-    }
-}
-
-impl DataCallback for ConsoleDebugLogger {
-    fn on_intermediate_data(&self, stage: &str, data: &DebugData) {
-        match data {
-            DebugData::PointCloud { cloud, metadata } => {
-                println!(
-                    "DATA: Stage '{}' - PointCloud with {} points",
-                    stage,
-                    cloud.points.len()
-                );
-                if self.verbose {
-                    for (key, value) in metadata {
-                        println!("  {}: {}", key, value);
-                    }
-                }
-            }
-            DebugData::DetectionResult {
-                detections,
-                confidence_scores,
-                metadata,
-            } => {
-                println!(
-                    "DATA: Stage '{}' - {} detections with confidences: {:?}",
-                    stage,
-                    detections.len(),
-                    confidence_scores
-                );
-                if self.verbose {
-                    for (key, value) in metadata {
-                        println!("  {}: {}", key, value);
-                    }
-                }
-            }
-            DebugData::PlaneData {
-                planes,
-                inlier_counts,
-                quality_scores,
-                metadata,
-            } => {
-                println!(
-                    "DATA: Stage '{}' - {} planes with inliers: {:?}, quality: {:?}",
-                    stage,
-                    planes.len(),
-                    inlier_counts,
-                    quality_scores
-                );
-                if self.verbose {
-                    for (key, value) in metadata {
-                        println!("  {}: {}", key, value);
-                    }
-                }
-            }
-            DebugData::CircleData {
-                holes,
-                fitting_residuals,
-                iteration_counts,
-                metadata,
-            } => {
-                println!(
-                    "DATA: Stage '{}' - {} holes with residuals: {:?}",
-                    stage,
-                    holes.len(),
-                    fitting_residuals
-                );
-                if self.verbose {
-                    for (key, value) in metadata {
-                        println!("  {}: {}", key, value);
-                    }
-                }
-            }
-            DebugData::Generic { data } => {
-                println!(
-                    "DATA: Stage '{}' - Generic data with {} entries",
-                    stage,
-                    data.len()
-                );
-                if self.verbose {
-                    for (key, value) in data {
-                        println!("  {}: {}", key, value);
-                    }
-                }
-            }
-        }
-    }
-
-    fn on_point_cloud(&self, stage: &str, cloud: &PointCloud) {
-        if self.verbose {
-            println!(
-                "CLOUD: Stage '{}' - {} points (frame: {})",
-                stage,
-                cloud.points.len(),
-                cloud.frame_id
-            );
-        }
-    }
-}
-
-impl MetricsCallback for ConsoleDebugLogger {
-    fn on_metrics(&self, stage: &str, metrics: &StageMetrics) {
-        println!(
-            "METRICS: Stage '{}' - {}->{} points in {:.2}ms",
-            stage,
-            metrics.input_points,
-            metrics.output_points,
-            metrics.processing_time.as_secs_f64() * 1000.0
-        );
-        if self.verbose {
-            for (key, value) in &metrics.custom_metrics {
-                println!("  {}: {:.3}", key, value);
-            }
-        }
-    }
-
-    fn on_algorithm_stats(&self, stage: &str, stats: &AlgorithmStats) {
-        println!(
-            "ALGORITHM: Stage '{}' - {} ({} iterations, converged: {}, error: {:?})",
-            stage, stats.algorithm, stats.iterations, stats.converged, stats.final_error
-        );
-        if self.verbose {
-            for (key, value) in &stats.custom_stats {
-                println!("  {}: {}", key, value);
-            }
-        }
-    }
-}
-
 /// Pipeline stage names as constants for consistency
 pub mod stages {
     pub const PLANE_DETECTION: &str = "plane_detection";
@@ -622,11 +409,15 @@ pub mod stages {
 #[macro_export]
 macro_rules! debug_timing {
     ($ctx:expr, $stage:expr, $block:block) => {
-        if $ctx.config.timing_enabled {
-            $ctx.start_stage($stage);
-            let result = $block;
-            $ctx.end_stage($stage);
-            result
+        if let Some(ctx) = $ctx {
+            if ctx.config.timing_enabled {
+                ctx.start_stage($stage);
+                let result = $block;
+                ctx.end_stage($stage);
+                result
+            } else {
+                $block
+            }
         } else {
             $block
         }
@@ -636,8 +427,10 @@ macro_rules! debug_timing {
 #[macro_export]
 macro_rules! debug_emit_data {
     ($ctx:expr, $stage:expr, $data:expr) => {
-        if $ctx.is_stage_enabled($stage) {
-            $ctx.emit_data($stage, $data);
+        if let Some(ctx) = $ctx {
+            if ctx.is_stage_enabled($stage) {
+                ctx.emit_data($stage, $data);
+            }
         }
     };
 }
@@ -645,8 +438,10 @@ macro_rules! debug_emit_data {
 #[macro_export]
 macro_rules! debug_emit_metrics {
     ($ctx:expr, $stage:expr, $metrics:expr) => {
-        if $ctx.is_stage_enabled($stage) {
-            $ctx.emit_metrics($stage, $metrics);
+        if let Some(ctx) = $ctx {
+            if ctx.is_stage_enabled($stage) {
+                ctx.emit_metrics($stage, $metrics);
+            }
         }
     };
 }
@@ -692,14 +487,12 @@ mod tests {
         let config = DebugConfigBuilder::new()
             .with_timing()
             .capture_stage("test_stage")
-            .verbosity(DebugVerbosity::Detailed)
             .max_point_clouds(20)
             .with_memory_tracking()
             .build();
 
         assert!(config.timing_enabled);
         assert_eq!(config.output_stages, vec!["test_stage"]);
-        assert_eq!(config.verbosity_level, DebugVerbosity::Detailed);
         assert_eq!(config.max_point_clouds, 20);
         assert!(config.memory_tracking);
     }

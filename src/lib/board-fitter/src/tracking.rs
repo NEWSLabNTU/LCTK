@@ -926,7 +926,7 @@ pub struct TrackingStateInfo {
 mod tests {
     use super::*;
     use crate::types::DetectionConfidence;
-    use nalgebra::{Isometry3, Point3, Vector3};
+    use nalgebra::{Isometry3, Vector3};
 
     fn create_test_detection() -> BoardDetection {
         BoardDetection::new(

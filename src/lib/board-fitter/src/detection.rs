@@ -1,31 +1,19 @@
 //! Core detection traits and implementation
 
 use anyhow::Result;
-use board_fitter_config::Config;
-use std::time::{Duration, Instant};
+use board_fitter_config::BoardConfig;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+use tracing::{debug, info, warn};
 
 use crate::{
-    debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
+    debug::{stages, DebugConfig, DebugConfigBuilder, DebugContext, DebugData, StageMetrics},
+    diamond::DiamondSquareFitter,
+    plane::RansacPlaneDetector,
     types::{BoardDetection, PointCloud, ProcessingStage, ProcessingStats},
 };
-
-/// Main trait for board detection algorithms
-pub trait BoardDetector: Send + Sync {
-    /// Detect boards in a point cloud
-    fn detect(&mut self, point_cloud: &PointCloud) -> Result<DetectionResult>;
-
-    /// Get the current configuration
-    fn config(&self) -> &Config;
-
-    /// Update the detector configuration
-    fn update_config(&mut self, config: Config) -> Result<()>;
-
-    /// Get processing statistics from the last detection run
-    fn last_stats(&self) -> &ProcessingStats;
-
-    /// Reset internal state (useful for testing)
-    fn reset(&mut self);
-}
 
 /// Result of a detection operation
 #[derive(Debug, Clone)]
@@ -72,6 +60,8 @@ impl DetectionResult {
 /// Configuration for detection algorithms
 #[derive(Debug, Clone)]
 pub struct DetectionConfig {
+    /// The shape of the board.
+    pub board_config: BoardConfig,
     /// Minimum confidence threshold for valid detections
     pub min_confidence: f64,
     /// Maximum number of detections to return
@@ -82,50 +72,46 @@ pub struct DetectionConfig {
     pub timeout_ms: u64,
 }
 
-impl Default for DetectionConfig {
-    fn default() -> Self {
+impl DetectionConfig {
+    pub fn new_with_default(board_config: BoardConfig) -> Self {
         Self {
+            board_config,
             min_confidence: 0.5,
             max_detections: 10,
-            parallel_processing: true,
-            timeout_ms: 1000,
+            parallel_processing: false,
+            timeout_ms: 2000,
         }
     }
 }
 
 /// Diamond board detector implementation
-pub struct DiamondDetector {
-    config: Config,
+pub struct BoardDetector {
     detection_config: DetectionConfig,
     stats: ProcessingStats,
     debug_ctx: Option<DebugContext>,
 }
 
-impl DiamondDetector {
+impl BoardDetector {
     /// Create a new diamond detector
-    pub fn new(config: Config, detection_config: DetectionConfig) -> Self {
+    pub fn new(detection_config: DetectionConfig) -> Self {
+        Self::new_with_debug(detection_config, None)
+    }
+
+    /// Create a new diamond detector
+    pub fn new_with_debug(
+        detection_config: DetectionConfig,
+        debug_context: Option<DebugContext>,
+    ) -> Self {
         Self {
-            config,
             detection_config,
             stats: ProcessingStats::new(),
-            debug_ctx: None,
+            debug_ctx: debug_context,
         }
-    }
-
-    /// Create with default detection configuration
-    pub fn with_board_config(config: Config) -> Self {
-        Self::new(config, DetectionConfig::default())
-    }
-
-    /// Set debug context for instrumentation
-    pub fn with_debug_context(mut self, debug_ctx: DebugContext) -> Self {
-        self.debug_ctx = Some(debug_ctx);
-        self
     }
 }
 
-impl BoardDetector for DiamondDetector {
-    fn detect(&mut self, point_cloud: &PointCloud) -> Result<DetectionResult> {
+impl BoardDetector {
+    pub fn detect(&mut self, point_cloud: &PointCloud) -> Result<DetectionResult> {
         let start_time = Instant::now();
         let timeout = Duration::from_millis(self.detection_config.timeout_ms);
 
@@ -137,7 +123,7 @@ impl BoardDetector for DiamondDetector {
             debug_ctx.start_stage(stages::PREPROCESSING);
 
             // Log initial point cloud statistics
-            let mut metadata = std::collections::HashMap::new();
+            let mut metadata = HashMap::new();
             metadata.insert("input_points".to_string(), point_cloud.len().to_string());
             metadata.insert(
                 "has_intensity".to_string(),
@@ -167,9 +153,7 @@ impl BoardDetector for DiamondDetector {
 
         // Early return for empty point clouds
         if point_cloud.is_empty() {
-            if let Some(debug_ctx) = &self.debug_ctx {
-                println!("DEBUG: Empty point cloud provided, returning no detections");
-            }
+            debug!("Empty point cloud provided, returning no detections");
             let detection_time = start_time.elapsed();
             self.stats
                 .add_time(ProcessingStage::Detection, detection_time);
@@ -177,29 +161,26 @@ impl BoardDetector for DiamondDetector {
         }
 
         // STEP 1: Plane Detection with Debug Instrumentation
+        debug!("Starting plane detection on {} points", point_cloud.len());
         if let Some(debug_ctx) = &mut self.debug_ctx {
             debug_ctx.start_stage(stages::PLANE_DETECTION);
-            println!(
-                "DEBUG: Starting plane detection on {} points",
-                point_cloud.len()
-            );
         }
 
         let plane_start = Instant::now();
-        let mut plane_detector = crate::plane::RansacPlaneDetector::default();
+        let mut plane_detector = RansacPlaneDetector::default();
         let detected_planes = plane_detector.detect_planes(point_cloud)?;
         let plane_time = plane_start.elapsed();
         self.stats.planes_detected = detected_planes.len();
 
-        if let Some(debug_ctx) = &mut self.debug_ctx {
-            println!(
-                "DEBUG: Plane detection found {} planes in {:.2}ms",
-                detected_planes.len(),
-                plane_time.as_secs_f64() * 1000.0
-            );
+        info!(
+            "Plane detection found {} planes in {:.2}ms",
+            detected_planes.len(),
+            plane_time.as_secs_f64() * 1000.0
+        );
 
+        if let Some(debug_ctx) = &mut self.debug_ctx {
             // Emit plane detection debug data
-            let mut metadata = std::collections::HashMap::new();
+            let mut metadata = HashMap::new();
             metadata.insert(
                 "planes_found".to_string(),
                 detected_planes.len().to_string(),
@@ -225,18 +206,14 @@ impl BoardDetector for DiamondDetector {
 
         // Check timeout after plane detection
         if start_time.elapsed() > timeout {
-            if let Some(debug_ctx) = &self.debug_ctx {
-                println!("DEBUG: Timeout exceeded during plane detection");
-            }
+            warn!("Timeout exceeded during plane detection");
             return Err(anyhow::anyhow!(
                 "Detection timeout exceeded during plane detection"
             ));
         }
 
         if detected_planes.is_empty() {
-            if let Some(debug_ctx) = &self.debug_ctx {
-                println!("DEBUG: No planes detected, returning no detections");
-            }
+            debug!("No planes detected, returning no detections");
             let detection_time = start_time.elapsed();
             self.stats
                 .add_time(ProcessingStage::Detection, detection_time);
@@ -246,55 +223,49 @@ impl BoardDetector for DiamondDetector {
         // STEP 2: Plane Filtering with Debug
         let plane_filter = crate::plane::PlaneFilter::for_diamond_boards();
 
-        if let Some(debug_ctx) = &self.debug_ctx {
-            println!("DEBUG: Plane filtering criteria:");
-            println!("  Min Z-angle: {:.1}°, Max Z-angle: {:.1}°", 30.0, 150.0);
-            println!("  Min dimensions: 0.5m x 0.5m, Max dimensions: 2.0m x 2.0m");
+        debug!("Plane filtering criteria:");
+        debug!("  Min Z-angle: {:.1}°, Max Z-angle: {:.1}°", 30.0, 150.0);
+        debug!("  Min dimensions: 0.5m x 0.5m, Max dimensions: 2.0m x 2.0m");
 
-            for (i, plane) in detected_planes.iter().enumerate() {
-                let z_axis = nalgebra::Vector3::new(0.0, 0.0, 1.0);
-                let angle_rad = plane.normal.angle(&z_axis);
-                let angle_deg = angle_rad.to_degrees();
-                let size = plane.bbox.size();
+        for (i, plane) in detected_planes.iter().enumerate() {
+            let z_axis = nalgebra::Vector3::new(0.0, 0.0, 1.0);
+            let angle_rad = plane.normal.angle(&z_axis);
+            let angle_deg = angle_rad.to_degrees();
+            let size = plane.bbox.size();
 
-                println!(
-                    "  Plane {}: normal={:.3?}, angle_with_z={:.1}°, size={:.2}x{:.2}m, inliers={}",
-                    i,
-                    plane.normal,
-                    angle_deg,
-                    size.x,
-                    size.y,
-                    plane.inliers.len()
-                );
+            debug!(
+                "  Plane {}: normal={:.3?}, angle_with_z={:.1}°, size={:.2}x{:.2}m, inliers={}",
+                i,
+                plane.normal,
+                angle_deg,
+                size.x,
+                size.y,
+                plane.inliers.len()
+            );
 
-                let angle_ok =
-                    angle_rad >= 30.0_f64.to_radians() && angle_rad <= 150.0_f64.to_radians();
-                let size_ok = size.x >= 0.5 && size.y >= 0.5 && size.x <= 2.0 && size.y <= 2.0;
+            let angle_ok =
+                angle_rad >= 30.0_f64.to_radians() && angle_rad <= 150.0_f64.to_radians();
+            let size_ok = size.x >= 0.5 && size.y >= 0.5 && size.x <= 2.0 && size.y <= 2.0;
 
-                println!(
-                    "    Angle check: {} ({}°), Size check: {} ({:.2}x{:.2}m)",
-                    if angle_ok { "PASS" } else { "FAIL" },
-                    angle_deg,
-                    if size_ok { "PASS" } else { "FAIL" },
-                    size.x,
-                    size.y
-                );
-            }
+            debug!(
+                "    Angle check: {} ({}°), Size check: {} ({:.2}x{:.2}m)",
+                if angle_ok { "PASS" } else { "FAIL" },
+                angle_deg,
+                if size_ok { "PASS" } else { "FAIL" },
+                size.x,
+                size.y
+            );
         }
 
         let filtered_planes = plane_filter.filter_planes(detected_planes);
 
-        if let Some(debug_ctx) = &self.debug_ctx {
-            println!(
-                "DEBUG: Filtered to {} suitable planes for diamond boards",
-                filtered_planes.len()
-            );
-        }
+        info!(
+            "Filtered to {} suitable planes for diamond boards",
+            filtered_planes.len()
+        );
 
         if filtered_planes.is_empty() {
-            if let Some(debug_ctx) = &self.debug_ctx {
-                println!("DEBUG: No suitable planes for diamond boards, returning no detections");
-            }
+            debug!("No suitable planes for diamond boards, returning no detections");
             let detection_time = start_time.elapsed();
             self.stats
                 .add_time(ProcessingStage::Detection, detection_time);
@@ -304,33 +275,29 @@ impl BoardDetector for DiamondDetector {
         let mut board_detections = Vec::new();
 
         // STEP 3: Diamond Fitting with Debug Instrumentation
+        info!(
+            "Starting diamond fitting on {} planes",
+            filtered_planes.len()
+        );
         if let Some(debug_ctx) = &mut self.debug_ctx {
             debug_ctx.start_stage(stages::DIAMOND_FITTING);
-            println!(
-                "DEBUG: Starting diamond fitting on {} planes",
-                filtered_planes.len()
-            );
         }
 
         let diamond_start = Instant::now();
         let diamond_fitter =
-            crate::diamond::DiamondSquareFitter::from_board_config(&self.config.board);
+            DiamondSquareFitter::from_board_config(&self.detection_config.board_config.board);
         let mut squares_fitted = 0;
 
         for (plane_idx, plane) in filtered_planes.iter().enumerate() {
-            if let Some(debug_ctx) = &self.debug_ctx {
-                println!(
-                    "DEBUG: Processing plane {} with {} inliers",
-                    plane_idx,
-                    plane.inliers.len()
-                );
-            }
+            debug!(
+                "Processing plane {} with {} inliers",
+                plane_idx,
+                plane.inliers.len()
+            );
 
             // Check timeout during processing
             if start_time.elapsed() > timeout {
-                if let Some(debug_ctx) = &self.debug_ctx {
-                    println!("DEBUG: Timeout exceeded during square fitting");
-                }
+                warn!("Timeout exceeded during square fitting");
                 return Err(anyhow::anyhow!(
                     "Detection timeout exceeded during square fitting"
                 ));
@@ -338,17 +305,12 @@ impl BoardDetector for DiamondDetector {
 
             if let Some(diamond_square) = diamond_fitter.fit_square(point_cloud, plane)? {
                 squares_fitted += 1;
-                if let Some(debug_ctx) = &self.debug_ctx {
-                    println!(
-                        "DEBUG: Successfully fitted diamond square on plane {}",
-                        plane_idx
-                    );
-                }
+                debug!("Successfully fitted diamond square on plane {}", plane_idx);
 
                 // STEP 4: Hole Detection with Debug
+                debug!("Starting hole detection in fitted square");
                 if let Some(debug_ctx) = &mut self.debug_ctx {
                     debug_ctx.start_stage(stages::HOLE_DETECTION);
-                    println!("DEBUG: Starting hole detection in fitted square");
                 }
 
                 let hole_start = Instant::now();
@@ -357,15 +319,15 @@ impl BoardDetector for DiamondDetector {
                     hole_detector.detect_holes_in_square(point_cloud, &diamond_square)?;
                 let hole_time = hole_start.elapsed();
 
-                if let Some(debug_ctx) = &mut self.debug_ctx {
-                    println!(
-                        "DEBUG: Found {} holes in {:.2}ms",
-                        detected_holes.len(),
-                        hole_time.as_secs_f64() * 1000.0
-                    );
+                info!(
+                    "Found {} holes in {:.2}ms",
+                    detected_holes.len(),
+                    hole_time.as_secs_f64() * 1000.0
+                );
 
+                if let Some(debug_ctx) = &mut self.debug_ctx {
                     // Emit hole detection debug data
-                    let mut metadata = std::collections::HashMap::new();
+                    let mut metadata = HashMap::new();
                     metadata.insert("holes_found".to_string(), detected_holes.len().to_string());
                     metadata.insert(
                         "processing_time_ms".to_string(),
@@ -389,36 +351,31 @@ impl BoardDetector for DiamondDetector {
 
                 // Check timeout during hole detection
                 if start_time.elapsed() > timeout {
-                    if let Some(debug_ctx) = &self.debug_ctx {
-                        println!("DEBUG: Timeout exceeded during hole detection");
-                    }
+                    warn!("Timeout exceeded during hole detection");
                     return Err(anyhow::anyhow!(
                         "Detection timeout exceeded during hole detection"
                     ));
                 }
 
                 // STEP 5: Pattern Matching with Debug
-                let hole_pattern = &self.config.board.holes;
+                let hole_pattern = &self.detection_config.board_config.board.holes;
                 let hole_match = hole_detector.match_hole_pattern(&detected_holes, hole_pattern)?;
 
-                if let Some(debug_ctx) = &self.debug_ctx {
-                    println!(
-                        "DEBUG: Pattern matching found {} hole matches",
-                        hole_match.matches.len()
-                    );
-                }
+                debug!(
+                    "Pattern matching found {} hole matches",
+                    hole_match.matches.len()
+                );
 
                 // STEP 6: Pattern Analysis with Debug
-                let pattern_analyzer =
-                    crate::hole::AsymmetricPatternAnalyzer::for_diamond_board(&self.config.board);
+                let pattern_analyzer = crate::hole::AsymmetricPatternAnalyzer::for_diamond_board(
+                    &self.detection_config.board_config.board,
+                );
                 let pattern_analysis = pattern_analyzer.analyze_pattern(&hole_match);
 
-                if let Some(debug_ctx) = &self.debug_ctx {
-                    println!(
-                        "DEBUG: Pattern analysis - orientation_determined: {}, confidence: {:.3}",
-                        pattern_analysis.orientation_determined, pattern_analysis.confidence
-                    );
-                }
+                debug!(
+                    "Pattern analysis - orientation_determined: {}, confidence: {:.3}",
+                    pattern_analysis.orientation_determined, pattern_analysis.confidence
+                );
 
                 // STEP 7: Create board detection if pattern is acceptable
                 if pattern_analysis.orientation_determined && pattern_analysis.confidence > 0.5 {
@@ -436,47 +393,41 @@ impl BoardDetector for DiamondDetector {
 
                     board_detections.push(board_detection);
 
-                    if let Some(debug_ctx) = &self.debug_ctx {
-                        println!(
-                            "DEBUG: Created board detection with confidence {:.3}",
-                            pattern_analysis.confidence
-                        );
-                    }
+                    debug!(
+                        "Created board detection with confidence {:.3}",
+                        pattern_analysis.confidence
+                    );
                 } else {
-                    if let Some(debug_ctx) = &self.debug_ctx {
-                        println!("DEBUG: Pattern rejected - orientation_determined: {}, confidence: {:.3}", 
-                            pattern_analysis.orientation_determined, pattern_analysis.confidence);
-                    }
+                    debug!(
+                        "Pattern rejected - orientation_determined: {}, confidence: {:.3}",
+                        pattern_analysis.orientation_determined, pattern_analysis.confidence
+                    );
                 }
             } else {
-                if let Some(debug_ctx) = &self.debug_ctx {
-                    println!("DEBUG: Failed to fit diamond square on plane {}", plane_idx);
-                }
+                debug!("Failed to fit diamond square on plane {}", plane_idx);
             }
 
             // Early exit if we have enough detections or approaching timeout
             if board_detections.len() >= self.detection_config.max_detections
                 || start_time.elapsed() > timeout * 3 / 4
             {
-                if let Some(debug_ctx) = &self.debug_ctx {
-                    println!(
-                        "DEBUG: Early exit - detections: {}, timeout approaching",
-                        board_detections.len()
-                    );
-                }
+                debug!(
+                    "Early exit - detections: {}, timeout approaching",
+                    board_detections.len()
+                );
                 break;
             }
         }
 
         let diamond_time = diamond_start.elapsed();
-        if let Some(debug_ctx) = &mut self.debug_ctx {
-            println!(
-                "DEBUG: Diamond fitting completed - {} squares fitted from {} planes in {:.2}ms",
-                squares_fitted,
-                filtered_planes.len(),
-                diamond_time.as_secs_f64() * 1000.0
-            );
+        info!(
+            "Diamond fitting completed - {} squares fitted from {} planes in {:.2}ms",
+            squares_fitted,
+            filtered_planes.len(),
+            diamond_time.as_secs_f64() * 1000.0
+        );
 
+        if let Some(debug_ctx) = &mut self.debug_ctx {
             let diamond_metrics =
                 StageMetrics::new(filtered_planes.len(), squares_fitted, diamond_time);
             debug_ctx.emit_metrics(stages::DIAMOND_FITTING, &diamond_metrics);
@@ -484,29 +435,26 @@ impl BoardDetector for DiamondDetector {
         }
 
         // STEP 8: Validation with Debug
+        debug!("Validating {} board detections", board_detections.len());
         if let Some(debug_ctx) = &mut self.debug_ctx {
             debug_ctx.start_stage(stages::VALIDATION);
-            println!(
-                "DEBUG: Validating {} board detections",
-                board_detections.len()
-            );
         }
 
         let validation_start = Instant::now();
-        let validator = DetectionValidator::from_config(&self.config.board);
+        let validator = DetectionValidator::from_config(&self.detection_config.board_config.board);
         let input_detections_count = board_detections.len();
         let validated_detections = validator.validate_detections(board_detections);
         let validation_time = validation_start.elapsed();
 
-        if let Some(debug_ctx) = &mut self.debug_ctx {
-            println!(
-                "DEBUG: Validation completed - {} detections validated in {:.2}ms",
-                validated_detections.len(),
-                validation_time.as_secs_f64() * 1000.0
-            );
+        info!(
+            "Validation completed - {} detections validated in {:.2}ms",
+            validated_detections.len(),
+            validation_time.as_secs_f64() * 1000.0
+        );
 
+        if let Some(debug_ctx) = &mut self.debug_ctx {
             // Emit final detection results
-            let mut metadata = std::collections::HashMap::new();
+            let mut metadata = HashMap::new();
             metadata.insert(
                 "final_detections".to_string(),
                 validated_detections.len().to_string(),
@@ -541,13 +489,11 @@ impl BoardDetector for DiamondDetector {
             .add_time(ProcessingStage::Detection, detection_time);
         self.stats.boards_detected = validated_detections.len();
 
-        if let Some(debug_ctx) = &self.debug_ctx {
-            println!(
-                "DEBUG: Detection pipeline completed - {} detections in {:.2}ms",
-                validated_detections.len(),
-                detection_time.as_secs_f64() * 1000.0
-            );
-        }
+        info!(
+            "Detection pipeline completed - {} detections in {:.2}ms",
+            validated_detections.len(),
+            detection_time.as_secs_f64() * 1000.0
+        );
 
         Ok(DetectionResult::new(
             validated_detections,
@@ -555,43 +501,15 @@ impl BoardDetector for DiamondDetector {
         ))
     }
 
-    fn config(&self) -> &Config {
-        &self.config
+    pub fn board_config(&self) -> &BoardConfig {
+        &self.detection_config.board_config
     }
 
-    fn update_config(&mut self, config: Config) -> Result<()> {
-        // Validate configuration compatibility
-        if config.board.holes.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Board configuration must have at least one hole for detection"
-            ));
-        }
-
-        // Check for asymmetric pattern requirement
-        if config.board.holes.len() < 3 {
-            return Err(anyhow::anyhow!(
-                "Diamond board detection requires at least 3 holes for orientation determination"
-            ));
-        }
-
-        // Validate board size is reasonable
-        let board_size = config.board.size.as_meters();
-        if board_size < 0.1 || board_size > 10.0 {
-            return Err(anyhow::anyhow!(
-                "Board size must be between 0.1m and 10.0m, got: {}m",
-                board_size
-            ));
-        }
-
-        self.config = config;
-        Ok(())
-    }
-
-    fn last_stats(&self) -> &ProcessingStats {
+    pub fn last_stats(&self) -> &ProcessingStats {
         &self.stats
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.stats = ProcessingStats::new();
     }
 }
@@ -605,21 +523,6 @@ pub struct DetectionValidator {
 }
 
 impl DetectionValidator {
-    /// Create a new validator with size constraints
-    pub fn new(
-        min_board_size: f64,
-        max_board_size: f64,
-        min_hole_radius: f64,
-        max_hole_radius: f64,
-    ) -> Self {
-        Self {
-            min_board_size,
-            max_board_size,
-            min_hole_radius,
-            max_hole_radius,
-        }
-    }
-
     /// Validate a board detection
     pub fn validate(&self, detection: &BoardDetection) -> bool {
         // Check board size
@@ -673,12 +576,12 @@ impl DetectionValidator {
             .map(|h| h.radius.as_meters())
             .fold(0.0, f64::max);
 
-        Self::new(
-            board_size * 0.7,      // Allow 30% tolerance below expected size
-            board_size * 1.3,      // Allow 30% tolerance above expected size
-            min_hole_radius * 0.5, // Allow 50% tolerance for hole sizes
-            max_hole_radius * 1.5,
-        )
+        Self {
+            min_board_size: board_size * 0.7, // Allow 30% tolerance below expected size
+            max_board_size: board_size * 1.3, // Allow 30% tolerance above expected size
+            min_hole_radius: min_hole_radius * 0.5, // Allow 50% tolerance for hole sizes
+            max_hole_radius: max_hole_radius * 1.5,
+        }
     }
 
     /// Validate multiple detections
@@ -698,61 +601,84 @@ impl DetectionValidator {
     }
 }
 
-/// Detection pipeline coordinator
-pub struct DetectionPipeline {
-    detector: Box<dyn BoardDetector>,
-    validator: DetectionValidator,
-    config: DetectionConfig,
+/// Builder for DiamondBoardDetector with fluent API
+pub struct BoardDetectorBuilder {
+    detection_config: DetectionConfig,
+    debug_config: Option<DebugConfig>,
 }
 
-impl DetectionPipeline {
-    /// Create a new detection pipeline
-    pub fn new(
-        detector: Box<dyn BoardDetector>,
-        validator: DetectionValidator,
-        config: DetectionConfig,
-    ) -> Self {
+impl BoardDetectorBuilder {
+    /// Create a new builder with default configuration
+    pub fn new(board_config: BoardConfig) -> Self {
         Self {
-            detector,
-            validator,
-            config,
+            detection_config: DetectionConfig::new_with_default(board_config),
+            debug_config: None,
         }
     }
 
-    /// Run the full detection pipeline
-    pub fn process(&mut self, point_cloud: &PointCloud) -> Result<DetectionResult> {
-        let start_time = Instant::now();
-
-        // Run detection
-        let detection_result = self.detector.detect(point_cloud)?;
-        let mut detections = detection_result.detections;
-
-        // Validate detections
-        detections = self.validator.filter_valid(detections);
-
-        // Apply confidence threshold
-        detections.retain(|d| d.confidence.above_threshold(self.config.min_confidence));
-
-        // Limit number of detections
-        detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
-        detections.truncate(self.config.max_detections);
-
-        // Get final statistics
-        let mut stats = detection_result.stats;
-        stats.total_time = start_time.elapsed();
-        stats.boards_detected = detections.len();
-
-        Ok(DetectionResult::new(detections, stats))
+    /// Set the board shape
+    pub fn board_config(mut self, board_config: BoardConfig) -> Self {
+        self.detection_config.board_config = board_config;
+        self
     }
 
-    /// Get the underlying detector
-    pub fn detector(&self) -> &dyn BoardDetector {
-        self.detector.as_ref()
+    /// Set the minimum confidence threshold
+    pub fn min_confidence(mut self, confidence: f64) -> Self {
+        self.detection_config.min_confidence = confidence;
+        self
     }
 
-    /// Get the underlying detector mutably
-    pub fn detector_mut(&mut self) -> &mut dyn BoardDetector {
-        self.detector.as_mut()
+    /// Set the maximum number of detections
+    pub fn max_detections(mut self, max: usize) -> Self {
+        self.detection_config.max_detections = max;
+        self
+    }
+
+    /// Set the detection timeout
+    pub fn timeout_ms(mut self, timeout: u64) -> Self {
+        self.detection_config.timeout_ms = timeout;
+        self
+    }
+
+    /// Enable or disable parallel processing
+    pub fn parallel_processing(mut self, enabled: bool) -> Self {
+        self.detection_config.parallel_processing = enabled;
+        self
+    }
+
+    /// Set debug configuration (only available with debug feature)
+    pub fn with_debug(mut self, debug_config: DebugConfig) -> Self {
+        self.debug_config = Some(debug_config);
+        self
+    }
+
+    /// Enable simple console debug logging with timing and data
+    pub fn with_console_debug(mut self, _verbose: bool) -> Self {
+        let debug_config = DebugConfigBuilder::new()
+            .with_timing()
+            .capture_stages(vec![
+                crate::debug::stages::PREPROCESSING,
+                crate::debug::stages::PLANE_DETECTION,
+                crate::debug::stages::DIAMOND_FITTING,
+                crate::debug::stages::HOLE_DETECTION,
+                crate::debug::stages::VALIDATION,
+            ])
+            .build();
+
+        self.debug_config = Some(debug_config);
+        self
+    }
+
+    /// Build the detector with the given board configuration
+    pub fn build(self) -> Result<BoardDetector> {
+        // Set up debug context if provided
+        let debug_context = self
+            .debug_config
+            .map(|debug_config| DebugContext::new(debug_config));
+
+        let detector = BoardDetector::new_with_debug(self.detection_config, debug_context);
+
+        Ok(detector)
     }
 }
 
@@ -760,13 +686,13 @@ impl DetectionPipeline {
 mod tests {
     use super::*;
     use crate::types::DetectionConfidence;
-    use board_fitter_config::{Config, SquareBoard};
+    use board_fitter_config::{BoardConfig, SquareBoard};
     use measurements::Length;
     use nalgebra::{Isometry3, Point3, Vector3};
 
-    fn create_test_config() -> Config {
+    fn create_test_config() -> BoardConfig {
         let board = SquareBoard::new(Length::from_meters(1.0));
-        Config {
+        BoardConfig {
             board,
             detection: None,
             metadata: None,
@@ -798,7 +724,12 @@ mod tests {
 
     #[test]
     fn test_detection_validator() {
-        let validator = DetectionValidator::new(0.5, 2.0, 0.01, 0.2);
+        let validator = DetectionValidator {
+            min_board_size: 0.5,   // Allow 30% tolerance below expected size
+            max_board_size: 2.0,   // Allow 30% tolerance above expected size
+            min_hole_radius: 0.01, // Allow 50% tolerance for hole sizes
+            max_hole_radius: 0.2,
+        };
 
         let mut valid_detection = BoardDetection::new(
             Isometry3::identity(),
@@ -834,8 +765,8 @@ mod tests {
 
     #[test]
     fn test_diamond_detector_creation() {
-        let config = create_test_config();
-        let detector = DiamondDetector::with_board_config(config);
-        assert_eq!(detector.config().board.size.as_meters(), 1.0);
+        let board_config = create_test_config();
+        let detector = BoardDetector::new(DetectionConfig::new_with_default(board_config));
+        assert_eq!(detector.board_config().board.size.as_meters(), 1.0);
     }
 }

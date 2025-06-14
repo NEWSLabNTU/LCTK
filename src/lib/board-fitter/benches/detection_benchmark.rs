@@ -1,7 +1,7 @@
 //! Performance benchmarks for board detection pipeline
 
-use board_fitter::{DiamondBoardDetector, PointCloud};
-use board_fitter_config::Config;
+use board_fitter::{BoardDetector, BoardDetectorBuilder, DetectionConfig, PointCloud};
+use board_fitter_config::BoardConfig;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Instant;
 
@@ -30,15 +30,16 @@ fn benchmark_detection_pipeline(c: &mut Criterion) {
     for (count, cloud) in &test_clouds {
         group.bench_with_input(BenchmarkId::new("points", count), cloud, |b, cloud| {
             b.iter(|| {
-                let config = Config {
+                let board_config_instance = BoardConfig {
                     board: board_config.clone(),
                     detection: None,
                     metadata: None,
                 };
-                let mut detector = DiamondBoardDetector::new(config).unwrap();
+                let detection_config = DetectionConfig::new_with_default(board_config_instance);
+                let mut detector = BoardDetector::new(detection_config);
                 let result = detector.detect(black_box(cloud));
                 assert!(result.is_ok());
-                assert!(!result.unwrap().is_empty());
+                assert!(!result.unwrap().detections.is_empty());
             });
         });
     }
@@ -152,14 +153,15 @@ fn benchmark_with_noise(c: &mut Criterion) {
             &noisy_cloud,
             |b, cloud| {
                 b.iter(|| {
-                    let config = Config {
+                    let board_config_instance = BoardConfig {
                         board: board_config.clone(),
                         detection: None,
                         metadata: None,
                     };
-                    let mut detector = DiamondBoardDetector::new(config).unwrap();
+                    let detection_config = DetectionConfig::new_with_default(board_config_instance);
+                    let mut detector = BoardDetector::new(detection_config);
                     let result = detector.detect(black_box(cloud)).unwrap();
-                    assert!(!result.is_empty());
+                    assert!(!result.detections.is_empty());
                 });
             },
         );
@@ -203,14 +205,14 @@ fn benchmark_roi_preprocessing(c: &mut Criterion) {
 }
 
 fn benchmark_debug_overhead(c: &mut Criterion) {
-    use board_fitter::debug::{DebugConfigBuilder, DebugContext};
+    use board_fitter::debug::DebugConfigBuilder;
 
     let board_config = create_test_board_config(1.0);
     let mut generator = TestDataGenerator::new(105);
     let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let cloud = generator.generate_perfect_board(&board_config, &pose, 1000);
 
-    let config = Config {
+    let config = BoardConfig {
         board: board_config.clone(),
         detection: None,
         metadata: None,
@@ -222,37 +224,38 @@ fn benchmark_debug_overhead(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::new("debug", "disabled"), &cloud, |b, cloud| {
         b.iter(|| {
-            let config = Config {
+            let board_config_instance = BoardConfig {
                 board: board_config.clone(),
                 detection: None,
                 metadata: None,
             };
-            let mut detector = DiamondBoardDetector::new(config).unwrap();
+            let detection_config = DetectionConfig::new_with_default(board_config_instance);
+            let mut detector = BoardDetector::new(detection_config);
             let result = detector.detect(black_box(cloud)).unwrap();
-            assert!(!result.is_empty());
+            assert!(!result.detections.is_empty());
         });
     });
 
     group.bench_with_input(BenchmarkId::new("debug", "enabled"), &cloud, |b, cloud| {
         b.iter(|| {
-            let config = Config {
+            let board_config_instance = BoardConfig {
                 board: board_config.clone(),
                 detection: None,
                 metadata: None,
             };
-            let mut detector = DiamondBoardDetector::new(config).unwrap();
 
             let debug_config = DebugConfigBuilder::new()
                 .with_timing()
-                .verbosity(board_fitter::DebugVerbosity::Detailed)
                 .capture_stages(["plane_detection", "diamond_fitting", "hole_detection"])
                 .build();
 
-            let debug_context = DebugContext::new(debug_config);
-            detector.with_debug_context(debug_context);
+            let mut detector = BoardDetectorBuilder::new(board_config_instance)
+                .with_debug(debug_config)
+                .build()
+                .unwrap();
 
             let result = detector.detect(black_box(cloud)).unwrap();
-            assert!(!result.is_empty());
+            assert!(!result.detections.is_empty());
         });
     });
 
