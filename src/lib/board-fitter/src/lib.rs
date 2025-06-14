@@ -331,27 +331,66 @@ impl DiamondBoardDetectorBuilder {
         self
     }
 
+    /// Enable simple console debug logging with timing and data
+    pub fn with_console_debug(mut self, verbose: bool) -> Self {
+        use std::sync::Arc;
+
+        let debug_config = crate::debug::DebugConfigBuilder::new()
+            .with_timing()
+            .verbosity(crate::debug::DebugVerbosity::Verbose)
+            .capture_stages(vec![
+                crate::debug::stages::PREPROCESSING,
+                crate::debug::stages::PLANE_DETECTION,
+                crate::debug::stages::DIAMOND_FITTING,
+                crate::debug::stages::HOLE_DETECTION,
+                crate::debug::stages::VALIDATION,
+            ])
+            .build();
+
+        self.debug_config = Some(debug_config);
+        self
+    }
+
     /// Build the detector with the given board configuration
     pub fn build(self, board_config: Config) -> Result<DiamondBoardDetector> {
         // Validate configuration before creating detector
         DiamondBoardDetector::validate_config(&board_config)?;
 
-        let detector = Box::new(detection::DiamondDetector::new(
-            board_config.clone(),
-            self.detection_config,
-        ));
+        let mut detector =
+            detection::DiamondDetector::new(board_config.clone(), self.detection_config);
 
-        let mut detector_instance = DiamondBoardDetector {
-            config: board_config,
-            detector,
-            debug_context: None,
-        };
+        let mut debug_context = None;
 
         // Set up debug context if provided
         if let Some(debug_config) = self.debug_config {
-            let debug_context = debug::DebugContext::new(debug_config);
-            detector_instance.debug_context = Some(debug_context);
+            use std::sync::Arc;
+
+            // Create console logger for debug output
+            let logger = Arc::new(debug::ConsoleDebugLogger::new(
+                debug_config.verbosity_level == debug::DebugVerbosity::Verbose,
+            ));
+
+            let mut ctx = debug::DebugContext::new(debug_config.clone())
+                .with_timing_callback(logger.clone() as Arc<dyn debug::TimingCallback>)
+                .with_data_callback(logger.clone() as Arc<dyn debug::DataCallback>)
+                .with_metrics_callback(logger.clone() as Arc<dyn debug::MetricsCallback>);
+
+            detector = detector.with_debug_context(ctx);
+
+            // Create second context for main detector
+            let main_ctx = debug::DebugContext::new(debug_config)
+                .with_timing_callback(logger.clone() as Arc<dyn debug::TimingCallback>)
+                .with_data_callback(logger.clone() as Arc<dyn debug::DataCallback>)
+                .with_metrics_callback(logger.clone() as Arc<dyn debug::MetricsCallback>);
+
+            debug_context = Some(main_ctx);
         }
+
+        let detector_instance = DiamondBoardDetector {
+            config: board_config,
+            detector: Box::new(detector),
+            debug_context,
+        };
 
         Ok(detector_instance)
     }

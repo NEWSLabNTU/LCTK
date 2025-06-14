@@ -449,6 +449,164 @@ impl MetricsCallback for NoOpMetricsCallback {
     fn on_algorithm_stats(&self, _stage: &str, _stats: &AlgorithmStats) {}
 }
 
+/// Console-based debug logger for development and testing
+#[derive(Debug)]
+pub struct ConsoleDebugLogger {
+    pub verbose: bool,
+}
+
+impl ConsoleDebugLogger {
+    pub fn new(verbose: bool) -> Self {
+        Self { verbose }
+    }
+}
+
+impl TimingCallback for ConsoleDebugLogger {
+    fn on_stage_start(&self, stage: &str, timestamp: Instant) {
+        if self.verbose {
+            println!("TIMING: Starting stage '{}' at {:?}", stage, timestamp);
+        }
+    }
+
+    fn on_stage_end(&self, stage: &str, duration: Duration, memory_usage: Option<usize>) {
+        println!(
+            "TIMING: Stage '{}' completed in {:.2}ms{}",
+            stage,
+            duration.as_secs_f64() * 1000.0,
+            if let Some(mem) = memory_usage {
+                format!(" ({}KB memory)", mem / 1024)
+            } else {
+                String::new()
+            }
+        );
+    }
+}
+
+impl DataCallback for ConsoleDebugLogger {
+    fn on_intermediate_data(&self, stage: &str, data: &DebugData) {
+        match data {
+            DebugData::PointCloud { cloud, metadata } => {
+                println!(
+                    "DATA: Stage '{}' - PointCloud with {} points",
+                    stage,
+                    cloud.points.len()
+                );
+                if self.verbose {
+                    for (key, value) in metadata {
+                        println!("  {}: {}", key, value);
+                    }
+                }
+            }
+            DebugData::DetectionResult {
+                detections,
+                confidence_scores,
+                metadata,
+            } => {
+                println!(
+                    "DATA: Stage '{}' - {} detections with confidences: {:?}",
+                    stage,
+                    detections.len(),
+                    confidence_scores
+                );
+                if self.verbose {
+                    for (key, value) in metadata {
+                        println!("  {}: {}", key, value);
+                    }
+                }
+            }
+            DebugData::PlaneData {
+                planes,
+                inlier_counts,
+                quality_scores,
+                metadata,
+            } => {
+                println!(
+                    "DATA: Stage '{}' - {} planes with inliers: {:?}, quality: {:?}",
+                    stage,
+                    planes.len(),
+                    inlier_counts,
+                    quality_scores
+                );
+                if self.verbose {
+                    for (key, value) in metadata {
+                        println!("  {}: {}", key, value);
+                    }
+                }
+            }
+            DebugData::CircleData {
+                holes,
+                fitting_residuals,
+                iteration_counts,
+                metadata,
+            } => {
+                println!(
+                    "DATA: Stage '{}' - {} holes with residuals: {:?}",
+                    stage,
+                    holes.len(),
+                    fitting_residuals
+                );
+                if self.verbose {
+                    for (key, value) in metadata {
+                        println!("  {}: {}", key, value);
+                    }
+                }
+            }
+            DebugData::Generic { data } => {
+                println!(
+                    "DATA: Stage '{}' - Generic data with {} entries",
+                    stage,
+                    data.len()
+                );
+                if self.verbose {
+                    for (key, value) in data {
+                        println!("  {}: {}", key, value);
+                    }
+                }
+            }
+        }
+    }
+
+    fn on_point_cloud(&self, stage: &str, cloud: &PointCloud) {
+        if self.verbose {
+            println!(
+                "CLOUD: Stage '{}' - {} points (frame: {})",
+                stage,
+                cloud.points.len(),
+                cloud.frame_id
+            );
+        }
+    }
+}
+
+impl MetricsCallback for ConsoleDebugLogger {
+    fn on_metrics(&self, stage: &str, metrics: &StageMetrics) {
+        println!(
+            "METRICS: Stage '{}' - {}->{} points in {:.2}ms",
+            stage,
+            metrics.input_points,
+            metrics.output_points,
+            metrics.processing_time.as_secs_f64() * 1000.0
+        );
+        if self.verbose {
+            for (key, value) in &metrics.custom_metrics {
+                println!("  {}: {:.3}", key, value);
+            }
+        }
+    }
+
+    fn on_algorithm_stats(&self, stage: &str, stats: &AlgorithmStats) {
+        println!(
+            "ALGORITHM: Stage '{}' - {} ({} iterations, converged: {}, error: {:?})",
+            stage, stats.algorithm, stats.iterations, stats.converged, stats.final_error
+        );
+        if self.verbose {
+            for (key, value) in &stats.custom_stats {
+                println!("  {}: {}", key, value);
+            }
+        }
+    }
+}
+
 /// Pipeline stage names as constants for consistency
 pub mod stages {
     pub const PLANE_DETECTION: &str = "plane_detection";
