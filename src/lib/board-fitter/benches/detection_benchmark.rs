@@ -212,14 +212,7 @@ fn benchmark_debug_overhead(c: &mut Criterion) {
     let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let cloud = generator.generate_perfect_board(&board_config, &pose, 1000);
 
-    let config = BoardConfig {
-        board: board_config.clone(),
-        detection: None,
-        metadata: None,
-    };
-
     // Config is created inside the benchmark iterations
-
     let mut group = c.benchmark_group("debug_overhead");
 
     group.bench_with_input(BenchmarkId::new("debug", "disabled"), &cloud, |b, cloud| {

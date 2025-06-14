@@ -9,10 +9,12 @@ use rand_chacha::ChaCha8Rng;
 use std::f64::consts::PI;
 
 /// Test data generator for creating synthetic point clouds
+#[allow(unused)]
 pub struct TestDataGenerator {
     rng: ChaCha8Rng,
 }
 
+#[allow(unused)]
 impl TestDataGenerator {
     /// Create a new test data generator with a fixed seed for reproducibility
     pub fn new(seed: u64) -> Self {
@@ -265,6 +267,7 @@ pub fn create_test_board_config(size: f64) -> SquareBoard {
 }
 
 /// Create a board pose at a specific position and orientation
+#[allow(unused)]
 pub fn create_board_pose(
     x: f64,
     y: f64,
@@ -279,7 +282,7 @@ pub fn create_board_pose(
 }
 
 /// Verify detection accuracy against ground truth
-pub fn verify_detection_accuracy(
+pub fn _verify_detection_accuracy(
     detected: &BoardDetection,
     ground_truth_pose: &Isometry3<f64>,
     position_tolerance: f64,
@@ -304,6 +307,7 @@ pub struct PerfTimer {
     name: String,
 }
 
+#[allow(unused)]
 impl PerfTimer {
     pub fn new(name: &str) -> Self {
         Self {
@@ -324,6 +328,7 @@ impl Drop for PerfTimer {
 }
 
 /// Test result collector for aggregate statistics
+#[allow(unused)]
 pub struct TestResults {
     pub successes: usize,
     pub failures: usize,
@@ -332,6 +337,7 @@ pub struct TestResults {
     pub processing_times: Vec<f64>,
 }
 
+#[allow(unused)]
 impl TestResults {
     pub fn new() -> Self {
         Self {

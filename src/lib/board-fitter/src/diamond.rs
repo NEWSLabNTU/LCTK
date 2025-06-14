@@ -56,11 +56,6 @@ impl DiamondSquareFitter {
         Self { config }
     }
 
-    /// Create with default configuration
-    pub fn default() -> Self {
-        Self::new(DiamondFittingConfig::default())
-    }
-
     /// Create from board configuration
     pub fn from_board_config(board: &SquareBoard) -> Self {
         let config = DiamondFittingConfig {
@@ -336,28 +331,28 @@ impl DiamondSquareFitter {
 
         // Remove points with same angle (keep the farthest)
         let mut unique_points = vec![points[0]];
-        for i in 1..points.len() {
+        for point in points.iter().skip(1) {
             // Skip points that are collinear with previous point
             while unique_points.len() > 1
                 && self
                     .cross_product_2d(
                         unique_points[unique_points.len() - 2],
                         unique_points[unique_points.len() - 1],
-                        points[i],
+                        *point,
                     )
                     .abs()
                     < 1e-10
             {
                 // If the new point is farther, replace the last point
                 let dist_last = (unique_points[unique_points.len() - 1] - start).norm_squared();
-                let dist_new = (points[i] - start).norm_squared();
+                let dist_new = (*point - start).norm_squared();
                 if dist_new > dist_last {
                     unique_points.pop();
                 } else {
                     break;
                 }
             }
-            unique_points.push(points[i]);
+            unique_points.push(*point);
         }
 
         if unique_points.len() < 3 {
@@ -367,18 +362,14 @@ impl DiamondSquareFitter {
         // Graham scan
         let mut hull = vec![unique_points[0], unique_points[1]];
 
-        for i in 2..unique_points.len() {
+        for point in unique_points.iter().skip(2) {
             // Remove points that make a right turn
             while hull.len() > 1
-                && self.cross_product_2d(
-                    hull[hull.len() - 2],
-                    hull[hull.len() - 1],
-                    unique_points[i],
-                ) < 0.0
+                && self.cross_product_2d(hull[hull.len() - 2], hull[hull.len() - 1], *point) < 0.0
             {
                 hull.pop();
             }
-            hull.push(unique_points[i]);
+            hull.push(*point);
         }
 
         hull
@@ -771,6 +762,12 @@ impl DiamondSquareFitter {
     }
 }
 
+impl Default for DiamondSquareFitter {
+    fn default() -> Self {
+        Self::new(DiamondFittingConfig::default())
+    }
+}
+
 /// 2D square representation for fitting
 #[derive(Debug, Clone)]
 struct Square2D {
@@ -798,8 +795,7 @@ impl DiamondSquare {
     /// Convert to board detection with confidence
     pub fn to_board_detection(&self, confidence: DetectionConfidence) -> BoardDetection {
         let dimensions = Vector3::new(self.size, self.size, 0.02); // Assume 2cm thickness
-        let detection = BoardDetection::new(self.pose, confidence, dimensions);
-        detection
+        BoardDetection::new(self.pose, confidence, dimensions)
     }
 
     /// Convert to board detection with confidence and supporting points
@@ -988,9 +984,11 @@ mod tests {
 
     #[test]
     fn test_pca_square_fitting() {
-        let mut config = DiamondFittingConfig::default();
-        config.expected_size = 2.0; // Expect 2-unit square
-        config.size_tolerance = 0.1;
+        let config = DiamondFittingConfig {
+            expected_size: 2.0, // Expect 2-unit square
+            size_tolerance: 0.1,
+            ..DiamondFittingConfig::default()
+        };
         let fitter = DiamondSquareFitter::new(config);
 
         // Create axis-aligned square points
@@ -1012,9 +1010,11 @@ mod tests {
 
     #[test]
     fn test_pca_rotated_square() {
-        let mut config = DiamondFittingConfig::default();
-        config.expected_size = 2.0; // Side length of square would be 2.0 for this diamond
-        config.size_tolerance = 0.3; // More tolerance for rotated shapes
+        let config = DiamondFittingConfig {
+            expected_size: 2.0,  // Side length of square would be 2.0 for this diamond
+            size_tolerance: 0.3, // More tolerance for rotated shapes
+            ..DiamondFittingConfig::default()
+        };
         let fitter = DiamondSquareFitter::new(config);
 
         // Create 45-degree rotated square (diamond shape)

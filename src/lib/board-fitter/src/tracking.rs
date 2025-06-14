@@ -350,7 +350,7 @@ impl KalmanFilterState {
     }
 
     /// Measurement matrix (observe position only)
-    fn measurement_matrix(&self) -> nalgebra::Matrix3x6<f64> {
+    fn _measurement_matrix(&self) -> nalgebra::Matrix3x6<f64> {
         let mut h = nalgebra::Matrix3x6::zeros();
         h[(0, 0)] = 1.0; // Observe x
         h[(1, 1)] = 1.0; // Observe y
@@ -398,6 +398,12 @@ pub struct BoardTracker {
     roi_mode: RoiType,
 }
 
+impl Default for BoardTracker {
+    fn default() -> Self {
+        Self::new(TrackingConfig::default())
+    }
+}
+
 impl BoardTracker {
     /// Create a new board tracker
     pub fn new(config: TrackingConfig) -> Self {
@@ -406,11 +412,6 @@ impl BoardTracker {
             config,
             roi_mode: RoiType::GlobalSearch,
         }
-    }
-
-    /// Create with default configuration
-    pub fn default() -> Self {
-        Self::new(TrackingConfig::default())
     }
 
     /// Update tracker with new detections
@@ -863,9 +864,9 @@ impl BoardTracker {
 
         // Create sorted list of all possible assignments by cost
         let mut candidates = Vec::new();
-        for i in 0..n_tracks {
-            for j in 0..n_detections {
-                candidates.push((cost_matrix[i][j], i, j));
+        for (i, track_costs) in cost_matrix.iter().enumerate().take(n_tracks) {
+            for (j, &cost) in track_costs.iter().enumerate().take(n_detections) {
+                candidates.push((cost, i, j));
             }
         }
         candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());

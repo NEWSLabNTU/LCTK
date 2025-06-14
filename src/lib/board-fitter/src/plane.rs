@@ -49,6 +49,12 @@ pub struct RansacPlaneDetector {
     stats: ProcessingStats,
 }
 
+impl Default for RansacPlaneDetector {
+    fn default() -> Self {
+        Self::new(PlaneDetectionConfig::default())
+    }
+}
+
 impl RansacPlaneDetector {
     /// Create a new RANSAC plane detector
     pub fn new(config: PlaneDetectionConfig) -> Self {
@@ -57,11 +63,6 @@ impl RansacPlaneDetector {
             rng: ChaCha8Rng::seed_from_u64(42), // Deterministic for testing
             stats: ProcessingStats::new(),
         }
-    }
-
-    /// Create with default configuration
-    pub fn default() -> Self {
-        Self::new(PlaneDetectionConfig::default())
     }
 
     /// Detect planes in a point cloud
@@ -216,8 +217,8 @@ impl RansacPlaneDetector {
     /// Sample three random point indices
     fn sample_three_points(&mut self, point_indices: &[usize]) -> [usize; 3] {
         let mut sample = [0; 3];
-        for i in 0..3 {
-            sample[i] = point_indices[self.rng.gen_range(0..point_indices.len())];
+        for element in &mut sample {
+            *element = point_indices[self.rng.gen_range(0..point_indices.len())];
         }
         sample
     }

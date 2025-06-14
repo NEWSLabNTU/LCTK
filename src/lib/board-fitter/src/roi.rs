@@ -61,6 +61,12 @@ pub struct RoiManager {
     cache_timeout: Duration,
 }
 
+impl Default for RoiManager {
+    fn default() -> Self {
+        Self::new(RoiConfig::default())
+    }
+}
+
 impl RoiManager {
     /// Create a new ROI manager
     pub fn new(config: RoiConfig) -> Self {
@@ -69,11 +75,6 @@ impl RoiManager {
             roi_cache: HashMap::new(),
             cache_timeout: Duration::from_millis(100), // 100ms cache
         }
-    }
-
-    /// Create with default configuration
-    pub fn default() -> Self {
-        Self::new(RoiConfig::default())
     }
 
     /// Compute ROIs based on current tracking state
@@ -125,10 +126,7 @@ impl RoiManager {
                     frame_id: point_cloud.frame_id.clone(),
                 };
 
-                filtered_clouds.push((
-                    filtered_cloud,
-                    roi.board_id.unwrap_or_else(|| BoardId::nil()),
-                ));
+                filtered_clouds.push((filtered_cloud, roi.board_id.unwrap_or_else(BoardId::nil)));
             }
         }
 
@@ -568,7 +566,7 @@ impl AdaptivePreprocessor {
 
             voxel_map
                 .entry((voxel_x, voxel_y, voxel_z))
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(idx);
         }
 
@@ -701,6 +699,12 @@ impl AdaptivePreprocessor {
             timestamp: point_cloud.timestamp,
             frame_id: point_cloud.frame_id.clone(),
         })
+    }
+}
+
+impl Default for AdaptivePreprocessor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

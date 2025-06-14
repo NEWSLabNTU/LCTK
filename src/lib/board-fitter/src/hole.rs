@@ -53,15 +53,16 @@ pub struct HoleDetector {
     config: HoleDetectionConfig,
 }
 
+impl Default for HoleDetector {
+    fn default() -> Self {
+        Self::new(HoleDetectionConfig::default())
+    }
+}
+
 impl HoleDetector {
     /// Create a new hole detector
     pub fn new(config: HoleDetectionConfig) -> Self {
         Self { config }
-    }
-
-    /// Create with default configuration
-    pub fn default() -> Self {
-        Self::new(HoleDetectionConfig::default())
     }
 
     /// Detect holes in a diamond square region
@@ -186,7 +187,7 @@ impl HoleDetector {
         // Detect holes using different methods
         let mut holes = Vec::new();
         let mut intensity_holes_count = 0;
-        let mut geometric_holes_count = 0;
+        // let mut geometric_holes_count = 0;
 
         debug!(
             "HoleDetector - {} projected points available for hole detection",
@@ -226,7 +227,7 @@ impl HoleDetector {
         // Method 2: Geometric hole detection (negative space)
         debug!("HoleDetector - attempting geometric hole detection");
         let geometric_holes = self.detect_holes_by_geometry(&projected_points)?;
-        geometric_holes_count = geometric_holes.len();
+        let geometric_holes_count = geometric_holes.len();
         debug!(
             "HoleDetector - found {} geometric holes",
             geometric_holes.len()
@@ -347,7 +348,7 @@ impl HoleDetector {
                 let position_error = (detected.center - expected_pos).norm();
                 let radius_error = (detected.radius - expected_radius).abs();
 
-                if i == 0 && expected.id.as_ref().map_or(false, |id| id == "top_hole") {
+                if i == 0 && expected.id.as_ref().is_some_and(|id| id == "top_hole") {
                     debug!("HoleDetector.match_pattern - checking top_hole:");
                     debug!(
                         "  Expected pos: ({:.3}, {:.3}, {:.3}), radius: {:.3}m",
@@ -426,7 +427,7 @@ impl HoleDetector {
             let projected_point = ProjectedPoint {
                 point_2d: Point2::new(local_point.x, local_point.y),
                 original_index: idx,
-                depth: local_point.z, // Distance from board surface
+                // depth: local_point.z, // Distance from board surface
             };
 
             projected.push(projected_point);
@@ -523,7 +524,7 @@ impl HoleDetector {
 
         for (i, region) in empty_regions.iter().enumerate() {
             // Convert empty region to boundary points for circle fitting
-            let boundary_points = self.extract_region_boundary(&region, grid_size);
+            let boundary_points = self.extract_region_boundary(region, grid_size);
 
             debug!("HoleDetector.geometry - processing circular region {} with {} cells, {} boundary points", 
                 i, region.len(), boundary_points.len());
@@ -670,9 +671,9 @@ impl HoleDetector {
 
         let mut grid = IntensityGrid {
             data: vec![vec![IntensityCell::default(); width]; height],
-            min_x,
-            min_y,
-            grid_size,
+            // min_x,
+            // min_y,
+            // grid_size,
             width,
             height,
         };
@@ -716,9 +717,9 @@ impl HoleDetector {
 
         let mut grid = OccupancyGrid {
             data: vec![vec![false; width]; height],
-            min_x,
-            min_y,
-            grid_size,
+            // min_x,
+            // min_y,
+            // grid_size,
             width,
             height,
         };
@@ -729,11 +730,9 @@ impl HoleDetector {
             let grid_x = ((point.point_2d.x - min_x) / grid_size) as usize;
             let grid_y = ((point.point_2d.y - min_y) / grid_size) as usize;
 
-            if grid_x < width && grid_y < height {
-                if !grid.data[grid_y][grid_x] {
-                    grid.data[grid_y][grid_x] = true;
-                    occupied_count += 1;
-                }
+            if grid_x < width && grid_y < height && !grid.data[grid_y][grid_x] {
+                grid.data[grid_y][grid_x] = true;
+                occupied_count += 1;
             }
         }
 
@@ -1057,9 +1056,9 @@ impl HoleDetector {
 #[derive(Debug)]
 struct IntensityGrid {
     data: Vec<Vec<IntensityCell>>,
-    min_x: f64,
-    min_y: f64,
-    grid_size: f64,
+    // min_x: f64,
+    // min_y: f64,
+    // grid_size: f64,
     width: usize,
     height: usize,
 }
@@ -1076,9 +1075,9 @@ struct IntensityCell {
 #[derive(Debug)]
 struct OccupancyGrid {
     data: Vec<Vec<bool>>,
-    min_x: f64,
-    min_y: f64,
-    grid_size: f64,
+    // min_x: f64,
+    // min_y: f64,
+    // grid_size: f64,
     width: usize,
     height: usize,
 }
@@ -1088,7 +1087,7 @@ struct OccupancyGrid {
 struct ProjectedPoint {
     point_2d: Point2<f64>,
     original_index: usize,
-    depth: f64, // Distance from board surface
+    // depth: f64, // Distance from board surface
 }
 
 /// Result of hole pattern matching
@@ -1232,7 +1231,7 @@ impl CircleFitter {
         let radius = radius_squared.sqrt();
 
         // Validate radius bounds
-        if radius < 0.001 || radius > 10.0 {
+        if !(0.001..=10.0).contains(&radius) {
             return None;
         }
 
@@ -1357,7 +1356,7 @@ impl CircleFitter {
         let radius = (p1 - center).norm();
 
         // Validate radius
-        if radius < 0.001 || radius > 10.0 {
+        if !(0.001..=10.0).contains(&radius) {
             return None;
         }
 
@@ -1406,15 +1405,15 @@ impl Circle2D {
 
 /// Hole pattern analyzer for asymmetric patterns
 pub struct AsymmetricPatternAnalyzer {
-    /// Expected pattern from configuration
-    expected_pattern: Vec<CircleHole>,
+    // /// Expected pattern from configuration
+    // expected_pattern: Vec<CircleHole>,
 }
 
 impl AsymmetricPatternAnalyzer {
     /// Create analyzer for diamond board pattern
-    pub fn for_diamond_board(board: &SquareBoard) -> Self {
+    pub fn for_diamond_board(_board: &SquareBoard) -> Self {
         Self {
-            expected_pattern: board.holes.clone(),
+            // expected_pattern: board.holes.clone(),
         }
     }
 
@@ -1471,17 +1470,7 @@ mod tests {
     use crate::types::DetectionConfidence;
     use board_fitter_config::{Point2D, SquareBoard};
     use measurements::Length;
-    use nalgebra::{Isometry3, Point3, Vector3};
-
-    fn create_test_diamond_square() -> DiamondSquare {
-        DiamondSquare {
-            center: Point3::origin(),
-            size: 1.0,
-            pose: Isometry3::identity(),
-            corners: [Point3::origin(); 4],
-            normal: Vector3::z(),
-        }
-    }
+    use nalgebra::Point3;
 
     fn create_test_board_config() -> SquareBoard {
         let mut board = SquareBoard::new(Length::from_meters(1.0));
@@ -1725,7 +1714,7 @@ mod tests {
                 projected_points.push(ProjectedPoint {
                     point_2d: Point2::new(x, y),
                     original_index: i,
-                    depth: 0.0,
+                    // depth: 0.0,
                 });
             }
         }
@@ -1743,12 +1732,12 @@ mod tests {
             ProjectedPoint {
                 point_2d: Point2::new(0.0, 0.0),
                 original_index: 0,
-                depth: 0.0,
+                // depth: 0.0,
             },
             ProjectedPoint {
                 point_2d: Point2::new(0.1, 0.1),
                 original_index: 1,
-                depth: 0.0,
+                // depth: 0.0,
             },
         ];
 

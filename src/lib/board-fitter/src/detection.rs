@@ -540,7 +540,7 @@ impl DetectionValidator {
 
         // Check aspect ratio - diamond boards should be roughly square
         let aspect_ratio = detection.dimensions.x / detection.dimensions.y;
-        if aspect_ratio < 0.8 || aspect_ratio > 1.2 {
+        if !(0.8..=1.2).contains(&aspect_ratio) {
             return false;
         }
 
@@ -672,9 +672,7 @@ impl BoardDetectorBuilder {
     /// Build the detector with the given board configuration
     pub fn build(self) -> Result<BoardDetector> {
         // Set up debug context if provided
-        let debug_context = self
-            .debug_config
-            .map(|debug_config| DebugContext::new(debug_config));
+        let debug_context = self.debug_config.map(DebugContext::new);
 
         let detector = BoardDetector::new_with_debug(self.detection_config, debug_context);
 
