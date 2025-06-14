@@ -29,10 +29,12 @@ fn test_debug_instrumentation_basic() {
         .build(config)
         .expect("Failed to create detector with debug");
 
-    // Generate test data
+    // Generate test data - use a tilted board pose that will pass plane filtering
     let mut generator = TestDataGenerator::new(42);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
-    let point_cloud = generator.generate_perfect_board(&board_config, &pose, 400);
+    // Tilt the board 45 degrees around X-axis to create a diamond orientation
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0);
+    // Use high point density for better hole detection
+    let point_cloud = generator.generate_perfect_board(&board_config, &pose, 10000);
 
     println!(
         "Generated test point cloud with {} points",

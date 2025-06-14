@@ -245,6 +245,43 @@ impl BoardDetector for DiamondDetector {
 
         // STEP 2: Plane Filtering with Debug
         let plane_filter = crate::plane::PlaneFilter::for_diamond_boards();
+
+        if let Some(debug_ctx) = &self.debug_ctx {
+            println!("DEBUG: Plane filtering criteria:");
+            println!("  Min Z-angle: {:.1}°, Max Z-angle: {:.1}°", 30.0, 150.0);
+            println!("  Min dimensions: 0.5m x 0.5m, Max dimensions: 2.0m x 2.0m");
+
+            for (i, plane) in detected_planes.iter().enumerate() {
+                let z_axis = nalgebra::Vector3::new(0.0, 0.0, 1.0);
+                let angle_rad = plane.normal.angle(&z_axis);
+                let angle_deg = angle_rad.to_degrees();
+                let size = plane.bbox.size();
+
+                println!(
+                    "  Plane {}: normal={:.3?}, angle_with_z={:.1}°, size={:.2}x{:.2}m, inliers={}",
+                    i,
+                    plane.normal,
+                    angle_deg,
+                    size.x,
+                    size.y,
+                    plane.inliers.len()
+                );
+
+                let angle_ok =
+                    angle_rad >= 30.0_f64.to_radians() && angle_rad <= 150.0_f64.to_radians();
+                let size_ok = size.x >= 0.5 && size.y >= 0.5 && size.x <= 2.0 && size.y <= 2.0;
+
+                println!(
+                    "    Angle check: {} ({}°), Size check: {} ({:.2}x{:.2}m)",
+                    if angle_ok { "PASS" } else { "FAIL" },
+                    angle_deg,
+                    if size_ok { "PASS" } else { "FAIL" },
+                    size.x,
+                    size.y
+                );
+            }
+        }
+
         let filtered_planes = plane_filter.filter_planes(detected_planes);
 
         if let Some(debug_ctx) = &self.debug_ctx {

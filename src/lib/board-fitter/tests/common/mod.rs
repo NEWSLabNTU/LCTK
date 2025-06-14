@@ -77,17 +77,52 @@ impl TestDataGenerator {
             );
             let radius = hole.radius.as_meters();
 
-            // Generate points around hole circumference
-            let num_boundary_points = 20;
-            for i in 0..num_boundary_points {
-                let angle = 2.0 * PI * i as f64 / num_boundary_points as f64;
-                let x = hole_center.x + radius * angle.cos() * 1.1; // Slightly outside
-                let y = hole_center.y + radius * angle.sin() * 1.1;
+            // Generate dense points around hole circumference at multiple radii
+            let num_rings = 3;
+            let num_points_per_ring = 40;
 
-                let local_point = Point3::new(x, y, 0.0);
-                let world_point = pose * local_point;
-                points.push(world_point);
-                intensities.push(64.0); // Lower intensity near holes
+            for ring in 0..num_rings {
+                let ring_radius = radius * (1.1 + 0.1 * ring as f64); // 1.1x, 1.2x, 1.3x radius
+
+                for i in 0..num_points_per_ring {
+                    let angle = 2.0 * PI * i as f64 / num_points_per_ring as f64;
+                    let x = hole_center.x + ring_radius * angle.cos();
+                    let y = hole_center.y + ring_radius * angle.sin();
+
+                    // Check if point is still within board bounds
+                    if x.abs() <= half_size && y.abs() <= half_size {
+                        let local_point = Point3::new(x, y, 0.0);
+                        let world_point = pose * local_point;
+                        points.push(world_point);
+                        intensities.push(64.0 - 10.0 * ring as f32); // Decreasing intensity away from hole
+                    }
+                }
+            }
+
+            // Also add dense grid of points in a square region around each hole
+            let grid_size = radius * 3.0; // 3x radius on each side
+            let grid_points = 20; // 20x20 grid
+
+            for i in 0..grid_points {
+                for j in 0..grid_points {
+                    let x = hole_center.x
+                        + (i as f64 / (grid_points - 1) as f64 - 0.5) * grid_size * 2.0;
+                    let y = hole_center.y
+                        + (j as f64 / (grid_points - 1) as f64 - 0.5) * grid_size * 2.0;
+
+                    // Check if point is outside hole but within board
+                    let dist_to_hole =
+                        ((x - hole_center.x).powi(2) + (y - hole_center.y).powi(2)).sqrt();
+                    if dist_to_hole > radius && x.abs() <= half_size && y.abs() <= half_size {
+                        let local_point = Point3::new(x, y, 0.0);
+                        let world_point = pose * local_point;
+                        points.push(world_point);
+
+                        // Intensity based on distance from hole
+                        let intensity = (64.0 + (dist_to_hole / radius * 64.0).min(64.0)) as f32;
+                        intensities.push(intensity);
+                    }
+                }
             }
         }
 

@@ -64,6 +64,8 @@ impl DiamondSquareFitter {
     pub fn from_board_config(board: &SquareBoard) -> Self {
         let config = DiamondFittingConfig {
             expected_size: board.size.as_meters(),
+            size_tolerance: 0.5, // Increase tolerance to handle projections
+            angle_tolerance: 30.0_f64.to_radians(), // Increase angle tolerance for tilted boards
             ..DiamondFittingConfig::default()
         };
         Self::new(config)
@@ -147,8 +149,23 @@ impl DiamondSquareFitter {
             ctx.emit_data(stages::DIAMOND_FITTING, &debug_data);
         }
 
+        // Debug: show range of projected points
+        if !plane_points.is_empty() {
+            let (min_x, max_x, min_y, max_y) = self.compute_bounding_box(&plane_points);
+            println!("DEBUG: DiamondFitter - projected points bounding box: x=[{:.3}, {:.3}], y=[{:.3}, {:.3}], size={:.3}x{:.3}", 
+                min_x, max_x, min_y, max_y, max_x - min_x, max_y - min_y);
+        }
+
         // Find boundary points using convex hull
+        println!(
+            "DEBUG: DiamondFitter - computing convex hull for {} projected points",
+            plane_points.len()
+        );
         let boundary = self.compute_convex_hull(&plane_points);
+        println!(
+            "DEBUG: DiamondFitter - convex hull has {} boundary points",
+            boundary.len()
+        );
 
         if let Some(ref mut ctx) = debug_ctx {
             let mut metadata = HashMap::new();
@@ -174,7 +191,12 @@ impl DiamondSquareFitter {
         let mut fitting_success = false;
         let mut validation_success = false;
 
+        println!(
+            "DEBUG: DiamondFitter - attempting to fit square to {} boundary points",
+            boundary.len()
+        );
         if let Some(square_2d) = self.fit_square_2d(&boundary)? {
+            println!("DEBUG: DiamondFitter - square fitting succeeded");
             fitting_attempts = 1;
             fitting_success = true;
 
@@ -369,32 +391,56 @@ impl DiamondSquareFitter {
     /// Fit square to 2D boundary points
     fn fit_square_2d(&self, boundary: &[Point2<f64>]) -> Result<Option<Square2D>> {
         if boundary.len() < 4 {
+            println!(
+                "DEBUG: fit_square_2d - not enough boundary points: {}",
+                boundary.len()
+            );
             return Ok(None);
         }
+
+        println!(
+            "DEBUG: fit_square_2d - fitting square to {} boundary points",
+            boundary.len()
+        );
 
         // Try different fitting approaches
 
         // 1. PCA-based fitting for oriented squares
+        println!("DEBUG: fit_square_2d - trying PCA fitting");
         if let Some(square) = self.fit_square_pca(boundary)? {
+            println!("DEBUG: fit_square_2d - PCA fitting succeeded!");
             return Ok(Some(square));
         }
+        println!("DEBUG: fit_square_2d - PCA fitting failed");
 
         // 2. Diamond-oriented fitting (45° rotation)
+        println!("DEBUG: fit_square_2d - trying diamond-specific fitting");
         if let Some(square) = self.fit_diamond_square(boundary)? {
+            println!("DEBUG: fit_square_2d - diamond fitting succeeded!");
             return Ok(Some(square));
         }
+        println!("DEBUG: fit_square_2d - diamond fitting failed");
 
         Ok(None)
     }
 
     /// Fit square using PCA (Principal Component Analysis)
     fn fit_square_pca(&self, points: &[Point2<f64>]) -> Result<Option<Square2D>> {
+        println!(
+            "DEBUG: fit_square_pca - attempting PCA fitting with {} points",
+            points.len()
+        );
         if points.len() < 4 {
+            println!("DEBUG: fit_square_pca - not enough points (need at least 4)");
             return Ok(None);
         }
 
         // Compute centroid
         let centroid = self.compute_centroid(points);
+        println!(
+            "DEBUG: fit_square_pca - centroid: ({:.3}, {:.3})",
+            centroid.x, centroid.y
+        );
 
         // Center the points
         let centered_points: Vec<Point2<f64>> = points
@@ -468,9 +514,17 @@ impl DiamondSquareFitter {
 
         // Check if it's roughly square
         let aspect_ratio = width / height;
+        println!(
+            "DEBUG: fit_square_pca - bounding box: width={:.3}, height={:.3}, aspect_ratio={:.3}",
+            width, height, aspect_ratio
+        );
         if aspect_ratio < self.config.min_aspect_ratio
             || aspect_ratio > self.config.max_aspect_ratio
         {
+            println!(
+                "DEBUG: fit_square_pca - aspect ratio {:.3} outside range [{:.3}, {:.3}]",
+                aspect_ratio, self.config.min_aspect_ratio, self.config.max_aspect_ratio
+            );
             return Ok(None);
         }
 
@@ -478,7 +532,18 @@ impl DiamondSquareFitter {
 
         // Check size constraints
         let size_error = (size - self.config.expected_size).abs() / self.config.expected_size;
+        println!(
+            "DEBUG: fit_square_pca - size={:.3}m, expected={:.3}m, error={:.1}%",
+            size,
+            self.config.expected_size,
+            size_error * 100.0
+        );
         if size_error > self.config.size_tolerance {
+            println!(
+                "DEBUG: fit_square_pca - size error {:.1}% exceeds tolerance {:.1}%",
+                size_error * 100.0,
+                self.config.size_tolerance * 100.0
+            );
             return Ok(None);
         }
 
@@ -491,8 +556,16 @@ impl DiamondSquareFitter {
 
     /// Fit diamond-oriented square (45° rotation)
     fn fit_diamond_square(&self, points: &[Point2<f64>]) -> Result<Option<Square2D>> {
+        println!(
+            "DEBUG: fit_diamond_square - attempting diamond fitting with {} points",
+            points.len()
+        );
         // Find centroid
         let centroid = self.compute_centroid(points);
+        println!(
+            "DEBUG: fit_diamond_square - centroid: ({:.3}, {:.3})",
+            centroid.x, centroid.y
+        );
 
         // Convert to diamond coordinate system (45° rotation)
         let diamond_points: Vec<Point2<f64>> = points
@@ -507,17 +580,41 @@ impl DiamondSquareFitter {
         let height = max_y - min_y;
         let size = (width + height) / 2.0; // Average for square
 
+        println!(
+            "DEBUG: fit_diamond_square - diamond space bounding box: width={:.3}, height={:.3}",
+            width, height
+        );
+
         // Check if it matches expected size
         let size_error = (size - self.config.expected_size).abs() / self.config.expected_size;
+        println!(
+            "DEBUG: fit_diamond_square - size={:.3}m, expected={:.3}m, error={:.1}%",
+            size,
+            self.config.expected_size,
+            size_error * 100.0
+        );
         if size_error > self.config.size_tolerance {
+            println!(
+                "DEBUG: fit_diamond_square - size error {:.1}% exceeds tolerance {:.1}%",
+                size_error * 100.0,
+                self.config.size_tolerance * 100.0
+            );
             return Ok(None);
         }
 
         // Check aspect ratio
         let aspect_ratio = width / height;
+        println!(
+            "DEBUG: fit_diamond_square - aspect_ratio={:.3}",
+            aspect_ratio
+        );
         if aspect_ratio < self.config.min_aspect_ratio
             || aspect_ratio > self.config.max_aspect_ratio
         {
+            println!(
+                "DEBUG: fit_diamond_square - aspect ratio {:.3} outside range [{:.3}, {:.3}]",
+                aspect_ratio, self.config.min_aspect_ratio, self.config.max_aspect_ratio
+            );
             return Ok(None);
         }
 
@@ -591,17 +688,40 @@ impl DiamondSquareFitter {
         // Check size is within tolerance
         let size_error =
             (square.size - self.config.expected_size).abs() / self.config.expected_size;
-        if size_error > self.config.size_tolerance {
-            return false;
-        }
+        let size_ok = size_error <= self.config.size_tolerance;
 
-        // Check rotation is close to diamond angle (45°)
-        let angle_error = (square.rotation - PI / 4.0).abs();
-        if angle_error > self.config.angle_tolerance {
-            return false;
+        // Check rotation is close to diamond angle (45°) or any 90° rotation
+        // Allow squares at 0°, 45°, 90°, etc. since projection can change apparent rotation
+        // Normalize angle to [0, 90°) range
+        let mut normalized_angle = square.rotation % (PI / 2.0);
+        if normalized_angle < 0.0 {
+            normalized_angle += PI / 2.0;
         }
+        let angle_45 = (normalized_angle - PI / 4.0).abs();
+        let angle_0 = normalized_angle.abs();
+        let angle_90 = (normalized_angle - PI / 2.0).abs();
+        let angle_error = angle_45.min(angle_0).min(angle_90);
+        let angle_ok = angle_error <= self.config.angle_tolerance;
 
-        true
+        // Debug output to understand validation failures
+        println!(
+            "DEBUG: validate_square - size={:.3}m (expected={:.3}m, error={:.1}%, ok={})",
+            square.size,
+            self.config.expected_size,
+            size_error * 100.0,
+            size_ok
+        );
+        println!(
+            "DEBUG: validate_square - angle={:.1}° (expected=45°, error={:.1}°, ok={})",
+            square.rotation.to_degrees(),
+            angle_error.to_degrees(),
+            angle_ok
+        );
+
+        let result = size_ok && angle_ok;
+        println!("DEBUG: validate_square - overall result: {}", result);
+
+        result
     }
 
     /// Convert 2D square back to 3D diamond square

@@ -14,7 +14,7 @@ fn benchmark_detection_pipeline(c: &mut Criterion) {
     let board_config = create_test_board_config(1.0);
 
     let mut generator = TestDataGenerator::new(100);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
 
     // Create test data sets of different sizes
     let point_counts = [100, 500, 1000, 5000, 10000];
@@ -51,7 +51,7 @@ fn benchmark_plane_detection(c: &mut Criterion) {
 
     let mut generator = TestDataGenerator::new(101);
     let board_config = create_test_board_config(1.0);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
 
     // Generate test cloud with multiple planes
     let cloud1 = generator.generate_perfect_board(&board_config, &pose, 1000);
@@ -106,7 +106,7 @@ fn benchmark_hole_detection(c: &mut Criterion) {
 
     let mut generator = TestDataGenerator::new(102);
     let board_config = create_test_board_config(1.0);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let cloud = generator.generate_perfect_board(&board_config, &pose, 1000);
 
     // First detect plane and fit square
@@ -133,7 +133,7 @@ fn benchmark_with_noise(c: &mut Criterion) {
     let board_config = create_test_board_config(1.0);
 
     let mut generator = TestDataGenerator::new(103);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let perfect_cloud = generator.generate_perfect_board(&board_config, &pose, 1000);
 
     let mut group = c.benchmark_group("noise_robustness");
@@ -173,7 +173,7 @@ fn benchmark_roi_preprocessing(c: &mut Criterion) {
 
     let mut generator = TestDataGenerator::new(104);
     let board_config = create_test_board_config(1.0);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
 
     // Generate dense point cloud
     let cloud = generator.generate_perfect_board(&board_config, &pose, 10000);
@@ -207,7 +207,7 @@ fn benchmark_debug_overhead(c: &mut Criterion) {
 
     let board_config = create_test_board_config(1.0);
     let mut generator = TestDataGenerator::new(105);
-    let pose = create_board_pose(2.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+    let pose = create_board_pose(2.0, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
     let cloud = generator.generate_perfect_board(&board_config, &pose, 1000);
 
     let config = Config {
