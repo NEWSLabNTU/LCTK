@@ -76,26 +76,34 @@ LCTK (LiDAR and Camera Toolkit) is undergoing a comprehensive refactoring to bec
   - **Priority**: Low
   - **Scope**: Consider ROS 2 service interface for dynamic generation
 
-## Future Work
+## Current Work in Progress
 
-### 1. CUDA-Accelerated Registration Integration 🎯
+### 1. Enhanced Board Detection with small_gicp Integration 🎯
 
-**Primary Goal**: Integrate [small_gicp_rust](https://github.com/jerry73204/small_gicp_rust/) for CUDA-accelerated point cloud registration
+**Status**: ✅ **small_gicp_rust submodule added** - Ready for integration
 
-**Implementation Plan**:
-- Create new crate: `cuda-registration`
-- Integrate small_gicp_rust as dependency
-- Develop ROS 2 node: `cuda_registration_node`
-  - **Subscribes**: Multiple point clouds for registration
-  - **Publishes**: Registration transforms and aligned point clouds
-  - **Services**: Registration parameter configuration
+**Implementation Progress**:
+- ✅ `small_gicp_rust` submodule integrated at `src/lib/small_gicp_rust/`
+- ✅ `board-fitter-config` crate with advanced board shape definitions
+- 🚧 `board-fitter` crate (placeholder implementation)
+- 🚧 Integration of small_gicp for enhanced point cloud registration
+
+**Next Steps**:
+- Implement full board-fitter using small_gicp for robust plane fitting
+- Create ROS 2 node: `advanced_board_locator_node`
+  - **Subscribes**: Point clouds for advanced board detection
+  - **Publishes**: Enhanced board detections with better accuracy
+  - **Features**: Support for complex board shapes (rectangles, circles, polygons)
 
 **Benefits**:
-- Significantly faster board fitting algorithms
-- Real-time multi-LiDAR registration
+- Significantly faster and more accurate board fitting algorithms
+- Support for multiple board geometries beyond simple rectangles
 - Enhanced calibration accuracy through better point cloud alignment
+- Real-time performance with parallel processing capabilities
 
-### 2. Enhanced Calibration Pipeline
+## Future Work
+
+### 1. Enhanced Calibration Pipeline
 
 **Real-time Calibration**:
 - Automatic calibration quality assessment
@@ -107,7 +115,7 @@ LCTK (LiDAR and Camera Toolkit) is undergoing a comprehensive refactoring to bec
 - GPS integration for global coordinate systems
 - Thermal camera support for additional calibration targets
 
-### 3. Distributed Computing Support
+### 2. Distributed Computing Support
 
 **Multi-node Calibration**:
 - Distributed processing across multiple compute nodes
@@ -121,9 +129,12 @@ LCTK (LiDAR and Camera Toolkit) is undergoing a comprehensive refactoring to bec
 - **`aruco-detector`** - ArUco marker detection algorithms
 - **`hollow-board-config`** - Hollow board pattern configuration
 - **`hollow-board-detector`** - Hollow board detection in point clouds
+- **`board-fitter-config`** ✅ - Advanced board shape configurations (rectangles, circles, polygons)
+- **`board-fitter`** 🚧 - Advanced board detection using small_gicp
 - **`plane-estimator`** - Point cloud plane fitting
 - **`pnp-solver`** - OpenCV PnP solving wrapper
 - **`multi-stream-synchronizer`** - Temporal synchronization utilities
+- **`small_gicp_rust`** ✅ - High-performance point cloud registration library
 
 ### ROS 2 Integration Status
 
@@ -159,8 +170,12 @@ LCTK (LiDAR and Camera Toolkit) is undergoing a comprehensive refactoring to bec
 
 ## Timeline
 
-- **Q1 2025**: Complete multi_wayside ROS 2 conversion
-- **Q2 2025**: Integrate small_gicp_rust and implement cuda_registration_node
+- **Q1 2025**: 
+  - ✅ Integrate small_gicp_rust submodule
+  - ✅ Create board-fitter-config crate
+  - 🚧 Complete board-fitter implementation
+  - 🚧 Complete multi_wayside ROS 2 conversion
+- **Q2 2025**: Create advanced_board_locator_node with small_gicp integration
 - **Q3 2025**: Enhanced real-time calibration features
 - **Q4 2025**: Distributed computing and multi-sensor support
 
