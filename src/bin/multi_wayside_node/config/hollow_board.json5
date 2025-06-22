@@ -1,0 +1,36 @@
+{
+    // Board configuration for multi-wayside calibration
+    // 1m x 1m square board with 4 circular holes
+    
+    // Board dimensions
+    "board_width": "1000mm",
+    "board_height": "1000mm",
+    "board_thickness": "20mm",
+    
+    // Hole configuration - 4 holes in square arrangement
+    "holes": [
+        {
+            "center": [-200.0, -200.0, 0.0],  // mm
+            "radius": 150.0,  // mm
+            "id": "hole_1"
+        },
+        {
+            "center": [200.0, -200.0, 0.0],
+            "radius": 150.0,
+            "id": "hole_2"
+        },
+        {
+            "center": [200.0, 200.0, 0.0],
+            "radius": 150.0,
+            "id": "hole_3"
+        },
+        {
+            "center": [-200.0, 200.0, 0.0],
+            "radius": 150.0,
+            "id": "hole_4"
+        }
+    ],
+    
+    // ArUco marker positions (if any)
+    "aruco_markers": []
+}

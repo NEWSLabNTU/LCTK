@@ -1,0 +1,22 @@
+<package format="3">
+  <name>multi_wayside_node</name>
+  <version>0.1.0</version>
+  <description>ROS 2 node for multi-wayside LiDAR-to-LiDAR calibration</description>
+  <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
+  <license>MIT</license>
+
+  <depend>rclrs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>vision_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>interactive_markers</depend>
+  
+  <depend>libpcap-dev</depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>
