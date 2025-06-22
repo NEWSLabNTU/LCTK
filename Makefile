@@ -19,4 +19,4 @@ build_packages:
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/bin
 
 clean:
-	rm -rf build install log target
+	rm -rf build install log target .cargo
