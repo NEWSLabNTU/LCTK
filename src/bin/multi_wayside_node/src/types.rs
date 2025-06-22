@@ -1,7 +1,9 @@
+use builtin_interfaces::msg::Time;
 use geometry_msgs::msg::Transform;
 use hollow_board_detector::Detection;
 use nalgebra as na;
 use sensor_msgs::msg::PointCloud2;
+use std::time::{Duration, SystemTime};
 use std_msgs::msg::Header;
 use vision_msgs::msg::{Detection3D, Detection3DArray, ObjectHypothesisWithPose};
 use visualization_msgs::msg::{Marker, MarkerArray};
@@ -15,12 +17,32 @@ pub struct LidarPoint {
     pub intensity: f32,
 }
 
+impl Default for LidarPoint {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            intensity: 0.0,
+        }
+    }
+}
+
+/// Board detection result
+#[derive(Debug, Clone)]
+pub struct BoardDetection {
+    pub pose: nalgebra::Isometry3<f64>,
+    pub confidence: f64,
+    pub inlier_count: usize,
+    pub timestamp: SystemTime,
+}
+
 /// Detection with timestamp
 #[derive(Debug, Clone)]
 pub struct TimestampedDetection {
-    pub timestamp: u64, // nanoseconds since epoch
-    pub detection: Detection,
-    pub header: Header,
+    pub timestamp: Time,
+    pub detection: BoardDetection,
+    pub lidar_id: u8,
 }
 
 /// Calibration result
@@ -29,6 +51,57 @@ pub struct CalibrationResult {
     pub transform: Transform,
     pub timestamp1: u64,
     pub timestamp2: u64,
+}
+
+/// ROI bounding box definition
+#[derive(Debug, Clone)]
+pub struct RoiBounds {
+    pub min_x: f64,
+    pub max_x: f64,
+    pub min_y: f64,
+    pub max_y: f64,
+    pub min_z: f64,
+    pub max_z: f64,
+}
+
+impl RoiBounds {
+    pub fn new(
+        center_x: f64,
+        center_y: f64,
+        center_z: f64,
+        size_x: f64,
+        size_y: f64,
+        size_z: f64,
+    ) -> Self {
+        let half_x = size_x / 2.0;
+        let half_y = size_y / 2.0;
+        let half_z = size_z / 2.0;
+
+        Self {
+            min_x: center_x - half_x,
+            max_x: center_x + half_x,
+            min_y: center_y - half_y,
+            max_y: center_y + half_y,
+            min_z: center_z - half_z,
+            max_z: center_z + half_z,
+        }
+    }
+
+    pub fn center(&self) -> (f64, f64, f64) {
+        (
+            (self.min_x + self.max_x) / 2.0,
+            (self.min_y + self.max_y) / 2.0,
+            (self.min_z + self.max_z) / 2.0,
+        )
+    }
+
+    pub fn size(&self) -> (f64, f64, f64) {
+        (
+            self.max_x - self.min_x,
+            self.max_y - self.min_y,
+            self.max_z - self.min_z,
+        )
+    }
 }
 
 /// Parse PointCloud2 message into vector of points
@@ -304,30 +377,37 @@ pub fn create_board_markers(detection: &Detection, lidar_id: u8, header: &Header
 }
 
 /// Find synchronized detection pair
-pub fn find_synchronized_pair<'a>(
-    detections1: &'a std::collections::VecDeque<TimestampedDetection>,
-    detections2: &'a std::collections::VecDeque<TimestampedDetection>,
-    tolerance: std::time::Duration,
-) -> Result<(&'a TimestampedDetection, &'a TimestampedDetection), eyre::Error> {
+pub fn find_synchronized_pair(
+    detections1: &mut std::collections::VecDeque<TimestampedDetection>,
+    detections2: &mut std::collections::VecDeque<TimestampedDetection>,
+    tolerance: Duration,
+) -> Option<(TimestampedDetection, TimestampedDetection)> {
     let tolerance_ns = tolerance.as_nanos() as u64;
 
-    for det1 in detections1.iter().rev() {
-        for det2 in detections2.iter().rev() {
-            let time_diff = if det1.timestamp > det2.timestamp {
-                det1.timestamp - det2.timestamp
+    // Look for synchronized pairs
+    for (i, det1) in detections1.iter().enumerate() {
+        for (j, det2) in detections2.iter().enumerate() {
+            let time1_ns =
+                det1.timestamp.sec as u64 * 1_000_000_000 + det1.timestamp.nanosec as u64;
+            let time2_ns =
+                det2.timestamp.sec as u64 * 1_000_000_000 + det2.timestamp.nanosec as u64;
+
+            let time_diff = if time1_ns > time2_ns {
+                time1_ns - time2_ns
             } else {
-                det2.timestamp - det1.timestamp
+                time2_ns - time1_ns
             };
 
             if time_diff <= tolerance_ns {
-                return Ok((det1, det2));
+                // Found synchronized pair, remove from queues and return
+                let det1 = detections1.remove(i).unwrap();
+                let det2 = detections2.remove(j).unwrap();
+                return Some((det1, det2));
             }
         }
     }
 
-    Err(eyre::eyre!(
-        "No synchronized detections found within tolerance"
-    ))
+    None
 }
 
 /// Compute transformation between two board detections
@@ -387,4 +467,23 @@ pub fn compute_transform(
     };
 
     Ok(msg)
+}
+
+/// Apply ROI cropping to point cloud (simple bounding box filter)
+pub fn apply_roi_crop(
+    points: &[nalgebra::Point3<f64>],
+    roi: &RoiBounds,
+) -> Vec<nalgebra::Point3<f64>> {
+    points
+        .iter()
+        .filter(|point| {
+            point.x >= roi.min_x
+                && point.x <= roi.max_x
+                && point.y >= roi.min_y
+                && point.y <= roi.max_y
+                && point.z >= roi.min_z
+                && point.z <= roi.max_z
+        })
+        .cloned()
+        .collect()
 }

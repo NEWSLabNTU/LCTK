@@ -13,7 +13,12 @@
   <depend>visualization_msgs</depend>
   <depend>std_srvs</depend>
   <depend>interactive_markers</depend>
-  
+  <depend>rosbag_deck_interface</depend>
+
+  <!-- Python dependencies for ROI interactive node -->
+  <depend>rclpy</depend>
+  <depend>tf2_ros</depend>
+
   <depend>libpcap-dev</depend>
 
   <export>

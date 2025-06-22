@@ -1,0 +1,112 @@
+<?xml version="1.0"?>
+<!--
+  Multi-Wayside Interactive ROI Launch File
+
+  This launch file starts both the Rust multi_wayside_node and Python
+  roi_interactive_node to enable interactive ROI manipulation in RViz2.
+
+  Features:
+  - Rust node for high-performance point cloud processing
+  - Python node for interactive ROI manipulation via RViz2
+  - Service-based communication for real-time ROI updates
+  - Optional RViz2 integration with pre-configured display
+
+  Usage:
+    ros2 launch multi_wayside_node multi_wayside_interactive.launch.xml
+
+  Optional parameters:
+    use_rviz:=true/false (default: true)
+    roi_box_size_x:=4.0 (default ROI size in meters)
+    roi_box_size_y:=4.0
+    roi_box_size_z:=2.0
+    roi_box_position_x:=2.0 (default ROI center position)
+    roi_box_position_y:=0.0
+    roi_box_position_z:=0.0
+-->
+
+<launch>
+  <!-- Launch arguments -->
+  <arg name="use_rviz" default="true" description="Start RViz2 with pre-configured display"/>
+  <arg name="rviz_config_file" default="$(find-pkg-share multi_wayside_node)/config/multi_wayside.rviz" description="RViz configuration file"/>
+
+  <!-- ROI Configuration Parameters -->
+  <arg name="roi_box_size_x" default="4.0" description="Default ROI box X dimension (meters)"/>
+  <arg name="roi_box_size_y" default="4.0" description="Default ROI box Y dimension (meters)"/>
+  <arg name="roi_box_size_z" default="2.0" description="Default ROI box Z dimension (meters)"/>
+  <arg name="roi_box_position_x" default="2.0" description="Default ROI box X position (meters)"/>
+  <arg name="roi_box_position_y" default="0.0" description="Default ROI box Y position (meters)"/>
+  <arg name="roi_box_position_z" default="0.0" description="Default ROI box Z position (meters)"/>
+  <arg name="roi_marker_scale" default="0.2" description="Interactive marker control size"/>
+  <arg name="roi_update_rate" default="10.0" description="ROI marker update frequency (Hz)"/>
+
+  <!-- Core Configuration Parameters -->
+  <arg name="board_config_file" default="$(find-pkg-share multi_wayside_node)/config/hollow_board.yaml" description="Hollow board configuration file"/>
+  <arg name="detector_config_file" default="$(find-pkg-share multi_wayside_node)/config/detector.yaml" description="Detector configuration file"/>
+  <arg name="aruco_pattern_file" default="$(find-pkg-share multi_wayside_node)/config/aruco_pattern.json5" description="ArUco pattern configuration file"/>
+  <arg name="max_queue_size" default="100" description="Maximum detection queue size"/>
+  <arg name="sync_tolerance_ms" default="100" description="Detection synchronization tolerance (milliseconds)"/>
+  <arg name="same_face_mode" default="true" description="Whether both LiDARs see the same face of the board"/>
+  <arg name="apply_bug_fix" default="false" description="Apply VLP16 coordinate system bug fix"/>
+
+  <!-- Frame Configuration -->
+  <arg name="frame_id" default="map" description="Reference frame for ROI markers"/>
+
+  <!-- 1. Launch Rust Multi-Wayside Node (Core Processing) -->
+  <node pkg="multi_wayside_node" exec="multi_wayside_node" name="multi_wayside_node" output="screen">
+    <!-- Core parameters -->
+    <param name="board_config_file" value="$(var board_config_file)"/>
+    <param name="detector_config_file" value="$(var detector_config_file)"/>
+    <param name="aruco_pattern_file" value="$(var aruco_pattern_file)"/>
+    <param name="max_queue_size" value="$(var max_queue_size)"/>
+    <param name="sync_tolerance_ms" value="$(var sync_tolerance_ms)"/>
+    <param name="same_face_mode" value="$(var same_face_mode)"/>
+    <param name="apply_bug_fix" value="$(var apply_bug_fix)"/>
+
+    <!-- ROI parameters -->
+    <param name="roi_box_size_x" value="$(var roi_box_size_x)"/>
+    <param name="roi_box_size_y" value="$(var roi_box_size_y)"/>
+    <param name="roi_box_size_z" value="$(var roi_box_size_z)"/>
+    <param name="roi_box_position_x" value="$(var roi_box_position_x)"/>
+    <param name="roi_box_position_y" value="$(var roi_box_position_y)"/>
+    <param name="roi_box_position_z" value="$(var roi_box_position_z)"/>
+
+    <!-- Logging configuration -->
+    <param name="log_level" value="INFO"/>
+  </node>
+
+  <!-- 2. Launch Python ROI Interactive Node (User Interface) -->
+  <node pkg="multi_wayside_node" exec="roi_interactive_node.py" name="roi_interactive_node" output="screen">
+    <!-- ROI parameters (must match Rust node) -->
+    <param name="roi_box_size_x" value="$(var roi_box_size_x)"/>
+    <param name="roi_box_size_y" value="$(var roi_box_size_y)"/>
+    <param name="roi_box_size_z" value="$(var roi_box_size_z)"/>
+    <param name="roi_box_position_x" value="$(var roi_box_position_x)"/>
+    <param name="roi_box_position_y" value="$(var roi_box_position_y)"/>
+    <param name="roi_box_position_z" value="$(var roi_box_position_z)"/>
+
+    <!-- Interactive marker parameters -->
+    <param name="roi_marker_scale" value="$(var roi_marker_scale)"/>
+    <param name="roi_update_rate" value="$(var roi_update_rate)"/>
+    <param name="frame_id" value="$(var frame_id)"/>
+
+    <!-- Logging configuration -->
+    <param name="log_level" value="INFO"/>
+  </node>
+
+  <!-- 3. Launch RViz2 with Interactive ROI Display (Optional) -->
+  <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var use_rviz)"
+        args="-d $(var rviz_config_file)">
+    <param name="log_level" value="WARN"/>
+  </node>
+
+  <!-- 4. Static TF Publisher for Map Frame (if needed) -->
+  <node pkg="tf2_ros" exec="static_transform_publisher" name="map_to_base_link"
+        args="0 0 0 0 0 0 map base_link"/>
+
+  <!-- Information Display -->
+  <node pkg="ros2" exec="topic" name="topic_info" output="screen"
+        args="echo /roi_interactive_markers/feedback --once"
+        launch-prefix="bash -c 'sleep 3; echo [INFO] Interactive ROI system started successfully!; echo [INFO] Available topics:; echo [INFO] - /lidar1/points \(subscribe your LiDAR data here\); echo [INFO] - /lidar2/points \(subscribe your LiDAR data here\); echo [INFO] - /set_roi_bounds \(service for ROI updates\); echo [INFO] - /roi_interactive_markers/update \(add this to RViz Interactive Markers display\); echo [INFO] - /roi_markers \(static ROI visualization\); echo [INFO] - /lidar1/board_detection, /lidar2/board_detection \(detection results\); echo [INFO] - /lidar1/points_cropped, /lidar2/points_cropped \(ROI-filtered point clouds\); echo [INFO]; echo [INFO] Usage Instructions:; echo [INFO] 1. In RViz2, add an Interactive Markers display; echo [INFO] 2. Set topic to: /roi_interactive_markers/update; echo [INFO] 3. Drag the red/blue ROI boxes to adjust regions for LiDAR 1/2; echo [INFO] 4. ROI changes are automatically sent to the processing node; echo [INFO] 5. Connect your LiDAR data to /lidar1/points and /lidar2/points; echo [INFO]; '"
+        if="$(var use_rviz)"/>
+
+</launch>

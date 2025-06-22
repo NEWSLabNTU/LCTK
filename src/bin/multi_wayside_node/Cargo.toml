@@ -28,8 +28,13 @@ pcd-rs = { workspace = true }
 
 # Linear algebra
 nalgebra = { workspace = true }
+measurements = { workspace = true }
+noisy_float = { workspace = true }
 
 # Point cloud filtering (without kiss3d)
 [dependencies.generic-point-filter]
 git = "https://github.com/NEWSLabNTU/point-cloud-filter.git"
 tag = "v0.3.1"
+
+[dev-dependencies]
+tempfile = "3.8"

@@ -9,4 +9,10 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Install Python scripts
+install(PROGRAMS
+  scripts/roi_interactive_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
