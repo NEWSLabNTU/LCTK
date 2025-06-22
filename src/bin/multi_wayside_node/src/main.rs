@@ -16,6 +16,7 @@ mod utils;
 mod visualization;
 
 // Imports from modules
+use calibration::{CalibrationConfig, CalibrationManager, DefaultCalibrationManager};
 use config::MultiWaysideConfig;
 use detection::{DefaultDetectionSynchronizer, DetectionPipeline, HollowBoardDetectionProcessor};
 use pointcloud::{DefaultPointCloudParser, RangeFilter};
@@ -40,6 +41,9 @@ pub struct MultiWaysideNode {
 
     // Detection synchronization
     synchronizer: Arc<DefaultDetectionSynchronizer>,
+
+    // Calibration management
+    calibration_manager: Arc<DefaultCalibrationManager>,
 
     // Visualization generators
     board_marker_generator: Arc<DefaultBoardMarkerGenerator>,
@@ -91,6 +95,19 @@ impl MultiWaysideNode {
             config.sync_tolerance_ms,
         ));
 
+        // Create calibration manager
+        let calibration_config = CalibrationConfig {
+            auto_calibrate: true,
+            min_detections_for_calibration: 5,
+            calibration_timeout_seconds: 30,
+            quality_threshold: 0.7,
+            same_face_mode: config.same_face_mode,
+            apply_bug_fix: config.apply_bug_fix,
+            max_queue_size: config.max_queue_size,
+            sync_tolerance_ms: config.sync_tolerance_ms,
+        };
+        let calibration_manager = Arc::new(DefaultCalibrationManager::new(calibration_config));
+
         // Create visualization generators
         let board_marker_generator = Arc::new(DefaultBoardMarkerGenerator);
         let roi_marker_generator = Arc::new(DefaultRoiMarkerGenerator);
@@ -104,6 +121,7 @@ impl MultiWaysideNode {
         Ok(Self {
             detection_pipeline,
             synchronizer,
+            calibration_manager,
             board_marker_generator,
             roi_marker_generator,
             text_marker_generator,
@@ -126,6 +144,10 @@ impl MultiWaysideNode {
 
     pub fn get_synchronizer(&self) -> &Arc<DefaultDetectionSynchronizer> {
         &self.synchronizer
+    }
+
+    pub fn get_calibration_manager(&self) -> &Arc<DefaultCalibrationManager> {
+        &self.calibration_manager
     }
 
     pub fn get_board_marker_generator(&self) -> &Arc<DefaultBoardMarkerGenerator> {
