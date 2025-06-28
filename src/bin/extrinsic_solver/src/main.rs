@@ -1,7 +1,14 @@
 use anyhow::{anyhow, ensure, Context as AnyhowContext, Result};
 use aruco_config::MultiArucoPattern;
 use aruco_detector::multi_aruco::ImageMarker;
+use calibration_quality::{
+    CalibrationMetrics, CalibrationQuality, ConvergenceMonitor, GeometricError, QualityAssessment,
+    StatisticalMetrics,
+};
 use cv_convert::prelude::*;
+use dynamic_calibration::{
+    AdjustmentStrategy, CalibrationParameters, DynamicCalibrationController,
+};
 use geometry_msgs::msg::{Transform, TransformStamped, Vector3};
 use hollow_board_config::BoardModel;
 use itertools::izip;
@@ -20,6 +27,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+use std_msgs;
 use vision_msgs::msg::{Detection2DArray, Detection3DArray};
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
@@ -47,6 +55,15 @@ struct ExtrinsicSolverState {
     parent_frame: Arc<str>,
     child_frame: Arc<str>,
     sync_timeout: i64,
+    // Quality assessment components
+    quality_assessment: Mutex<QualityAssessment>,
+    convergence_monitor: Mutex<ConvergenceMonitor>,
+    // Dynamic calibration controller
+    dynamic_controller: Mutex<DynamicCalibrationController>,
+    // Enable quality assessment flag
+    enable_quality_assessment: bool,
+    // Enable dynamic adjustment flag
+    enable_dynamic_adjustment: bool,
 }
 
 pub struct ExtrinsicSolverNode {
@@ -56,6 +73,7 @@ pub struct ExtrinsicSolverNode {
     _board_subscription: Subscription<Detection3DArray>,
     _camera_info_subscription: Subscription<CameraInfo>,
     _transform_publisher: Publisher<TransformStamped>,
+    _quality_publisher: Publisher<std_msgs::msg::String>,
 }
 
 impl ExtrinsicSolverNode {
@@ -86,10 +104,34 @@ impl ExtrinsicSolverNode {
             .default(100i64)
             .mandatory()?
             .get();
+        let enable_quality_assessment_param: bool = node
+            .declare_parameter("enable_quality_assessment")
+            .default(true)
+            .mandatory()?
+            .get();
+        let enable_dynamic_adjustment_param: bool = node
+            .declare_parameter("enable_dynamic_adjustment")
+            .default(false)
+            .mandatory()?
+            .get();
+        let adjustment_strategy_param: Arc<str> = node
+            .declare_parameter("adjustment_strategy")
+            .default(Arc::<str>::from("Balanced"))
+            .mandatory()?
+            .get();
 
         // Load configurations
         let aruco_pattern = Self::load_aruco_pattern(&aruco_pattern_file_param)?;
         let method: PnpMethod = method_param.parse()?;
+
+        // Parse adjustment strategy
+        let adjustment_strategy = match adjustment_strategy_param.as_ref() {
+            "Conservative" => AdjustmentStrategy::Conservative,
+            "Balanced" => AdjustmentStrategy::Balanced,
+            "Aggressive" => AdjustmentStrategy::Aggressive,
+            "Adaptive" => AdjustmentStrategy::Adaptive,
+            _ => AdjustmentStrategy::Balanced,
+        };
 
         // Create state
         let state = Arc::new(ExtrinsicSolverState {
@@ -100,21 +142,33 @@ impl ExtrinsicSolverNode {
             parent_frame: parent_frame_param,
             child_frame: child_frame_param,
             sync_timeout: sync_timeout_ms_param,
+            quality_assessment: Mutex::new(QualityAssessment::new()),
+            convergence_monitor: Mutex::new(ConvergenceMonitor::new()),
+            dynamic_controller: Mutex::new(DynamicCalibrationController::with_strategy(
+                adjustment_strategy,
+            )),
+            enable_quality_assessment: enable_quality_assessment_param,
+            enable_dynamic_adjustment: enable_dynamic_adjustment_param,
         });
 
         // Create publisher for extrinsic transforms
         let transform_publisher =
             node.create_publisher::<TransformStamped>("extrinsic_transform")?;
 
+        // Create publisher for calibration quality metrics
+        let quality_publisher =
+            node.create_publisher::<std_msgs::msg::String>("calibration_quality")?;
+
         // Create subscribers
         let aruco_subscription = {
             let state = Arc::clone(&state);
             let transform_publisher = Arc::clone(&transform_publisher);
+            let quality_publisher = Arc::clone(&quality_publisher);
 
             node.create_subscription::<Detection2DArray, _>(
                 "aruco_detections",
                 move |msg: Detection2DArray| {
-                    Self::aruco_callback(msg, &state, &transform_publisher);
+                    Self::aruco_callback(msg, &state, &transform_publisher, &quality_publisher);
                 },
             )?
         };
@@ -122,11 +176,12 @@ impl ExtrinsicSolverNode {
         let board_subscription = {
             let state = Arc::clone(&state);
             let transform_publisher = Arc::clone(&transform_publisher);
+            let quality_publisher = Arc::clone(&quality_publisher);
 
             node.create_subscription::<Detection3DArray, _>(
                 "calibration_board_detections",
                 move |msg: Detection3DArray| {
-                    Self::board_callback(msg, &state, &transform_publisher);
+                    Self::board_callback(msg, &state, &transform_publisher, &quality_publisher);
                 },
             )?
         };
@@ -141,7 +196,7 @@ impl ExtrinsicSolverNode {
 
         log_info!(
             LOGGER_NAME,
-            "Solve extrinsic params node initialized. Subscribing to: aruco_detections, calibration_board_detections, camera_info. Publishing to: extrinsic_transform"
+            "Solve extrinsic params node initialized. Subscribing to: aruco_detections, calibration_board_detections, camera_info. Publishing to: extrinsic_transform, calibration_quality"
         );
 
         Ok(Self {
@@ -151,6 +206,7 @@ impl ExtrinsicSolverNode {
             _board_subscription: board_subscription,
             _camera_info_subscription: camera_info_subscription,
             _transform_publisher: transform_publisher,
+            _quality_publisher: quality_publisher,
         })
     }
 
@@ -187,6 +243,7 @@ impl ExtrinsicSolverNode {
         msg: Detection2DArray,
         state: &Arc<ExtrinsicSolverState>,
         publisher: &Publisher<TransformStamped>,
+        quality_publisher: &Publisher<std_msgs::msg::String>,
     ) {
         let timestamp = Self::get_timestamp_nanos(&msg.header);
 
@@ -206,7 +263,8 @@ impl ExtrinsicSolverNode {
             pair.aruco_detection = msg;
             drop(pending); // Release lock before processing
 
-            if let Err(e) = Self::process_detection_pair(pair, publisher, state) {
+            if let Err(e) = Self::process_detection_pair(pair, publisher, quality_publisher, state)
+            {
                 log_warn!(LOGGER_NAME, "Failed to process detection pair: {e}");
             }
         } else {
@@ -226,6 +284,7 @@ impl ExtrinsicSolverNode {
         msg: Detection3DArray,
         state: &Arc<ExtrinsicSolverState>,
         publisher: &Publisher<TransformStamped>,
+        quality_publisher: &Publisher<std_msgs::msg::String>,
     ) {
         let timestamp = Self::get_timestamp_nanos(&msg.header);
 
@@ -245,7 +304,8 @@ impl ExtrinsicSolverNode {
             pair.board_detection = msg;
             drop(pending); // Release lock before processing
 
-            if let Err(e) = Self::process_detection_pair(pair, publisher, state) {
+            if let Err(e) = Self::process_detection_pair(pair, publisher, quality_publisher, state)
+            {
                 log_warn!(LOGGER_NAME, "Failed to process detection pair: {e}");
             }
         } else {
@@ -273,6 +333,7 @@ impl ExtrinsicSolverNode {
     fn process_detection_pair(
         pair: DetectionPair,
         publisher: &Publisher<TransformStamped>,
+        quality_publisher: &Publisher<std_msgs::msg::String>,
         state: &ExtrinsicSolverState,
     ) -> Result<()> {
         // Check if both detections are present
@@ -306,11 +367,111 @@ impl ExtrinsicSolverNode {
         // Create PnP solver with current camera info
         let pnp_solver = PnpSolver::new(&camera_info, state.pnp_method);
 
+        // Get dynamic parameters if enabled
+        let current_params = if state.enable_dynamic_adjustment {
+            let controller = state
+                .dynamic_controller
+                .lock()
+                .map_err(|e| anyhow!("Failed to lock dynamic controller: {}", e))?;
+            controller.parameters().clone()
+        } else {
+            CalibrationParameters::default()
+        };
+
         // Solve PnP problem
         let point_pairs =
             Self::create_point_pairs(board_model, image_markers, &state.aruco_pattern)?;
 
-        if let Some(transform) = pnp_solver.solve(point_pairs) {
+        if let Some(transform) = pnp_solver.solve(point_pairs.clone()) {
+            // Quality assessment if enabled
+            if state.enable_quality_assessment {
+                let metrics = Self::compute_calibration_metrics(
+                    &point_pairs,
+                    &transform,
+                    &pair.aruco_detection,
+                    &pair.board_detection,
+                    &current_params,
+                )?;
+
+                // Assess quality
+                let mut quality_assessment = state
+                    .quality_assessment
+                    .lock()
+                    .map_err(|e| anyhow!("Failed to lock quality assessment: {}", e))?;
+                let quality = quality_assessment.assess(&metrics)?;
+
+                // Monitor convergence
+                let mut convergence_monitor = state
+                    .convergence_monitor
+                    .lock()
+                    .map_err(|e| anyhow!("Failed to lock convergence monitor: {}", e))?;
+                let convergence_status = convergence_monitor.update(&metrics)?;
+
+                // Create quality report
+                let quality_report = serde_json::json!({
+                    "overall_quality": quality.overall_score,
+                    "metrics": {
+                        "reprojection_error": metrics.reprojection_error,
+                        "inlier_ratio": metrics.inlier_ratio,
+                        "detection_confidence": metrics.detection_confidence,
+                        "consistency_score": metrics.consistency_score,
+                    },
+                    "validation": quality.validation,
+                    "convergence": {
+                        "is_converged": convergence_status.is_converged,
+                        "iterations": convergence_status.iterations,
+                        "improvement_rate": convergence_status.improvement_rate,
+                    },
+                    "parameters": if state.enable_dynamic_adjustment {
+                        Some(current_params.summary())
+                    } else {
+                        None
+                    }
+                });
+
+                // Publish quality metrics
+                let quality_msg = std_msgs::msg::String {
+                    data: quality_report.to_string(),
+                };
+                if let Err(e) = quality_publisher.publish(quality_msg) {
+                    log_warn!(LOGGER_NAME, "Failed to publish quality metrics: {e}");
+                }
+
+                // Dynamic parameter adjustment if enabled
+                if state.enable_dynamic_adjustment {
+                    let mut controller = state
+                        .dynamic_controller
+                        .lock()
+                        .map_err(|e| anyhow!("Failed to lock dynamic controller: {}", e))?;
+
+                    let quality_score = calibration_quality::QualityScore {
+                        overall: quality.overall_score,
+                        components: std::collections::HashMap::new(),
+                    };
+
+                    let updated_params = controller.update(&metrics, &quality_score)?;
+                    log_info!(
+                        LOGGER_NAME,
+                        "Updated calibration parameters: {}",
+                        updated_params.summary()
+                    );
+                }
+
+                // Log quality information
+                log_info!(
+                    LOGGER_NAME,
+                    "Calibration quality: {:.2}%, Convergence: {}, Inliers: {}/{}",
+                    quality.overall_score * 100.0,
+                    if convergence_status.is_converged {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                    metrics.num_inliers,
+                    metrics.num_correspondences
+                );
+            }
+
             let transform_msg = Self::isometry_to_transform_stamped(
                 transform,
                 &pair.aruco_detection.header,
@@ -457,6 +618,103 @@ impl ExtrinsicSolverNode {
 
         let point_pairs = izip!(object_points, image_points).collect();
         Ok(point_pairs)
+    }
+
+    fn compute_calibration_metrics(
+        point_pairs: &[(Point3d, Point2d)],
+        transform: &na::Isometry3<f64>,
+        aruco_detection: &Detection2DArray,
+        board_detection: &Detection3DArray,
+        params: &CalibrationParameters,
+    ) -> Result<CalibrationMetrics> {
+        // Compute reprojection errors
+        let mut reprojection_errors = Vec::new();
+        let mut num_inliers = 0;
+
+        for (object_point, image_point) in point_pairs {
+            // Transform object point to camera frame
+            let pt_3d = na::Point3::new(object_point.x, object_point.y, object_point.z);
+            let transformed = transform * pt_3d;
+
+            // Project to image plane (simplified projection, assumes normalized camera)
+            if transformed.z > 0.0 {
+                let projected_x = transformed.x / transformed.z;
+                let projected_y = transformed.y / transformed.z;
+
+                let error = ((projected_x - image_point.x).powi(2)
+                    + (projected_y - image_point.y).powi(2))
+                .sqrt();
+                reprojection_errors.push(error);
+
+                if error < params.outlier_threshold * 100.0 {
+                    // Convert to pixels
+                    num_inliers += 1;
+                }
+            }
+        }
+
+        // Compute statistics
+        let mean_error = if !reprojection_errors.is_empty() {
+            reprojection_errors.iter().sum::<f64>() / reprojection_errors.len() as f64
+        } else {
+            f64::MAX
+        };
+
+        let error_std_dev = if reprojection_errors.len() > 1 {
+            let variance = reprojection_errors
+                .iter()
+                .map(|&e| (e - mean_error).powi(2))
+                .sum::<f64>()
+                / (reprojection_errors.len() - 1) as f64;
+            variance.sqrt()
+        } else {
+            0.0
+        };
+
+        // Sort errors for percentile calculations
+        let mut sorted_errors = reprojection_errors.clone();
+        sorted_errors.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let median_error = if !sorted_errors.is_empty() {
+            sorted_errors[sorted_errors.len() / 2]
+        } else {
+            0.0
+        };
+
+        let percentile_95_error = if !sorted_errors.is_empty() {
+            let idx = ((sorted_errors.len() as f64 * 0.95) as usize).min(sorted_errors.len() - 1);
+            sorted_errors[idx]
+        } else {
+            0.0
+        };
+
+        // Detection confidence (simplified - based on detection count)
+        let expected_detections = 4; // Assuming 4 ArUco markers
+        let detection_confidence =
+            (aruco_detection.detections.len() as f64 / expected_detections as f64).min(1.0);
+
+        // Create metrics
+        Ok(CalibrationMetrics {
+            reprojection_error: mean_error,
+            consistency_score: 0.8, // Placeholder - would compute from multiple frames
+            detection_confidence,
+            num_inliers,
+            num_correspondences: point_pairs.len(),
+            inlier_ratio: num_inliers as f64 / point_pairs.len().max(1) as f64,
+            geometric_error: GeometricError {
+                mean_translation_error: mean_error * 0.01, // Convert to meters (approximation)
+                mean_rotation_error: 0.0,                  // Would need ground truth to compute
+                max_translation_error: sorted_errors.last().copied().unwrap_or(0.0) * 0.01,
+                max_rotation_error: 0.0,
+            },
+            statistical_metrics: StatisticalMetrics {
+                error_mean: mean_error,
+                error_std_dev,
+                median_error,
+                percentile_95_error,
+                outlier_count: point_pairs.len() - num_inliers,
+            },
+        })
     }
 
     fn isometry_to_transform_stamped(

@@ -9,7 +9,9 @@ edition = "2021"
 anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
 aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
+calibration-quality = { version = "0.1.0", path = "../../lib/calibration-quality" }
 cv-convert = { workspace = true, features = ["nalgebra"] }
+dynamic-calibration = { version = "0.1.0", path = "../../lib/dynamic-calibration" }
 geometry_msgs = "4.8.0"
 hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config" }
 itertools = { workspace = true }
@@ -23,7 +25,7 @@ pnp-solver = { version = "0.1.0", path = "../../lib/pnp-solver" }
 rclrs = "0.4.0"
 sensor_msgs = "4.8.0"
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
 serde_yaml = { workspace = true }
 std_msgs = "4.8.0"
 vision_msgs = "4.1.1"
