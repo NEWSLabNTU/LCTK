@@ -14,9 +14,10 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 # Install launch files
-install(DIRECTORY
-  launch
-  DESTINATION share/${PROJECT_NAME}
+install(FILES
+  launch/lidar_camera_calibration.launch.yaml
+  launch/two_lidar_calibration.launch.yaml
+  DESTINATION share/${PROJECT_NAME}/launch
 )
 
 if(BUILD_TESTING)
