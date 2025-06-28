@@ -7,6 +7,3 @@
 [submodule "src/ros2_rust_ws"]
 	path = ros2_rust_ws
 	url = https://github.com/jerry73204/ros2_rust_ws.git
-[submodule "src/lib/small_gicp_rust"]
-	path = src/lib/small_gicp_rust
-	url = https://github.com/jerry73204/small_gicp_rust.git
