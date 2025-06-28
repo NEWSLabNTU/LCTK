@@ -1,0 +1,38 @@
+# Test parameters for multi_wayside_node integration testing
+# These parameters are optimized for test scenarios and may differ from production values
+
+multi_wayside_test:
+  ros__parameters:
+    # Configuration files (test versions)
+    board_config_file: "test_data/configs/test_board.yaml"
+    detector_config_file: "test_data/configs/test_detector.yaml"
+    aruco_pattern_file: "test_data/configs/test_aruco.json5"
+    
+    # Detection parameters (relaxed for testing)
+    max_queue_size: 50
+    sync_tolerance_ms: 200
+    same_face_mode: true
+    apply_bug_fix: false
+    
+    # Calibration parameters (tuned for test scenarios)
+    auto_calibrate: true
+    min_detections_for_calibration: 3
+    quality_threshold: 0.6
+    calibration_timeout_seconds: 30
+    
+    # ROI parameters (smaller for test data)
+    roi_box_size_x: 3.0
+    roi_box_size_y: 3.0
+    roi_box_size_z: 1.5
+    roi_box_position_x: 2.0
+    roi_box_position_y: 0.0
+    roi_box_position_z: 0.0
+    
+    # Point cloud filtering (permissive for test data)
+    min_range: 0.3
+    max_range: 20.0
+    
+    # Frame IDs for test setup
+    lidar1_frame: "test_lidar1"
+    lidar2_frame: "test_lidar2"
+    base_frame: "test_base_link"

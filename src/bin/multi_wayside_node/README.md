@@ -1,14 +1,17 @@
 # Multi Wayside Node
 
-ROS 2 node for multi-wayside LiDAR-to-LiDAR calibration with interactive adjustment capabilities.
+ROS 2 node for automatic LiDAR-to-LiDAR calibration using hollow board detection with comprehensive visualization and adjustment capabilities.
 
 ## Features
 
-- Real-time board detection from two LiDAR sources
-- Automatic synchronization and calibration computation  
-- Manual pose adjustment with visual feedback
-- Rich RViz2 visualization with color-coded point clouds and markers
-- Service-based calibration triggering
+- **Automatic Calibration** (Phase 7): Real-time detection and calibration without manual intervention
+- **Quality Assessment**: Confidence scoring and validation of calibration results  
+- **Time Synchronization**: Automatic pairing of detections across sensors
+- **Interactive ROI**: Service-based region of interest adjustment
+- **Manual Refinement**: Pose adjustment for challenging scenarios
+- **Transform Broadcasting**: Automatic TF2 integration for calibration results
+- **Rich Visualization**: RViz2 integration with color-coded markers and point clouds
+- **Production Ready**: Comprehensive error handling and recovery
 
 ## Topics
 
@@ -28,12 +31,49 @@ ROS 2 node for multi-wayside LiDAR-to-LiDAR calibration with interactive adjustm
 - `/calibration_transform` (geometry_msgs/TransformStamped) - Computed calibration transform
 
 ### Services
-- `/trigger_calibration` (std_srvs/Trigger) - Compute calibration from synchronized detections
+- `/trigger_calibration` (std_srvs/Trigger) - Manually compute calibration from synchronized detections
+- `/reset_calibration` (std_srvs/Trigger) - Reset calibration state and clear detection buffers
+- `/set_roi_bounds` (multi_wayside_node/SetROIBounds) - Set detection region of interest
+- `/get_roi_bounds` (multi_wayside_node/GetROIBounds) - Query current ROI settings
+- `/reset_roi` (std_srvs/Trigger) - Reset ROI to default values
+- `/save_roi_config` (std_srvs/Trigger) - Save current ROI configuration
 - `/reset_adjustments` (std_srvs/Trigger) - Clear all manual pose adjustments
 - `/save_adjustments` (std_srvs/Trigger) - Save current pose adjustments to config/pose_adjustments.json
 - `/load_adjustments` (std_srvs/Trigger) - Load pose adjustments from config/pose_adjustments.json
 - `/save_config` (std_srvs/Trigger) - Save current node configuration to timestamped YAML file
 - `/load_config` (std_srvs/Trigger) - Load configuration (requires node restart, use launch parameters instead)
+
+## Automatic Calibration (Phase 7)
+
+The node now features automatic calibration that continuously monitors detections and computes calibration when sufficient synchronized data is available.
+
+### How It Works
+1. **Detection**: Processes point clouds from both LiDARs to find calibration boards
+2. **Synchronization**: Automatically pairs detections within time tolerance
+3. **Quality Check**: Validates detection quality before attempting calibration
+4. **Transform Computation**: Calculates relative pose between sensors
+5. **Validation**: Assesses calibration quality with confidence scoring
+6. **Broadcasting**: Publishes transform on `/calibration_transform` topic
+
+### Configuration
+```bash
+# Enable automatic calibration (default: true)
+ros2 run multi_wayside_node multi_wayside_node --ros-args \
+  -p auto_calibrate:=true \
+  -p min_detections_for_calibration:=5 \
+  -p calibration_timeout_seconds:=30 \
+  -p quality_threshold:=0.7
+```
+
+### Monitoring
+```bash
+# Watch calibration progress
+ros2 topic echo /calibration_transform
+
+# Check detection synchronization
+ros2 topic hz /lidar1/board_detection
+ros2 topic hz /lidar2/board_detection
+```
 
 ## Manual Pose Adjustment
 
@@ -160,10 +200,14 @@ ros2 launch multi_wayside_node multi_wayside_advanced.launch.xml \
 | `aruco_pattern_file` | string | `config/aruco_pattern.json5` | Path to ArUco marker pattern definition | Must exist and be readable |
 
 ### Calibration Mode
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `same_face_mode` | bool | `true` | Whether both LiDARs see the same face of the board |
-| `apply_bug_fix` | bool | `false` | Apply VLP16 coordinate system correction |
+| Parameter | Type | Default | Description | Range |
+|-----------|------|---------|-------------|-------|
+| `same_face_mode` | bool | `true` | Whether both LiDARs see the same face of the board | - |
+| `apply_bug_fix` | bool | `false` | Apply VLP16 coordinate system correction | - |
+| `auto_calibrate` | bool | `true` | Enable automatic calibration when detections are synchronized | - |
+| `min_detections_for_calibration` | int | 5 | Minimum synchronized detection pairs before attempting calibration | 1-20 |
+| `calibration_timeout_seconds` | int | 30 | Maximum age of detections to consider for calibration | 5-300 |
+| `quality_threshold` | float | 0.7 | Minimum quality score to accept calibration result | 0.1-1.0 |
 
 ### Synchronization
 | Parameter | Type | Default | Description | Range |
@@ -176,6 +220,23 @@ ros2 launch multi_wayside_node multi_wayside_advanced.launch.xml \
 |-----------|------|---------|-------------|
 | `lidar1_frame` | string | `lidar1` | Frame ID for first LiDAR |
 | `lidar2_frame` | string | `lidar2` | Frame ID for second LiDAR |
+| `base_frame` | string | `base_link` | Base frame for visualization |
+
+### ROI Configuration
+| Parameter | Type | Default | Description | Range |
+|-----------|------|---------|-------------|-------|
+| `roi_box_position_x` | float | 2.0 | ROI center X coordinate (meters) | -10.0 to 10.0 |
+| `roi_box_position_y` | float | 0.0 | ROI center Y coordinate (meters) | -10.0 to 10.0 |
+| `roi_box_position_z` | float | 0.0 | ROI center Z coordinate (meters) | -5.0 to 5.0 |
+| `roi_box_size_x` | float | 4.0 | ROI size along X axis (meters) | 0.5 to 10.0 |
+| `roi_box_size_y` | float | 4.0 | ROI size along Y axis (meters) | 0.5 to 10.0 |
+| `roi_box_size_z` | float | 2.0 | ROI size along Z axis (meters) | 0.5 to 5.0 |
+
+### Point Cloud Filtering
+| Parameter | Type | Default | Description | Range |
+|-----------|------|---------|-------------|-------|
+| `min_range` | float | 0.5 | Minimum range for point cloud filtering (meters) | 0.1 to 5.0 |
+| `max_range` | float | 50.0 | Maximum range for point cloud filtering (meters) | 5.0 to 200.0 |
 
 ### Visualization
 | Parameter | Type | Default | Description |
@@ -212,3 +273,49 @@ Service names are configurable via parameters under the `services` namespace:
 - `services.reset_adjustments`: Service to clear adjustments
 - `services.save_adjustments`: Service to save adjustments
 - `services.load_adjustments`: Service to load adjustments
+
+## Integration Testing
+
+The node includes comprehensive integration tests with synthetic data generation and automated validation.
+
+### Quick Test
+```bash
+# Run all integration tests
+./scripts/run_integration_tests.sh
+
+# Run specific scenario
+./scripts/run_integration_tests.sh --scenario scenario_1_perfect_boards
+
+# Run with visualization
+./scripts/run_integration_tests.sh --visual
+```
+
+### Test Scenarios
+1. **Perfect Boards**: Ideal conditions for baseline validation
+2. **Noisy Data**: Sensor noise and environmental artifacts
+3. **Partial Occlusion**: Board partially blocked from view
+4. **Multi-Board**: Multiple boards in scene
+
+### Generating Test Data
+```bash
+# Generate all test scenarios
+python3 scripts/generate_test_data.py --output_dir test_data --scenarios perfect noisy occlusion multi
+
+# Generate specific scenario
+python3 scripts/generate_test_data.py --output_dir test_data --scenarios perfect
+```
+
+### Launch Files for Testing
+```bash
+# Basic integration test
+ros2 launch launch/test_basic_calibration.launch.py
+
+# Multi-scenario test
+ros2 launch launch/test_multi_scenario.launch.py
+
+# With custom parameters
+ros2 launch launch/test_basic_calibration.launch.py \
+  test_bag:=scenario_1_perfect_boards.bag \
+  use_rviz:=true \
+  auto_validate:=true
+```
