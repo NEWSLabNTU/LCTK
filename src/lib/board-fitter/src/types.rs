@@ -3,7 +3,25 @@
 use nalgebra::{Isometry3, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
+use thiserror::Error;
 use uuid::Uuid;
+
+/// Detection error types
+#[derive(Error, Debug)]
+pub enum DetectionError {
+    #[error("Insufficient data: {0}")]
+    InsufficientData(String),
+    #[error("ICP convergence failed")]
+    IcpConvergenceFailed,
+    #[error("ICP refinement failed")]
+    IcpRefinementFailed,
+    #[error("ICP preprocessing failed")]
+    IcpPreprocessingFailed,
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
+    #[error("Processing error: {0}")]
+    ProcessingError(String),
+}
 
 /// 3D point cloud representation
 #[derive(Debug, Clone)]
@@ -150,6 +168,11 @@ impl DetectionConfidence {
     /// Check if confidence is above a threshold
     pub fn above_threshold(&self, threshold: f64) -> bool {
         self.0 > threshold
+    }
+
+    /// Get the confidence score (alias for value)
+    pub fn score(&self) -> f64 {
+        self.0
     }
 }
 

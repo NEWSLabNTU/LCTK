@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
     debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
+    refinement::{temporal_alignment::TemporalTrackingState, IcpRefinement},
     types::{BoardDetection, BoardId, BoundingBox, DetectionConfidence, RoiType},
 };
 
@@ -88,6 +89,8 @@ pub struct TrackedBoard {
     pub dimensions: Vector3<f64>,
     /// Motion prediction filter (Kalman filter state)
     pub filter_state: Option<KalmanFilterState>,
+    /// ICP temporal tracking state
+    pub temporal_state: Option<TemporalTrackingState>,
 }
 
 impl TrackedBoard {
@@ -107,11 +110,22 @@ impl TrackedBoard {
             detection_count: 1,
             dimensions: detection.dimensions,
             filter_state: None,
+            temporal_state: None,
         }
     }
 
     /// Update track with new detection
     pub fn update(&mut self, detection: &BoardDetection, config: &TrackingConfig) {
+        self.update_with_points(detection, config, None);
+    }
+
+    /// Update track with new detection and optional point cloud for temporal ICP
+    pub fn update_with_points(
+        &mut self,
+        detection: &BoardDetection,
+        config: &TrackingConfig,
+        board_points: Option<&[Point3<f64>]>,
+    ) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_detection_time).as_secs_f64();
 
@@ -132,6 +146,17 @@ impl TrackedBoard {
         // Update Kalman filter if enabled
         if config.enable_prediction {
             self.update_filter(detection, dt, config);
+        }
+
+        // Update temporal ICP state if points are provided
+        if let Some(points) = board_points {
+            if self.temporal_state.is_none() {
+                self.temporal_state = Some(TemporalTrackingState {
+                    previous_voxelmap: None,
+                    previous_cloud: None,
+                    motion_prediction: None,
+                });
+            }
         }
     }
 
@@ -396,6 +421,8 @@ pub struct BoardTracker {
     config: TrackingConfig,
     /// Current ROI mode
     roi_mode: RoiType,
+    /// ICP refinement for temporal alignment
+    icp_refiner: Option<IcpRefinement>,
 }
 
 impl Default for BoardTracker {
@@ -411,6 +438,17 @@ impl BoardTracker {
             tracked_boards: HashMap::new(),
             config,
             roi_mode: RoiType::GlobalSearch,
+            icp_refiner: None,
+        }
+    }
+
+    /// Create a new board tracker with ICP refinement
+    pub fn new_with_icp(config: TrackingConfig, icp_refiner: IcpRefinement) -> Self {
+        Self {
+            tracked_boards: HashMap::new(),
+            config,
+            roi_mode: RoiType::GlobalSearch,
+            icp_refiner: Some(icp_refiner),
         }
     }
 
@@ -518,7 +556,17 @@ impl BoardTracker {
         let mut updated_tracks = 0;
         for (track_id, detection_idx) in associations.matches {
             if let Some(track) = self.tracked_boards.get_mut(&track_id) {
-                track.update(&detections[detection_idx], &self.config);
+                let detection = &detections[detection_idx];
+
+                // Apply ICP temporal refinement if available
+                let refined_detection = if let Some(ref icp_refiner) = self.icp_refiner {
+                    Self::refine_detection_with_temporal_icp(track, detection, icp_refiner)
+                        .unwrap_or_else(|_| detection.clone())
+                } else {
+                    detection.clone()
+                };
+
+                track.update(&refined_detection, &self.config);
                 updated_tracks += 1;
             }
         }
@@ -884,6 +932,69 @@ impl BoardTracker {
         }
 
         assignments
+    }
+
+    /// Refine detection using temporal ICP alignment
+    fn refine_detection_with_temporal_icp(
+        track: &TrackedBoard,
+        detection: &BoardDetection,
+        refiner: &IcpRefinement,
+    ) -> Result<BoardDetection> {
+        use crate::refinement::temporal_alignment;
+
+        // Check if track has temporal state, otherwise initialize
+        if track.temporal_state.is_none() {
+            return Ok(detection.clone());
+        }
+
+        let temporal_state = track.temporal_state.as_ref().unwrap();
+
+        // Extract board region points (using supporting points if available)
+        let board_points: Vec<Point3<f64>> = if !detection.supporting_points.is_empty() {
+            detection
+                .supporting_points
+                .iter()
+                .map(|&idx| Point3::new(idx as f64, 0.0, 0.0)) // Placeholder - would need actual points
+                .collect()
+        } else {
+            // Generate points from board dimensions
+            let half_x = detection.dimensions.x / 2.0;
+            let half_y = detection.dimensions.y / 2.0;
+            vec![
+                Point3::new(-half_x, -half_y, 0.0),
+                Point3::new(half_x, -half_y, 0.0),
+                Point3::new(half_x, half_y, 0.0),
+                Point3::new(-half_x, half_y, 0.0),
+            ]
+        };
+
+        // Transform points to world coordinates
+        let world_points: Vec<Point3<f64>> =
+            board_points.iter().map(|p| detection.pose * p).collect();
+
+        // Apply temporal ICP alignment
+        let initial_guess = Some(&detection.pose);
+        let refinement =
+            refiner.align_temporal(&world_points, temporal_state, initial_guess, None)?;
+
+        // Apply smoothing if refinement was successful
+        let refined_pose = if refinement.converged {
+            temporal_alignment::smooth_transformation(
+                &refinement.transformation,
+                &track.pose,
+                0.3, // Smoothing factor
+            )
+        } else {
+            detection.pose
+        };
+
+        // Create refined detection
+        let mut refined = detection.clone();
+        refined.pose = refined_pose;
+        refined.confidence =
+            DetectionConfidence::new(detection.confidence.score() * refinement.fitness);
+
+        Ok(refined)
     }
 }
 

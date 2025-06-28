@@ -11,6 +11,7 @@ use tracing::debug;
 
 use crate::{
     debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
+    refinement::IcpRefinement,
     types::{BoardDetection, BoundingBox, DetectedPlane, DetectionConfidence, PointCloud},
 };
 use board_fitter_config::SquareBoard;
@@ -76,12 +77,33 @@ impl DiamondSquareFitter {
         self.fit_square_with_debug(point_cloud, plane, None)
     }
 
+    /// Fit diamond square with ICP refinement
+    pub fn fit_square_with_refinement(
+        &self,
+        point_cloud: &PointCloud,
+        plane: &DetectedPlane,
+        icp_refiner: Option<&IcpRefinement>,
+    ) -> Result<Option<DiamondSquare>> {
+        self.fit_square_with_debug_and_refinement(point_cloud, plane, None, icp_refiner)
+    }
+
     /// Fit diamond square to detected plane with optional debug context
     pub fn fit_square_with_debug(
         &self,
         point_cloud: &PointCloud,
         plane: &DetectedPlane,
+        debug_ctx: Option<&mut DebugContext>,
+    ) -> Result<Option<DiamondSquare>> {
+        self.fit_square_with_debug_and_refinement(point_cloud, plane, debug_ctx, None)
+    }
+
+    /// Fit diamond square with optional debug context and ICP refinement
+    pub fn fit_square_with_debug_and_refinement(
+        &self,
+        point_cloud: &PointCloud,
+        plane: &DetectedPlane,
         mut debug_ctx: Option<&mut DebugContext>,
+        icp_refiner: Option<&IcpRefinement>,
     ) -> Result<Option<DiamondSquare>> {
         let start_time = Instant::now();
 
@@ -221,7 +243,36 @@ impl DiamondSquareFitter {
                 validation_success = true;
 
                 // Convert back to 3D
-                let square_3d = self.square_2d_to_3d(&square_2d, plane)?;
+                let mut square_3d = self.square_2d_to_3d(&square_2d, plane)?;
+
+                // Apply ICP refinement if available
+                if let Some(refiner) = icp_refiner {
+                    debug!("Applying ICP refinement to square pose");
+
+                    // Extract square region points
+                    let square_points: Vec<Point3<f64>> = plane
+                        .inliers
+                        .iter()
+                        .filter_map(|&idx| point_cloud.points.get(idx).copied())
+                        .collect();
+
+                    if !square_points.is_empty() {
+                        match crate::refinement::square_pose_refinement::refine_detected_square(
+                            &square_3d,
+                            &square_points,
+                            plane,
+                            refiner,
+                        ) {
+                            Ok(refined) => {
+                                debug!("Square ICP refinement successful");
+                                square_3d = refined;
+                            }
+                            Err(e) => {
+                                debug!("Square ICP refinement failed: {:?}", e);
+                            }
+                        }
+                    }
+                }
 
                 let duration = start_time.elapsed();
 

@@ -33,10 +33,10 @@ impl Default for PlaneDetectionConfig {
     fn default() -> Self {
         Self {
             ransac_iterations: 1000,
-            distance_threshold: 0.01, // 1cm
-            min_inliers: 100,
-            max_planes: 5,
-            min_plane_area: 0.1, // 0.1 m²
+            distance_threshold: 0.015, // Reduced to 1.5cm for better plane separation
+            min_inliers: 50,           // Reduced from 100 to 50 for smaller point clouds
+            max_planes: 10,            // Increased to detect more planes
+            min_plane_area: 0.25,      // Increased to 0.25 m² to match 1m board size
             multi_plane: true,
         }
     }
@@ -339,7 +339,7 @@ impl PlaneFilter {
             min_z_angle: 30.0_f64.to_radians(), // 30° minimum angle with horizontal
             max_z_angle: 150.0_f64.to_radians(), // 150° maximum angle
             min_dimensions: Vector3::new(0.5, 0.5, 0.01), // 0.5m x 0.5m minimum
-            max_dimensions: Vector3::new(2.0, 2.0, 0.1), // 2m x 2m maximum
+            max_dimensions: Vector3::new(6.0, 6.0, 0.1), // Increased to 6m x 6m for multi-board scenes
         }
     }
 

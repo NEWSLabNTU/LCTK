@@ -10,6 +10,7 @@
 //! - **Multi-board tracking**: Kalman filter-based motion prediction and tracking
 //! - **Adaptive ROI management**: Efficient processing with region-of-interest focusing
 //! - **Robust algorithms**: RANSAC plane detection, PCA-based square fitting, circle fitting
+//! - **ICP refinement**: Multi-stage ICP refinement for sub-centimeter accuracy
 //! - **Real-time performance**: Optimized for real-time processing with configurable timeouts
 //!
 //! ## Quick Start
@@ -106,6 +107,7 @@ pub mod diamond;
 pub mod hole;
 pub mod io;
 pub mod plane;
+pub mod refinement;
 pub mod roi;
 pub mod tracking;
 pub mod types;

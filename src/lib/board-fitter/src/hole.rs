@@ -6,11 +6,12 @@ use std::{
     collections::{HashMap, HashSet},
     time::Instant,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     debug::{stages, AlgorithmStats, DebugContext, DebugData, StageMetrics},
     diamond::DiamondSquare,
+    refinement::IcpRefinement,
     types::{DetectedHole, DetectionConfidence, PointCloud},
 };
 use board_fitter_config::{CircleHole, SquareBoard};
@@ -42,7 +43,7 @@ impl Default for HoleDetectionConfig {
             radius_tolerance: 0.08,  // 8cm tolerance (temporary for coordinate transform tuning)
             position_tolerance: 0.6, // 60cm position tolerance (temporary for coordinate transform tuning)
             min_points: 10,
-            grid_resolution: 0.005, // 5mm grid
+            grid_resolution: 0.02, // 20mm grid - increased for performance
             min_depth_threshold: 0.1,
         }
     }
@@ -82,6 +83,7 @@ impl HoleDetector {
         mut debug_ctx: Option<&mut DebugContext>,
     ) -> Result<Vec<DetectedHole>> {
         let start_time = Instant::now();
+        let timeout = std::time::Duration::from_secs(5); // 5 second timeout for hole detection
 
         if let Some(ref mut ctx) = debug_ctx {
             ctx.start_stage(stages::HOLE_DETECTION);
@@ -225,14 +227,16 @@ impl HoleDetector {
         }
 
         // Method 2: Geometric hole detection (negative space)
-        debug!("HoleDetector - attempting geometric hole detection");
-        let geometric_holes = self.detect_holes_by_geometry(&projected_points)?;
-        let geometric_holes_count = geometric_holes.len();
-        debug!(
-            "HoleDetector - found {} geometric holes",
-            geometric_holes.len()
-        );
-        holes.extend(geometric_holes);
+        // TEMPORARILY DISABLED due to performance issues with large grids
+        debug!("HoleDetector - geometric hole detection temporarily disabled for performance");
+        let geometric_holes_count = 0;
+        // let geometric_holes = self.detect_holes_by_geometry(&projected_points)?;
+        // let geometric_holes_count = geometric_holes.len();
+        // debug!(
+        //     "HoleDetector - found {} geometric holes",
+        //     geometric_holes.len()
+        // );
+        // holes.extend(geometric_holes);
 
         if let Some(ref mut ctx) = debug_ctx {
             let mut metadata = HashMap::new();
@@ -253,6 +257,21 @@ impl HoleDetector {
                 },
             };
             ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+        }
+
+        // Check timeout before transformation
+        if start_time.elapsed() > timeout {
+            warn!("HoleDetector - timeout during hole detection, returning partial results");
+            return Ok(holes
+                .into_iter()
+                .take(3)
+                .map(|h| DetectedHole {
+                    center: h.center,
+                    radius: h.radius,
+                    confidence: h.confidence,
+                    id: h.id,
+                })
+                .collect());
         }
 
         // Transform holes from 2D plane coordinates to 3D board coordinates
@@ -314,6 +333,31 @@ impl HoleDetector {
         }
 
         Ok(validated_holes)
+    }
+
+    /// Match detected holes with expected pattern from configuration with optional ICP refinement
+    pub fn match_hole_pattern_with_refinement(
+        &self,
+        detected_holes: &[DetectedHole],
+        expected_pattern: &[CircleHole],
+        icp_refiner: Option<&IcpRefinement>,
+    ) -> Result<HoleMatchResult> {
+        // First do standard matching
+        let mut result = self.match_hole_pattern(detected_holes, expected_pattern)?;
+
+        // Apply ICP refinement if available and we have matches
+        if let Some(refiner) = icp_refiner {
+            if !result.matches.is_empty() {
+                result = self.refine_hole_matches_with_icp(
+                    result,
+                    detected_holes,
+                    expected_pattern,
+                    refiner,
+                )?;
+            }
+        }
+
+        Ok(result)
     }
 
     /// Match detected holes with expected pattern from configuration
@@ -398,6 +442,51 @@ impl HoleDetector {
             unmatched_detected,
             unmatched_expected,
         })
+    }
+
+    /// Refine hole matches using ICP
+    fn refine_hole_matches_with_icp(
+        &self,
+        mut result: HoleMatchResult,
+        detected_holes: &[DetectedHole],
+        expected_pattern: &[CircleHole],
+        refiner: &IcpRefinement,
+    ) -> Result<HoleMatchResult> {
+        use crate::refinement::hole_pattern_alignment::refine_hole_pattern;
+
+        // Convert detected holes to points
+        let detected_points: Vec<Point3<f64>> = detected_holes.iter().map(|h| h.center).collect();
+
+        // Convert expected pattern to points
+        let expected_points: Vec<Point3<f64>> = expected_pattern
+            .iter()
+            .map(|h| Point3::new(h.position.x.as_meters(), h.position.y.as_meters(), 0.0))
+            .collect();
+
+        // Apply ICP refinement
+        match refine_hole_pattern(&detected_points, &expected_points, refiner) {
+            Ok(refinement) => {
+                debug!(
+                    "Hole pattern ICP refinement successful, fitness: {:.3}",
+                    refinement.fitness
+                );
+
+                // Update matched holes with refined positions
+                for (expected_id, (detected_hole, error)) in result.matches.iter_mut() {
+                    let refined_center = refinement.transformation * detected_hole.center;
+                    detected_hole.center = refined_center;
+
+                    // Update error based on refinement fitness
+                    *error *= (1.0 - refinement.fitness);
+                }
+
+                Ok(result)
+            }
+            Err(e) => {
+                debug!("Hole pattern ICP refinement failed: {:?}", e);
+                Ok(result) // Return unrefined result
+            }
+        }
     }
 
     /// Filter points that are within the diamond square

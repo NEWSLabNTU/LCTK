@@ -20,6 +20,9 @@ board-fitter-config = { path = "../board-fitter-config" }
 rand = "0.8"
 rand_chacha = "0.3"
 
+# ICP refinement
+fast-gicp = { version = "0.1", default-features = false }
+
 # Collections and utilities
 indexmap = "2.0"
 uuid = { version = "1.0", features = ["v4"] }
@@ -41,10 +44,15 @@ tempfile = "3.0"
 default = []
 # Enable automatic dataset downloading
 download = ["reqwest"]
-# Future features for optimization
-cuda = []
+# ICP acceleration features
+cuda = ["fast-gicp/cuda"]
+# Future features
 opencl = []
 
 [[bench]]
 name = "detection_benchmark"
+harness = false
+
+[[bench]]
+name = "icp_refinement_benchmark"
 harness = false

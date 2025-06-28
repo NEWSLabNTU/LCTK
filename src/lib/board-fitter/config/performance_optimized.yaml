@@ -1,0 +1,62 @@
+# Performance-optimized ICP configuration for real-time board detection
+# Target: <1s detection time with acceptable accuracy trade-off
+
+enable_cuda: true
+cuda_device_id: 0
+fallback_to_cpu: true
+num_threads: 4
+
+# Square pose refinement - most critical stage
+square_pose_refinement:
+  enabled: true
+  registration_type:
+    Vgicp:
+      voxel_resolution: 0.05  # 5cm voxels for speed
+  max_iterations: 5         # Reduced from default 20
+  downsampling_resolution: 0.02  # 2cm downsampling
+  num_neighbors: 10         # Reduced from default 20
+  convergence_criteria:
+    translation_epsilon: 0.005  # 5mm tolerance
+    rotation_epsilon: 0.01      # ~0.6 degree tolerance
+    max_correspondence_distance: 0.1  # 10cm max distance
+  robust_kernel:
+    Huber:
+      threshold: 0.05       # 5cm outlier threshold
+  use_covariance_estimation: false  # Disable for speed
+
+# Hole pattern alignment - simplified for performance
+hole_pattern_alignment:
+  enabled: false             # Disable for maximum speed
+  registration_type: Icp
+  max_iterations: 3
+  downsampling_resolution: 0.03
+  num_neighbors: 5
+  convergence_criteria:
+    translation_epsilon: 0.01
+    rotation_epsilon: 0.02
+    max_correspondence_distance: 0.05
+
+# Board pose refinement - final cleanup
+board_pose_refinement:
+  enabled: true
+  registration_type: PlaneIcp  # Faster than GICP
+  max_iterations: 3           # Minimal refinement
+  downsampling_resolution: 0.01  # 1cm for final accuracy
+  num_neighbors: 5
+  convergence_criteria:
+    translation_epsilon: 0.002  # 2mm final accuracy
+    rotation_epsilon: 0.005     # ~0.3 degree final accuracy
+    max_correspondence_distance: 0.05
+  use_covariance_estimation: false
+
+# Temporal alignment - disabled for single-frame detection
+temporal_alignment:
+  enabled: false
+  registration_type: Icp
+  max_iterations: 1
+  downsampling_resolution: 0.05
+  num_neighbors: 5
+  convergence_criteria:
+    translation_epsilon: 0.01
+    rotation_epsilon: 0.02
+    max_correspondence_distance: 0.1
