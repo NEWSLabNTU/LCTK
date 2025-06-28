@@ -2,14 +2,13 @@ use crate::{
     roi::{bounds_from_center_size, center_size_from_bounds, RoiManager},
     visualization::RoiMarkerGenerator,
 };
-use eyre::Result;
 use rclrs::{log_error, log_info, rmw_request_id_t as ServiceRequestHeader, Node, ToLogParams};
 // Temporarily disabled - rosbag_deck_interface not available as Rust crate
-// use rosbag_deck_interface::srv::{SetROIBounds_Request, SetROIBounds_Response};
+// use rosbag_deck_interface::srv::{SetRoiBoundsRequest, SetRoiBoundsResponse};
 
 // Mock types for now
 #[derive(Default)]
-pub struct SetROIBounds_Request {
+pub struct SetRoiBoundsRequest {
     pub lidar_id: u8,
     pub center_x: f64,
     pub center_y: f64,
@@ -20,7 +19,7 @@ pub struct SetROIBounds_Request {
 }
 
 #[derive(Default)]
-pub struct SetROIBounds_Response {
+pub struct SetRoiBoundsResponse {
     pub success: bool,
     pub message: String,
 }
@@ -45,9 +44,9 @@ impl<R: RoiManager, M: RoiMarkerGenerator> RoiServiceHandler<R, M> {
     pub fn handle_set_roi_bounds(
         &self,
         _request_header: &ServiceRequestHeader,
-        request: SetROIBounds_Request,
-    ) -> SetROIBounds_Response {
-        let mut response = SetROIBounds_Response::default();
+        request: SetRoiBoundsRequest,
+    ) -> SetRoiBoundsResponse {
+        let mut response = SetRoiBoundsResponse::default();
 
         // Validate lidar_id
         if request.lidar_id != 1 && request.lidar_id != 2 {
@@ -98,6 +97,7 @@ impl<R: RoiManager, M: RoiMarkerGenerator> RoiServiceHandler<R, M> {
         response
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn get_roi_bounds(&self, lidar_id: u8) -> Option<((f64, f64, f64), (f64, f64, f64))> {
         self.roi_manager
             .get_bounds(lidar_id)
@@ -123,14 +123,15 @@ mod tests {
         let handler = RoiServiceHandler::new(roi_manager.clone(), marker_generator, Arc::new(node));
 
         // Test valid request
-        let mut request = SetROIBounds_Request::default();
-        request.lidar_id = 1;
-        request.center_x = 2.0;
-        request.center_y = 0.0;
-        request.center_z = 0.0;
-        request.size_x = 4.0;
-        request.size_y = 4.0;
-        request.size_z = 2.0;
+        let request = SetRoiBoundsRequest {
+            lidar_id: 1,
+            center_x: 2.0,
+            center_y: 0.0,
+            center_z: 0.0,
+            size_x: 4.0,
+            size_y: 4.0,
+            size_z: 2.0,
+        };
 
         let header = ServiceRequestHeader {
             writer_guid: [0; 16],
@@ -157,8 +158,10 @@ mod tests {
 
         let handler = RoiServiceHandler::new(roi_manager, marker_generator, node);
 
-        let mut request = SetROIBounds_Request::default();
-        request.lidar_id = 3; // Invalid
+        let request = SetRoiBoundsRequest {
+            lidar_id: 3, // Invalid
+            ..Default::default()
+        };
 
         let header = ServiceRequestHeader {
             writer_guid: [0; 16],

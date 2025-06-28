@@ -115,10 +115,17 @@ pub struct DynamicCalibrationController {
 #[derive(Debug, Clone)]
 struct AdjustmentRecord {
     timestamp: std::time::SystemTime,
+    #[allow(dead_code)]
     parameters_before: CalibrationParameters,
     parameters_after: CalibrationParameters,
     reason: String,
     quality_score: f64,
+}
+
+impl Default for DynamicCalibrationController {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DynamicCalibrationController {

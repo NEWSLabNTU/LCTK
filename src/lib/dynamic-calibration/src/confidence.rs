@@ -55,6 +55,12 @@ pub struct ConfidenceAnalyzer {
     max_history: usize,
 }
 
+impl Default for ConfidenceAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfidenceAnalyzer {
     /// Create a new confidence analyzer
     pub fn new() -> Self {
@@ -122,12 +128,12 @@ impl ConfidenceAnalyzer {
         confidence *= metrics.detection_confidence;
 
         // Adjust based on inlier ratio
-        confidence *= (0.5 + 0.5 * metrics.inlier_ratio);
+        confidence *= 0.5 + 0.5 * metrics.inlier_ratio;
 
         // Adjust based on consistency over time
         if self.quality_history.len() >= 5 {
             let recent_variance = self.compute_recent_variance(5);
-            confidence *= (1.0 - recent_variance.min(0.5));
+            confidence *= 1.0 - recent_variance.min(0.5);
         }
 
         confidence.clamp(0.0, 1.0)
@@ -283,7 +289,7 @@ impl ConfidenceAnalyzer {
             .iter()
             .rev()
             .take(10)
-            .map(|m| extractor(m))
+            .map(extractor)
             .collect();
 
         if values.len() < 2 {

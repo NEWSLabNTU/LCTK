@@ -29,12 +29,14 @@ fn main() -> Result<()> {
         border_bits: 1,
     };
     // Create a default CameraInfo for testing
-    let mut camera_info = CameraInfo::default();
-    camera_info.k = [1000.0, 0.0, 640.0, 0.0, 1000.0, 480.0, 0.0, 0.0, 1.0];
-    camera_info.d = vec![0.0; 5];
-    camera_info.width = 1280;
-    camera_info.height = 960;
-    camera_info.distortion_model = "plumb_bob".to_string();
+    let camera_info = CameraInfo {
+        k: [1000.0, 0.0, 640.0, 0.0, 1000.0, 480.0, 0.0, 0.0, 1.0],
+        d: vec![0.0; 5],
+        width: 1280,
+        height: 960,
+        distortion_model: "plumb_bob".to_string(),
+        ..Default::default()
+    };
 
     let detector = Builder {
         pattern,
@@ -52,7 +54,7 @@ fn main() -> Result<()> {
             print!("id={}, corners=", marker.id);
 
             let corners: Vec<_> = marker.corners[1..]
-                .into_iter()
+                .iter()
                 .map(|corner| format!("({}, {})", corner.x, corner.y))
                 .collect();
             let corners = corners.join(", ");

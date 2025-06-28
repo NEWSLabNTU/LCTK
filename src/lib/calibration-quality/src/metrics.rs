@@ -1,7 +1,7 @@
 //! Calibration quality metrics computation
 
 use anyhow::Result;
-use nalgebra::{Isometry3, Point3, Vector3};
+use nalgebra::{Isometry3, Point3};
 use serde::{Deserialize, Serialize};
 
 /// Individual quality metrics for calibration
@@ -166,7 +166,7 @@ impl CalibrationMetrics {
 }
 
 /// Geometric error metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GeometricError {
     /// Mean translation error
     pub mean_translation_error: f64,
@@ -230,7 +230,7 @@ impl GeometricError {
 }
 
 /// Statistical quality metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StatisticalMetrics {
     /// Standard deviation of errors
     pub error_std_dev: f64,
@@ -299,7 +299,7 @@ pub struct QualityScore {
     pub components: QualityComponents,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct QualityComponents {
     pub accuracy: f64,
     pub precision: f64,

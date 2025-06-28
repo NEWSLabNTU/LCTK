@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use crate::types::RoiBounds;
 use geometry_msgs::msg::{Point, Vector3};
 use std_msgs::msg::{ColorRGBA, Header};

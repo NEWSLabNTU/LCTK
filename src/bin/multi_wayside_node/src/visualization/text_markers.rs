@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use geometry_msgs::msg::{Point, Vector3};
 use std_msgs::msg::{ColorRGBA, Header};
 use visualization_msgs::msg::{Marker, MarkerArray};
@@ -126,7 +128,7 @@ impl TextMarkerGenerator for DefaultTextMarkerGenerator {
             let mut indicator = Marker::default();
             indicator.header = header.clone();
             indicator.ns = format!("lidar_{}_status", lidar_id);
-            indicator.id = lidar_id as i32;
+            indicator.id = lidar_id;
             indicator.type_ = 2; // SPHERE
             indicator.action = 0; // ADD
             indicator.pose.position = Point {

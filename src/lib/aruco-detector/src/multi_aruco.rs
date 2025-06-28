@@ -374,6 +374,7 @@ impl Detector {
                 params
             };
 
+            #[allow(clippy::unnecessary_mut_passed)]
             aruco::detect_markers(
                 &canvas,
                 &dictionary,
@@ -467,6 +468,7 @@ impl Detector {
             params
         };
 
+        #[allow(clippy::unnecessary_mut_passed)]
         aruco::detect_markers(
             &canvas,
             &dictionary,

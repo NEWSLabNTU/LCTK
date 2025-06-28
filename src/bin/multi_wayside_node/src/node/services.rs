@@ -1,15 +1,8 @@
-use crate::{
-    roi::{RoiManager, RoiServiceHandler},
-    visualization::RoiMarkerGenerator,
-};
-use eyre::Result;
-use rclrs::{Node, Service};
 // Temporarily disabled - rosbag_deck_interface not available as Rust crate
 // use rosbag_deck_interface::srv::SetROIBounds;
 
 // Mock type for now
 pub struct SetROIBounds;
-use std::sync::Arc;
 
 /// Trait for managing ROS 2 services
 pub trait ServiceManager: Send + Sync {
@@ -47,7 +40,7 @@ impl ServiceFactory {
     */
 }
 
-/// Container for all services to keep them alive
+// Container for all services to keep them alive
 // Temporarily disabled due to rosbag_deck_interface dependency
 /*
 pub struct ServiceContainer {
@@ -65,9 +58,6 @@ impl ServiceContainer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{roi::DefaultRoiManager, visualization::DefaultRoiMarkerGenerator};
-    use rclrs::Context;
 
     // Temporarily disabled due to rosbag_deck_interface dependency
     /*

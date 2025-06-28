@@ -128,7 +128,7 @@ impl ParameterAdjuster {
     /// Compute parameter deltas based on analysis
     fn compute_deltas(
         &self,
-        current: &CalibrationParameters,
+        _current: &CalibrationParameters,
         confidence: &ConfidenceMetrics,
         scene: &SceneCharacteristics,
     ) -> ParameterDeltas {

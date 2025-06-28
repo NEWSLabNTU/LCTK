@@ -9,12 +9,14 @@ pub fn to_pointcloud2(
     header: Header,
     color: Option<[u8; 3]>,
 ) -> PointCloud2 {
-    let mut msg = PointCloud2::default();
-    msg.header = header;
-    msg.height = 1;
-    msg.width = points.len() as u32;
-    msg.is_dense = true;
-    msg.is_bigendian = false;
+    let mut msg = PointCloud2 {
+        header,
+        height: 1,
+        width: points.len() as u32,
+        is_dense: true,
+        is_bigendian: false,
+        ..Default::default()
+    };
 
     // Define fields based on whether we include color
     if color.is_some() {

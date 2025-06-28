@@ -47,15 +47,13 @@ impl MrptCalibration {
             );
         }
 
-        let mut camera_info = CameraInfo::default();
-
-        // Set image dimensions
-        camera_info.width = self.image_width as u32;
-        camera_info.height = self.image_height as u32;
-
-        // Set distortion model
-        camera_info.distortion_model = match self.distortion_model {
-            DistortionModel::PlumbBob => "plumb_bob".to_string(),
+        let mut camera_info = CameraInfo {
+            width: self.image_width as u32,
+            height: self.image_height as u32,
+            distortion_model: match self.distortion_model {
+                DistortionModel::PlumbBob => "plumb_bob".to_string(),
+            },
+            ..Default::default()
         };
 
         // Convert camera matrix to K array (row-major 3x3)
@@ -74,10 +72,7 @@ impl MrptCalibration {
         ];
 
         // Convert distortion coefficients
-        camera_info.d = self.distortion_coefficients.data[0..5]
-            .iter()
-            .map(|&r| r)
-            .collect();
+        camera_info.d = self.distortion_coefficients.data[0..5].to_vec();
 
         // Set projection matrix P (3x4)
         if self.projection_matrix.rows == 3 && self.projection_matrix.cols == 4 {

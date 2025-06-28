@@ -17,8 +17,8 @@ mod visualization;
 
 // Imports from modules
 use calibration::{
-    CalibrationConfig, CalibrationManager, CalibrationSolver, DefaultCalibrationManager,
-    DefaultCalibrationSolver, DefaultTfBroadcaster, TfBroadcaster,
+    CalibrationConfig, CalibrationSolver, DefaultCalibrationManager, DefaultCalibrationSolver,
+    DefaultTfBroadcaster, TfBroadcaster,
 };
 use config::MultiWaysideConfig;
 use detection::{
@@ -290,7 +290,8 @@ fn setup_ros2_interfaces(
 
                 // Apply pose adjustment to LiDAR 1 calibration state
                 // This could be used to refine manual calibration or adjust detected poses
-                if let Some(manager) = calibration_manager.upgrade() {
+                {
+                    let _manager = &calibration_manager;
                     // Note: In a full implementation, this would apply the adjustment
                     // to the detection pipeline or calibration state
                     log_info!(LOGGER_NAME, "Applied LiDAR 1 pose adjustment");
@@ -314,7 +315,8 @@ fn setup_ros2_interfaces(
                 );
 
                 // Apply pose adjustment to LiDAR 2 calibration state
-                if let Some(manager) = calibration_manager.upgrade() {
+                {
+                    let _manager = &calibration_manager;
                     log_info!(LOGGER_NAME, "Applied LiDAR 2 pose adjustment");
                 }
             },

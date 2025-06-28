@@ -65,6 +65,12 @@ enum SceneType {
     Laboratory,
 }
 
+impl Default for SceneAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SceneAnalyzer {
     /// Create a new scene analyzer
     pub fn new() -> Self {
@@ -244,8 +250,7 @@ impl SceneAnalyzer {
         if let Some(latest) = self.metrics_history.back() {
             let error_range = latest.geometric_error.max_translation_error
                 - latest.statistical_metrics.median_error;
-            let normalized_range = (error_range * 5.0).clamp(0.0, 1.0);
-            normalized_range
+            (error_range * 5.0).clamp(0.0, 1.0)
         } else {
             0.3 // Default
         }

@@ -2,7 +2,6 @@ use crate::types::LidarPoint;
 use eyre::Result;
 use nalgebra::Point3;
 use sensor_msgs::msg::PointCloud2;
-use std::mem;
 
 /// Trait for parsing point cloud data
 pub trait PointCloudParser: Send + Sync {
@@ -52,7 +51,7 @@ pub fn parse_pointcloud2(msg: &PointCloud2) -> Result<Vec<LidarPoint>> {
 
     // Parse points
     let point_step = msg.point_step as usize;
-    let num_points = (msg.data.len() / point_step) as usize;
+    let num_points = msg.data.len() / point_step;
 
     let mut points = Vec::with_capacity(num_points);
 
@@ -92,32 +91,32 @@ mod tests {
     use sensor_msgs::msg::{PointCloud2, PointField};
 
     fn create_test_pointcloud() -> PointCloud2 {
-        let mut msg = PointCloud2::default();
-        msg.height = 1;
-        msg.width = 3;
-        msg.point_step = 12; // 3 floats * 4 bytes
-
-        // Define fields
-        msg.fields = vec![
-            PointField {
-                name: "x".to_string(),
-                offset: 0,
-                datatype: 7, // FLOAT32
-                count: 1,
-            },
-            PointField {
-                name: "y".to_string(),
-                offset: 4,
-                datatype: 7,
-                count: 1,
-            },
-            PointField {
-                name: "z".to_string(),
-                offset: 8,
-                datatype: 7,
-                count: 1,
-            },
-        ];
+        let mut msg = PointCloud2 {
+            height: 1,
+            width: 3,
+            point_step: 12, // 3 floats * 4 bytes
+            fields: vec![
+                PointField {
+                    name: "x".to_string(),
+                    offset: 0,
+                    datatype: 7, // FLOAT32
+                    count: 1,
+                },
+                PointField {
+                    name: "y".to_string(),
+                    offset: 4,
+                    datatype: 7,
+                    count: 1,
+                },
+                PointField {
+                    name: "z".to_string(),
+                    offset: 8,
+                    datatype: 7,
+                    count: 1,
+                },
+            ],
+            ..Default::default()
+        };
 
         // Add test data
         let points = vec![

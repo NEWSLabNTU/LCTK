@@ -119,7 +119,7 @@ impl ArucoDetector {
             &mut display_image,
             &camera_matrix,
             &dist_coeffs,
-            &mut no_array(),
+            &no_array(),
         )?;
 
         let draw_text = |image: &mut Mat, text: &str, (x, y), (b, g, r)| -> Result<()> {

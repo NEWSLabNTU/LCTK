@@ -102,31 +102,32 @@ mod tests {
     use std::collections::HashMap;
 
     fn create_test_pointcloud() -> PointCloud2 {
-        let mut msg = PointCloud2::default();
-        msg.height = 1;
-        msg.width = 3;
-        msg.point_step = 12;
-
-        msg.fields = vec![
-            PointField {
-                name: "x".to_string(),
-                offset: 0,
-                datatype: 7,
-                count: 1,
-            },
-            PointField {
-                name: "y".to_string(),
-                offset: 4,
-                datatype: 7,
-                count: 1,
-            },
-            PointField {
-                name: "z".to_string(),
-                offset: 8,
-                datatype: 7,
-                count: 1,
-            },
-        ];
+        let mut msg = PointCloud2 {
+            height: 1,
+            width: 3,
+            point_step: 12,
+            fields: vec![
+                PointField {
+                    name: "x".to_string(),
+                    offset: 0,
+                    datatype: 7,
+                    count: 1,
+                },
+                PointField {
+                    name: "y".to_string(),
+                    offset: 4,
+                    datatype: 7,
+                    count: 1,
+                },
+                PointField {
+                    name: "z".to_string(),
+                    offset: 8,
+                    datatype: 7,
+                    count: 1,
+                },
+            ],
+            ..Default::default()
+        };
 
         // Points: inside range, outside range, inside range
         let points = vec![

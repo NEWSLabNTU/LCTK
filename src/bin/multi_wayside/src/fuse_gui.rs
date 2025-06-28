@@ -212,7 +212,7 @@ impl WindowState {
                         ),
                         -0.2_f64.to_radians(),
                     );
-                    (*orig_board).pose.rotation = rotation * orig_board.pose.rotation;
+                    orig_board.pose.rotation = rotation * orig_board.pose.rotation;
                 }
                 E::Key(K::S, A::Press, _) => {
                     let rotation = na::UnitQuaternion::from_axis_angle(
@@ -221,45 +221,45 @@ impl WindowState {
                         ),
                         0.2_f64.to_radians(),
                     );
-                    (*orig_board).pose.rotation = rotation * orig_board.pose.rotation;
+                    orig_board.pose.rotation = rotation * orig_board.pose.rotation;
                 }
                 E::Key(K::A, A::Press, _) => {
                     let rotation = na::UnitQuaternion::from_axis_angle(
                         &na::Unit::new_normalize(orig_board.pose * na::Vector3::new(0.0, 0.0, 1.0)),
                         0.2_f64.to_radians(),
                     );
-                    (*orig_board).pose.rotation = rotation * orig_board.pose.rotation;
+                    orig_board.pose.rotation = rotation * orig_board.pose.rotation;
                 }
                 E::Key(K::D, A::Press, _) => {
                     let rotation = na::UnitQuaternion::from_axis_angle(
                         &na::Unit::new_normalize(orig_board.pose * na::Vector3::new(0.0, 0.0, 1.0)),
                         -0.2_f64.to_radians(),
                     );
-                    (*orig_board).pose.rotation = rotation * orig_board.pose.rotation;
+                    orig_board.pose.rotation = rotation * orig_board.pose.rotation;
                 }
                 E::Key(K::Up, A::Press, _) => {
                     let translation = na::Translation3::new(0.0, 0.05, 0.0);
-                    (*orig_board).pose = translation * orig_board.pose;
+                    orig_board.pose = translation * orig_board.pose;
                 }
                 E::Key(K::Down, A::Press, _) => {
                     let translation = na::Translation3::new(0.0, -0.05, 0.0);
-                    (*orig_board).pose = translation * orig_board.pose;
+                    orig_board.pose = translation * orig_board.pose;
                 }
                 E::Key(K::Right, A::Press, _) => {
                     let translation = na::Translation3::new(0.05, 0.0, 0.0);
-                    (*orig_board).pose = translation * orig_board.pose;
+                    orig_board.pose = translation * orig_board.pose;
                 }
                 E::Key(K::Left, A::Press, _) => {
                     let translation = na::Translation3::new(-0.05, 0.0, 0.0);
-                    (*orig_board).pose = translation * orig_board.pose;
+                    orig_board.pose = translation * orig_board.pose;
                 }
                 E::Key(K::PageUp, A::Press, _) => {
                     let translation = na::Translation3::new(0.0, 0.0, 0.05);
-                    (*orig_board).pose = translation * orig_board.pose;
+                    orig_board.pose = translation * orig_board.pose;
                 }
                 E::Key(K::PageDown, A::Press, _) => {
                     let translation = na::Translation3::new(0.0, 0.0, -0.05);
-                    (*orig_board).pose = translation * orig_board.pose;
+                    orig_board.pose = translation * orig_board.pose;
                 }
                 E::Key(K::R, A::Press, _) => {
                     let rotation = na::UnitQuaternion::from_axis_angle(
@@ -269,14 +269,14 @@ impl WindowState {
                     orig_board.pose.translation.x = orig_board.left_corner().x;
                     orig_board.pose.translation.y = orig_board.left_corner().y;
                     orig_board.pose.translation.z = orig_board.left_corner().z;
-                    (*orig_board).pose.rotation = rotation * orig_board.pose.rotation;
+                    orig_board.pose.rotation = rotation * orig_board.pose.rotation;
                 }
                 E::Key(K::F, A::Press, _) => {
                     let rotation = na::UnitQuaternion::from_axis_angle(
                         &na::Unit::new_normalize(orig_board.pose * na::Vector3::new(1.0, 1.0, 0.0)),
                         PI,
                     );
-                    (*orig_board).pose.rotation = rotation * orig_board.pose.rotation;
+                    orig_board.pose.rotation = rotation * orig_board.pose.rotation;
                 }
 
                 _ => {}

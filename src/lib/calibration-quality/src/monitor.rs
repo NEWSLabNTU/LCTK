@@ -1,7 +1,7 @@
 //! Calibration convergence monitoring
 
 use crate::CalibrationMetrics;
-use nalgebra::{Isometry3, Vector3};
+use nalgebra::Isometry3;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -88,6 +88,12 @@ impl Default for ConvergenceConfig {
             convergence_window: 5,
             quality_improvement_threshold: 0.01,
         }
+    }
+}
+
+impl Default for ConvergenceMonitor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -303,6 +309,12 @@ impl ConvergenceMonitor {
 pub struct AdaptiveConvergenceMonitor {
     base_monitor: ConvergenceMonitor,
     threshold_adjuster: ThresholdAdjuster,
+}
+
+impl Default for AdaptiveConvergenceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AdaptiveConvergenceMonitor {

@@ -4,4 +4,3 @@ pub mod service;
 
 pub use cropper::*;
 pub use manager::*;
-pub use service::*;

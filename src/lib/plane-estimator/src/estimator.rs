@@ -43,10 +43,7 @@ where
             let vec2 = vec2.cross(&vec1);
             let vec2_norm = vec2.norm();
             if vec2_norm <= 1e-7 {
-                p2 = match data.next() {
-                    Some(point) => point,
-                    None => return None,
-                };
+                p2 = data.next()?;
                 continue;
             }
 

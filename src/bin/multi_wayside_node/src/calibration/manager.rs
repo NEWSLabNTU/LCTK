@@ -4,7 +4,7 @@ use crate::{
         DefaultCalibrationValidator,
     },
     detection::{DefaultDetectionSynchronizer, DetectionSynchronizer},
-    types::{BoardDetection, TimestampedDetection},
+    types::BoardDetection,
 };
 use builtin_interfaces::msg::Time;
 use eyre::Result;
@@ -17,7 +17,7 @@ use std::{
 };
 
 /// Calibration state for tracking the calibration process
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CalibrationState {
     pub is_calibrated: bool,
     pub transform: Option<Isometry3<f64>>,
@@ -25,19 +25,6 @@ pub struct CalibrationState {
     pub last_calibration_time: Option<SystemTime>,
     pub successful_calibrations: u32,
     pub failed_calibrations: u32,
-}
-
-impl Default for CalibrationState {
-    fn default() -> Self {
-        Self {
-            is_calibrated: false,
-            transform: None,
-            quality_score: None,
-            last_calibration_time: None,
-            successful_calibrations: 0,
-            failed_calibrations: 0,
-        }
-    }
 }
 
 /// Trait for managing automatic calibration

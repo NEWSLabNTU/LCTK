@@ -110,7 +110,7 @@ impl Detector {
             };
 
             // Construct the corrected pose
-            fixup_translation * fixup_rotation * &board_model.pose.rotation
+            fixup_translation * fixup_rotation * board_model.pose.rotation
         };
 
         let detection = Detection {

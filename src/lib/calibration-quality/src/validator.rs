@@ -1,6 +1,6 @@
 //! Calibration validation module
 
-use crate::{CalibrationMetrics, QualityError};
+use crate::CalibrationMetrics;
 use anyhow::Result;
 use nalgebra::Isometry3;
 use serde::{Deserialize, Serialize};
@@ -191,14 +191,18 @@ impl CalibrationValidator {
     /// Check physical constraints
     fn check_physical_constraints(&self, transform: &Isometry3<f64>) -> bool {
         // Check that transform preserves handedness (determinant should be positive)
-        let det = transform.rotation.matrix().determinant();
+        let det = transform
+            .rotation
+            .to_rotation_matrix()
+            .matrix()
+            .determinant();
         if det < 0.0 {
             return false;
         }
 
         // Check that rotation is reasonable (no extreme rotations)
         let rotation = transform.rotation;
-        let (roll, pitch, yaw) = rotation.euler_angles();
+        let (roll, pitch, _yaw) = rotation.euler_angles();
 
         // Assuming sensors are roughly level, extreme roll/pitch are suspicious
         let max_roll_pitch = std::f64::consts::PI / 3.0; // 60 degrees
@@ -279,8 +283,10 @@ impl CalibrationValidator {
 }
 
 /// Dynamic validation config adjustment based on scene
+#[allow(dead_code)]
 pub struct AdaptiveValidator {
     base_config: ValidationConfig,
+    #[allow(dead_code)]
     scene_analyzer: SceneAnalyzer,
 }
 
@@ -314,6 +320,7 @@ impl AdaptiveValidator {
 
 /// Scene complexity analyzer
 struct SceneAnalyzer {
+    #[allow(dead_code)]
     complexity_history: Vec<f64>,
 }
 
@@ -324,6 +331,7 @@ impl SceneAnalyzer {
         }
     }
 
+    #[allow(dead_code)]
     fn analyze_complexity(&mut self, metrics: &CalibrationMetrics) -> f64 {
         // Simple complexity metric based on correspondence count and distribution
         let complexity = 1.0 / (1.0 + metrics.num_correspondences as f64 / 20.0);

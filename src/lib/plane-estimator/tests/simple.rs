@@ -3,7 +3,7 @@ use sample_consensus::Estimator;
 
 #[test]
 fn simple() {
-    let points = vec![
+    let points = [
         [1.0, 0.0, 0.0],
         [1.0, 1.2, 2.4],
         [1.0, -0.9, 1.7],

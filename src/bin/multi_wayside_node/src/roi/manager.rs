@@ -19,6 +19,12 @@ pub struct DefaultRoiManager {
     bounds: Arc<Mutex<HashMap<u8, RoiBounds>>>,
 }
 
+impl Default for DefaultRoiManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefaultRoiManager {
     pub fn new() -> Self {
         Self {

@@ -74,7 +74,7 @@ pub fn validate_directory_structure(base_path: &str) -> Result<()> {
 pub fn validate_config_files(base_path: &str) -> Result<()> {
     let validator = DefaultConfigValidator;
 
-    let config_files = vec![
+    let config_files = [
         format!("{}/config/hollow_board.yaml", base_path),
         format!("{}/config/detector.yaml", base_path),
         format!("{}/config/aruco_pattern.json5", base_path),

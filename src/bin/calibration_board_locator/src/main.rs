@@ -28,7 +28,7 @@ static DEFAULT_BOARD_DETECTOR_CONFIG: Lazy<BoardDetectorConfig> = Lazy::new(|| {
         env!("CARGO_MANIFEST_DIR"),
         "/config/board_detector.json5"
     ));
-    json5::from_str(&text).unwrap()
+    json5::from_str(text).unwrap()
 });
 
 static DEFAULT_ARUCO_PATTERN_CONFIG: Lazy<MultiArucoPattern> = Lazy::new(|| {
@@ -36,7 +36,7 @@ static DEFAULT_ARUCO_PATTERN_CONFIG: Lazy<MultiArucoPattern> = Lazy::new(|| {
         env!("CARGO_MANIFEST_DIR"),
         "/config/aruco_pattern.json5"
     ));
-    json5::from_str(&text).unwrap()
+    json5::from_str(text).unwrap()
 });
 
 pub struct CalibrationBoardLocatorNode {

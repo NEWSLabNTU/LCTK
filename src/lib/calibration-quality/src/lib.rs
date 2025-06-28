@@ -4,7 +4,7 @@
 //! in real-time, enabling automatic validation and confidence scoring.
 
 use anyhow::Result;
-use nalgebra::{Isometry3, Point3, Vector3};
+use nalgebra::{Isometry3, Point3};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use thiserror::Error;

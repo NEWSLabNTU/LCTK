@@ -233,8 +233,8 @@ impl SynchronizerNode {
         state: Arc<SynchronizerState>,
     ) {
         // Convert mpsc receiver to stream
-        let input_stream = stream::poll_fn(move |cx| receiver.poll_recv(cx))
-            .map(|item| Ok::<_, eyre::Report>(item));
+        let input_stream =
+            stream::poll_fn(move |cx| receiver.poll_recv(cx)).map(Ok::<_, eyre::Report>);
 
         // Run the synchronizer
         let (sync_stream, _feedback_stream) = match sync(

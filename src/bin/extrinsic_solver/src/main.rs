@@ -2,8 +2,8 @@ use anyhow::{anyhow, ensure, Context as AnyhowContext, Result};
 use aruco_config::MultiArucoPattern;
 use aruco_detector::multi_aruco::ImageMarker;
 use calibration_quality::{
-    CalibrationMetrics, CalibrationQuality, ConvergenceMonitor, GeometricError, QualityAssessment,
-    StatisticalMetrics,
+    metrics::{GeometricError, QualityComponents, StatisticalMetrics},
+    CalibrationMetrics, ConvergenceMonitor, QualityAssessor, ValidationConfig,
 };
 use cv_convert::prelude::*;
 use dynamic_calibration::{
@@ -27,7 +27,6 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use std_msgs;
 use vision_msgs::msg::{Detection2DArray, Detection3DArray};
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
@@ -56,7 +55,7 @@ struct ExtrinsicSolverState {
     child_frame: Arc<str>,
     sync_timeout: i64,
     // Quality assessment components
-    quality_assessment: Mutex<QualityAssessment>,
+    quality_assessment: Mutex<QualityAssessor>,
     convergence_monitor: Mutex<ConvergenceMonitor>,
     // Dynamic calibration controller
     dynamic_controller: Mutex<DynamicCalibrationController>,
@@ -142,7 +141,7 @@ impl ExtrinsicSolverNode {
             parent_frame: parent_frame_param,
             child_frame: child_frame_param,
             sync_timeout: sync_timeout_ms_param,
-            quality_assessment: Mutex::new(QualityAssessment::new()),
+            quality_assessment: Mutex::new(QualityAssessor::new(ValidationConfig::default())),
             convergence_monitor: Mutex::new(ConvergenceMonitor::new()),
             dynamic_controller: Mutex::new(DynamicCalibrationController::with_strategy(
                 adjustment_strategy,
@@ -398,14 +397,27 @@ impl ExtrinsicSolverNode {
                     .quality_assessment
                     .lock()
                     .map_err(|e| anyhow!("Failed to lock quality assessment: {}", e))?;
-                let quality = quality_assessment.assess(&metrics)?;
+                let quality = quality_assessment.assess(
+                    &transform,
+                    &point_pairs
+                        .iter()
+                        .map(|(obj, img)| {
+                            (
+                                nalgebra::Point3::new(obj.x, obj.y, obj.z),
+                                nalgebra::Point3::new(img.x, img.y, 0.0),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                    metrics.detection_confidence,
+                )?;
 
                 // Monitor convergence
                 let mut convergence_monitor = state
                     .convergence_monitor
                     .lock()
                     .map_err(|e| anyhow!("Failed to lock convergence monitor: {}", e))?;
-                let convergence_status = convergence_monitor.update(&metrics)?;
+                convergence_monitor.update(&transform, &metrics);
+                let convergence_status = convergence_monitor.status();
 
                 // Create quality report
                 let quality_report = serde_json::json!({
@@ -420,7 +432,7 @@ impl ExtrinsicSolverNode {
                     "convergence": {
                         "is_converged": convergence_status.is_converged,
                         "iterations": convergence_status.iterations,
-                        "improvement_rate": convergence_status.improvement_rate,
+                        "convergence_rate": convergence_status.convergence_rate,
                     },
                     "parameters": if state.enable_dynamic_adjustment {
                         Some(current_params.summary())
@@ -446,7 +458,7 @@ impl ExtrinsicSolverNode {
 
                     let quality_score = calibration_quality::QualityScore {
                         overall: quality.overall_score,
-                        components: std::collections::HashMap::new(),
+                        components: QualityComponents::default(),
                     };
 
                     let updated_params = controller.update(&metrics, &quality_score)?;
@@ -624,7 +636,7 @@ impl ExtrinsicSolverNode {
         point_pairs: &[(Point3d, Point2d)],
         transform: &na::Isometry3<f64>,
         aruco_detection: &Detection2DArray,
-        board_detection: &Detection3DArray,
+        _board_detection: &Detection3DArray,
         params: &CalibrationParameters,
     ) -> Result<CalibrationMetrics> {
         // Compute reprojection errors
@@ -708,7 +720,6 @@ impl ExtrinsicSolverNode {
                 max_rotation_error: 0.0,
             },
             statistical_metrics: StatisticalMetrics {
-                error_mean: mean_error,
                 error_std_dev,
                 median_error,
                 percentile_95_error,

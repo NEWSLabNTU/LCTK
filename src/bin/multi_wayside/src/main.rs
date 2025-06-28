@@ -225,8 +225,7 @@ fn preprocess_points(
 ) -> Vec<LidarPoint> {
     let points: Vec<_> = points
         .iter()
-        .cloned()
-        .filter(|point| {
+        .filter(|&point| {
             let LidarPoint {
                 xyz: [x, y, z],
                 intensity,
@@ -239,6 +238,7 @@ fn preprocess_points(
             };
             filter.contains(&point)
         })
+        .cloned()
         .collect();
     filter.step();
     points
