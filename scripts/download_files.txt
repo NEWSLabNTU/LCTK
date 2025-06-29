@@ -1,0 +1,7 @@
+https://zenodo.org/records/7780490/files/livox.tar.gz
+  out=data/lidar_camera_calibration/livox.tar.gz
+  checksum=md5=d06951014b28da1afa001db93153909d
+
+https://zenodo.org/records/7780490/files/ouster.tar.gz
+  out=data/lidar_camera_calibration/ouster.tar.gz
+  checksum=md5=a0a56bbb93433f729a9e924744ad6b0c
