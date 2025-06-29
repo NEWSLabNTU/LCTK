@@ -8,7 +8,6 @@ exclude = [
     # Launch-only package without Cargo.toml
     "src/bin/calib_launch",
     "src/bin/rosbag_deck",
-    "src/lib/small_gicp_rust",
     "ros2_rust_ws",
 ]
 
@@ -20,6 +19,7 @@ cv-convert = { version = "0.26.0" }
 # Core utilities
 anyhow = "1.0.75"
 eyre = "0.6"
+thiserror = "1.0"
 serde = { version = "1.0.188", features = ["derive"] }
 clap = { version = "4.4.6", features = ["derive"] }
 nalgebra = { version = "0.32.3", features = ["serde-serialize"] }
