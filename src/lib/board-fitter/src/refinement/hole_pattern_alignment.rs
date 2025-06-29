@@ -4,12 +4,12 @@
 //! to improve detection accuracy and enable partial matching.
 
 use super::{
-    register_advanced, IcpRefinement, IcpRefinementConfig, IcpStageConfig, KdTree, PointCloud,
-    RefinementResult, RegistrationSettings, SmallGicpConvergenceCriteria,
+    register_advanced, IcpRefinement, IcpStageConfig, PointCloud, RefinementResult,
+    RegistrationSettings, SmallGicpConvergenceCriteria,
 };
 use crate::types::{DetectedHole, DetectionError};
 use anyhow::Result;
-use nalgebra::{Isometry3, Point3, Vector3};
+use nalgebra::{Isometry3, Point3};
 
 /// Hole pattern for matching
 #[derive(Debug, Clone)]
@@ -265,6 +265,7 @@ pub fn refine_hole_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::refinement::IcpRefinementConfig;
 
     #[test]
     fn test_pattern_match_score() {

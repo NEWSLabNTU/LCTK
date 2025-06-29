@@ -317,16 +317,8 @@ impl PointcloudImageOverlayNode {
                 let img_time = img_msg.timestamp;
                 let tf_time = tf_msg.timestamp;
 
-                let time_diff_pc_img = if pc_time > img_time {
-                    pc_time - img_time
-                } else {
-                    img_time - pc_time
-                };
-                let time_diff_pc_tf = if pc_time > tf_time {
-                    pc_time - tf_time
-                } else {
-                    tf_time - pc_time
-                };
+                let time_diff_pc_img = pc_time.abs_diff(img_time);
+                let time_diff_pc_tf = pc_time.abs_diff(tf_time);
 
                 if time_diff_pc_img <= max_time_diff && time_diff_pc_tf <= max_time_diff {
                     if let Err(e) = Self::process_overlay_with_rerun(
@@ -477,7 +469,7 @@ impl PointcloudImageOverlayNode {
         // Log the 3D points (Rerun automatically projects them onto camera view)
         if !positions.is_empty() {
             rec.log(
-                format!("camera/points/{}", correlation_id),
+                format!("camera/points/{correlation_id}"),
                 &Points3D::new(positions)
                     .with_colors(colors)
                     .with_radii(radii),

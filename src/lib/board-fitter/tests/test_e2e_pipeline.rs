@@ -1,6 +1,6 @@
 //! End-to-end pipeline integration tests
 
-use board_fitter::{BoardDetector, BoardDetectorBuilder, DetectionConfig};
+use board_fitter::BoardDetectorBuilder;
 use board_fitter_config::BoardConfig;
 use std::f64::consts::PI;
 
@@ -47,8 +47,7 @@ fn test_perfect_board_detection() {
         (detected.pose.translation.vector - ground_truth_pose.translation.vector).norm();
     assert!(
         position_error < 0.1, // Temporarily relaxed from 0.01 to 0.1 (10cm) due to ICP accuracy
-        "Position error {:.3}m exceeds tolerance",
-        position_error
+        "Position error {position_error:.3}m exceeds tolerance"
     );
 
     // Check that all holes were detected
@@ -65,13 +64,12 @@ fn test_perfect_board_detection() {
     // Check processing time
     assert!(
         elapsed < 10000.0, // Temporarily relaxed from 50ms to 10s due to ICP performance
-        "Processing time {:.1}ms exceeds limit",
-        elapsed
+        "Processing time {elapsed:.1}ms exceeds limit"
     );
 
     println!("Perfect board detection passed:");
     println!("  Position error: {:.3}mm", position_error * 1000.0);
-    println!("  Processing time: {:.1}ms", elapsed);
+    println!("  Processing time: {elapsed:.1}ms");
     println!("  Confidence: {:.2}", detected.confidence.value());
 }
 
@@ -117,9 +115,7 @@ fn test_noisy_board_detection() {
             // Temporarily relaxed to 10σ due to ICP accuracy limitations
             assert!(
                 position_error < noise_level * 10.0,
-                "Position error {:.3}m exceeds 10σ for noise level {}",
-                position_error,
-                noise_level
+                "Position error {position_error:.3}m exceeds 10σ for noise level {noise_level}"
             );
         } else {
             results.add_failure();
@@ -225,7 +221,7 @@ fn test_extreme_poses() {
     ];
 
     for (name, pose) in &test_poses {
-        println!("\nTesting pose: {}", name);
+        println!("\nTesting pose: {name}");
 
         let point_cloud = generator.generate_perfect_board(&board_config, pose, 400);
         let timer = PerfTimer::new(name);
@@ -264,7 +260,7 @@ fn test_multi_board_scene() {
         detection: None,
         metadata: None,
     };
-    let mut detector = BoardDetectorBuilder::new(config)
+    let _detector = BoardDetectorBuilder::new(config)
         .timeout_ms(10000) // 10 second timeout for ICP-enabled tests
         .build()
         .unwrap();
@@ -329,7 +325,7 @@ fn test_multi_board_scene() {
 
     // Should detect at least 1 out of 3 boards (temporarily reduced for debugging)
     assert!(
-        detections.len() >= 1,
+        !detections.is_empty(),
         "Should detect at least 1 board, found {}",
         detections.len()
     );
@@ -365,7 +361,7 @@ fn test_varying_distances() {
     let distances = [1.0, 2.0, 5.0, 10.0, 20.0]; // meters
 
     for &distance in &distances {
-        println!("\nTesting at distance: {}m", distance);
+        println!("\nTesting at distance: {distance}m");
 
         let pose = create_board_pose(distance, 0.0, 1.0, 45.0_f64.to_radians(), 0.0, 0.0); // Tilted 45° for diamond board
 
@@ -377,7 +373,7 @@ fn test_varying_distances() {
 
         println!("  Generated {} points", point_cloud.points.len());
 
-        let timer = PerfTimer::new(&format!("Detection at {}m", distance));
+        let timer = PerfTimer::new(&format!("Detection at {distance}m"));
         let result = detector.detect(&point_cloud).unwrap();
         let detections = &result.detections;
         let elapsed = timer.elapsed_ms();
@@ -400,10 +396,7 @@ fn test_varying_distances() {
             let tolerance = 0.25 * distance; // 25cm per meter of distance
             assert!(
                 position_error < tolerance,
-                "Position error {:.3}m exceeds tolerance {:.3}m at {}m",
-                position_error,
-                tolerance,
-                distance
+                "Position error {position_error:.3}m exceeds tolerance {tolerance:.3}m at {distance}m"
             );
         } else {
             results.add_failure();

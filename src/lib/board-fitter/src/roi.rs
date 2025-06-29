@@ -411,7 +411,7 @@ impl AdaptivePreprocessor {
                 data: {
                     let mut data = HashMap::new();
                     data.insert("input_points".to_string(), point_cloud.len().into());
-                    data.insert("roi_type".to_string(), format!("{:?}", roi_type).into());
+                    data.insert("roi_type".to_string(), format!("{roi_type:?}").into());
                     data.insert(
                         "has_intensities".to_string(),
                         point_cloud.intensities.is_some().into(),

@@ -347,51 +347,51 @@ impl BoardDetector {
 
                     // STEP 4: Hole Detection with Debug
                     // TEMPORARY: Skip hole detection for debugging timeout issues
-                    let detected_holes: Vec<DetectedHole> = Vec::new();
-                    let hole_time = Duration::from_millis(1); // Fake time for skipped detection
-                                                              /*
-                                                              debug!("Starting hole detection in fitted square");
-                                                              if let Some(debug_ctx) = &mut self.debug_ctx {
-                                                                  debug_ctx.start_stage(stages::HOLE_DETECTION);
-                                                              }
+                    let _detected_holes: Vec<DetectedHole> = Vec::new();
+                    let _hole_time = Duration::from_millis(1); // Fake time for skipped detection
+                                                               /*
+                                                               debug!("Starting hole detection in fitted square");
+                                                               if let Some(debug_ctx) = &mut self.debug_ctx {
+                                                                   debug_ctx.start_stage(stages::HOLE_DETECTION);
+                                                               }
 
-                                                              let hole_start = Instant::now();
-                                                              let hole_detector = crate::hole::HoleDetector::default();
-                                                              let detected_holes =
-                                                                  hole_detector.detect_holes_in_square(point_cloud, &diamond_square)?;
-                                                              let hole_time = hole_start.elapsed();
+                                                               let hole_start = Instant::now();
+                                                               let hole_detector = crate::hole::HoleDetector::default();
+                                                               let detected_holes =
+                                                                   hole_detector.detect_holes_in_square(point_cloud, &diamond_square)?;
+                                                               let hole_time = hole_start.elapsed();
 
-                                                              info!(
-                                                                  "Found {} holes in {:.2}ms",
-                                                                  detected_holes.len(),
-                                                                  hole_time.as_secs_f64() * 1000.0
-                                                              );
+                                                               info!(
+                                                                   "Found {} holes in {:.2}ms",
+                                                                   detected_holes.len(),
+                                                                   hole_time.as_secs_f64() * 1000.0
+                                                               );
 
-                                                              if let Some(debug_ctx) = &mut self.debug_ctx {
-                                                                  // Emit hole detection debug data
-                                                                  let mut metadata = HashMap::new();
-                                                                  metadata.insert("holes_found".to_string(), detected_holes.len().to_string());
-                                                                  metadata.insert(
-                                                                      "processing_time_ms".to_string(),
-                                                                      (hole_time.as_secs_f64() * 1000.0).to_string(),
-                                                                  );
-                                                                  metadata.insert("plane_index".to_string(), plane_idx.to_string());
+                                                               if let Some(debug_ctx) = &mut self.debug_ctx {
+                                                                   // Emit hole detection debug data
+                                                                   let mut metadata = HashMap::new();
+                                                                   metadata.insert("holes_found".to_string(), detected_holes.len().to_string());
+                                                                   metadata.insert(
+                                                                       "processing_time_ms".to_string(),
+                                                                       (hole_time.as_secs_f64() * 1000.0).to_string(),
+                                                                   );
+                                                                   metadata.insert("plane_index".to_string(), plane_idx.to_string());
 
-                                                                  let debug_data = DebugData::CircleData {
-                                                                      holes: detected_holes.clone(),
-                                                                      fitting_residuals: vec![0.0; detected_holes.len()], // TODO: Get actual residuals
-                                                                      iteration_counts: vec![0; detected_holes.len()], // TODO: Get actual iteration counts
-                                                                      metadata,
-                                                                  };
-                                                                  debug_ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
+                                                                   let debug_data = DebugData::CircleData {
+                                                                       holes: detected_holes.clone(),
+                                                                       fitting_residuals: vec![0.0; detected_holes.len()], // TODO: Get actual residuals
+                                                                       iteration_counts: vec![0; detected_holes.len()], // TODO: Get actual iteration counts
+                                                                       metadata,
+                                                                   };
+                                                                   debug_ctx.emit_data(stages::HOLE_DETECTION, &debug_data);
 
-                                                                  let hole_metrics =
-                                                                      StageMetrics::new(plane.inliers.len(), detected_holes.len(), hole_time);
-                                                                  debug_ctx.emit_metrics(stages::HOLE_DETECTION, &hole_metrics);
-                                                                  debug_ctx.end_stage(stages::HOLE_DETECTION);
-                                                              }
+                                                                   let hole_metrics =
+                                                                       StageMetrics::new(plane.inliers.len(), detected_holes.len(), hole_time);
+                                                                   debug_ctx.emit_metrics(stages::HOLE_DETECTION, &hole_metrics);
+                                                                   debug_ctx.end_stage(stages::HOLE_DETECTION);
+                                                               }
 
-                                                              */
+                                                               */
 
                     // Check timeout during hole detection
                     if start_time.elapsed() > timeout {
@@ -654,7 +654,7 @@ impl BoardDetector {
         // Extract board region points
         let board_cloud: Vec<Point3<f64>> = board_indices
             .iter()
-            .filter_map(|&idx| point_cloud.points.get(idx).map(|p| *p))
+            .filter_map(|&idx| point_cloud.points.get(idx).copied())
             .collect();
 
         if board_cloud.is_empty() {

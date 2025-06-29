@@ -472,12 +472,12 @@ impl HoleDetector {
                 );
 
                 // Update matched holes with refined positions
-                for (expected_id, (detected_hole, error)) in result.matches.iter_mut() {
+                for (_expected_id, (detected_hole, error)) in result.matches.iter_mut() {
                     let refined_center = refinement.transformation * detected_hole.center;
                     detected_hole.center = refined_center;
 
                     // Update error based on refinement fitness
-                    *error *= (1.0 - refinement.fitness);
+                    *error *= 1.0 - refinement.fitness;
                 }
 
                 Ok(result)
@@ -583,6 +583,7 @@ impl HoleDetector {
     }
 
     /// Detect holes using geometric analysis (negative space)
+    #[allow(dead_code)]
     fn detect_holes_by_geometry(
         &self,
         projected_points: &[ProjectedPoint],
@@ -793,6 +794,7 @@ impl HoleDetector {
     }
 
     /// Create occupancy grid from projected points
+    #[allow(dead_code)]
     fn create_occupancy_grid(
         &self,
         projected_points: &[ProjectedPoint],
@@ -904,6 +906,7 @@ impl HoleDetector {
     }
 
     /// Find empty circular regions in occupancy grid
+    #[allow(dead_code)]
     fn find_empty_circular_regions(
         &self,
         grid: &OccupancyGrid,
@@ -997,6 +1000,7 @@ impl HoleDetector {
     }
 
     /// Flood fill for occupancy-based region growing
+    #[allow(dead_code)]
     fn flood_fill_occupancy(
         &self,
         grid: &OccupancyGrid,
@@ -1035,6 +1039,7 @@ impl HoleDetector {
     }
 
     /// Check if a region is roughly circular
+    #[allow(dead_code)]
     fn is_roughly_circular_region(&self, region: &[(usize, usize)]) -> bool {
         if region.len() < 4 {
             return false;
@@ -1074,6 +1079,7 @@ impl HoleDetector {
     }
 
     /// Extract boundary points from a region
+    #[allow(dead_code)]
     fn extract_region_boundary(
         &self,
         region: &[(usize, usize)],
@@ -1130,6 +1136,7 @@ impl HoleDetector {
     }
 
     /// Calculate confidence for geometric detection
+    #[allow(dead_code)]
     fn calculate_geometric_confidence(
         &self,
         _circle: &Circle2D,
@@ -1162,6 +1169,7 @@ struct IntensityCell {
 
 /// Occupancy grid for geometric hole detection
 #[derive(Debug)]
+#[allow(dead_code)]
 struct OccupancyGrid {
     data: Vec<Vec<bool>>,
     // min_x: f64,

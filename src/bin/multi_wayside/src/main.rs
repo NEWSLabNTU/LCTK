@@ -162,7 +162,7 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
         let det = board_detector.detect(&points_in_point3_format)?;
 
         let mut window = Window::new_with_size(
-            &format!("detection_result_with_frame{}", frame_selected),
+            &format!("detection_result_with_frame{frame_selected}"),
             3000,
             1000,
         );
@@ -201,10 +201,7 @@ fn pcap_to_pose(config: &Config, pcap_number: PcapNumber) -> Result<ResultStruct
             gui.step(&mut window);
         }
     }
-    eprintln!(
-        "You chose the frame{}'s detection result as your pose.",
-        frame_selected
-    );
+    eprintln!("You chose the frame{frame_selected}'s detection result as your pose.");
 
     let board_detection = gui
         .det

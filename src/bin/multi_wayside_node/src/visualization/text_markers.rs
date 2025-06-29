@@ -127,7 +127,7 @@ impl TextMarkerGenerator for DefaultTextMarkerGenerator {
 
             let mut indicator = Marker::default();
             indicator.header = header.clone();
-            indicator.ns = format!("lidar_{}_status", lidar_id);
+            indicator.ns = format!("lidar_{lidar_id}_status");
             indicator.id = lidar_id;
             indicator.type_ = 2; // SPHERE
             indicator.action = 0; // ADD

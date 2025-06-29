@@ -3,7 +3,6 @@
 //! This module provides multi-stage ICP refinement using small_gicp_rust
 //! to achieve sub-centimeter accuracy in board detection.
 
-use crate::types::DetectionError;
 use anyhow::Result;
 use nalgebra::{Isometry3, Point3, Vector3};
 use serde::{Deserialize, Serialize};
@@ -363,7 +362,6 @@ pub fn register_vgicp(
         iterations: 10,
     })
 }
-use std::sync::Arc;
 
 pub mod board_pose_refinement;
 pub mod config;
@@ -550,12 +548,12 @@ impl IcpRefinement {
         match config {
             Some(DofRestrictionConfig::Planar3Dof) => Ok(Some(DofRestriction::planar_2d()?)),
             Some(DofRestrictionConfig::PlanarWithNormal { normal }) => {
-                let normal_vec = Vector3::new(normal[0], normal[1], normal[2]);
+                let _normal_vec = Vector3::new(normal[0], normal[1], normal[2]);
                 // Note: This is a placeholder - actual API might differ
                 Ok(Some(DofRestriction::planar_2d()?))
             }
             Some(DofRestrictionConfig::YawOnly) => Ok(Some(DofRestriction::yaw_only()?)),
-            Some(DofRestrictionConfig::Custom { mask }) => {
+            Some(DofRestrictionConfig::Custom { mask: _ }) => {
                 // Note: This is a placeholder - actual API might differ
                 Ok(None)
             }
@@ -865,9 +863,11 @@ mod tests {
 
     #[test]
     fn test_cuda_fallback() {
-        let mut config = IcpRefinementConfig::default();
-        config.enable_cuda = true;
-        config.fallback_to_cpu = true;
+        let config = IcpRefinementConfig {
+            enable_cuda: true,
+            fallback_to_cpu: true,
+            ..Default::default()
+        };
 
         // Should fall back to CPU when CUDA is not available
         let refiner = IcpRefinement::new(config);

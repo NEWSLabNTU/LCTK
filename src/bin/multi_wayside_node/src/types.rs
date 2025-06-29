@@ -270,7 +270,7 @@ pub fn create_board_markers(detection: &Detection, lidar_id: u8, header: &Header
 
     // Create frame marker
     let header = header.clone();
-    let ns = format!("board_frame_lidar{}", lidar_id);
+    let ns = format!("board_frame_lidar{lidar_id}");
     let id = 0;
     let type_ = 0; // ARROW
     let action = 0; // ADD
@@ -300,7 +300,7 @@ pub fn create_board_markers(detection: &Detection, lidar_id: u8, header: &Header
     };
 
     // Create board marker
-    let ns = format!("board_outline_lidar{}", lidar_id);
+    let ns = format!("board_outline_lidar{lidar_id}");
     let id = 1;
     let type_ = 1; // CUBE
 
@@ -352,10 +352,10 @@ pub fn create_board_markers(detection: &Detection, lidar_id: u8, header: &Header
     };
 
     // Create text marker
-    let ns = format!("board_text_lidar{}", lidar_id);
+    let ns = format!("board_text_lidar{lidar_id}");
     let id = 2;
     let type_ = 9; // TEXT_VIEW_FACING
-    let text = format!("LiDAR {} Board", lidar_id);
+    let text = format!("LiDAR {lidar_id} Board");
 
     let text_marker = Marker {
         header,
@@ -392,11 +392,7 @@ pub fn find_synchronized_pair(
             let time2_ns =
                 det2.timestamp.sec as u64 * 1_000_000_000 + det2.timestamp.nanosec as u64;
 
-            let time_diff = if time1_ns > time2_ns {
-                time1_ns - time2_ns
-            } else {
-                time2_ns - time1_ns
-            };
+            let time_diff = time1_ns.abs_diff(time2_ns);
 
             if time_diff <= tolerance_ns {
                 // Found synchronized pair, remove from queues and return

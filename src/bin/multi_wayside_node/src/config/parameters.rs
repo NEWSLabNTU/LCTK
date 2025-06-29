@@ -450,8 +450,7 @@ mod tests {
                 let error_msg = e.to_string();
                 assert!(
                     error_msg.contains("not found") || error_msg.contains("File not found"),
-                    "Error should be about missing files, got: {}",
-                    error_msg
+                    "Error should be about missing files, got: {error_msg}"
                 );
                 println!("Parameter loading successful - failed on file validation as expected");
             }

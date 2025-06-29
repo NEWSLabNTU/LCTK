@@ -46,7 +46,7 @@ impl RoiMarkerGenerator for DefaultRoiMarkerGenerator {
         // ROI box marker
         let mut roi_marker = Marker::default();
         roi_marker.header = header.clone();
-        roi_marker.ns = format!("roi_bounds_lidar_{}", lidar_id);
+        roi_marker.ns = format!("roi_bounds_lidar_{lidar_id}");
         roi_marker.id = lidar_id as i32;
         roi_marker.type_ = 1; // CUBE
         roi_marker.action = 0; // ADD
@@ -73,7 +73,7 @@ impl RoiMarkerGenerator for DefaultRoiMarkerGenerator {
         // Add text label
         let mut text_marker = Marker::default();
         text_marker.header = header;
-        text_marker.ns = format!("roi_label_lidar_{}", lidar_id);
+        text_marker.ns = format!("roi_label_lidar_{lidar_id}");
         text_marker.id = (lidar_id as i32) + 100;
         text_marker.type_ = 9; // TEXT_VIEW_FACING
         text_marker.action = 0; // ADD
@@ -99,10 +99,7 @@ impl RoiMarkerGenerator for DefaultRoiMarkerGenerator {
             a: 1.0,
         };
 
-        text_marker.text = format!(
-            "LiDAR {} ROI\n{:.1}×{:.1}×{:.1}m",
-            lidar_id, size_x, size_y, size_z
-        );
+        text_marker.text = format!("LiDAR {lidar_id} ROI\n{size_x:.1}×{size_y:.1}×{size_z:.1}m");
 
         text_marker.lifetime = builtin_interfaces::msg::Duration { sec: 0, nanosec: 0 }; // Persistent
 

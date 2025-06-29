@@ -4,13 +4,10 @@
 //! PlaneICP with DOF restrictions.
 
 use super::{
-    register_advanced, IcpRefinement, IcpStageConfig, KdTree, PointCloud, PreprocessorConfig,
-    ProcessedPointCloud, RefinementResult, RegistrationSettings,
+    register_advanced, IcpRefinement, IcpStageConfig, PointCloud, PreprocessorConfig,
+    RefinementResult,
 };
-use crate::{
-    diamond::DiamondSquare,
-    types::{DetectedPlane, DetectionError},
-};
+use crate::{diamond::DiamondSquare, types::DetectedPlane};
 use anyhow::Result;
 use nalgebra::{Isometry3, Point3, Vector3};
 
@@ -24,7 +21,7 @@ impl IcpRefinement {
         square_points: &[Point3<f64>],
         square_size: f64,
         initial_pose: &Isometry3<f64>,
-        plane_normal: &Vector3<f64>,
+        _plane_normal: &Vector3<f64>,
         config: Option<&IcpStageConfig>,
     ) -> Result<RefinementResult> {
         let stage_config = config.unwrap_or(&self.config.square_pose_refinement);

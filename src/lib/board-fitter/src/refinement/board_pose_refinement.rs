@@ -5,10 +5,8 @@
 
 use super::{
     register_advanced, register_vgicp, GaussianVoxelMap, GaussianVoxelMapConfig, IcpRefinement,
-    IcpStageConfig, KdTree, PointCloud, PreprocessorConfig, ProcessedPointCloud, RefinementResult,
-    RegistrationSettings, RegistrationTypeConfig,
+    IcpStageConfig, PointCloud, PreprocessorConfig, RefinementResult, RegistrationTypeConfig,
 };
-use crate::types::{BoardDetection, DetectionError};
 use anyhow::Result;
 use nalgebra::{Isometry3, Point3};
 

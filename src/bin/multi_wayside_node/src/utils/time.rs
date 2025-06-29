@@ -28,11 +28,7 @@ pub fn ros_time_diff(time1: &Time, time2: &Time) -> Duration {
     let duration2 =
         Duration::from_secs(time2.sec as u64) + Duration::from_nanos(time2.nanosec as u64);
 
-    if duration1 > duration2 {
-        duration1 - duration2
-    } else {
-        duration2 - duration1
-    }
+    duration1.abs_diff(duration2)
 }
 
 /// Check if two ROS timestamps are within tolerance

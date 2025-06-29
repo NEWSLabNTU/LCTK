@@ -60,7 +60,7 @@ fn test_debug_instrumentation_basic() {
             }
         }
         Err(e) => {
-            println!("Detection failed: {}", e);
+            println!("Detection failed: {e}");
         }
     }
 
@@ -102,7 +102,7 @@ fn test_debug_instrumentation_verbose() {
             println!("RESULT: {} detections found", detections.detections.len());
         }
         Err(e) => {
-            println!("RESULT: Detection failed - {}", e);
+            println!("RESULT: Detection failed - {e}");
         }
     }
 
@@ -170,7 +170,7 @@ fn test_debug_noisy_data() {
             );
         }
         Err(e) => {
-            println!("Noisy detection failed: {}", e);
+            println!("Noisy detection failed: {e}");
         }
     }
 

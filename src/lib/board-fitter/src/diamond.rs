@@ -1093,8 +1093,7 @@ mod tests {
         assert!(
             (rotation_abs - expected_rotation1).abs() < 0.1
                 || (rotation_abs - expected_rotation2).abs() < 0.1,
-            "Rotation {} is not close to π/4 or π/2",
-            rotation_abs
+            "Rotation {rotation_abs} is not close to π/4 or π/2"
         );
     }
 

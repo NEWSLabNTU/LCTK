@@ -5,7 +5,6 @@
 
 use super::{ConvergenceCriteria, IcpRefinementConfig, IcpStageConfig};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
 /// Load ICP refinement configuration from a YAML file

@@ -15,7 +15,7 @@ fn test_pcl_table_scene() {
 
     // Skip if test data not available
     if !Path::new(data_path).exists() {
-        eprintln!("Skipping PCL test - data not available at {}", data_path);
+        eprintln!("Skipping PCL test - data not available at {data_path}");
         eprintln!("Run './scripts/download_test_data.sh' to download test data");
         return;
     }
@@ -58,7 +58,7 @@ fn test_open3d_fragment() {
     let data_path = "../../../test_data/external/open3d/fragment.ply";
 
     if !Path::new(data_path).exists() {
-        eprintln!("Skipping Open3D test - data not available at {}", data_path);
+        eprintln!("Skipping Open3D test - data not available at {data_path}");
         return;
     }
 
@@ -101,10 +101,7 @@ fn test_synthetic_calibration_data() {
 
     for data_path in &test_files {
         if !Path::new(data_path).exists() {
-            eprintln!(
-                "Skipping synthetic test - data not available at {}",
-                data_path
-            );
+            eprintln!("Skipping synthetic test - data not available at {data_path}");
             continue;
         }
 
@@ -124,7 +121,7 @@ fn test_synthetic_calibration_data() {
             .build()
             .unwrap();
 
-        let timer = PerfTimer::new(&format!("Detection: {}", data_path));
+        let timer = PerfTimer::new(&format!("Detection: {data_path}"));
         let result = detector.detect(&cloud).unwrap();
         let detections = &result.detections;
         let elapsed = timer.elapsed_ms();
@@ -165,17 +162,17 @@ fn test_performance_comparison() {
     let mut results = TestResults::new();
 
     for (path, description) in &test_datasets {
-        let full_path = format!("../../../test_data/external/{}", path);
+        let full_path = format!("../../../test_data/external/{path}");
 
         if !Path::new(&full_path).exists() {
-            println!("Skipping {} - not available", description);
+            println!("Skipping {description} - not available");
             continue;
         }
 
         let cloud = match load_point_cloud(&full_path) {
             Ok(c) => c,
             Err(e) => {
-                println!("Failed to load {}: {}", description, e);
+                println!("Failed to load {description}: {e}");
                 continue;
             }
         };
@@ -268,7 +265,7 @@ fn test_automatic_download() {
             assert!(!cloud.points.is_empty());
         }
         Err(e) => {
-            println!("Auto-download failed (expected in CI): {}", e);
+            println!("Auto-download failed (expected in CI): {e}");
             // Don't fail the test in CI environments where download might not work
         }
     }

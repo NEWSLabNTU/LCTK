@@ -251,7 +251,7 @@ mod tests {
         });
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
-        println!("Serialized config:\n{}", toml_str);
+        println!("Serialized config:\n{toml_str}");
 
         let deserialized: Config = toml::from_str(&toml_str).unwrap();
         match (&config, &deserialized) {

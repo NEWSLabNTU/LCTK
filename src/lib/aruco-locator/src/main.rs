@@ -56,7 +56,7 @@ fn main() -> Result<()> {
         if let Some(output_file) = &opts.output_file {
             let json_text = serde_json::to_string_pretty(&detection_result)?;
             fs::write(output_file, &json_text)?;
-            println!("Detection results saved to: {:?}", output_file);
+            println!("Detection results saved to: {output_file:?}");
         }
     } else {
         println!("No ArUco markers detected in the image.");

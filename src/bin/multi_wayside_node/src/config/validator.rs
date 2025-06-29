@@ -75,9 +75,9 @@ pub fn validate_config_files(base_path: &str) -> Result<()> {
     let validator = DefaultConfigValidator;
 
     let config_files = [
-        format!("{}/config/hollow_board.yaml", base_path),
-        format!("{}/config/detector.yaml", base_path),
-        format!("{}/config/aruco_pattern.json5", base_path),
+        format!("{base_path}/config/hollow_board.yaml"),
+        format!("{base_path}/config/detector.yaml"),
+        format!("{base_path}/config/aruco_pattern.json5"),
     ];
 
     let config_file_refs: Vec<&str> = config_files.iter().map(|s| s.as_str()).collect();

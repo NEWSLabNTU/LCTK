@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use eyre::Result;
 use rclrs::{
     log_info, Context, CreateBasicExecutor, InitOptions, RclrsErrorFilter, SpinOptions, ToLogParams,

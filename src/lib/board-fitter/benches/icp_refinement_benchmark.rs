@@ -2,7 +2,7 @@
 
 use board_fitter::{
     refinement::{config::IcpConfigBuilder, IcpRefinement, IcpRefinementConfig},
-    types::{DetectionConfidence, PointCloud},
+    types::DetectionConfidence,
     BoardDetector, DetectionConfig,
 };
 use board_fitter_config::BoardConfig;

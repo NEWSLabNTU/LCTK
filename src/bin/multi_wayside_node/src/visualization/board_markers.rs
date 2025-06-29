@@ -65,7 +65,7 @@ impl BoardMarkerGenerator for DefaultBoardMarkerGenerator {
         // 1. Board outline marker (cube)
         let mut outline_marker = Marker::default();
         outline_marker.header = header.clone();
-        outline_marker.ns = format!("board_detection_lidar_{}", lidar_id);
+        outline_marker.ns = format!("board_detection_lidar_{lidar_id}");
         outline_marker.id = base_id + 1;
         outline_marker.type_ = 1; // CUBE
         outline_marker.action = 0; // ADD
@@ -87,7 +87,7 @@ impl BoardMarkerGenerator for DefaultBoardMarkerGenerator {
         // X-axis (red arrow)
         let mut x_arrow = Marker::default();
         x_arrow.header = header.clone();
-        x_arrow.ns = format!("board_frame_lidar_{}", lidar_id);
+        x_arrow.ns = format!("board_frame_lidar_{lidar_id}");
         x_arrow.id = base_id + 2;
         x_arrow.type_ = 0; // ARROW
         x_arrow.action = 0; // ADD
@@ -113,7 +113,7 @@ impl BoardMarkerGenerator for DefaultBoardMarkerGenerator {
         // 3. Detection info text
         let mut text_marker = Marker::default();
         text_marker.header = header.clone();
-        text_marker.ns = format!("board_info_lidar_{}", lidar_id);
+        text_marker.ns = format!("board_info_lidar_{lidar_id}");
         text_marker.id = base_id + 3;
         text_marker.type_ = 9; // TEXT_VIEW_FACING
         text_marker.action = 0; // ADD

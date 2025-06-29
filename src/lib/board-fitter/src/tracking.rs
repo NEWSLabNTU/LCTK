@@ -149,7 +149,7 @@ impl TrackedBoard {
         }
 
         // Update temporal ICP state if points are provided
-        if let Some(points) = board_points {
+        if let Some(_points) = board_points {
             if self.temporal_state.is_none() {
                 self.temporal_state = Some(TemporalTrackingState {
                     previous_voxelmap: None,

@@ -116,8 +116,7 @@ fn test_detection_with_icp_refinement() {
     let position_error = (detection.pose.translation.vector - true_pose.translation.vector).norm();
     assert!(
         position_error < 0.01,
-        "Position error: {:.3}m",
-        position_error
+        "Position error: {position_error:.3}m"
     );
 
     let rotation_error = (detection.pose.rotation.inverse() * true_pose.rotation)
@@ -161,11 +160,7 @@ fn test_detection_without_icp_refinement() {
     let position_error = (detection.pose.translation.vector - true_pose.translation.vector).norm();
 
     // Without ICP, we expect larger errors
-    assert!(
-        position_error < 0.1,
-        "Position error: {:.3}m",
-        position_error
-    );
+    assert!(position_error < 0.1, "Position error: {position_error:.3}m");
 }
 
 #[test]
@@ -221,9 +216,7 @@ fn test_tracking_with_temporal_icp() {
             let track_error = (track.pose.translation.vector - expected_pos).norm();
             assert!(
                 track_error < 0.02,
-                "Frame {}: tracking error {:.3}m",
-                frame,
-                track_error
+                "Frame {frame}: tracking error {track_error:.3}m"
             );
         }
 
@@ -315,8 +308,8 @@ fn test_icp_performance_comparison() {
     let result_without_icp = detector_without_icp.detect(&point_cloud).unwrap();
     let time_without_icp = start.elapsed();
 
-    println!("Detection time with ICP: {:?}", time_with_icp);
-    println!("Detection time without ICP: {:?}", time_without_icp);
+    println!("Detection time with ICP: {time_with_icp:?}");
+    println!("Detection time without ICP: {time_without_icp:?}");
 
     // Both should detect the board
     assert_eq!(result_with_icp.count(), 1);
@@ -326,8 +319,8 @@ fn test_icp_performance_comparison() {
     let confidence_with_icp = result_with_icp.detections[0].confidence.score();
     let confidence_without_icp = result_without_icp.detections[0].confidence.score();
 
-    println!("Confidence with ICP: {:.3}", confidence_with_icp);
-    println!("Confidence without ICP: {:.3}", confidence_without_icp);
+    println!("Confidence with ICP: {confidence_with_icp:.3}");
+    println!("Confidence without ICP: {confidence_without_icp:.3}");
 
     // ICP may take longer but should provide better results
     // In practice, the time difference should be reasonable

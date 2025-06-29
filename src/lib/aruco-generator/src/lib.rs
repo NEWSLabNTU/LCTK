@@ -60,8 +60,8 @@ impl ArucoGenerator {
         let mut board = {
             let square_length = (paper_size_mm - margin_size_mm * 2.0) / squares_per_side as f64;
             let marker_length = square_length * marker_to_square_length_ratio;
-            println!("square length = {} mm", square_length);
-            println!("marker length = {} mm", marker_length);
+            println!("square length = {square_length} mm");
+            println!("marker length = {marker_length} mm");
 
             CharucoBoard::create(
                 squares_per_side,
@@ -75,8 +75,8 @@ impl ArucoGenerator {
         let image = {
             let image_size_pixels = (paper_size_mm / MILLIMETERS_PER_INCH * dpi) as i32;
             let margin_size_pixels = (margin_size_mm / MILLIMETERS_PER_INCH * dpi) as i32;
-            println!("image size = {} pixels", image_size_pixels);
-            println!("margin size = {} pixels", margin_size_pixels);
+            println!("image size = {image_size_pixels} pixels");
+            println!("margin size = {margin_size_pixels} pixels");
 
             let mut image = Mat::zeros(image_size_pixels, image_size_pixels, CV_8UC1)?.to_mat()?;
             board.draw(
@@ -89,7 +89,7 @@ impl ArucoGenerator {
         };
 
         imgcodecs::imwrite(output_path, &image, &Vector::<i32>::new())?;
-        println!("Saved ChArUco board to: {}", output_path);
+        println!("Saved ChArUco board to: {output_path}");
 
         if preview {
             highgui::imshow("preview", &image)?;
@@ -197,7 +197,7 @@ impl ArucoGenerator {
 
         // save image
         imgcodecs::imwrite(&output_path, &image, &Vector::<i32>::new())?;
-        println!("Saved multiple ArUco pattern to: {}", output_path);
+        println!("Saved multiple ArUco pattern to: {output_path}");
 
         if preview {
             highgui::imshow("preview", &image)?;
@@ -436,13 +436,13 @@ impl InteractiveBuilder {
                 let tokens = match tokens_result {
                     Ok(tokens) => tokens,
                     Err(error) => {
-                        writeln!(term, "input not understood: {:?}", error)?;
+                        writeln!(term, "input not understood: {error:?}")?;
                         continue;
                     }
                 };
 
                 if tokens.len() != n_markers {
-                    writeln!(term, "expect {} IDs", n_markers)?;
+                    writeln!(term, "expect {n_markers} IDs")?;
                     continue;
                 }
 

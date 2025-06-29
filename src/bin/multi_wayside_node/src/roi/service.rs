@@ -90,7 +90,7 @@ impl<R: RoiManager, M: RoiMarkerGenerator> RoiServiceHandler<R, M> {
                 );
 
                 response.success = false;
-                response.message = format!("Failed to update ROI bounds: {}", e);
+                response.message = format!("Failed to update ROI bounds: {e}");
             }
         }
 

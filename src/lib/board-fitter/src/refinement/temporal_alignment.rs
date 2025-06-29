@@ -5,13 +5,9 @@
 
 use super::{
     register_vgicp, GaussianVoxelMap, GaussianVoxelMapConfig, IcpRefinement, IcpStageConfig,
-    PointCloud, RefinementResult, RegistrationSettings, RegistrationTypeConfig,
-    SmallGicpConvergenceCriteria,
+    PointCloud, RefinementResult, RegistrationSettings, SmallGicpConvergenceCriteria,
 };
-use crate::{
-    tracking::TrackedBoard,
-    types::{BoardDetection, DetectionError},
-};
+use crate::types::DetectionError;
 use anyhow::Result;
 use nalgebra::{Isometry3, Point3, Vector3};
 
@@ -126,7 +122,7 @@ pub fn smooth_transformation(
     // For rotation, we use quaternion slerp
     let current_rot = current.rotation.quaternion();
     let previous_rot = previous.rotation.quaternion();
-    let smoothed_rot = previous_rot.lerp(&current_rot, 1.0 - smoothing_factor);
+    let smoothed_rot = previous_rot.lerp(current_rot, 1.0 - smoothing_factor);
 
     // For translation, linear interpolation
     let current_trans = current.translation.vector;

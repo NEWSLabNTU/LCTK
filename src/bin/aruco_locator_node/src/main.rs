@@ -87,7 +87,7 @@ fn convert_marker_to_detection2d(
         header: header.clone(),
         results: vec![object_hypothesis_with_pose],
         bbox,
-        id: format!("aruco_{}", marker_id),
+        id: format!("aruco_{marker_id}"),
     })
 }
 
