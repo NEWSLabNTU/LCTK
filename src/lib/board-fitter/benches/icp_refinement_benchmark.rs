@@ -3,7 +3,6 @@
 use board_fitter::{
     refinement::{config::IcpConfigBuilder, IcpRefinement, IcpRefinementConfig},
     types::DetectionConfidence,
-    BoardDetector, DetectionConfig,
 };
 use board_fitter_config::BoardConfig;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -91,6 +90,8 @@ fn benchmark_board_pose_refinement(c: &mut Criterion) {
 }
 
 fn benchmark_detection_with_without_icp(c: &mut Criterion) {
+    use board_fitter::BoardDetectorBuilder;
+
     let mut group = c.benchmark_group("detection_icp_comparison");
 
     let board_config = create_test_board_config(1.0);
@@ -106,12 +107,21 @@ fn benchmark_detection_with_without_icp(c: &mut Criterion) {
             detection: None,
             metadata: None,
         };
-        let detection_config = DetectionConfig::without_icp(board_config_instance);
 
         b.iter(|| {
-            let mut detector = BoardDetector::new(detection_config.clone());
+            let mut detector = BoardDetectorBuilder::new(board_config_instance.clone())
+                .timeout_ms(30000) // 30 seconds timeout
+                .build()
+                .unwrap();
             let result = detector.detect(black_box(&point_cloud));
-            assert!(result.is_ok());
+            match result {
+                Ok(_) => {
+                    // Success - continue benchmark
+                }
+                Err(e) => {
+                    panic!("Detection failed: {e}");
+                }
+            }
         });
     });
 
@@ -121,13 +131,22 @@ fn benchmark_detection_with_without_icp(c: &mut Criterion) {
             detection: None,
             metadata: None,
         };
-        let mut detection_config = DetectionConfig::new_with_default(board_config_instance);
-        detection_config.icp_refinement = Some(IcpRefinementConfig::default());
 
         b.iter(|| {
-            let mut detector = BoardDetector::new(detection_config.clone());
+            let mut detector = BoardDetectorBuilder::new(board_config_instance.clone())
+                .timeout_ms(30000) // 30 seconds timeout
+                .with_fast_icp() // Enable ICP
+                .build()
+                .unwrap();
             let result = detector.detect(black_box(&point_cloud));
-            assert!(result.is_ok());
+            match result {
+                Ok(_) => {
+                    // Success - continue benchmark
+                }
+                Err(e) => {
+                    panic!("Detection failed: {e}");
+                }
+            }
         });
     });
 
