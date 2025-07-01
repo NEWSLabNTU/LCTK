@@ -6,7 +6,7 @@ RUST_VERSION ?= stable
 CARGO_FLAGS ?= --release
 TEST_FLAGS ?= --no-fail-fast
 
-.PHONY: all test test-unit test-integration test-external bench bench-% setup-data download-data clean clean-data docs fmt lint lint-strict check install dev help
+.PHONY: all test test-unit test-integration test-external bench bench-% setup-data download-data clean clean-data docs lint lint-strict check install dev help format
 
 # Default target
 all: check
@@ -96,7 +96,7 @@ install:
 	cargo install --path .
 
 # Format code
-fmt:
+format:
 	@echo "Formatting code..."
 	cargo +nightly fmt
 
@@ -113,7 +113,7 @@ lint-strict:
 # Run all quality checks
 check: 
 	@echo "Running code formatting..."
-	@$(MAKE) fmt
+	@$(MAKE) format
 	@echo "Running linter..."
 	@$(MAKE) lint
 	@echo "Running tests..."
@@ -138,7 +138,7 @@ help:
 	@echo "  clean        - Clean all build artifacts and test data"
 	@echo "  clean-data   - Clean test data only"
 	@echo "  docs         - Generate documentation"
-	@echo "  fmt          - Format code"
+	@echo "  format       - Format code"
 	@echo "  dev          - Setup development environment"
 	@echo "  install      - Install library for system-wide use"
 	@echo "  lint         - Lint code (warnings allowed)"
