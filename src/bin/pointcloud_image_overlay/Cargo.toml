@@ -12,7 +12,7 @@ geometry_msgs = "*"
 nalgebra = { workspace = true }
 palette = "0.7.3"
 rclrs = "*"
-rerun = { version = "0.18", features = ["web_viewer"] }
+rerun.workspace = true
 sensor_msgs = "*"
 std_msgs = "*"
 unzip-n.workspace = true
