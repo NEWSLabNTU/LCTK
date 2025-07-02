@@ -6,7 +6,7 @@ LOG_DIR := build_logs
 default: build
 
 prepare:
-	pip install -U git+https://github.com/colcon/colcon-cargo.git
+	pip install -U git+https://github.com/jerry73204/colcon-cargo.git
 	pip install -U git+https://github.com/colcon/colcon-ros-cargo.git
 
 build: build_ros2_rust build_interface build_packages
@@ -26,11 +26,9 @@ build_interface:
 build_packages:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS nodes... (log: $(LOG_DIR)/packages.log)"
-#	# CARGO_LOG=warn suppresses patch warnings that break colcon-cargo JSON parsing
-#	# Without this, cargo metadata outputs patch warnings to stderr before JSON,
-#	# causing colcon-cargo to fail with "JSONDecodeError: Expecting value: line 1 column 1"
+# Fix applied directly to colcon-cargo source to handle JSON parsing issues
 	. install/setup.sh && \
-	CARGO_LOG=warn colcon build $(COLCON_BUILD_FLAGS) --base-paths src/bin 2>&1 | tee $(LOG_DIR)/packages.log
+	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/bin 2>&1 | tee $(LOG_DIR)/packages.log
 
 build_cargo:
 	cargo build --all-targets
