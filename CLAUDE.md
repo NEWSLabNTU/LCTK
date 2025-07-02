@@ -185,6 +185,8 @@ ros2 launch lctk_ros2 lctk_nodes.launch.py
 - Don't make Pokemon exception handlings. For example, `try: except Exception: pass`. It creates silent errors. I prefer to throw errors to the user so developers can fix it.
 - If `source /opt/ros/humble/setup.bash` was done earlier and we would like to test Rust code only without ROS, you can run `cargo clippy --all-targets --all-features`.
 - In Rust, initialize struct fields first and then construct the struct. It avoids creating a mutable struct.
+- When tasks are completed, notify GNU Screen with a bell: `printf '\a'; echo "[Task Complete] <task description>"`
+- Fixed colcon-cargo JSON parsing issue by modifying /home/aeon/.local/lib/python3.10/site-packages/colcon_cargo/task/cargo/build.py to use direct subprocess calls with --quiet flag. This resolves "JSONDecodeError: Expecting value: line 1 column 1" errors caused by patch warnings in cargo metadata output.
 
 ## Coding Style
 
