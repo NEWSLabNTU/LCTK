@@ -156,6 +156,10 @@ match icp_cuda_refinement(data) {
 
 ## Performance Design
 
+> **Note**: For detailed profiling and optimization strategies, see:
+> - [DESIGN_PROFILING_OPTIMIZATION.md](DESIGN_PROFILING_OPTIMIZATION.md) - Comprehensive profiling infrastructure and optimization design
+> - [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md) - Practical guide for achieving <100ms detection time
+
 ### Optimization Levels
 
 1. **Level 0**: Full accuracy, all refinements enabled

@@ -51,6 +51,10 @@
 ### 🎯 Performance Optimization (Priority: HIGH)
 **Target**: Achieve <100ms detection latency
 
+> **📚 Documentation**: 
+> - See [DESIGN_PROFILING_OPTIMIZATION.md](DESIGN_PROFILING_OPTIMIZATION.md) for the comprehensive optimization strategy
+> - See [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md) for practical implementation steps
+
 #### Tasks:
 - [ ] Profile and optimize hot paths
 - [ ] Implement parallel plane detection
