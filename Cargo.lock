@@ -1185,10 +1185,12 @@ dependencies = [
  "approx 0.5.1",
  "board-fitter-config",
  "chrono",
+ "clap",
  "criterion",
  "env_logger",
  "fast-gicp",
  "indexmap 2.10.0",
+ "json5",
  "measurements",
  "nalgebra 0.33.2",
  "rand 0.8.5",
@@ -12922,6 +12924,18 @@ name = "actionlib_msgs"
 version = "4.8.0"
 
 [[patch.unused]]
+name = "aruco_generator_node"
+version = "0.1.1"
+
+[[patch.unused]]
+name = "aruco_locator_node"
+version = "0.1.1"
+
+[[patch.unused]]
+name = "calibration_board_locator"
+version = "0.1.1"
+
+[[patch.unused]]
 name = "composition_interfaces"
 version = "1.2.1"
 
@@ -12946,6 +12960,10 @@ name = "examples_rclrs_minimal_pub_sub"
 version = "0.4.1"
 
 [[patch.unused]]
+name = "extrinsic_solver"
+version = "0.1.1"
+
+[[patch.unused]]
 name = "lifecycle_msgs"
 version = "1.2.1"
 
@@ -12954,8 +12972,20 @@ name = "mrpt_msgs"
 version = "0.3.4"
 
 [[patch.unused]]
+name = "multi_wayside"
+version = "0.1.1"
+
+[[patch.unused]]
+name = "multi_wayside_node"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "nav_msgs"
 version = "4.8.0"
+
+[[patch.unused]]
+name = "pointcloud_image_overlay"
+version = "0.1.1"
 
 [[patch.unused]]
 name = "rcl_interfaces"
@@ -12964,6 +12994,10 @@ version = "1.2.1"
 [[patch.unused]]
 name = "rclrs_example_msgs"
 version = "0.4.1"
+
+[[patch.unused]]
+name = "rosbag_deck_interface"
+version = "0.1.0"
 
 [[patch.unused]]
 name = "rosgraph_msgs"
@@ -12988,6 +13022,10 @@ version = "4.8.0"
 [[patch.unused]]
 name = "stereo_msgs"
 version = "4.8.0"
+
+[[patch.unused]]
+name = "synchronizer"
+version = "0.1.1"
 
 [[patch.unused]]
 name = "test_msgs"

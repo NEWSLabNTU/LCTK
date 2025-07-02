@@ -49,7 +49,7 @@ pub fn load_point_cloud<P: AsRef<Path>>(path: P) -> Result<PointCloud> {
 }
 
 /// Load PCD (Point Cloud Data) format
-fn load_pcd(path: &Path) -> Result<PointCloud> {
+pub fn load_pcd(path: &Path) -> Result<PointCloud> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut lines = reader.lines();

@@ -205,9 +205,16 @@ fn main() {
     println!("========================================\n");
 
     // Create a test board configuration
+    // Note: SquareBoard is defined in standard orientation, but we'll generate
+    // the point cloud in diamond orientation (rotated 45 degrees)
     let mut board = SquareBoard::new(Length::from_meters(1.0));
 
-    // Add holes in a pattern
+    // Add holes for diamond orientation
+    // When the square is rotated 45°, the corners are at:
+    // Top: (0, 0.707), Left: (-0.707, 0), Right: (0.707, 0), Bottom: (0, -0.707)
+    // We place holes near these corners
+
+    // Hole 1: Near top corner (in diamond orientation)
     board.add_hole(
         Length::from_meters(0.1),
         Point2D {
@@ -217,6 +224,7 @@ fn main() {
         Some("top_hole".to_string()),
     );
 
+    // Hole 2: Near left corner (in diamond orientation)
     board.add_hole(
         Length::from_meters(0.05),
         Point2D {
@@ -226,6 +234,7 @@ fn main() {
         Some("left_hole".to_string()),
     );
 
+    // Hole 3: Near right corner (in diamond orientation)
     board.add_hole(
         Length::from_meters(0.05),
         Point2D {
@@ -282,11 +291,29 @@ fn main() {
     let mut points = Vec::new();
     let mut intensities = Vec::new();
 
-    // Generate a tilted square pattern
+    // Generate a diamond-oriented board (square rotated 45°)
+    // The board is 1m x 1m, so in diamond orientation:
+    // - Top corner: (0, 0.707)
+    // - Right corner: (0.707, 0)
+    // - Bottom corner: (0, -0.707)
+    // - Left corner: (-0.707, 0)
+    let sqrt2_half = std::f64::consts::SQRT_2 / 2.0; // 0.707...
+
     for i in 0..50 {
         for j in 0..50 {
-            let x = -0.5 + (i as f64 / 49.0);
-            let y = -0.5 + (j as f64 / 49.0);
+            // Generate points in a square grid
+            let u = -0.5 + (i as f64 / 49.0);
+            let v = -0.5 + (j as f64 / 49.0);
+
+            // Rotate 45 degrees to create diamond orientation
+            let x = (u - v) * sqrt2_half;
+            let y = (u + v) * sqrt2_half;
+
+            // Check if point is inside the diamond bounds
+            if x.abs() + y.abs() > sqrt2_half {
+                continue; // Skip points outside diamond
+            }
+
             let z = 2.0 + 0.1 * x + 0.05 * y; // Tilted plane
 
             // Skip points inside holes
