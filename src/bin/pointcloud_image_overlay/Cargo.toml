@@ -13,6 +13,6 @@ nalgebra = { workspace = true }
 palette = "0.7.3"
 rclrs = "*"
 rerun.workspace = true
-sensor_msgs = "*"
+sensor_msgs = "4.8.0"
 std_msgs = "*"
 unzip-n.workspace = true
