@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for publishing both LiDAR and camera data from files.
+    
+    This launch file includes both lidar.launch.xml and camera.launch.xml
+    to publish synchronized sensor data for calibration or analysis.
+    
+    Usage:
+    ros2 launch calib_launch sensor.launch.xml pcap_file:=/path/to/file.pcap video_file:=/path/to/file.avi
+-->
+<launch>
+    <!-- LiDAR Arguments -->
+    <arg name="pcap_file" 
+         description="Path to the PCAP file containing Velodyne VLP-32C data"/>
+    
+    <arg name="pointcloud_topic" 
+         default="/velodyne_points"
+         description="Output PointCloud2 topic name"/>
+    
+    <arg name="lidar_frame_id" 
+         default="velodyne"
+         description="Frame ID for the point cloud messages"/>
+    
+    <arg name="rpm" 
+         default="600.0"
+         description="Device rotation rate (RPM)"/>
+    
+    <arg name="port" 
+         default="2368"
+         description="UDP port number for Velodyne data"/>
+    
+    <arg name="read_fast" 
+         default="false"
+         description="Read PCAP file as fast as possible (true) or preserve timing (false)"/>
+    
+    <!-- Camera Arguments -->
+    <arg name="video_file" 
+         description="Path to the video file (mp4, avi, etc.)"/>
+    
+    <arg name="camera_name"
+         default="camera"
+         description="Camera name for topic namespace"/>
+    
+    <arg name="camera_info_url" 
+         default=""
+         description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
+    
+    <arg name="camera_frame_id" 
+         default="camera_frame"
+         description="Frame ID for the image messages"/>
+    
+    <!-- Common Arguments -->
+    <arg name="loop" 
+         default="false"
+         description="Loop playback when reaching end of files"/>
+    
+    
+    <!-- Include LiDAR launch file -->
+    <include file="$(find-pkg-share calib_launch)/launch/lidar.launch.xml">
+        <arg name="pcap_file" value="$(var pcap_file)"/>
+        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
+        <arg name="frame_id" value="$(var lidar_frame_id)"/>
+        <arg name="rpm" value="$(var rpm)"/>
+        <arg name="port" value="$(var port)"/>
+        <arg name="read_once" value="false"/>
+        <arg name="read_fast" value="$(var read_fast)"/>
+        <arg name="repeat_delay" value="1.0"/>
+    </include>
+    
+    <!-- Include Camera launch file -->
+    <include file="$(find-pkg-share calib_launch)/launch/camera.launch.xml">
+        <arg name="video_file" value="$(var video_file)"/>
+        <arg name="camera_name" value="$(var camera_name)"/>
+        <arg name="camera_info_url" value="$(var camera_info_url)"/>
+        <arg name="frame_id" value="$(var camera_frame_id)"/>
+        <arg name="loop" value="$(var loop)"/>
+    </include>
+    
+    <!-- Optional: Static transform publisher between sensors -->
+    <node pkg="tf2_ros" 
+          exec="static_transform_publisher" 
+          name="lidar_to_camera_tf"
+          args="0 0 0 0 0 0 $(var lidar_frame_id) $(var camera_frame_id)"
+          if="false"/>
+    
+    <!-- Optional: rosbag record node -->
+    <executable cmd="ros2 bag record -o sensor_data $(var pointcloud_topic) /$(var camera_name)/image_raw /$(var camera_name)/camera_info /tf /tf_static"
+                shell="true"
+                if="false"/>
+</launch>

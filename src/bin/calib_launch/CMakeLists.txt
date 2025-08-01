@@ -17,6 +17,9 @@ find_package(ament_cmake REQUIRED)
 install(FILES
   launch/lidar_camera_calibration.launch.yaml
   launch/two_lidar_calibration.launch.yaml
+  launch/lidar.launch.xml
+  launch/camera.launch.xml
+  launch/sensor.launch.xml
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
