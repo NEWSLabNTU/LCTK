@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for image processing pipeline (ArUco marker detection).
+    
+    This launch file starts the ArUco locator node that detects ArUco markers
+    in camera images and publishes their locations.
+    
+    Input topics:
+    - Camera image topic
+    - Camera info topic
+    
+    Output topics:
+    - ArUco detections
+-->
+<launch>
+    <!-- Launch Arguments -->
+    <arg name="aruco_config_file"
+         default=""
+         description="Path to ArUco pattern configuration JSON5 file"/>
+    
+    <arg name="camera_topic"
+         default="/camera/image_raw"
+         description="Input camera image topic"/>
+    
+    <arg name="camera_info_topic"
+         default="/camera/camera_info"
+         description="Input camera info topic"/>
+    
+    <arg name="aruco_detections_topic"
+         default="/calibration/aruco_locator/aruco_detections"
+         description="Output ArUco detections topic"/>
+    
+    <arg name="namespace"
+         default="calibration"
+         description="Namespace for the nodes"/>
+    
+    <arg name="debug_mode"
+         default="false"
+         description="Enable debug logging and visualization"/>
+    
+    <!-- ArUco Locator Node -->
+    <node pkg="aruco_locator_node"
+          exec="aruco_locator_node"
+          name="aruco_locator"
+          namespace="$(var namespace)"
+          output="screen">
+        <param name="aruco_config_file" value="$(var aruco_config_file)"/>
+        <param name="debug_mode" value="$(var debug_mode)"/>
+        <param name="camera_namespace" value="camera"/>
+        <remap from="input_image" to="$(var camera_topic)"/>
+        <remap from="camera_info" to="$(var camera_info_topic)"/>
+        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
+    </node>
+</launch>

@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for point cloud processing pipeline (calibration board detection).
+    
+    This launch file starts the calibration board locator node that detects
+    calibration boards in point cloud data and publishes their locations.
+    
+    Input topics:
+    - Point cloud topic
+    
+    Output topics:
+    - Board detections
+-->
+<launch>
+    <!-- Launch Arguments -->
+    <arg name="board_config_file"
+         default=""
+         description="Path to calibration board configuration JSON5 file"/>
+    
+    <arg name="pointcloud_topic"
+         default="/lidar/pointcloud"
+         description="Input point cloud topic"/>
+    
+    <arg name="board_detections_topic"
+         default="/calibration/calibration_board_locator/board_detections"
+         description="Output board detections topic"/>
+    
+    <arg name="namespace"
+         default="calibration"
+         description="Namespace for the nodes"/>
+    
+    <arg name="debug_mode"
+         default="false"
+         description="Enable debug logging and visualization"/>
+    
+    <!-- Calibration Board Locator Node -->
+    <node pkg="calibration_board_locator"
+          exec="calibration_board_locator"
+          name="calibration_board_locator"
+          namespace="$(var namespace)"
+          output="screen">
+        <param name="board_detector_file" value="$(var board_config_file)"/>
+        <param name="aruco_pattern_file" value=""/>
+        <param name="bbox_file" value=""/>
+        <param name="debug_mode" value="$(var debug_mode)"/>
+        <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
+        <remap from="board_detections" to="$(var board_detections_topic)"/>
+    </node>
+</launch>

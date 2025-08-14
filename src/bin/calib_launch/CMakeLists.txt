@@ -15,11 +15,18 @@ find_package(ament_cmake REQUIRED)
 
 # Install launch files
 install(FILES
-  launch/lidar_camera_calibration.launch.yaml
-  launch/two_lidar_calibration.launch.yaml
+  # Sensor launch files
   launch/lidar.launch.xml
   launch/camera.launch.xml
   launch/sensor.launch.xml
+  # Modular component launch files
+  launch/image_processing.launch.xml
+  launch/pointcloud_processing.launch.xml
+  launch/extrinsic_calibration.launch.xml
+  launch/calibration_visualization.launch.xml
+  # Refactored calibration launch files
+  launch/lidar_camera_calibration.launch.xml
+  launch/two_lidar_calibration.launch.xml
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
