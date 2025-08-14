@@ -1,4 +1,4 @@
-.PHONY: default build build_ros2_rust build_interface build_packages clean prepare lint format build_cargo
+.PHONY: default build build_ros2_rust build_interface build_packages clean prepare lint format build_cargo launch_sensor launch_lidar_camera_calibration launch_two_lidar_calibration
 
 COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 LOG_DIR := build_logs
@@ -44,3 +44,31 @@ lint:
 
 clean:
 	rm -rf build install log target .cargo $(LOG_DIR)
+
+launch_sensor:
+	@echo "Launching sensor publishers with sample data..."
+	. /opt/ros/humble/setup.sh && \
+	. install/setup.sh && \
+	ros2 launch calib_launch sensor.launch.xml \
+		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
+		video_file:=$(PWD)/data/sampledata/3/video.avi \
+		loop:=true
+
+launch_lidar_camera_calibration:
+	@echo "Launching LiDAR-Camera calibration with sample data..."
+	. /opt/ros/humble/setup.sh && \
+	. install/setup.sh && \
+	ros2 launch calib_launch lidar_camera_calibration.launch.xml \
+		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
+		video_file:=$(PWD)/data/sampledata/3/video.avi \
+		aruco_config_file:=$(PWD)/configs/example/aruco_pattern.json5 \
+		board_config_file:=$(PWD)/configs/example/board_pattern.json5
+
+launch_two_lidar_calibration:
+	@echo "Launching two LiDAR calibration with sample data..."
+	. /opt/ros/humble/setup.sh && \
+	. install/setup.sh && \
+	ros2 launch calib_launch two_lidar_calibration.launch.xml \
+		lidar1_pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
+		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap \
+		board_config_file:=$(PWD)/configs/example/board_pattern.json5
