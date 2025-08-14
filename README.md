@@ -13,7 +13,9 @@ LCTK provides tools and ROS 2 nodes for:
 
 ## System Architecture
 
-The following diagram shows the data flow through the calibration pipeline:
+### LiDAR-Camera Calibration Pipeline
+
+The following diagram shows the data flow for LiDAR-Camera calibration:
 
 ```mermaid
 graph TB
@@ -21,98 +23,143 @@ graph TB
     subgraph "Sensor Sources"
         PCAP[PCAP File<br/>LiDAR Data]
         VIDEO[Video File<br/>Camera Data]
-        PCAP2[PCAP File 2<br/>Second LiDAR]
     end
 
-    %% LiDAR Processing Pipeline
-    subgraph "LiDAR Pipeline"
+    %% Point Cloud Pipeline
+    subgraph "Point Cloud Pipeline"
         VD[Velodyne Driver<br/>Node]
         VT[Velodyne Transform<br/>Node]
         PC[PointCloud2<br/>Messages]
+        BOARD[Calibration Board<br/>Locator Node]
+        BD[Board<br/>Detections]
         
         PCAP --> VD
         VD --> VT
         VT --> PC
+        PC --> BOARD
+        BOARD --> BD
     end
 
-    %% Camera Processing Pipeline
-    subgraph "Camera Pipeline"
+    %% Image Pipeline
+    subgraph "Image Pipeline"
         GSCAM[GSCam Node]
         IMG[Image Messages]
         INFO[Camera Info]
+        ARUCO[ArUco Locator<br/>Node]
+        AD[ArUco<br/>Detections]
         
         VIDEO --> GSCAM
         GSCAM --> IMG
         GSCAM --> INFO
-    end
-
-    %% Detection Pipeline
-    subgraph "Detection Pipeline"
-        ARUCO[ArUco Locator<br/>Node]
-        BOARD[Calibration Board<br/>Locator Node]
-        
         IMG --> ARUCO
         INFO --> ARUCO
-        PC --> BOARD
-        
-        ARUCO --> AD[ArUco<br/>Detections]
-        BOARD --> BD[Board<br/>Detections]
+        ARUCO --> AD
     end
 
     %% Calibration Pipeline
     subgraph "Calibration Pipeline"
         SYNC[Synchronizer<br/>Node]
         SOLVER[Extrinsic Solver<br/>Node]
+        TF[Extrinsic<br/>Transform]
         
         AD --> SYNC
         BD --> SYNC
         SYNC --> SD[Synchronized<br/>Detections]
-        
         SD --> SOLVER
         INFO --> SOLVER
-        SOLVER --> TF[Extrinsic<br/>Transform]
+        SOLVER --> TF
     end
 
     %% Visualization
     subgraph "Visualization"
         VIZ[Pointcloud Image<br/>Overlay Node]
+        RERUN[Rerun<br/>Visualization]
         
         PC --> VIZ
         IMG --> VIZ
         TF --> VIZ
         INFO --> VIZ
-        
-        VIZ --> RERUN[Rerun<br/>Visualization]
-    end
-
-    %% Two LiDAR Calibration Branch
-    subgraph "Two LiDAR Calibration"
-        BOARD2[Board Locator 2]
-        MW[Multi-Wayside<br/>Node]
-        
-        PCAP2 --> VD2[Velodyne Driver 2]
-        VD2 --> VT2[Velodyne Transform 2]
-        VT2 --> PC2[PointCloud2 - LiDAR 2]
-        PC2 --> BOARD2
-        
-        BD --> MW
-        BOARD2 --> BD2[Board Detections 2]
-        BD2 --> MW
-        MW --> TF2[LiDAR1 to LiDAR2<br/>Transform]
+        VIZ --> RERUN
     end
 
     %% Styling
-    classDef sensor fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef processing fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef detection fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
-    classDef calibration fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef output fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    classDef sensor fill:#1976d2,stroke:#0d47a1,stroke-width:2px,color:#fff
+    classDef pointcloud fill:#388e3c,stroke:#1b5e20,stroke-width:2px,color:#fff
+    classDef image fill:#7b1fa2,stroke:#4a148c,stroke-width:2px,color:#fff
+    classDef calibration fill:#f57c00,stroke:#e65100,stroke-width:2px,color:#fff
+    classDef output fill:#d32f2f,stroke:#b71c1c,stroke-width:2px,color:#fff
     
-    class PCAP,VIDEO,PCAP2 sensor
-    class VD,VT,GSCAM,VD2,VT2 processing
-    class ARUCO,BOARD,BOARD2 detection
-    class SYNC,SOLVER,MW calibration
-    class TF,TF2,RERUN output
+    class PCAP,VIDEO sensor
+    class VD,VT,PC,BOARD,BD pointcloud
+    class GSCAM,IMG,INFO,ARUCO,AD image
+    class SYNC,SOLVER,SD,TF calibration
+    class VIZ,RERUN output
+```
+
+### Two LiDAR Calibration Pipeline
+
+The following diagram shows the data flow for calibrating two LiDARs:
+
+```mermaid
+graph TB
+    %% Sensor Sources
+    subgraph "Sensor Sources"
+        PCAP1[PCAP File 1<br/>LiDAR 1 Data]
+        PCAP2[PCAP File 2<br/>LiDAR 2 Data]
+    end
+
+    %% LiDAR 1 Pipeline
+    subgraph "LiDAR 1 Pipeline"
+        VD1[Velodyne Driver 1]
+        VT1[Velodyne Transform 1]
+        PC1[PointCloud2<br/>LiDAR 1]
+        BOARD1[Board Locator 1]
+        BD1[Board Detections 1]
+        
+        PCAP1 --> VD1
+        VD1 --> VT1
+        VT1 --> PC1
+        PC1 --> BOARD1
+        BOARD1 --> BD1
+    end
+
+    %% LiDAR 2 Pipeline
+    subgraph "LiDAR 2 Pipeline"
+        VD2[Velodyne Driver 2]
+        VT2[Velodyne Transform 2]
+        PC2[PointCloud2<br/>LiDAR 2]
+        BOARD2[Board Locator 2]
+        BD2[Board Detections 2]
+        
+        PCAP2 --> VD2
+        VD2 --> VT2
+        VT2 --> PC2
+        PC2 --> BOARD2
+        BOARD2 --> BD2
+    end
+
+    %% Calibration
+    subgraph "Multi-LiDAR Calibration"
+        MW[Multi-Wayside<br/>Node]
+        TF[LiDAR1 to LiDAR2<br/>Transform]
+        
+        BD1 --> MW
+        BD2 --> MW
+        MW --> TF
+    end
+
+    %% Styling
+    classDef sensor fill:#1976d2,stroke:#0d47a1,stroke-width:2px,color:#fff
+    classDef lidar1 fill:#388e3c,stroke:#1b5e20,stroke-width:2px,color:#fff
+    classDef lidar2 fill:#00796b,stroke:#004d40,stroke-width:2px,color:#fff
+    classDef calibration fill:#f57c00,stroke:#e65100,stroke-width:2px,color:#fff
+    classDef output fill:#d32f2f,stroke:#b71c1c,stroke-width:2px,color:#fff
+    
+    class PCAP1,PCAP2 sensor
+    class VD1,VT1,PC1,BOARD1,BD1 lidar1
+    class VD2,VT2,PC2,BOARD2,BD2 lidar2
+    class MW calibration
+    class TF output
 ```
 
 ## Prerequisites
