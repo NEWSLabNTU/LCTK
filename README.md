@@ -1,33 +1,368 @@
-# LCTK
+# LCTK - LiDAR Camera Toolkit
 
-This is the repository for LiDAR and camera calibration tools and
-supporting librariesx.
+A comprehensive toolkit for calibrating LiDAR and camera systems, implemented in Rust with ROS 2 integration.
 
-## Libraries
+## Overview
 
-- [aruco-config](rust-lib/aruco-config/README.md) - Serializable types
-  to describe ArUco patterns.
+LCTK provides tools and ROS 2 nodes for:
+- LiDAR to camera extrinsic calibration
+- LiDAR to LiDAR extrinsic calibration
+- ArUco marker detection in images
+- Calibration board detection in point clouds
+- Real-time sensor data synchronization and visualization
 
-- [aruco-detector](rust-lib/aruco-detector/README.md) - ArUco board
-  detector.
+## System Architecture
 
-- [hollow-board-config](rust-lib/hollow-board-config/README.md) -
-  Serializable types to describe hollow-board shapes.
+The following diagram shows the data flow through the calibration pipeline:
 
-- [hollow-board-detector](rust-lib/hollow-board-detector/README.md) -
-  Locate a hollow-board inside a point cloud.
+```mermaid
+graph TB
+    %% Sensor Sources
+    subgraph "Sensor Sources"
+        PCAP[PCAP File<br/>LiDAR Data]
+        VIDEO[Video File<br/>Camera Data]
+        PCAP2[PCAP File 2<br/>Second LiDAR]
+    end
 
-- [plane-estimator](rust-lib/plane-estimator/README.md) - Fit a plane
-  against a point cloud.
+    %% LiDAR Processing Pipeline
+    subgraph "LiDAR Pipeline"
+        VD[Velodyne Driver<br/>Node]
+        VT[Velodyne Transform<br/>Node]
+        PC[PointCloud2<br/>Messages]
+        
+        PCAP --> VD
+        VD --> VT
+        VT --> PC
+    end
 
-- [pnp-solver](rust-lib/pnp-solver/README.md) - A Rust wrapper around
-  OpenCV `solve_pnp`.
+    %% Camera Processing Pipeline
+    subgraph "Camera Pipeline"
+        GSCAM[GSCam Node]
+        IMG[Image Messages]
+        INFO[Camera Info]
+        
+        VIDEO --> GSCAM
+        GSCAM --> IMG
+        GSCAM --> INFO
+    end
 
-## Programs
+    %% Detection Pipeline
+    subgraph "Detection Pipeline"
+        ARUCO[ArUco Locator<br/>Node]
+        BOARD[Calibration Board<br/>Locator Node]
+        
+        IMG --> ARUCO
+        INFO --> ARUCO
+        PC --> BOARD
+        
+        ARUCO --> AD[ArUco<br/>Detections]
+        BOARD --> BD[Board<br/>Detections]
+    end
 
-- [aruco-generator](rust-bin/aruco-generator/README.md) - Generate
-  ArUco board image according to the configuration described by
-  [aruco-config](rust-lib/aruco-config/README.md).
+    %% Calibration Pipeline
+    subgraph "Calibration Pipeline"
+        SYNC[Synchronizer<br/>Node]
+        SOLVER[Extrinsic Solver<br/>Node]
+        
+        AD --> SYNC
+        BD --> SYNC
+        SYNC --> SD[Synchronized<br/>Detections]
+        
+        SD --> SOLVER
+        INFO --> SOLVER
+        SOLVER --> TF[Extrinsic<br/>Transform]
+    end
+
+    %% Visualization
+    subgraph "Visualization"
+        VIZ[Pointcloud Image<br/>Overlay Node]
+        
+        PC --> VIZ
+        IMG --> VIZ
+        TF --> VIZ
+        INFO --> VIZ
+        
+        VIZ --> RERUN[Rerun<br/>Visualization]
+    end
+
+    %% Two LiDAR Calibration Branch
+    subgraph "Two LiDAR Calibration"
+        BOARD2[Board Locator 2]
+        MW[Multi-Wayside<br/>Node]
+        
+        PCAP2 --> VD2[Velodyne Driver 2]
+        VD2 --> VT2[Velodyne Transform 2]
+        VT2 --> PC2[PointCloud2 - LiDAR 2]
+        PC2 --> BOARD2
+        
+        BD --> MW
+        BOARD2 --> BD2[Board Detections 2]
+        BD2 --> MW
+        MW --> TF2[LiDAR1 to LiDAR2<br/>Transform]
+    end
+
+    %% Styling
+    classDef sensor fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef processing fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef detection fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef calibration fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef output fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    
+    class PCAP,VIDEO,PCAP2 sensor
+    class VD,VT,GSCAM,VD2,VT2 processing
+    class ARUCO,BOARD,BOARD2 detection
+    class SYNC,SOLVER,MW calibration
+    class TF,TF2,RERUN output
+```
+
+## Prerequisites
+
+### System Requirements
+- Ubuntu 22.04 LTS
+- ROS 2 Humble or later
+- Rust toolchain (stable)
+- Python 3.10+
+
+### Dependencies
+```bash
+# ROS 2 dependencies
+sudo apt update
+sudo apt install -y \
+    ros-humble-desktop \
+    ros-humble-velodyne \
+    ros-humble-gscam \
+    ros-humble-vision-msgs \
+    ros-humble-tf2-ros
+
+# Development tools
+sudo apt install -y \
+    build-essential \
+    cmake \
+    libopencv-dev \
+    libclang-dev \
+    python3-colcon-common-extensions
+
+# GStreamer for video processing
+sudo apt install -y \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-libav
+```
+
+### Rust Setup
+```bash
+# Install Rust if not already installed
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Install colcon-cargo for ROS 2 Rust integration
+pip install -U git+https://github.com/jerry73204/colcon-cargo.git
+pip install -U git+https://github.com/colcon/colcon-ros-cargo.git
+```
+
+## Building
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/NEWSLabNTU/LCTK.git
+cd LCTK
+```
+
+2. **Setup environment:**
+```bash
+source setup/setup-env.sh
+```
+
+3. **Build the project:**
+```bash
+# Full build (includes ROS 2 Rust packages)
+make build
+```
+
+## Usage
+
+### LiDAR-Camera Calibration
+
+1. **Prepare your data:**
+   - PCAP file from Velodyne LiDAR
+   - Video file from camera (AVI, MP4, etc.)
+   - Configuration files for ArUco markers and calibration board
+
+2. **Create configuration files:**
+```bash
+# Example ArUco pattern configuration (configs/aruco_pattern.json5)
+{
+  "dictionary": "DICT_5X5_100",
+  "marker_size": 0.178,  // meters
+  "marker_ids": [0, 1, 2, 3],
+  "board_layout": {
+    "rows": 2,
+    "cols": 2,
+    "spacing": 0.05  // meters
+  }
+}
+
+# Example board configuration (configs/board_pattern.json5)
+{
+  "board_shape": {
+    "board_width": "1m",
+    "hole_radius": "0.15m",
+    "hole_center_shift": "0.2m"
+  },
+  "marker_paper_size": {
+    "meters": 0.5
+  },
+  "max_icp_iterations": 50
+}
+```
+
+3. **Run the calibration:**
+```bash
+# Using the Makefile recipe
+make launch_lidar_camera_calibration
+
+# Or manually with custom parameters
+ros2 launch calib_launch lidar_camera_calibration.launch.xml \
+    pcap_file:=/path/to/your/lidar.pcap \
+    video_file:=/path/to/your/video.avi \
+    aruco_config_file:=/path/to/aruco_config.json5 \
+    board_config_file:=/path/to/board_config.json5
+```
+
+### Two LiDAR Calibration
+
+For calibrating two LiDARs:
+```bash
+# Using the Makefile recipe
+make launch_two_lidar_calibration
+
+# Or manually
+ros2 launch calib_launch two_lidar_calibration.launch.xml \
+    lidar1_pcap_file:=/path/to/lidar1.pcap \
+    lidar2_pcap_file:=/path/to/lidar2.pcap \
+    board_config_file:=/path/to/board_config.json5
+```
+
+### Sensor Data Playback Only
+
+To just play back sensor data without running calibration:
+```bash
+make launch_sensor
+
+# Or manually
+ros2 launch calib_launch sensor.launch.xml \
+    pcap_file:=/path/to/lidar.pcap \
+    video_file:=/path/to/video.avi \
+    loop:=true  # Loop playback
+```
+
+## Available ROS 2 Nodes
+
+### Sensor Nodes
+- **velodyne_driver_node**: Reads PCAP files and publishes raw Velodyne packets
+- **velodyne_transform_node**: Converts raw packets to PointCloud2 messages
+- **gscam_node**: Streams video files as ROS Image messages
+
+### Processing Nodes
+- **aruco_locator_node**: Detects ArUco markers in camera images
+  - Subscribes: `/camera/image_raw`, `/camera/camera_info`
+  - Publishes: `/aruco_detections`
+
+- **calibration_board_locator**: Detects calibration boards in point clouds
+  - Subscribes: `/velodyne_points`
+  - Publishes: `/board_detections`
+
+### Calibration Nodes
+- **synchronizer**: Synchronizes detections from different sensors
+  - Subscribes: `/aruco_detections`, `/board_detections`
+  - Publishes: `/synchronized_detections`
+
+- **extrinsic_solver**: Computes extrinsic calibration parameters
+  - Subscribes: `/synchronized_detections`, `/camera/camera_info`
+  - Publishes: `/extrinsic_transform`
+
+- **multi_wayside_node**: Computes transform between two LiDARs
+  - Subscribes: `/lidar1/board_detections`, `/lidar2/board_detections`
+  - Publishes: `/lidar1_to_lidar2_transform`
+
+### Visualization
+- **pointcloud_image_overlay**: Projects point clouds onto camera images
+  - Subscribes: `/velodyne_points`, `/camera/image_raw`, `/extrinsic_transform`
+  - Outputs: Rerun visualization
+
+## Topics
+
+### Standard Topics
+- `/velodyne_points` (sensor_msgs/PointCloud2): LiDAR point cloud data
+- `/camera/image_raw` (sensor_msgs/Image): Camera image stream
+- `/camera/camera_info` (sensor_msgs/CameraInfo): Camera calibration info
+
+### Detection Topics
+- `/calibration/aruco_locator/aruco_detections` (vision_msgs/Detection2DArray): Detected ArUco markers
+- `/calibration/calibration_board_locator/board_detections` (vision_msgs/Detection3DArray): Detected calibration boards
+
+### Calibration Topics
+- `/calibration/synchronizer/synchronized_detections`: Time-synchronized detection pairs
+- `/calibration/extrinsic_solver/extrinsic_transform` (geometry_msgs/TransformStamped): Computed extrinsic calibration
+
+## Configuration Files
+
+### Launch Parameters
+
+Key parameters that can be configured:
+- `pcap_file`: Path to Velodyne PCAP file
+- `video_file`: Path to camera video file
+- `aruco_config_file`: ArUco pattern configuration
+- `board_config_file`: Calibration board configuration
+- `debug_mode`: Enable debug logging
+- `enable_visualization`: Enable Rerun visualization
+- `sync_window_ms`: Time synchronization window (default: 50ms)
+
+## Project Structure
+
+### Libraries
+
+- **[aruco-config](src/lib/aruco-config/README.md)** - Serializable types to describe ArUco patterns
+- **[aruco-detector](src/lib/aruco-detector/README.md)** - ArUco board detector
+- **[board-fitter](src/lib/board-fitter/README.md)** - Calibration board fitting algorithms
+- **[hollow-board-config](src/lib/hollow-board-config/README.md)** - Serializable types to describe hollow-board shapes
+- **[hollow-board-detector](src/lib/hollow-board-detector/README.md)** - Locate a hollow-board inside a point cloud
+- **[multi-stream-synchronizer](src/lib/multi-stream-synchronizer/README.md)** - Time synchronization for multiple sensor streams
+- **[plane-estimator](src/lib/plane-estimator/README.md)** - Fit a plane against a point cloud
+- **[pnp-solver](src/lib/pnp-solver/README.md)** - A Rust wrapper around OpenCV `solve_pnp`
+- **[serde-types](src/lib/serde-types/README.md)** - Common serializable types used across the project
+
+### Standalone Programs
+
+- **[aruco-generator](src/bin/aruco_generator/README.md)** - Generate ArUco board images
+- **[find-aruco-marker](src/bin/find_aruco_marker/README.md)** - Detect ArUco markers in images
+- **[find-hollow-board](src/bin/find_hollow_board/README.md)** - Detect hollow boards in point clouds
+- **[pcd-tool](src/bin/pcd_tool/README.md)** - Convert and process point cloud data
+- **[project-to-image](src/bin/project_to_image/README.md)** - Project 3D points to camera images
+- **[extrinsic_solver](src/bin/extrinsic_solver/README.md)** - Solve extrinsic parameters between sensors
+
+### ROS 2 Nodes
+
+- **[aruco_locator_node](src/bin/aruco_locator_node/README.md)** - ROS 2 node for ArUco detection
+- **[calibration_board_locator](src/bin/calibration_board_locator/README.md)** - ROS 2 node for board detection in point clouds
+- **[synchronizer](src/bin/synchronizer/README.md)** - ROS 2 node for time synchronization
+- **[extrinsic_solver](src/bin/extrinsic_solver/README.md)** - ROS 2 node for extrinsic calibration
+- **[multi_wayside_node](src/bin/multi_wayside_node/README.md)** - ROS 2 node for multi-LiDAR calibration
+- **[pointcloud_image_overlay](src/bin/pointcloud_image_overlay/README.md)** - ROS 2 node for visualization
+
+### Launch Files
+
+- **[calib_launch](src/bin/calib_launch/README.md)** - ROS 2 launch files for calibration pipelines
+
+## Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 
 ## Authors
