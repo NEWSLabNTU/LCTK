@@ -28,6 +28,10 @@
     <arg name="camera_info_topic"
          default="/camera/camera_info"
          description="Input camera info topic"/>
+     
+     <arg name="loop"
+         default="false"
+         description="Loop video playback"/>
     
     <arg name="pointcloud_topic"
          default="/velodyne_points"
@@ -72,7 +76,7 @@
         <arg name="video_file" value="$(var video_file)"/>
         <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
         <arg name="camera_name" value="camera"/>
-        <arg name="loop" value="false"/>
+        <arg name="loop" value="$(var loop)"/>
     </include>
     
     <!-- Image Processing Pipeline -->
@@ -85,26 +89,26 @@
     </include>
     
     <!-- Point Cloud Processing Pipeline -->
-    <include file="$(find-pkg-share calib_launch)/launch/pointcloud_processing.launch.xml">
+    <!-- <include file="$(find-pkg-share calib_launch)/launch/pointcloud_processing.launch.xml">
         <arg name="board_config_file" value="$(var board_config_file)"/>
         <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
-    </include>
+    </include> -->
     
     <!-- Extrinsic Calibration -->
-    <include file="$(find-pkg-share calib_launch)/launch/extrinsic_calibration.launch.xml">
+    <!-- <include file="$(find-pkg-share calib_launch)/launch/extrinsic_calibration.launch.xml">
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="sync_window_ms" value="$(var sync_window_ms)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
-    </include>
+    </include> -->
     
     <!-- Visualization (Optional) -->
-    <include file="$(find-pkg-share calib_launch)/launch/calibration_visualization.launch.xml" if="$(var enable_visualization)">
+    <!-- <include file="$(find-pkg-share calib_launch)/launch/calibration_visualization.launch.xml" if="$(var enable_visualization)">
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="max_distance" value="$(var max_distance)"/>
         <arg name="min_distance" value="$(var min_distance)"/>
-    </include>
+    </include> -->
 </launch>

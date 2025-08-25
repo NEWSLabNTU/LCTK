@@ -46,9 +46,7 @@
           output="screen">
         <param name="aruco_config_file" value="$(var aruco_config_file)"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
-        <param name="camera_namespace" value="camera"/>
-        <remap from="input_image" to="$(var camera_topic)"/>
-        <remap from="camera_info" to="$(var camera_info_topic)"/>
+        <param name="camera_namespace" value="camera/camera"/>
         <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
     </node>
 </launch>

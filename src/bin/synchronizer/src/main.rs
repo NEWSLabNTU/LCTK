@@ -393,7 +393,8 @@ fn calculate_sync_quality(time_diff_ns: u64) -> u8 {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let context = Context::new(std::env::args(), InitOptions::default())?;
     let mut executor = context.create_basic_executor();
     let node = executor.create_node("synchronizer")?;

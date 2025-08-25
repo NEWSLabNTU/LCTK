@@ -9,6 +9,7 @@ prepare:
 	pip install -U git+https://github.com/jerry73204/colcon-cargo.git
 	pip install -U git+https://github.com/colcon/colcon-ros-cargo.git
 	rosdep install --from-paths src -y --ignore-src
+	cargo install cargo-ament-build
 
 build: build_ros2_rust build_interface build_packages
 
@@ -65,8 +66,9 @@ launch_lidar_camera_calibration:
 	ros2 launch calib_launch lidar_camera_calibration.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
-		aruco_config_file:=$(PWD)/configs/example/aruco_pattern.json5 \
-		board_config_file:=$(PWD)/configs/example/board_pattern.json5
+		aruco_config_file:=$(PWD)/configs/aruco_pattern.json5 \
+		board_config_file:=$(PWD)/configs/board_pattern.json5 \
+		loop:=true
 
 launch_two_lidar_calibration:
 	@echo "Launching two LiDAR calibration with sample data..."
@@ -75,4 +77,4 @@ launch_two_lidar_calibration:
 	ros2 launch calib_launch two_lidar_calibration.launch.xml \
 		lidar1_pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap \
-		board_config_file:=$(PWD)/configs/example/board_pattern.json5
+		board_config_file:=$(PWD)/configs/board_pattern.json5

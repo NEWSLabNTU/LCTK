@@ -200,19 +200,75 @@ impl CalibrationBoardLocatorNode {
         })
     }
 
-    fn convert_pointcloud2_to_points(_msg: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
-        // TODO: Implement PointCloud2 parsing
-        // This is a simplified placeholder - you'll need to implement proper PointCloud2 parsing
-        // based on the message fields and data layout
+    fn convert_pointcloud2_to_points(msg: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
+        // Find the x, y, z fields in the PointCloud2 message
+        let x_field = msg
+            .fields
+            .iter()
+            .find(|f| f.name == "x")
+            .ok_or_else(|| anyhow!("Missing 'x' field in PointCloud2"))?;
+        let y_field = msg
+            .fields
+            .iter()
+            .find(|f| f.name == "y")
+            .ok_or_else(|| anyhow!("Missing 'y' field in PointCloud2"))?;
+        let z_field = msg
+            .fields
+            .iter()
+            .find(|f| f.name == "z")
+            .ok_or_else(|| anyhow!("Missing 'z' field in PointCloud2"))?;
 
-        // For now, return empty vector to allow compilation
-        // In a real implementation, you would:
-        // 1. Parse the fields to understand the data layout
-        // 2. Extract x, y, z coordinates from the binary data
-        // 3. Convert to nalgebra Point3 objects
+        // Get field offsets
+        let x_offset = x_field.offset as usize;
+        let y_offset = y_field.offset as usize;
+        let z_offset = z_field.offset as usize;
 
-        log_warn!(LOGGER_NAME, "PointCloud2 parsing not yet implemented");
-        Ok(Vec::new())
+        // Parse points
+        let point_step = msg.point_step as usize;
+        let num_points = (msg.width * msg.height) as usize;
+
+        let mut points = Vec::with_capacity(num_points);
+
+        for i in 0..num_points {
+            let base_offset = i * point_step;
+
+            // Ensure we don't read beyond the data buffer
+            if base_offset + point_step > msg.data.len() {
+                log_warn!(LOGGER_NAME, "Point data truncated at point {}", i);
+                break;
+            }
+
+            // Read x, y, z as f32 (assuming FLOAT32 datatype = 7)
+            let x = Self::read_f32_le(&msg.data, base_offset + x_offset)?;
+            let y = Self::read_f32_le(&msg.data, base_offset + y_offset)?;
+            let z = Self::read_f32_le(&msg.data, base_offset + z_offset)?;
+
+            // Skip points with invalid coordinates (NaN or infinity)
+            if x.is_finite() && y.is_finite() && z.is_finite() {
+                points.push(na::Point3::new(x as f64, y as f64, z as f64));
+            }
+        }
+
+        log_info!(
+            LOGGER_NAME,
+            "Parsed {} valid points from PointCloud2 message",
+            points.len()
+        );
+
+        Ok(points)
+    }
+
+    fn read_f32_le(data: &[u8], offset: usize) -> Result<f32> {
+        if offset + 4 > data.len() {
+            return Err(anyhow!("Buffer overflow when reading f32 at offset {}", offset));
+        }
+        let bytes: [u8; 4] = [
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ];
+        Ok(f32::from_le_bytes(bytes))
     }
 
     fn convert_board_detection_to_detection3d(

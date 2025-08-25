@@ -39,7 +39,7 @@
           name="calibration_board_locator"
           namespace="$(var namespace)"
           output="screen">
-        <param name="board_detector_file" value="$(var board_config_file)"/>
+        <param name="board_detector_file" value=""/>
         <param name="aruco_pattern_file" value=""/>
         <param name="bbox_file" value=""/>
         <param name="debug_mode" value="$(var debug_mode)"/>
