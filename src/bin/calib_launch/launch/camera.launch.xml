@@ -30,7 +30,7 @@
          description="Frame ID for the image messages"/>
     
     <arg name="loop" 
-         default="false"
+         default="True"
          description="Loop video playback"/>
     
     <!-- GSCam node for video file playback -->

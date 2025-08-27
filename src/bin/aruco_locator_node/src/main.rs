@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
-use opencv::{core::CV_8UC3, prelude::*};
+use opencv::{core::{CV_8UC1, CV_8UC3, CV_8UC4}, prelude::*, imgproc};
 use rclrs::{log_error, log_info, log_warn, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::sync::{Arc, Mutex};
@@ -178,16 +178,13 @@ impl ArucoLocatorNode {
         // Create the detector state
         let detector_state = Arc::new(Mutex::new(None));
 
-        // Try to declare the parameter, but have a default fallback for any errors
-        let camera_namespace = match node
+        // Try to declare the parameter with default value
+        let camera_namespace = node
             .declare_parameter::<Arc<str>>("camera_namespace")
-            .mandatory()
-        {
-            Ok(param) => param.get().to_string(),
-            Err(e) => {
-                bail!("Failed to declare parameter 'camera_namespace': {e}.");
-            }
-        };
+            .default("/camera/camera".into())
+            .mandatory()?
+            .get()
+            .to_string();
 
         log_info!(LOGGER_NAME, "Using camera namespace: {camera_namespace}");
 
@@ -196,11 +193,8 @@ impl ArucoLocatorNode {
 
         // Define potential image topics in priority order
         let potential_image_topics = vec![
-            format!("{camera_namespace}/image_rect_color"),
-            format!("{camera_namespace}/image_rect"),
-            format!("{camera_namespace}/image_color"),
-            format!("{camera_namespace}/image"),
             format!("{camera_namespace}/image_raw"),
+            format!("{camera_namespace}/image"),
         ];
 
         // Create detection publisher
@@ -214,7 +208,6 @@ impl ArucoLocatorNode {
                 Self::camera_info_callback(msg, Arc::clone(&detector_state_camera_info));
             },
         )?;
-
         log_info!(LOGGER_NAME, "Camera namespace: {camera_namespace}");
         log_info!(
             LOGGER_NAME,
@@ -252,6 +245,8 @@ impl ArucoLocatorNode {
         camera_info: CameraInfo,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
     ) {
+        log_info!(LOGGER_NAME, "Initializing ArUco detector with camera info");
+
         let aruco_pattern = match Self::load_aruco_pattern() {
             Ok(pattern) => pattern,
             Err(e) => {
@@ -282,13 +277,27 @@ impl ArucoLocatorNode {
         };
 
         *state = Some(Arc::new(detector));
-        log_info!(LOGGER_NAME, "Camera info updated from camera_info topic");
+        log_info!(LOGGER_NAME, "ArUco detector successfully initialized");
     }
 
     /// Load ArUco pattern from config file
     fn load_aruco_pattern() -> Result<aruco_config::MultiArucoPattern> {
+        log_info!(LOGGER_NAME, "Loading ArUco pattern from: {}", ARUCO_PATTERN_CONFIG);
+        
         let json5_text = std::fs::read_to_string(ARUCO_PATTERN_CONFIG)?;
-        let pattern = json5::from_str(&json5_text)?;
+        let pattern: aruco_config::MultiArucoPattern = json5::from_str(&json5_text)?;
+        
+        // Validate pattern configuration
+        log_info!(LOGGER_NAME, "ArUco config loaded: {} markers, dictionary: {:?}", 
+            pattern.marker_ids.len(), pattern.dictionary);
+        
+        // Check if expected markers match our test pattern
+        let expected_markers = [696, 64, 306, 195];
+        if pattern.marker_ids != expected_markers {
+            log_warn!(LOGGER_NAME, "ArUco pattern markers {:?} don't match expected {:?}", 
+                pattern.marker_ids, expected_markers);
+        }
+        
         Ok(pattern)
     }
 
@@ -297,61 +306,152 @@ impl ArucoLocatorNode {
         msg: &ImageMsg,
         detector: &ArucoDetector,
     ) -> Result<aruco_locator::DetectionResult> {
-        // Create OpenCV Mat from raw image data
-        // Assuming the image is in BGR8 format (common for ROS)
-        let mat = unsafe {
-            Mat::new_rows_cols_with_data(
-                msg.height as i32,
-                msg.width as i32,
-                CV_8UC3,
-                msg.data.as_ptr() as *mut std::ffi::c_void,
-                opencv::core::Mat_AUTO_STEP,
-            )?
-        };
+        // Validate image encoding and convert to OpenCV Mat
+        let mat = Self::ros_image_to_opencv_mat(msg)?;
 
         // Detect ArUco markers
         detector.detect_markers(&mat)
     }
 
-    /// Helper method to try subscribing to an image topic from a list of candidates
-    /// with image processing callback
+    /// Convert ROS Image message to OpenCV Mat with proper encoding handling
+    fn ros_image_to_opencv_mat(msg: &ImageMsg) -> Result<Mat> {
+        
+        // Log image properties for debugging
+        log_info!(LOGGER_NAME, "Converting image: {}x{}, encoding: {}, step: {}, data_size: {}", 
+            msg.width, msg.height, msg.encoding, msg.step, msg.data.len());
+        
+        // Validate data size
+        let expected_size = (msg.step * msg.height) as usize;
+        if msg.data.len() < expected_size {
+            bail!("Image data size ({}) is smaller than expected ({})", 
+                  msg.data.len(), expected_size);
+        }
+
+        // Determine OpenCV type based on encoding
+        let cv_type = match msg.encoding.as_str() {
+            "mono8" => CV_8UC1,
+            "bgr8" | "rgb8" => CV_8UC3,
+            "bgra8" | "rgba8" => CV_8UC4,
+            // Add more encodings as needed
+            _ => bail!("Unsupported image encoding: {}", msg.encoding),
+        };
+
+        // Create OpenCV Mat with proper validation
+        let mat = unsafe {
+            Mat::new_rows_cols_with_data(
+                msg.height as i32,
+                msg.width as i32,
+                cv_type,
+                msg.data.as_ptr() as *mut std::ffi::c_void,
+                msg.step as usize,  // Use actual step from message
+            )?
+        };
+
+        // Convert RGB to BGR if necessary (OpenCV expects BGR)
+        let processed_mat = match msg.encoding.as_str() {
+            "rgb8" => {
+                let mut bgr_mat = Mat::default();
+                imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_RGB2BGR, 0)?;
+                bgr_mat
+            },
+            "rgba8" => {
+                let mut bgr_mat = Mat::default();
+                imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_RGBA2BGR, 0)?;
+                bgr_mat
+            },
+            "mono8" => {
+                // Convert grayscale to BGR for ArUco detection
+                let mut bgr_mat = Mat::default();
+                imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_GRAY2BGR, 0)?;
+                bgr_mat
+            },
+            "bgr8" | "bgra8" => mat, // Already in correct format
+            _ => mat, // Should not reach here due to earlier validation
+        };
+
+        Ok(processed_mat)
+    }
+
+    /// Save debug images to visualize the processing pipeline
+    fn save_debug_images(mat: &Mat, msg: &ImageMsg) -> Result<()> {
+        use opencv::imgcodecs::{imwrite, IMWRITE_JPEG_QUALITY};
+        use opencv::core::Vector;
+        
+        // Create debug directory if it doesn't exist
+        let debug_dir = "debug_images";
+        std::fs::create_dir_all(debug_dir)?;
+        
+        // Generate timestamp for unique filenames
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis();
+        
+        // Save the original BGR/RGB image
+        let original_filename = format!("{}/original_{}x{}_{}.jpg", 
+            debug_dir, msg.width, msg.height, timestamp);
+        let mut jpeg_params = Vector::new();
+        jpeg_params.push(IMWRITE_JPEG_QUALITY);
+        jpeg_params.push(90); // Quality 90%
+        
+        match imwrite(&original_filename, mat, &jpeg_params) {
+            Ok(_) => log_info!(LOGGER_NAME, "Saved original image: {}", original_filename),
+            Err(e) => log_warn!(LOGGER_NAME, "Failed to save original image: {}", e),
+        }
+        
+        // Convert to grayscale to see what ArUco detection actually sees
+        let mut gray_mat = Mat::default();
+        let channels = mat.channels();
+        if channels > 1 {
+            opencv::imgproc::cvt_color(mat, &mut gray_mat, opencv::imgproc::COLOR_BGR2GRAY, 0)?;
+            
+            let gray_filename = format!("{}/grayscale_{}x{}_{}.jpg", 
+                debug_dir, msg.width, msg.height, timestamp);
+            
+            match imwrite(&gray_filename, &gray_mat, &jpeg_params) {
+                Ok(_) => log_info!(LOGGER_NAME, "Saved grayscale image: {}", gray_filename),
+                Err(e) => log_warn!(LOGGER_NAME, "Failed to save grayscale image: {}", e),
+            }
+        } else {
+            // Already grayscale
+            let gray_filename = format!("{}/already_grayscale_{}x{}_{}.jpg", 
+                debug_dir, msg.width, msg.height, timestamp);
+            
+            match imwrite(&gray_filename, mat, &jpeg_params) {
+                Ok(_) => log_info!(LOGGER_NAME, "Saved grayscale image: {}", gray_filename),
+                Err(e) => log_warn!(LOGGER_NAME, "Failed to save grayscale image: {}", e),
+            }
+        }
+        
+        Ok(())
+    }
+
     fn subscribe_to_image_topic(
         &self,
         node: &Node,
         potential_topics: &[String],
     ) -> Option<Subscription<ImageMsg>> {
-        // Find first topic with publishers
+        log_info!(LOGGER_NAME, "Attempting to subscribe to image topics...");
+        
+        // Subscribe to image topic directly
         for topic in potential_topics {
-            match node.count_publishers(topic) {
-                Ok(count) if count > 0 => {
-                    // Topic has publishers, try to subscribe with image processing callback
-                    let detector_state = Arc::clone(&self.detector_state);
-                    let publisher = self.detection_publisher.clone();
-
-                    match node.create_subscription::<ImageMsg, _>(topic, move |msg: ImageMsg| {
-                        Self::image_callback(msg, Arc::clone(&detector_state), &publisher);
-                    }) {
-                        Ok(sub) => {
-                            log_info!(LOGGER_NAME, "Subscribed to image topic: {topic}");
-                            return Some(sub);
-                        }
-                        Err(e) => {
-                            log_warn!(LOGGER_NAME, "Failed to subscribe to {topic}: {e}");
-                            continue;
-                        }
-                    }
-                }
-                Ok(_) => {
-                    // Topic exists but has no publishers
-                    log_info!(LOGGER_NAME, "Topic {topic} has no publishers");
-                    continue;
+            log_info!(LOGGER_NAME, "Trying to subscribe to topic: {topic}");
+            let detector_state = Arc::clone(&self.detector_state);
+            let publisher = self.detection_publisher.clone();
+    
+            match node.create_subscription::<ImageMsg, _>(topic, move |msg: ImageMsg| {
+                Self::image_callback(msg, Arc::clone(&detector_state), &publisher);
+            }) {
+                Ok(sub) => {
+                    log_info!(LOGGER_NAME, "Successfully subscribed to image topic: {topic}");
+                    return Some(sub);
                 }
                 Err(e) => {
-                    log_error!(LOGGER_NAME, "Error checking publishers for {topic}: {e}");
+                    log_warn!(LOGGER_NAME, "Failed to subscribe to {topic}: {e}");
                     continue;
                 }
             }
         }
+        log_error!(LOGGER_NAME, "Failed to subscribe to any image topic");
         None
     }
 
@@ -383,9 +483,50 @@ impl ArucoLocatorNode {
             }
         };
 
+
         // Process the image
+        log_info!(LOGGER_NAME, "-----------Processing image: {}x{}", msg.width, msg.height);
+
         match Self::process_image(&msg, &detector) {
             Ok(detection_result) => {
+                // 檢查檢測結果是否為空
+                if !detection_result.markers_found || detection_result.marker_ids.is_empty() {
+                    log_warn!(LOGGER_NAME, "No ArUco markers detected in image {}x{}", 
+                        msg.width, msg.height);
+                } else {
+                    // 打印檢測到的標記詳細信息
+                    log_info!(LOGGER_NAME, "Successfully detected {} ArUco markers", 
+                        detection_result.marker_ids.len());
+                    
+                    // Validate detection consistency
+                    if detection_result.marker_ids.len() != detection_result.markers.len() {
+                        log_error!(LOGGER_NAME, "Inconsistent detection data: {} IDs but {} marker data entries", 
+                            detection_result.marker_ids.len(), detection_result.markers.len());
+                    }
+                    
+                    for (i, &marker_id) in detection_result.marker_ids.iter().enumerate() {
+                        log_info!(LOGGER_NAME, "Marker {}: ID={}", i, marker_id);
+                        
+                        // Validate marker ID is in expected range
+                        if marker_id < 0 || marker_id > 1023 {
+                            log_warn!(LOGGER_NAME, "Suspicious marker ID: {} (outside typical range 0-1023)", marker_id);
+                        }
+                        
+                        // 打印每個標記的詳細數據並驗證格式
+                        if let Some(marker_data) = detection_result.markers.get(i) {
+                            // Check if marker data has expected structure
+                            if marker_data.get("corners").is_none() {
+                                log_error!(LOGGER_NAME, "Marker {} missing 'corners' field in JSON data", i);
+                            }
+                            
+                            log_info!(LOGGER_NAME, "  Marker {} data: {}", i, 
+                                serde_json::to_string(marker_data).unwrap_or_else(|_| "Invalid JSON".to_string()));
+                        } else {
+                            log_error!(LOGGER_NAME, "Missing marker data for marker {}", i);
+                        }
+                    }
+                }
+
                 // Create message header
                 let header = Header {
                     stamp: msg.header.stamp.clone(),
@@ -394,14 +535,34 @@ impl ArucoLocatorNode {
 
                 // Convert detection result to vision_msgs Detection2DArray
                 let detection_msg = convert_detection_result(&detection_result, header);
+                
+                // 驗證轉換後的消息
+                if detection_msg.detections.is_empty() && detection_result.markers_found {
+                    log_error!(LOGGER_NAME, "Conversion error: DetectionResult has markers but Detection2DArray is empty");
+                } else if !detection_msg.detections.is_empty() {
+                    log_info!(LOGGER_NAME, "Successfully converted {} markers to Detection2DArray", 
+                        detection_msg.detections.len());
+                    
+                    // 打印轉換後的檢測消息詳細信息
+                    for (i, detection) in detection_msg.detections.iter().enumerate() {
+                        if let Some(result) = detection.results.first() {
+                            log_info!(LOGGER_NAME, "Detection {}: ID={}, Score={}", 
+                                i, result.hypothesis.class_id, result.hypothesis.score);
+                        }
+                    }
+                }
 
                 // Publish the detection result
-                if let Err(e) = publisher.publish(detection_msg) {
+                if let Err(e) = publisher.publish(&detection_msg) {
                     log_error!(LOGGER_NAME, "Failed to publish detection result: {e}");
+                } else {
+                    log_info!(LOGGER_NAME, "Successfully published detection message with {} detections", 
+                        detection_msg.detections.len());
                 }
             }
             Err(e) => {
-                log_error!(LOGGER_NAME, "Detection failed: {e}");
+                log_error!(LOGGER_NAME, "ArUco detection failed for image {}x{}: {e}", 
+                    msg.width, msg.height);
             }
         }
     }
