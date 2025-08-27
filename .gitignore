@@ -21,11 +21,49 @@ __main__/
 .ninja_deps
 .ninja_log
 
-/thi_output
-/deepsort-tracker/wayside_?_camera?/
-/config/files/*
-
 # colcon
 /build/
 /install/
 /log/
+/build_logs/
+
+# Cargo and Rust workspace artifacts
+/.cargo/
+/ros2_rust_ws/build/
+/ros2_rust_ws/install/
+/ros2_rust_ws/log/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.orig
+
+# ROS specific
+*.bag
+*.db3
+.ros/
+
+# Test artifacts
+/test_results/
+/coverage/
+*.gcda
+*.gcno
+*.gcov
+
+# IDE specific
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Python environments
+venv/
+.venv/
+env/
+.env/
