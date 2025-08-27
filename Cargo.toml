@@ -13,7 +13,7 @@ exclude = [
 
 [workspace.dependencies]
 # Computer vision
-opencv = { version = "0.88.9", default-features = false }
+opencv = { version = "0.88.9", default-features = false, features = ["clang-runtime"] }
 cv-convert = { version = "0.26.0" }
 
 # Core utilities

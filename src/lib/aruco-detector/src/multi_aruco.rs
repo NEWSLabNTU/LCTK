@@ -13,6 +13,7 @@ use opencv::{
     calib3d, core as core_cv,
     core::{Mat, Point2f, Point3d, Ptr, Vector},
     prelude::*,
+    types::VectorOfMat,
 };
 use sensor_msgs::msg::CameraInfo;
 use serde::{Deserialize, Serialize};
@@ -50,7 +51,7 @@ pub struct ImagePoseMarker {
 #[derive(Clone, Debug)]
 pub struct ImageDetection {
     id: Vector<i32>,
-    corners: Vector<Vector<Point2f>>,
+    corners: VectorOfMat,
     marker_size: Length,
     camera_matrix: Mat,
     distortion_coefs: Mat,
@@ -62,13 +63,19 @@ unsafe impl Sync for ImageDetection {}
 
 impl ImageDetection {
     pub fn markers(&self) -> impl Iterator<Item = ImageMarker> + '_ {
-        izip!(&self.corners, &self.id).map(|(corners, id)| {
-            let corners: Vec<Point2<f32>> =
-                corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
+        izip!(&self.corners, &self.id).map(|(corners_mat, id)| {
+            // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
+            let mut corners_vec = Vec::new();
+            for i in 0..4 {
+                let pt: &Point2f = corners_mat.at_2d(0, i).unwrap_or_else(|_| 
+                    corners_mat.at_2d(i, 0).unwrap()
+                );
+                corners_vec.push(Point2::new(pt.x, pt.y));
+            }
 
             ImageMarker {
                 id,
-                corners: corners.try_into().unwrap(),
+                corners: corners_vec.try_into().unwrap(),
             }
         })
     }
@@ -102,7 +109,7 @@ impl ImageDetection {
     }
 
     /// Get a reference to the image detection's corners.
-    pub fn corners(&self) -> &Vector<Vector<Point2f>> {
+    pub fn corners(&self) -> &VectorOfMat {
         &self.corners
     }
 }
@@ -122,14 +129,20 @@ impl PoseEstimation {
             &self.rvec,
             &self.tvec
         )
-        .map(|(corners, id, rvec, tvec)| {
-            let corners: Vec<Point2<f32>> =
-                corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
+        .map(|(corners_mat, id, rvec, tvec)| {
+            // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
+            let mut corners_vec = Vec::new();
+            for i in 0..4 {
+                let pt: &Point2f = corners_mat.at_2d(0, i).unwrap_or_else(|_| 
+                    corners_mat.at_2d(i, 0).unwrap()
+                );
+                corners_vec.push(Point2::new(pt.x, pt.y));
+            }
             let pose: Isometry3<f64> = OpenCvPose { rvec, tvec }.try_to_cv().unwrap();
 
             ImagePoseMarker {
                 id,
-                corners: corners.try_into().unwrap(),
+                corners: corners_vec.try_into().unwrap(),
                 pose,
             }
         })
@@ -360,7 +373,7 @@ impl Detector {
 
         // find aruco markers
         let (aruco_corners_vec, aruco_ids) = {
-            let mut corners_vec = Vector::<Vector<Point2f>>::new();
+            let mut corners_vec = VectorOfMat::new();
             let mut ids = Vector::<i32>::new();
 
             let parameters = {
@@ -404,7 +417,7 @@ impl Detector {
                 .collect();
 
             let reordered_ids: Vector<i32> = marker_ids.iter().map(|&id| id as i32).collect();
-            let reordered_corners_vec: Vector<Vector<Point2f>> = marker_ids
+            let reordered_corners_vec: VectorOfMat = marker_ids
                 .iter()
                 .map(|&id| {
                     let index = id_to_index[&(id as i32)];
@@ -454,7 +467,7 @@ impl Detector {
         )?;
 
         // find aruco markers
-        let mut corners_vec = Vector::<Vector<Point2f>>::new();
+        let mut corners_vec = VectorOfMat::new();
         let mut ids = Vector::<i32>::new();
 
         let parameters = {
@@ -486,13 +499,19 @@ impl Detector {
 
         // convert to ImageMarker
         let markers: Vec<ImageMarker> = izip!(&corners_vec, &ids)
-            .map(|(corners, id)| {
-                let corners: Vec<Point2<f32>> =
-                    corners.into_iter().map(|p| Point2::new(p.x, p.y)).collect();
+            .map(|(corners_mat, id)| {
+                // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
+                let mut corners_vec = Vec::new();
+                for i in 0..4 {
+                    let pt: &Point2f = corners_mat.at_2d(0, i).unwrap_or_else(|_| 
+                        corners_mat.at_2d(i, 0).unwrap()
+                    );
+                    corners_vec.push(Point2::new(pt.x, pt.y));
+                }
 
                 ImageMarker {
                     id,
-                    corners: corners.try_into().unwrap(),
+                    corners: corners_vec.try_into().unwrap(),
                 }
             })
             .collect();

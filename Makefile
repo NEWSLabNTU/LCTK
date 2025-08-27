@@ -21,6 +21,7 @@ build_interface:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building interface packages... (log: $(LOG_DIR)/interface.log)"
 	. ./ros2_rust_ws/install/setup.sh && \
+	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/interface 2>&1 | tee $(LOG_DIR)/interface.log
 
 build_packages:
@@ -28,9 +29,11 @@ build_packages:
 	@echo "Building ROS nodes... (log: $(LOG_DIR)/packages.log)"
 # Fix applied directly to colcon-cargo source to handle JSON parsing issues
 	. install/setup.sh && \
+	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/bin 2>&1 | tee $(LOG_DIR)/packages.log
 
 build_cargo:
+	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	cargo build --all-targets
 
 format:
