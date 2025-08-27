@@ -6,7 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LCTK (LiDAR and Camera Toolkit) is a set of libraries and tools for calibrating LiDAR and camera systems. It's primarily implemented in Rust with some shell scripts for workflow automation.
 
-## Build Commands
+## Setup and Build
+
+### Quick Start
+
+```bash
+# Set up development environment (interactive)
+make prepare
+
+# Or use the setup script directly with options:
+./setup-dev-env.sh -y              # Non-interactive installation
+./setup-dev-env.sh -y --no-cuda    # Skip CUDA installation
+./setup-dev-env.sh -y --minimal    # Minimal installation (no CUDA, no dev tools)
+
+# Build the project
+make build
+
+# Test with sample data
+make launch_sensor
+```
+
+### Build Commands
 
 The project uses a three-pass build process:
 
@@ -21,7 +41,8 @@ make build_ros2_rust
 # 2. Build interface types in this project (after building ROS for Rust)
 make build_interface
 
-# 3. Build the rest of the project (handled by make build)
+# 3. Build the rest of the project
+make build_packages
 
 # To build a single crate:
 make build_interface  # Run at least once
@@ -30,39 +51,46 @@ cargo build --release --manifest-path src/bin/aruco_locator_node/Cargo.toml
 
 # Clean build artifacts
 make clean
-# or
-cargo clean
 
-# Setup environment variables (run before build/development)
-source setup/setup-env.sh
+# Launch calibration pipelines
+make launch_lidar_camera_calibration
+make launch_two_lidar_calibration
 ```
 
 ## Project Structure
 
 The project is organized into:
 
-1. **Rust Libraries** (`rust-lib/`): Core components with reusable functionality
+1. **Rust Libraries** (`src/lib/`): Core components with reusable functionality
    - `aruco-config`: Serializable types for ArUco pattern description
    - `aruco-detector`: Detection of ArUco markers in images
+   - `aruco-generator`: Generate ArUco board images (library)
    - `hollow-board-config`: Serializable types for hollow-board shapes
    - `hollow-board-detector`: Detection of hollow-boards in point clouds
    - `plane-estimator`: Plane fitting algorithms for point clouds
    - `pnp-solver`: OpenCV wrapper for PnP (Perspective-n-Point) solving
    - `serde-types`: Common serializable types used across the project
 
-2. **Rust Binaries** (`rust-bin/`): Command-line tools
-   - `aruco-generator`: Generate ArUco board images
-   - `find-aruco-marker`: Detect ArUco markers in images
-   - `find-hollow-board`: Detect hollow boards in point clouds
-   - `pcd-tool`: Process point cloud data
-   - `project-to-image`: Project 3D points to camera images
-   - `extrinsic_solver`: Solve extrinsic parameters between LiDAR and camera
-   - `multi_wayside`: Handle multi-wayside calibration
+2. **ROS 2 Nodes** (`src/bin/`): ROS 2 nodes and command-line tools
+   - `aruco_generator_node`: Generate ArUco board images
+   - `aruco_locator_node`: Detect ArUco markers in images
+   - `calibration_board_locator`: Detect calibration boards in point clouds
+   - `extrinsic_solver`: Solve extrinsic parameters between LiDAR and camera (requires SFCGAL)
+   - `multi_wayside`: Handle multi-wayside calibration (requires SFCGAL)
+   - `multi_wayside_node`: Multi-wayside calibration ROS node (requires SFCGAL)
+   - `pointcloud_image_overlay`: Overlay point clouds on camera images
+   - `synchronizer`: Synchronize multiple data streams
+   - `rosbag_deck`: ROS bag playback and recording tools
 
 3. **Scripts** (`scripts/`): Automation scripts for calibration workflows
    - `lidar-to-camera-calibration/`: Scripts for LiDAR to camera calibration
    - `lidar-to-lidar-calibration/`: Scripts for LiDAR to LiDAR calibration
    - `record-data/`: Scripts for data recording
+
+4. **Ansible** (`ansible/`): Infrastructure-as-code for environment setup
+   - `playbooks/`: Ansible playbooks for setup automation
+   - `roles/`: Modular Ansible roles for each component
+   - Self-contained configuration and requirements
 
 ## Calibration Workflow
 
@@ -107,14 +135,59 @@ The toolkit includes utilities for data recording across multiple sensor devices
 
 ## Dependencies
 
-The project requires:
-- Rust toolchain
-- OpenCV 4.6.0
-- CUDA 11.3 (optional)
-- Python 3.8 (optional)
-- ROS 2 Humble or later (for ROS 2 nodes)
+The project requires Ubuntu 22.04 LTS and the following dependencies:
+
+### Core Dependencies (installed by setup-dev-env.sh)
+- ROS 2 Humble
+- Rust toolchain (stable and nightly)
+- OpenCV 4.5.4 or later
+- GStreamer 1.20+ with plugins (base, good, bad, ugly, libav)
+- C++ development headers (libstdc++-12-dev, libclang-dev, llvm-dev)
+- SFCGAL library for geometric computations
+- libpcap for network packet capture
+- Python 3.10 with pip, venv, numpy, scipy
+
+### Optional Dependencies
+- CUDA 11.8 toolkit (for GPU acceleration)
+- Development tools (gdb, valgrind, lcov, etc.)
+- Poetry for Python package management
+
+All dependencies are managed through Ansible playbooks. Run `make prepare` or `./setup-dev-env.sh` to install everything automatically.
 
 The environment setup script is in `setup/setup-env.sh`.
+
+### Known Build Issues and Solutions
+
+1. **OpenCV version 0.0.0 issue**: The Makefile now automatically sets `OPENCV_PKGCONFIG_NAME=opencv4` to use the system OpenCV installation instead of the non-existent `/opt/opencv4.6.0` path.
+
+2. **Ansible configuration errors**: 
+   - The ansible.builtin collection is built-in and shouldn't be in ansible-galaxy-requirements.yaml
+   - Ansible needs the ANSIBLE_CONFIG environment variable set to find the correct roles path
+   - The setup script now exports ANSIBLE_CONFIG to ensure roles are found
+   - When Ansible is installed via pipx, pip module needs `executable: /usr/bin/pip3` to install user packages
+
+3. **OpenCV binding generation failure**: If you see errors like "fatal error: 'memory' file not found" when building opencv-rust crates:
+   - Install C++ development headers: `sudo apt-get install libstdc++-12-dev libclang-dev`
+   - The Makefile already sets the correct OpenCV environment variables
+
+4. **SFCGAL library missing**: If packages like `extrinsic_solver`, `multi_wayside`, or `multi_wayside_node` fail with "SFCGAL/capi/sfcgal_c.h: No such file or directory":
+   - Install SFCGAL: `sudo apt-get install libsfcgal-dev`
+   - Or exclude these packages from the build if not needed
+
+5. **Colcon build aborts**: When one package fails in colcon build, all subsequent packages are aborted. To build other packages:
+   - Fix the failing package's dependencies first, or
+   - Build packages individually using cargo with their manifest paths
+
+6. **gscam node crashes**: If the gscam node fails to play video files:
+   - Install required GStreamer plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`
+   - The camera.launch.xml file has been updated to use a simple decodebin pipeline that auto-detects video formats
+
+7. **rosdep missing dependencies**: The `libpcap` dependency is correctly specified in package.xml files (not `libpcap-dev`)
+
+8. **rosdep initialization errors**: 
+   - `rosdep init` must be run as root (creates /etc/ros/rosdep/sources.list.d/20-default.list)
+   - `rosdep update` must be run as a regular user (updates ~/.ros/rosdep/sources.cache)
+   - The Ansible playbooks now check if rosdep is already initialized before attempting to run init
 
 ## ROS 2 Integration
 
@@ -175,6 +248,17 @@ ros2 run pcd_tool pcd_tool_ros
 ros2 launch lctk_ros2 lctk_nodes.launch.py
 ```
 
+## Sample Data
+
+The repository includes sample data for testing calibration workflows:
+- `data/sampledata/3/`: Contains LiDAR pcap and video.avi files
+- `data/sampledata/4/`: Contains additional LiDAR pcap files
+
+Run sample data playback:
+```bash
+make launch_sensor  # Plays LiDAR and camera data in loop
+```
+
 ## Development Memories
 
 - The rclrs source is located at ros2_rust_ws/src/ros2_rust/rclrs
@@ -187,6 +271,9 @@ ros2 launch lctk_ros2 lctk_nodes.launch.py
 - In Rust, initialize struct fields first and then construct the struct. It avoids creating a mutable struct.
 - When tasks are completed, notify GNU Screen with a bell: `printf '\a'; echo "[Task Complete] <task description>"`
 - Fixed colcon-cargo JSON parsing issue by modifying /home/aeon/.local/lib/python3.10/site-packages/colcon_cargo/task/cargo/build.py to use direct subprocess calls with --quiet flag. This resolves "JSONDecodeError: Expecting value: line 1 column 1" errors caused by patch warnings in cargo metadata output.
+- OpenCV environment variables are set automatically in the Makefile to avoid version 0.0.0 issues.
+- Dependencies are now managed through Ansible playbooks in an Autoware-style setup (setup-dev-env.sh)
+- Git ignores build artifacts: ansible_collections/, build/, install/, log/, build_logs/, .cargo/, ros2_rust_ws/{build,install,log}/
 
 ## Coding Style
 
