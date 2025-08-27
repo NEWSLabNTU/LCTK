@@ -1,0 +1,16 @@
+---
+- name: Install SFCGAL for geometric computations
+  become: true
+  ansible.builtin.apt:
+    name:
+      - libsfcgal-dev
+      - libsfcgal1
+    state: present
+
+- name: Install PCL (Point Cloud Library) - optional
+  become: true
+  ansible.builtin.apt:
+    name:
+      - libpcl-dev
+    state: present
+  when: install_pcl | default(false)

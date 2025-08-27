@@ -1,0 +1,31 @@
+---
+- name: Install C++ development tools
+  become: true
+  ansible.builtin.apt:
+    name:
+      - libstdc++-12-dev
+      - libclang-dev
+      - llvm-dev
+      - clang
+      - clang-format
+      - clang-tidy
+    state: present
+
+- name: Install mathematical libraries
+  become: true
+  ansible.builtin.apt:
+    name:
+      - libeigen3-dev
+      - libomp-dev
+      - libtbb-dev
+      - libfmt-dev
+    state: present
+
+- name: Install additional utilities
+  become: true
+  ansible.builtin.apt:
+    name:
+      - moreutils
+      - jq
+      - htop
+    state: present

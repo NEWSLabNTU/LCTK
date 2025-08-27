@@ -1,0 +1,10 @@
+---
+- name: Install network packet capture libraries
+  become: true
+  ansible.builtin.apt:
+    name:
+      - libpcap-dev
+      - libpcap0.8-dev
+      - tcpdump
+      - wireshark-common
+    state: present

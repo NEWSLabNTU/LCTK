@@ -2,6 +2,22 @@
 
 A comprehensive toolkit for calibrating LiDAR and camera systems, implemented in Rust with ROS 2 integration.
 
+## Quick Start
+
+```bash
+# Clone and setup
+git clone https://github.com/your-org/LCTK.git
+cd LCTK
+./setup-dev-env.sh -y    # Install all dependencies (~15-30 minutes)
+
+# Build
+source /opt/ros/humble/setup.bash
+make build
+
+# Test with sample data
+make launch_sensor       # Launch sensor data playback
+```
+
 ## Overview
 
 LCTK provides tools and ROS 2 nodes for:
@@ -166,66 +182,76 @@ graph TB
 
 ### System Requirements
 - Ubuntu 22.04 LTS
-- ROS 2 Humble or later
-- Rust toolchain (stable)
-- Python 3.10+
+- ROS 2 Humble
+- Internet connection for downloading packages
 
-### Dependencies
+## Installation
+
+### Quick Setup (Recommended)
+
+Use the automated setup script to install all dependencies:
+
 ```bash
-# ROS 2 dependencies
-sudo apt update
-sudo apt install -y \
-    ros-humble-desktop \
-    ros-humble-velodyne \
-    ros-humble-gscam \
-    ros-humble-vision-msgs \
-    ros-humble-tf2-ros
+# Clone the repository
+git clone https://github.com/your-org/LCTK.git
+cd LCTK
 
-# Development tools
-sudo apt install -y \
-    build-essential \
-    cmake \
-    libopencv-dev \
-    libclang-dev \
-    python3-colcon-common-extensions
+# Run the setup script (interactive mode - recommended for first-time setup)
+./setup-dev-env.sh
 
-# GStreamer for video processing
-sudo apt install -y \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-libav
+# Or run non-interactively with defaults
+./setup-dev-env.sh -y
+
+# For minimal installation (no CUDA or dev tools)
+./setup-dev-env.sh -y --minimal
+
+# For verbose output (useful for debugging)
+./setup-dev-env.sh -v
+
+# See all available options
+./setup-dev-env.sh --help
 ```
 
-### Rust Setup
-```bash
-# Install Rust if not already installed
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
+The setup script will automatically install:
+- ROS 2 Humble and required packages
+- Rust toolchain (stable and nightly)
+- Python 3.10+ with pip and Poetry
+- OpenCV 4.5.4+
+- GStreamer with all necessary plugins
+- SFCGAL for geometric computations
+- libpcap for network packet capture
+- Build tools and development dependencies
 
-# Install colcon-cargo for ROS 2 Rust integration
-pip install -U git+https://github.com/jerry73204/colcon-cargo.git
-pip install -U git+https://github.com/colcon/colcon-ros-cargo.git
+### Manual Installation
+
+If you prefer to install dependencies manually, see the Ansible roles in `ansible/roles/` for the complete list of packages, or run:
+
+```bash
+# Install Ansible first
+python3 -m pip install --user pipx
+pipx install ansible==6.*
+
+# Run the Ansible playbook directly
+cd ansible/
+ansible-galaxy collection install -f -r ansible-galaxy-requirements.yaml
+ansible-playbook playbooks/lctk.dev_env.yaml
 ```
 
 ## Building
 
-1. **Clone the repository:**
-```bash
-git clone https://github.com/NEWSLabNTU/LCTK.git
-cd LCTK
-```
+After running the setup script, build the project:
 
-2. **Setup environment:**
 ```bash
-source setup/setup-env.sh
-```
+# Source ROS 2 environment
+source /opt/ros/humble/setup.bash
 
-3. **Build the project:**
-```bash
-# Full build (includes ROS 2 Rust packages)
+# Build everything
 make build
+
+# Or build individual components:
+make build_ros2_rust    # Build ROS 2 Rust base packages
+make build_interface    # Build interface packages
+make build_packages     # Build LCTK nodes and tools
 ```
 
 ## Usage
@@ -402,6 +428,27 @@ Key parameters that can be configured:
 ### Launch Files
 
 - **[calib_launch](src/bin/calib_launch/README.md)** - ROS 2 launch files for calibration pipelines
+
+## Troubleshooting
+
+### Common Issues
+
+1. **gscam node crashes during video playback**
+   - Install missing GStreamer plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`
+
+2. **OpenCV version 0.0.0 error during build**
+   - The Makefile automatically sets the correct OpenCV environment variables
+   - If issues persist, check that OpenCV is installed: `pkg-config --modversion opencv4`
+
+3. **rosdep fails with "not initialized" error**
+   - Run: `sudo rosdep init` followed by `rosdep update`
+   - The setup script handles this automatically
+
+4. **Build fails with missing SFCGAL**
+   - Install SFCGAL: `sudo apt install libsfcgal-dev`
+   - Or run the setup script which installs all dependencies
+
+For more troubleshooting information, see [CLAUDE.md](CLAUDE.md).
 
 ## Contributing
 

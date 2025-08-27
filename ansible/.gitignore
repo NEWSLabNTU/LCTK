@@ -1,0 +1,66 @@
+# Ansible artifacts
+*.retry
+*.pyc
+__pycache__/
+
+# Ansible Galaxy collections (installed locally)
+ansible_collections/
+
+# Ansible facts cache
+.facts/
+
+# Ansible temporary files
+*.tmp
+.ansible_async/
+
+# Ansible vault password files
+.vault_pass
+vault_password_file
+
+# Local inventory files (if any)
+inventory.local
+hosts.local
+
+# Log files
+*.log
+logs/
+
+# Backup files
+*.bak
+*~
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Terraform files (if using Terraform with Ansible)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# SSH keys (if stored locally)
+*.pem
+*.key
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+
+# Environment specific files
+.env
+.env.local
+
+# Generated documentation
+docs/_build/

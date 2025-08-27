@@ -1,0 +1,28 @@
+---
+- name: Install GStreamer base packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - gstreamer1.0-tools
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - libgstreamer1.0-dev
+      - libgstreamer-plugins-base1.0-dev
+    state: present
+
+- name: Install additional GStreamer plugins for video decoding
+  become: true
+  ansible.builtin.apt:
+    name:
+      - gstreamer1.0-plugins-bad
+      - gstreamer1.0-plugins-ugly
+      - gstreamer1.0-libav
+      - gstreamer1.0-vaapi
+    state: present
+
+- name: Install GStreamer Python bindings
+  become: true
+  ansible.builtin.apt:
+    name:
+      - python3-gst-1.0
+    state: present

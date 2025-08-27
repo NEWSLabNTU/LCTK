@@ -1,0 +1,21 @@
+---
+- name: Install colcon extensions for Rust
+  ansible.builtin.pip:
+    name:
+      - git+https://github.com/jerry73204/colcon-cargo.git
+      - git+https://github.com/colcon/colcon-ros-cargo.git
+    extra_args: --user --force-reinstall
+    executable: /usr/bin/pip3
+    state: present
+
+- name: Ensure colcon can find Rust packages
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_env.HOME }}/.colcon/defaults.yaml"
+    line: |
+      {
+        "build": {
+          "symlink-install": true
+        }
+      }
+    create: true
+    state: present

@@ -6,10 +6,18 @@ LOG_DIR := build_logs
 default: build
 
 prepare:
-	pip install -U git+https://github.com/jerry73204/colcon-cargo.git
-	pip install -U git+https://github.com/colcon/colcon-ros-cargo.git
-	rosdep install --from-paths src -y --ignore-src
-	cargo install cargo-ament-build
+	@echo "Setting up LCTK development environment..."
+	@echo "This will install all required dependencies using Ansible."
+	@echo ""
+	@./setup-dev-env.sh
+
+prepare-minimal:
+	@echo "Setting up minimal LCTK environment (no CUDA or dev tools)..."
+	@./setup-dev-env.sh -y --minimal
+
+prepare-ci:
+	@echo "Setting up LCTK environment for CI (non-interactive)..."
+	@./setup-dev-env.sh -y
 
 build: build_ros2_rust build_interface build_packages
 

@@ -1,0 +1,66 @@
+---
+- name: Install Python environment
+  become: true
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-pip
+      - python3-dev
+      - python3-venv
+      - python3-setuptools
+      - python3-wheel
+    state: present
+
+- name: Install Python libraries for scientific computing
+  become: true
+  ansible.builtin.apt:
+    name:
+      - python3-numpy
+      - python3-scipy
+      - python3-matplotlib
+      - python3-pandas
+    state: present
+
+- name: Install Python build dependencies
+  ansible.builtin.pip:
+    name:
+      - cffi>=1.0.0
+      - setuptools>=45
+      - wheel
+    extra_args: --user
+    executable: /usr/bin/pip3
+    state: present
+
+- name: Check if Poetry is installed
+  ansible.builtin.shell: |
+    command -v poetry
+  register: poetry_check
+  failed_when: false
+  changed_when: false
+
+- name: Install Poetry
+  when: poetry_check.rc != 0
+  block:
+    - name: Download Poetry installer
+      ansible.builtin.get_url:
+        url: https://install.python-poetry.org
+        dest: /tmp/install-poetry.py
+        mode: '0755'
+
+    - name: Install Poetry
+      ansible.builtin.shell: |
+        python3 /tmp/install-poetry.py
+      args:
+        creates: "{{ ansible_env.HOME }}/.local/bin/poetry"
+
+    - name: Remove Poetry installer
+      ansible.builtin.file:
+        path: /tmp/install-poetry.py
+        state: absent
+
+- name: Update PATH for Poetry
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH="$HOME/.local/bin:$PATH"'
+    create: true
+    state: present
