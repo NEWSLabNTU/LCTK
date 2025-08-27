@@ -8,6 +8,7 @@ default: build
 prepare:
 	pip install -U git+https://github.com/jerry73204/colcon-cargo.git
 	pip install -U git+https://github.com/colcon/colcon-ros-cargo.git
+	rosdep install --from-paths src -y --ignore-src
 
 build: build_ros2_rust build_interface build_packages
 

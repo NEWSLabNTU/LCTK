@@ -11,8 +11,7 @@
   <depend>geometry_msgs</depend>
   <depend>tf2_msgs</depend>
   <depend>tf2_ros</depend>
-
-  <depend>libpcap-dev</depend>
+  <depend>libpcap</depend>
 
   <export>
     <build_type>ament_cargo</build_type>

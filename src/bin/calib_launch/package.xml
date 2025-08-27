@@ -8,6 +8,7 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <exec_depend>gscam</exec_depend>
   <exec_depend>aruco_locator_node</exec_depend>
   <exec_depend>calibration_board_locator</exec_depend>
   <exec_depend>synchronizer</exec_depend>
