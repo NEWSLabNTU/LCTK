@@ -1,0 +1,20 @@
+{
+    // max number of RANSAC steps
+    "plane_ransac_max_iterations": 500,
+    // the loss threshold that a point is considered an inlier
+    "plane_ransac_inlier_threshold": 0.05,
+    // max number of ICP iterations
+    "max_icp_iterations": 20000,
+    // pose weight is amount of pose change per iteration
+    // the ICP terminates if pose weight is blow this threshold several times
+    "icp_pose_weight_threshold": 5e-13,
+    // the maximum accepted ICP loss
+    "icp_rejection_threshold": 1.0,
+    // the length of border margin
+    "board_width": "1000mm",    // mm
+    // the radius of circle holes
+    "hole_radius": "150mm",     // mm
+    // suppose the center of board is (0, 0)
+    // the center of hole will be at (+/- shift, +/- shift)
+    "hole_center_shift": "200mm", // mm
+}
