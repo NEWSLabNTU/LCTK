@@ -18,6 +18,14 @@ make build
 make launch_sensor       # Launch sensor data playback
 ```
 
+### Prerequisites
+
+- Ubuntu 22.04 LTS
+- ROS 2 Humble (includes python3-empy 3.3.4)
+- Python 3.10+
+
+**Important:** Use the system-provided python3-empy package (3.3.4) from Ubuntu/ROS repositories. Do not install empy via pip as version 4.x is incompatible with the ROS 2 build system.
+
 ## Overview
 
 LCTK provides tools and ROS 2 nodes for:

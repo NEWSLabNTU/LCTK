@@ -9,7 +9,15 @@
       - python3-venv
       - python3-setuptools
       - python3-wheel
+      - python3-empy  # Required by ROS 2, must be system package (3.3.4)
     state: present
+
+- name: Remove pip-installed empy if present (conflicts with system package)
+  ansible.builtin.pip:
+    name: empy
+    state: absent
+    executable: /usr/bin/pip3
+  failed_when: false  # Don't fail if not installed
 
 - name: Install Python libraries for scientific computing
   become: true

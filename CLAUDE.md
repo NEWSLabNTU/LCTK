@@ -26,6 +26,24 @@ make build
 make launch_sensor
 ```
 
+### Known Issues and Solutions
+
+#### empy Version Compatibility
+ROS 2 Humble requires empy version 3.3.4, which is provided by Ubuntu 22.04's python3-empy package. If you encounter errors like:
+- `AttributeError: module 'string' has no attribute 'split'`
+- Build failures in ros2_rust_ws with empy-related errors
+
+This typically means a newer incompatible version (4.x) was installed via pip. Fix by removing pip-installed empy and using the system package:
+```bash
+# Remove any pip-installed empy versions
+pip3 uninstall empy
+
+# Ensure the system package is installed (already included in ros-humble-desktop)
+sudo apt-get install python3-empy
+```
+
+The setup-dev-env.sh script handles this automatically by ensuring the system package is used.
+
 ### Build Commands
 
 The project uses a three-pass build process:
