@@ -25,12 +25,12 @@ build_ros2_rust:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS2 Rust packages... (log: $(LOG_DIR)/ros2_rust.log)"
 	. /opt/ros/humble/setup.sh && \
-	$(MAKE) -C ros2_rust_ws 2>&1 | tee $(LOG_DIR)/ros2_rust.log
+	$(MAKE) -C src/ros2_rust_ws 2>&1 | tee $(LOG_DIR)/ros2_rust.log
 
 build_interface:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building interface packages... (log: $(LOG_DIR)/interface.log)"
-	. ./ros2_rust_ws/install/setup.sh && \
+	. ./src/ros2_rust_ws/install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/interface 2>&1 | tee $(LOG_DIR)/interface.log
 
@@ -50,12 +50,12 @@ format:
 	@echo "Formatting Rust code..."
 	@cargo +nightly fmt
 	@echo "Formatting Python code..."
-	@find . -name "*.py" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./.venv/*" -not -path "./ros2_rust_ws/*" | xargs -r python3 -m black --quiet 2>/dev/null || true
-	@find . -name "*.py" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./.venv/*" -not -path "./ros2_rust_ws/*" | xargs -r python3 -m isort --quiet 2>/dev/null || true
+	@find . -name "*.py" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./.venv/*" -not -path "./src/ros2_rust_ws/*" | xargs -r python3 -m black --quiet 2>/dev/null || true
+	@find . -name "*.py" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./.venv/*" -not -path "./src/ros2_rust_ws/*" | xargs -r python3 -m isort --quiet 2>/dev/null || true
 	@echo "Removing trailing spaces in launch and config files..."
-	@find . \( -name "*.launch.xml" -o -name "*.launch.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.json" -o -name "*.json5" \) -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
+	@find . \( -name "*.launch.xml" -o -name "*.launch.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.json" -o -name "*.json5" \) -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./src/ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
 	@echo "Removing trailing spaces in Markdown files..."
-	@find . -name "*.md" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
+	@find . -name "*.md" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./src/ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
 
 lint:
 	@echo "Checking Rust code formatting and linting..."
@@ -64,6 +64,7 @@ lint:
 
 clean:
 	rm -rf build install log target .cargo $(LOG_DIR)
+	$(MAKE) -C src/ros2_rust_ws clean
 
 launch_sensor:
 	@echo "Launching sensor publishers with sample data..."
