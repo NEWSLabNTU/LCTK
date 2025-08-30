@@ -24,7 +24,7 @@
          description="Input synchronized image topic"/>
     
     <arg name="camera_info_topic"
-         default="/camera/camera_info"
+         default="/sensing/camera/front_center/camera_info"
          description="Input camera info topic"/>
     
     <arg name="extrinsic_transform_topic"

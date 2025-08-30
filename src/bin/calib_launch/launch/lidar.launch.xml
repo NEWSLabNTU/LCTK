@@ -16,8 +16,13 @@
     <arg name="pointcloud_topic" 
          default="/velodyne_points"
          description="Output PointCloud2 topic name"/>
-    
-    <arg name="frame_id" 
+
+    <arg name="velodyne_packets_topic"
+         default="/velodyne_packets"
+         description="Output VelodyneScan packets topic name"/>
+
+
+    <arg name="frame_id"
          default="velodyne"
          description="Frame ID for the point cloud messages"/>
     
@@ -69,6 +74,8 @@
         <param name="repeat_delay" value="$(var repeat_delay)"/>
         <param name="cut_angle" value="$(var cut_angle)"/>
         <param name="timestamp_first_packet" value="$(var timestamp_first_packet)"/>
+        <!-- Topic remapping -->
+        <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>
     </node>
     
     <!-- Velodyne pointcloud transform node -->
@@ -86,5 +93,6 @@
         
         <!-- Topic remapping -->
         <remap from="velodyne_points" to="$(var pointcloud_topic)"/>
+        <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>
     </node>
 </launch>

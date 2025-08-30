@@ -22,11 +22,11 @@
          description="Path to calibration board configuration JSON5 file"/>
     
     <arg name="camera_topic"
-         default="/camera/image_raw"
+         default="/sensing/camera/front_center/image_raw"
          description="Input camera image topic"/>
     
     <arg name="camera_info_topic"
-         default="/camera/camera_info"
+         default="/sensing/camera/front_center/camera_info"
          description="Input camera info topic"/>
      
      <arg name="loop"
@@ -34,7 +34,7 @@
          description="Loop video playback"/>
     
     <arg name="pointcloud_topic"
-         default="/velodyne_points"
+         default="/sensing/lidar/top/pointcloud_raw"
          description="Input point cloud topic"/>
     
     <arg name="namespace"
@@ -75,7 +75,8 @@
         <arg name="pcap_file" value="$(var pcap_file)"/>
         <arg name="video_file" value="$(var video_file)"/>
         <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
-        <arg name="camera_name" value="camera"/>
+        <arg name="camera_name" value="front_center"/>
+        <arg name="camera_namespace" value="/sensing/camera/front_center"/>
         <arg name="loop" value="$(var loop)"/>
     </include>
     

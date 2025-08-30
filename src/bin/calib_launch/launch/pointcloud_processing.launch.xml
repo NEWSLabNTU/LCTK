@@ -18,7 +18,7 @@
          description="Path to calibration board configuration JSON5 file"/>
     
     <arg name="pointcloud_topic"
-         default="/lidar/pointcloud"
+         default="/sensing/lidar/top/pointcloud_raw"
          description="Input point cloud topic"/>
     
     <arg name="board_detections_topic"

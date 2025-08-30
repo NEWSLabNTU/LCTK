@@ -12,13 +12,17 @@
     <!-- LiDAR Arguments -->
     <arg name="pcap_file" 
          description="Path to the PCAP file containing Velodyne VLP-32C data"/>
-    
-    <arg name="pointcloud_topic" 
-         default="/velodyne_points"
+
+    <arg name="pointcloud_topic"
+         default="/sensing/lidar/top/pointcloud_raw"
          description="Output PointCloud2 topic name"/>
-    
-    <arg name="lidar_frame_id" 
-         default="velodyne"
+
+    <arg name="velodyne_packets_topic"
+         default="/sensing/lidar/top/velodyne_packets"
+         description="Output VelodyneScan packets topic name"/>
+
+    <arg name="lidar_frame_id"
+         default="velodyne_top"
          description="Frame ID for the point cloud messages"/>
     
     <arg name="rpm" 
@@ -38,15 +42,19 @@
          description="Path to the video file (mp4, avi, etc.)"/>
     
     <arg name="camera_name"
-         default="camera"
-         description="Camera name for topic namespace"/>
-    
-    <arg name="camera_info_url" 
+         default="front_center"
+         description="Camera name"/>
+
+    <arg name="camera_namespace"
+         default="/sensing/camera/front_center"
+         description="Camera namespace for topics"/>
+
+    <arg name="camera_info_url"
          default=""
          description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
-    
-    <arg name="camera_frame_id" 
-         default="camera_frame"
+
+    <arg name="camera_frame_id"
+         default="camera_front_center"
          description="Frame ID for the image messages"/>
     
     <!-- Common Arguments -->
@@ -59,6 +67,7 @@
     <include file="$(find-pkg-share calib_launch)/launch/lidar.launch.xml">
         <arg name="pcap_file" value="$(var pcap_file)"/>
         <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
+        <arg name="velodyne_packets_topic" value="$(var velodyne_packets_topic)"/>
         <arg name="frame_id" value="$(var lidar_frame_id)"/>
         <arg name="rpm" value="$(var rpm)"/>
         <arg name="port" value="$(var port)"/>
@@ -71,6 +80,7 @@
     <include file="$(find-pkg-share calib_launch)/launch/camera.launch.xml">
         <arg name="video_file" value="$(var video_file)"/>
         <arg name="camera_name" value="$(var camera_name)"/>
+        <arg name="camera_namespace" value="$(var camera_namespace)"/>
         <arg name="camera_info_url" value="$(var camera_info_url)"/>
         <arg name="frame_id" value="$(var camera_frame_id)"/>
         <arg name="loop" value="$(var loop)"/>
@@ -84,7 +94,7 @@
           if="false"/>
     
     <!-- Optional: rosbag record node -->
-    <executable cmd="ros2 bag record -o sensor_data $(var pointcloud_topic) /$(var camera_name)/image_raw /$(var camera_name)/camera_info /tf /tf_static"
+    <executable cmd="ros2 bag record -o sensor_data $(var pointcloud_topic) /sensing/camera/front_center/image_raw /sensing/camera/front_center/camera_info /tf /tf_static"
                 shell="true"
                 if="false"/>
 </launch>
