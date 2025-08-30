@@ -48,7 +48,14 @@ build_cargo:
 
 format:
 	@echo "Formatting Rust code..."
-	cargo +nightly fmt
+	@cargo +nightly fmt
+	@echo "Formatting Python code..."
+	@find . -name "*.py" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./.venv/*" -not -path "./ros2_rust_ws/*" | xargs -r python3 -m black --quiet 2>/dev/null || true
+	@find . -name "*.py" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./.venv/*" -not -path "./ros2_rust_ws/*" | xargs -r python3 -m isort --quiet 2>/dev/null || true
+	@echo "Removing trailing spaces in launch and config files..."
+	@find . \( -name "*.launch.xml" -o -name "*.launch.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.json" -o -name "*.json5" \) -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
+	@echo "Removing trailing spaces in Markdown files..."
+	@find . -name "*.md" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
 
 lint:
 	@echo "Checking Rust code formatting and linting..."
