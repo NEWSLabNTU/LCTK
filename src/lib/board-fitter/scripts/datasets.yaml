@@ -47,7 +47,7 @@ synthetic_datasets:
       board_size: 1.0
       distance: 2.0
       points_per_side: 30
-      holes: 
+      holes:
         - {x: 0.0, y: 0.35, radius: 0.1}
         - {x: -0.35, y: 0.0, radius: 0.05}
         - {x: 0.35, y: 0.0, radius: 0.05}

@@ -67,9 +67,9 @@ impl ImageDetection {
             // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
             let mut corners_vec = Vec::new();
             for i in 0..4 {
-                let pt: &Point2f = corners_mat.at_2d(0, i).unwrap_or_else(|_| 
-                    corners_mat.at_2d(i, 0).unwrap()
-                );
+                let pt: &Point2f = corners_mat
+                    .at_2d(0, i)
+                    .unwrap_or_else(|_| corners_mat.at_2d(i, 0).unwrap());
                 corners_vec.push(Point2::new(pt.x, pt.y));
             }
 
@@ -133,9 +133,9 @@ impl PoseEstimation {
             // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
             let mut corners_vec = Vec::new();
             for i in 0..4 {
-                let pt: &Point2f = corners_mat.at_2d(0, i).unwrap_or_else(|_| 
-                    corners_mat.at_2d(i, 0).unwrap()
-                );
+                let pt: &Point2f = corners_mat
+                    .at_2d(0, i)
+                    .unwrap_or_else(|_| corners_mat.at_2d(i, 0).unwrap());
                 corners_vec.push(Point2::new(pt.x, pt.y));
             }
             let pose: Isometry3<f64> = OpenCvPose { rvec, tvec }.try_to_cv().unwrap();
@@ -503,9 +503,9 @@ impl Detector {
                 // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
                 let mut corners_vec = Vec::new();
                 for i in 0..4 {
-                    let pt: &Point2f = corners_mat.at_2d(0, i).unwrap_or_else(|_| 
-                        corners_mat.at_2d(i, 0).unwrap()
-                    );
+                    let pt: &Point2f = corners_mat
+                        .at_2d(0, i)
+                        .unwrap_or_else(|_| corners_mat.at_2d(i, 0).unwrap());
                     corners_vec.push(Point2::new(pt.x, pt.y));
                 }
 

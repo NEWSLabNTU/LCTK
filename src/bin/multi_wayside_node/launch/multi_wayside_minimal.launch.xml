@@ -1,21 +1,21 @@
 <?xml version="1.0"?>
 <!--
     Minimal launch file for multi_wayside_node.
-    
+
     This is a simplified version for quick testing with default parameters.
 -->
 <launch>
     <!-- Multi-wayside Node with default configuration -->
-    <node pkg="multi_wayside_node" 
-          exec="multi_wayside_node" 
+    <node pkg="multi_wayside_node"
+          exec="multi_wayside_node"
           name="multi_wayside_node"
           output="screen">
         <param from="$(find-pkg-share multi_wayside_node)/config/multi_wayside.yaml"/>
     </node>
-    
+
     <!-- RViz2 for visualization -->
-    <node pkg="rviz2" 
-          exec="rviz2" 
+    <node pkg="rviz2"
+          exec="rviz2"
           name="rviz2"
           args="-d $(find-pkg-share multi_wayside_node)/config/multi_wayside.rviz"/>
 </launch>

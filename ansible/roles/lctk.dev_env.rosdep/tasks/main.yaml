@@ -39,6 +39,6 @@
   when: src_dir.stat.exists
   changed_when: false
   register: rosdep_install
-  failed_when: 
+  failed_when:
     - rosdep_install.rc != 0
     - '"All required rosdeps installed successfully" not in rosdep_install.stderr'

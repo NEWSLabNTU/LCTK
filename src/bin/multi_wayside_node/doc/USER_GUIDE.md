@@ -368,7 +368,7 @@ class CalibrationIntegrator(Node):
             '/calibration_transform',
             self.calibration_callback,
             10)
-    
+
     def calibration_callback(self, msg):
         # Broadcast as static transform
         self.tf_broadcaster.sendTransform(msg)

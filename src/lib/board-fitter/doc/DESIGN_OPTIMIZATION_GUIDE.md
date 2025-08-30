@@ -101,7 +101,7 @@ let filtered_cloud = roi.filter_points(&point_cloud);
 ```rust
 pub fn downsample_pointcloud(cloud: &PointCloud, voxel_size: f64) -> PointCloud {
     let mut voxel_map: HashMap<(i32, i32, i32), Point3> = HashMap::new();
-    
+
     for point in &cloud.points {
         let key = (
             (point.x / voxel_size) as i32,
@@ -110,7 +110,7 @@ pub fn downsample_pointcloud(cloud: &PointCloud, voxel_size: f64) -> PointCloud 
         );
         voxel_map.entry(key).or_insert(*point);
     }
-    
+
     PointCloud {
         points: voxel_map.into_values().collect(),
         timestamp: cloud.timestamp,
@@ -139,15 +139,15 @@ impl KdTreeCache {
             cache: Mutex::new(LruCache::new(NonZeroUsize::new(capacity).unwrap())),
         }
     }
-    
+
     pub fn get_or_build(&self, cloud: &PointCloud) -> Arc<KdTree> {
         let hash = calculate_hash(cloud);
         let mut cache = self.cache.lock().unwrap();
-        
+
         if let Some(tree) = cache.get(&hash) {
             return Arc::clone(tree);
         }
-        
+
         let tree = Arc::new(build_kdtree(cloud));
         cache.put(hash, Arc::clone(&tree));
         tree
@@ -165,43 +165,43 @@ use std::arch::x86_64::*;
 
 pub fn distance_squared_simd(a: &[Point3], b: &Point3) -> Vec<f64> {
     let mut distances = vec![0.0; a.len()];
-    
+
     // Process 4 points at a time with AVX
     let chunks = a.chunks_exact(4);
     let remainder = chunks.remainder();
-    
+
     unsafe {
         let bx = _mm256_set1_pd(b.x);
         let by = _mm256_set1_pd(b.y);
         let bz = _mm256_set1_pd(b.z);
-        
+
         for (chunk, dist_chunk) in chunks.zip(distances.chunks_exact_mut(4)) {
             // Load 4 points
             let ax = _mm256_loadu_pd(&chunk[0].x);
             let ay = _mm256_loadu_pd(&chunk[0].y);
             let az = _mm256_loadu_pd(&chunk[0].z);
-            
+
             // Compute differences
             let dx = _mm256_sub_pd(ax, bx);
             let dy = _mm256_sub_pd(ay, by);
             let dz = _mm256_sub_pd(az, bz);
-            
+
             // Square and sum
             let dx2 = _mm256_mul_pd(dx, dx);
             let dy2 = _mm256_mul_pd(dy, dy);
             let dz2 = _mm256_mul_pd(dz, dz);
-            
+
             let sum = _mm256_add_pd(_mm256_add_pd(dx2, dy2), dz2);
             _mm256_storeu_pd(dist_chunk.as_mut_ptr(), sum);
         }
     }
-    
+
     // Handle remainder
     for (i, point) in remainder.iter().enumerate() {
         let idx = a.len() - remainder.len() + i;
         distances[idx] = (point - b).norm_squared();
     }
-    
+
     distances
 }
 ```
@@ -219,7 +219,7 @@ pub struct EarlyTerminationDetector {
 impl EarlyTerminationDetector {
     pub fn detect_with_early_termination(&self, cloud: &PointCloud) -> Option<BoardDetection> {
         let start = Instant::now();
-        
+
         // Try progressively more accurate methods
         let strategies = [
             (0.1, 100),   // 10% points, 100 RANSAC iterations
@@ -227,12 +227,12 @@ impl EarlyTerminationDetector {
             (0.6, 600),   // 60% points, 600 iterations
             (1.0, 1000),  // Full accuracy
         ];
-        
+
         for (sample_ratio, iterations) in strategies {
             if start.elapsed() > self.time_budget {
                 break;
             }
-            
+
             let sampled = sample_pointcloud(cloud, sample_ratio);
             if let Some(detection) = self.detect_with_params(&sampled, iterations) {
                 if detection.confidence > self.confidence_threshold {
@@ -240,7 +240,7 @@ impl EarlyTerminationDetector {
                 }
             }
         }
-        
+
         None
     }
 }
@@ -256,17 +256,17 @@ impl EarlyTerminationDetector {
 #[cfg(feature = "cuda")]
 pub mod gpu {
     use cuda_runtime::*;
-    
+
     pub struct GpuRansac {
         device: Device,
         stream: Stream,
     }
-    
+
     impl GpuRansac {
         pub fn detect_planes(&self, points: &[Point3]) -> Vec<Plane> {
             // Allocate GPU memory
             let d_points = DeviceBuffer::from_slice(points)?;
-            
+
             // Launch kernel
             unsafe {
                 ransac_kernel<<<grid_size, block_size, 0, self.stream>>>(
@@ -275,7 +275,7 @@ pub mod gpu {
                     // ... other parameters
                 );
             }
-            
+
             // Copy results back
             let results = d_results.to_host()?;
             results
@@ -298,10 +298,10 @@ impl MLAcceleratedDetector {
     pub fn detect(&self, cloud: &PointCloud) -> Vec<BoardDetection> {
         // Extract features
         let features = self.feature_extractor.extract(cloud);
-        
+
         // Run inference
         let predictions = self.detector_model.predict(&features)?;
-        
+
         // Refine with traditional methods
         predictions.into_iter()
             .filter_map(|pred| self.refine_prediction(cloud, pred))
@@ -326,7 +326,7 @@ pub fn real_time_config() -> DetectionConfig {
         icp_refinement: Some(IcpRefinementConfig {
             enable_cuda: true,
             num_threads: 8,
-            
+
             square_pose_refinement: IcpStageConfig {
                 enabled: true,
                 max_iterations: 5,  // Very limited
@@ -337,19 +337,19 @@ pub fn real_time_config() -> DetectionConfig {
                 downsampling_resolution: Some(0.05), // Aggressive
                 num_neighbors: 5,
             },
-            
+
             hole_detection: IcpStageConfig {
                 enabled: false, // Skip for speed
                 ..Default::default()
             },
-            
+
             ..IcpRefinementConfig::fast_config()
         }),
-        
+
         // Preprocessing
         voxel_size: Some(0.03), // 3cm voxels
         roi_radius: Some(3.0),  // 3m radius
-        
+
         // RANSAC tuning
         ransac_iterations: 200,
         ransac_threshold: 0.03,
@@ -367,11 +367,11 @@ pub fn high_accuracy_config() -> DetectionConfig {
         timeout_ms: 10000, // 10 seconds
         parallel_processing: true,
         icp_refinement: Some(IcpRefinementConfig::high_precision_config()),
-        
+
         // No downsampling
         voxel_size: None,
         roi_radius: None,
-        
+
         // Thorough RANSAC
         ransac_iterations: 2000,
         ransac_threshold: 0.01,
@@ -416,22 +416,22 @@ use std::time::Instant;
 
 pub fn detect_with_profiling(cloud: &PointCloud) -> Result<BoardDetection> {
     let total_start = Instant::now();
-    
+
     // Plane detection
     let plane_start = Instant::now();
     let planes = detect_planes(cloud)?;
     info!("Plane detection: {:?}", plane_start.elapsed());
-    
+
     // Hole detection
     let hole_start = Instant::now();
     let holes = detect_holes(&planes)?;
     info!("Hole detection: {:?}", hole_start.elapsed());
-    
+
     // ICP refinement
     let icp_start = Instant::now();
     let refined = refine_with_icp(&detection)?;
     info!("ICP refinement: {:?}", icp_start.elapsed());
-    
+
     info!("Total detection time: {:?}", total_start.elapsed());
     Ok(refined)
 }
@@ -444,14 +444,14 @@ pub fn detect_with_profiling(cloud: &PointCloud) -> Result<BoardDetection> {
 fn test_performance_regression() {
     let cloud = load_test_pointcloud();
     let start = Instant::now();
-    
+
     let result = detector.detect(&cloud).unwrap();
     let elapsed = start.elapsed();
-    
+
     // Assert performance requirements
-    assert!(elapsed < Duration::from_millis(100), 
+    assert!(elapsed < Duration::from_millis(100),
             "Detection took {:?}, expected <100ms", elapsed);
-    
+
     // Assert accuracy requirements
     assert!(result.confidence > 0.9,
             "Confidence {}, expected >0.9", result.confidence);

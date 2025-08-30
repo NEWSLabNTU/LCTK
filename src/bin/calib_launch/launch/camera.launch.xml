@@ -1,22 +1,22 @@
 <?xml version="1.0"?>
 <!--
     Launch file for publishing Image topic from a video file using GStreamer.
-    
-    This launch file uses the gscam package which provides a ROS 2 camera driver 
+
+    This launch file uses the gscam package which provides a ROS 2 camera driver
     for GStreamer-based video streams, including video files.
-    
+
     Requirements:
     - ros-humble-gscam (install with: sudo apt install ros-humble-gscam)
     - GStreamer plugins for video decoding
-    
+
     Usage:
     ros2 launch calib_launch camera.launch.xml video_file:=/path/to/video.avi
 -->
 <launch>
     <!-- Launch Arguments -->
-    <arg name="video_file" 
+    <arg name="video_file"
          description="Path to the video file (mp4, avi, etc.)"/>
-    
+
     <arg name="camera_name"
          default="front_center"
          description="Camera name"/>
@@ -28,15 +28,15 @@
     <arg name="camera_info_url"
          default=""
          description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
-    
-    <arg name="frame_id" 
+
+    <arg name="frame_id"
          default="camera_frame"
          description="Frame ID for the image messages"/>
-    
-    <arg name="loop" 
+
+    <arg name="loop"
          default="True"
          description="Loop video playback"/>
-    
+
     <!-- GSCam node for video file playback -->
     <node pkg="gscam"
           exec="gscam_node"

@@ -4,7 +4,7 @@
 board:
   # 1 meter square board
   size: "1.0 m"
-  
+
   # Three circular holes positioned for diamond orientation
   holes:
     # Top corner hole (largest)
@@ -13,21 +13,21 @@ board:
         x: "0.0 m"
         y: "0.5 m"
       id: "top_hole"
-    
+
     # Left corner hole
     - radius: "0.05 m"  # 5 cm radius
       position:
         x: "-0.5 m"
         y: "0.0 m"
       id: "left_hole"
-    
+
     # Right corner hole
     - radius: "0.05 m"  # 5 cm radius
       position:
         x: "0.5 m"
         y: "0.0 m"
       id: "right_hole"
-  
+
   # Optional board thickness
   thickness: "0.02 m"  # 2 cm thick
 

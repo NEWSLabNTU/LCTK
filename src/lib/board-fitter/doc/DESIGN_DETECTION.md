@@ -50,12 +50,12 @@ impl VoxelFilter {
     pub fn downsample(&self, cloud: &PointCloud) -> PointCloud {
         // Grid-based downsampling preserving point distribution
         let mut voxel_map: HashMap<VoxelKey, Vec<usize>> = HashMap::new();
-        
+
         for (idx, point) in cloud.points.iter().enumerate() {
             let key = self.compute_voxel_key(point);
             voxel_map.entry(key).or_default().push(idx);
         }
-        
+
         // Select representative point from each voxel
         self.select_representatives(cloud, voxel_map)
     }
@@ -108,13 +108,13 @@ pub struct RansacPlaneDetector {
 pub fn detect_planes(&self, points: &[Point3<f64>]) -> Vec<PlaneCandidate> {
     let mut remaining_points = points.to_vec();
     let mut planes = Vec::new();
-    
+
     while remaining_points.len() > self.min_inliers {
         match self.fit_plane(&remaining_points) {
             Some(plane) => {
                 // Remove inliers from remaining points
                 remaining_points = self.remove_inliers(&remaining_points, &plane);
-                
+
                 // Merge with existing parallel planes
                 if let Some(merged) = self.try_merge_parallel(&planes, &plane) {
                     *merged = self.merge_planes(merged, &plane);
@@ -125,7 +125,7 @@ pub fn detect_planes(&self, points: &[Point3<f64>]) -> Vec<PlaneCandidate> {
             None => break,
         }
     }
-    
+
     planes
 }
 ```
@@ -171,21 +171,21 @@ pub fn extract_convex_hull(points: &[Point2<f64>]) -> Vec<Point2<f64>> {
         a.x.partial_cmp(&b.x).unwrap()
             .then(a.y.partial_cmp(&b.y).unwrap())
     });
-    
+
     let mut hull = Vec::new();
-    
+
     // Lower hull
     for point in &sorted {
-        while hull.len() >= 2 && 
+        while hull.len() >= 2 &&
               !is_counter_clockwise(&hull[hull.len()-2], &hull[hull.len()-1], point) {
             hull.pop();
         }
         hull.push(*point);
     }
-    
+
     // Upper hull (similar process)
     // ...
-    
+
     hull
 }
 ```
@@ -196,22 +196,22 @@ pub fn extract_convex_hull(points: &[Point2<f64>]) -> Vec<Point2<f64>> {
 pub fn compute_square_orientation(points: &[Point2<f64>]) -> DiamondSquare {
     // Compute centroid
     let centroid = compute_centroid(points);
-    
+
     // Build covariance matrix
     let cov = compute_covariance(points, &centroid);
-    
+
     // Eigendecomposition for principal axes
     let eigen = cov.symmetric_eigen();
     let principal_axis = eigen.eigenvectors.column(0);
-    
+
     // Compute rotation angle
     let angle = principal_axis.y.atan2(principal_axis.x);
-    
+
     // Validate diamond orientation (45° ± 15°)
     if !is_diamond_oriented(angle) {
         return Err(NotDiamondOriented);
     }
-    
+
     // Fit bounding box in principal coordinates
     fit_oriented_bbox(points, centroid, angle)
 }
@@ -223,7 +223,7 @@ pub fn compute_square_orientation(points: &[Point2<f64>]) -> DiamondSquare {
 fn is_diamond_oriented(angle: f64) -> bool {
     let angle_deg = angle.to_degrees().abs();
     // Check if angle is near 45° or 135°
-    (angle_deg - 45.0).abs() < 15.0 || 
+    (angle_deg - 45.0).abs() < 15.0 ||
     (angle_deg - 135.0).abs() < 15.0
 }
 ```
@@ -248,10 +248,10 @@ impl IntensityHoleDetector {
     pub fn detect_holes(&self, points: &[LidarPoint]) -> Vec<DetectedHole> {
         // Build intensity grid
         let grid = self.build_intensity_grid(points);
-        
+
         // Find low-intensity regions
         let dark_regions = self.find_dark_regions(&grid);
-        
+
         // Fit circles to region boundaries
         dark_regions.into_iter()
             .filter_map(|region| self.fit_circle_to_region(region))
@@ -273,13 +273,13 @@ impl GeometricHoleDetector {
     pub fn detect_holes(&self, points: &[Point3<f64>]) -> Vec<DetectedHole> {
         // Project to 2D plane
         let points_2d = project_to_plane(points);
-        
+
         // Build occupancy grid
         let occupancy = self.build_occupancy_grid(&points_2d);
-        
+
         // Find empty regions
         let empty_regions = self.find_empty_regions(&occupancy);
-        
+
         // Validate circular shape
         empty_regions.into_iter()
             .filter_map(|region| self.validate_circular_region(region))
@@ -297,11 +297,11 @@ pub fn fuse_hole_detections(
 ) -> Vec<DetectedHole> {
     let mut fused = Vec::new();
     let mut used_geometric = HashSet::new();
-    
+
     // Match and fuse nearby detections
     for int_hole in intensity_holes {
         let matching = find_matching_hole(&int_hole, &geometric_holes);
-        
+
         if let Some((idx, geo_hole)) = matching {
             used_geometric.insert(idx);
             fused.push(merge_holes(&int_hole, &geo_hole));
@@ -309,14 +309,14 @@ pub fn fuse_hole_detections(
             fused.push(int_hole);
         }
     }
-    
+
     // Add unmatched geometric holes
     for (idx, geo_hole) in geometric_holes.iter().enumerate() {
         if !used_geometric.contains(&idx) {
             fused.push(geo_hole.clone());
         }
     }
-    
+
     // Sort by confidence
     fused.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
     fused
@@ -341,7 +341,7 @@ impl CoordinateTransformer {
         let world_point = self.sensor_to_world * point;
         self.board_to_world.inverse() * world_point
     }
-    
+
     pub fn compute_board_pose(
         &self,
         square: &DiamondSquare,
@@ -351,13 +351,13 @@ impl CoordinateTransformer {
         let z_axis = plane.normal;
         let x_axis = square.compute_x_axis();
         let y_axis = z_axis.cross(&x_axis);
-        
+
         let rotation = Rotation3::from_matrix_unchecked(
             Matrix3::from_columns(&[x_axis, y_axis, z_axis])
         );
-        
+
         let translation = square.center;
-        
+
         Isometry3::from_parts(translation.into(), rotation.into())
     }
 }
@@ -380,23 +380,23 @@ pub struct PatternValidator {
 impl PatternValidator {
     pub fn validate(&self, detection: &BoardDetection) -> ValidationResult {
         let mut result = ValidationResult::default();
-        
+
         // Check hole count
         result.hole_count_valid = detection.holes.len() == self.expected_holes.len();
-        
+
         // Check hole positions
         let (matches, unmatched) = self.match_holes(&detection.holes);
         result.hole_match_ratio = matches.len() as f64 / self.expected_holes.len() as f64;
-        
+
         // Check hole spacing
         result.spacing_error = self.compute_spacing_error(&matches);
-        
+
         // Check hole sizes
         result.size_consistency = self.compute_size_consistency(&detection.holes);
-        
+
         // Overall score
         result.confidence = self.compute_confidence(&result);
-        
+
         result
     }
 }
@@ -411,19 +411,19 @@ pub fn validate_board_geometry(detection: &BoardDetection) -> bool {
     if (aspect_ratio - 1.0).abs() > 0.1 {
         return false;
     }
-    
+
     // Check hole grid regularity
     let grid_score = compute_grid_regularity(&detection.holes);
     if grid_score < 0.8 {
         return false;
     }
-    
+
     // Check co-planarity
     let planarity = compute_hole_planarity(&detection.holes);
     if planarity > 0.01 { // 1cm threshold
         return false;
     }
-    
+
     true
 }
 ```
@@ -441,7 +441,7 @@ pub struct ParallelDetector {
 impl ParallelDetector {
     pub fn detect_parallel(&self, planes: Vec<PlaneCandidate>) -> Vec<BoardDetection> {
         let (tx, rx) = channel();
-        
+
         for plane in planes {
             let tx = tx.clone();
             self.thread_pool.execute(move || {
@@ -449,7 +449,7 @@ impl ParallelDetector {
                 tx.send(detection).unwrap();
             });
         }
-        
+
         rx.iter().take(planes.len()).filter_map(|d| d).collect()
     }
 }
@@ -462,7 +462,7 @@ pub fn detect_with_early_termination(&self, cloud: &PointCloud) -> Option<BoardD
     for plane in self.detect_planes(cloud) {
         if let Some(square) = self.fit_diamond_square(&plane) {
             let holes = self.detect_holes(&square, &plane);
-            
+
             // Early termination on high confidence
             if holes.len() >= self.min_holes {
                 let detection = self.create_detection(square, holes);
@@ -472,7 +472,7 @@ pub fn detect_with_early_termination(&self, cloud: &PointCloud) -> Option<BoardD
             }
         }
     }
-    
+
     None
 }
 ```
@@ -513,10 +513,10 @@ impl PartialDetection {
 ```rust
 pub struct DetectionQuality {
     pub geometric_score: f64,     // Shape regularity
-    pub intensity_score: f64,     // Intensity consistency  
+    pub intensity_score: f64,     // Intensity consistency
     pub completeness_score: f64,  // Detected vs expected features
     pub confidence_score: f64,    // Overall confidence
-    
+
     pub warnings: Vec<QualityWarning>,
 }
 

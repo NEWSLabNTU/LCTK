@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <!--
     Launch file for point cloud processing pipeline (calibration board detection).
-    
+
     This launch file starts the calibration board locator node that detects
     calibration boards in point cloud data and publishes their locations.
-    
+
     Input topics:
     - Point cloud topic
-    
+
     Output topics:
     - Board detections
 -->
@@ -16,23 +16,23 @@
     <arg name="board_config_file"
          default=""
          description="Path to calibration board configuration JSON5 file"/>
-    
+
     <arg name="pointcloud_topic"
          default="/sensing/lidar/top/pointcloud_raw"
          description="Input point cloud topic"/>
-    
+
     <arg name="board_detections_topic"
          default="/calibration/calibration_board_locator/board_detections"
          description="Output board detections topic"/>
-    
+
     <arg name="namespace"
          default="calibration"
          description="Namespace for the nodes"/>
-    
+
     <arg name="debug_mode"
          default="false"
          description="Enable debug logging and visualization"/>
-    
+
     <!-- Calibration Board Locator Node -->
     <node pkg="calibration_board_locator"
           exec="calibration_board_locator"

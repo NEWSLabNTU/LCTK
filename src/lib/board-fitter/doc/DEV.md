@@ -8,7 +8,7 @@
    ```bash
    # Install Rust (if not already installed)
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   
+
    # Install nightly toolchain for formatting
    rustup toolchain install nightly
    rustup component add rustfmt --toolchain nightly
@@ -25,7 +25,7 @@
        libopencv-dev \
        libeigen3-dev \
        libboost-all-dev
-   
+
    # Optional: CUDA for GPU acceleration
    # Install CUDA 11.3+ from NVIDIA website
    ```
@@ -34,10 +34,10 @@
    ```bash
    # Install cargo-nextest for better test output
    cargo install cargo-nextest
-   
+
    # Install cargo-watch for auto-rebuild
    cargo install cargo-watch
-   
+
    # Install cargo-expand for macro debugging
    cargo install cargo-expand
    ```
@@ -142,7 +142,7 @@ cargo nextest run -E 'kind(test)'
 1. **Unit Tests** (`src/*.rs`)
    - Test individual functions and modules
    - Fast, isolated, no external dependencies
-   
+
 2. **Integration Tests** (`tests/`)
    - Test end-to-end functionality
    - May require test data files
@@ -157,19 +157,19 @@ cargo nextest run -E 'kind(test)'
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_example() {
         // Arrange
         let input = create_test_data();
-        
+
         // Act
         let result = function_under_test(input);
-        
+
         // Assert
         assert_eq!(result, expected_value);
     }
-    
+
     #[test]
     #[should_panic(expected = "invalid input")]
     fn test_error_handling() {
@@ -366,7 +366,7 @@ The project uses GitHub Actions for CI:
    ```bash
    # Ubuntu/Debian
    sudo apt-get install libopencv-dev
-   
+
    # Or build OpenCV from source
    ```
 
@@ -374,7 +374,7 @@ The project uses GitHub Actions for CI:
    ```bash
    # Check CUDA installation
    nvcc --version
-   
+
    # Build without CUDA
    cargo build --no-default-features
    ```
@@ -391,7 +391,7 @@ The project uses GitHub Actions for CI:
    # Use sccache for caching
    cargo install sccache
    export RUSTC_WRAPPER=sccache
-   
+
    # Or use mold linker
    RUSTFLAGS="-C link-arg=-fuse-ld=mold" cargo build
    ```
@@ -416,7 +416,7 @@ The project uses GitHub Actions for CI:
 3. **Document changes**
    ```rust
    /// New detection method that improves accuracy
-   /// 
+   ///
    /// # Example
    /// ```
    /// let result = new_method(data);
@@ -463,7 +463,7 @@ The project uses GitHub Actions for CI:
    ```rust
    // Good
    let plane_detection_threshold = 0.02;
-   
+
    // Bad
    let t = 0.02;
    ```
@@ -471,11 +471,11 @@ The project uses GitHub Actions for CI:
 2. **Document public APIs**
    ```rust
    /// Detects planes in the point cloud using RANSAC
-   /// 
+   ///
    /// # Arguments
    /// * `points` - Input point cloud
    /// * `config` - Detection configuration
-   /// 
+   ///
    /// # Returns
    /// Vector of detected plane candidates
    pub fn detect_planes(points: &PointCloud, config: &Config) -> Vec<Plane>
@@ -485,7 +485,7 @@ The project uses GitHub Actions for CI:
    ```rust
    // Good
    let plane = detect_plane(points)?;
-   
+
    // Bad
    let plane = detect_plane(points).unwrap();
    ```

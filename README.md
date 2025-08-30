@@ -48,7 +48,7 @@ graph TB
         PC[PointCloud2<br/>Messages]
         BOARD[Calibration Board<br/>Locator Node]
         BD[Board<br/>Detections]
-        
+
         PCAP --> VD
         VD --> VT
         VT --> PC
@@ -63,7 +63,7 @@ graph TB
         INFO[Camera Info]
         ARUCO[ArUco Locator<br/>Node]
         AD[ArUco<br/>Detections]
-        
+
         VIDEO --> GSCAM
         GSCAM --> IMG
         GSCAM --> INFO
@@ -77,7 +77,7 @@ graph TB
         SYNC[Synchronizer<br/>Node]
         SOLVER[Extrinsic Solver<br/>Node]
         TF[Extrinsic<br/>Transform]
-        
+
         AD --> SYNC
         BD --> SYNC
         SYNC --> SD[Synchronized<br/>Detections]
@@ -90,7 +90,7 @@ graph TB
     subgraph "Visualization"
         VIZ[Pointcloud Image<br/>Overlay Node]
         RERUN[Rerun<br/>Visualization]
-        
+
         PC --> VIZ
         IMG --> VIZ
         TF --> VIZ
@@ -104,7 +104,7 @@ graph TB
     classDef image fill:#7b1fa2,stroke:#4a148c,stroke-width:2px,color:#fff
     classDef calibration fill:#f57c00,stroke:#e65100,stroke-width:2px,color:#fff
     classDef output fill:#d32f2f,stroke:#b71c1c,stroke-width:2px,color:#fff
-    
+
     class PCAP,VIDEO sensor
     class VD,VT,PC,BOARD,BD pointcloud
     class GSCAM,IMG,INFO,ARUCO,AD image
@@ -131,7 +131,7 @@ graph TB
         PC1[PointCloud2<br/>LiDAR 1]
         BOARD1[Board Locator 1]
         BD1[Board Detections 1]
-        
+
         PCAP1 --> VD1
         VD1 --> VT1
         VT1 --> PC1
@@ -146,7 +146,7 @@ graph TB
         PC2[PointCloud2<br/>LiDAR 2]
         BOARD2[Board Locator 2]
         BD2[Board Detections 2]
-        
+
         PCAP2 --> VD2
         VD2 --> VT2
         VT2 --> PC2
@@ -158,7 +158,7 @@ graph TB
     subgraph "Multi-LiDAR Calibration"
         MW[Multi-Wayside<br/>Node]
         TF[LiDAR1 to LiDAR2<br/>Transform]
-        
+
         BD1 --> MW
         BD2 --> MW
         MW --> TF
@@ -170,7 +170,7 @@ graph TB
     classDef lidar2 fill:#00796b,stroke:#004d40,stroke-width:2px,color:#fff
     classDef calibration fill:#f57c00,stroke:#e65100,stroke-width:2px,color:#fff
     classDef output fill:#d32f2f,stroke:#b71c1c,stroke-width:2px,color:#fff
-    
+
     class PCAP1,PCAP2 sensor
     class VD1,VT1,PC1,BOARD1,BD1 lidar1
     class VD2,VT2,PC2,BOARD2,BD2 lidar2

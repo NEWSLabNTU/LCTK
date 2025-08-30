@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
     Advanced launch file for multi_wayside_node with additional configuration options.
-    
+
     This launch file demonstrates:
     - Parameter overrides
     - Conditional node launching
@@ -10,135 +10,135 @@
 -->
 <launch>
     <!-- Environment Configuration -->
-    <arg name="environment" 
+    <arg name="environment"
          default="default"
          description="Environment configuration (default, sim, outdoor, indoor)"/>
-    
+
     <!-- Base Configuration Arguments -->
-    <arg name="config_file" 
+    <arg name="config_file"
          default="$(find-pkg-share multi_wayside_node)/config/multi_wayside.yaml"
          description="Path to the base parameter file"/>
-    
-    <arg name="use_rviz" 
+
+    <arg name="use_rviz"
          default="true"
          description="Launch RViz2 for visualization"/>
-    
-    <arg name="use_rosbag" 
+
+    <arg name="use_rosbag"
          default="false"
          description="Launch rosbag for data playback"/>
-    
-    <arg name="record_data" 
+
+    <arg name="record_data"
          default="false"
          description="Record data to rosbag"/>
-    
+
     <!-- LiDAR Configuration -->
     <arg name="lidar1_topic" default="/lidar1/points"/>
     <arg name="lidar2_topic" default="/lidar2/points"/>
     <arg name="lidar1_frame" default="lidar1"/>
     <arg name="lidar2_frame" default="lidar2"/>
-    
+
     <!-- Calibration Parameters -->
-    <arg name="same_face_mode" 
+    <arg name="same_face_mode"
          default="true"
          description="Whether both LiDARs see the same face of the board"/>
-    
-    <arg name="apply_bug_fix" 
+
+    <arg name="apply_bug_fix"
          default="false"
          description="Apply VLP16 coordinate system correction"/>
-    
+
     <!-- Debug Options -->
-    <arg name="debug" 
+    <arg name="debug"
          default="false"
          description="Enable debug mode with verbose logging"/>
-    
-    <arg name="log_level" 
+
+    <arg name="log_level"
          default="$(eval 'debug' if '$(var debug)' == 'true' else 'info')"
          description="Logging level"/>
-    
+
     <!-- Multi-wayside Node with Environment-Specific Overrides -->
-    <node pkg="multi_wayside_node" 
-          exec="multi_wayside_node" 
+    <node pkg="multi_wayside_node"
+          exec="multi_wayside_node"
           name="multi_wayside_node"
           output="screen"
           respawn="$(eval 'true' if '$(var environment)' == 'outdoor' else 'false')"
           respawn_delay="5">
-        
+
         <!-- Load base parameters -->
         <param from="$(var config_file)"/>
-        
+
         <!-- Override parameters based on arguments -->
         <param name="same_face_mode" value="$(var same_face_mode)"/>
         <param name="apply_bug_fix" value="$(var apply_bug_fix)"/>
         <param name="lidar1_frame" value="$(var lidar1_frame)"/>
         <param name="lidar2_frame" value="$(var lidar2_frame)"/>
-        
+
         <!-- Environment-specific parameter overrides -->
         <group if="$(eval '$(var environment)' == 'sim')">
             <param name="max_queue_size" value="50"/>
             <param name="sync_tolerance_ms" value="10"/>
         </group>
-        
+
         <group if="$(eval '$(var environment)' == 'outdoor')">
             <param name="max_queue_size" value="200"/>
             <param name="sync_tolerance_ms" value="200"/>
             <param name="visualization.marker_lifetime_sec" value="10.0"/>
         </group>
-        
+
         <group if="$(eval '$(var environment)' == 'indoor')">
             <param name="max_queue_size" value="100"/>
             <param name="sync_tolerance_ms" value="50"/>
             <param name="adjustment_constraints.max_translation" value="1.0"/>
         </group>
-        
+
         <!-- Topic remappings -->
         <remap from="/lidar1/points" to="$(var lidar1_topic)"/>
         <remap from="/lidar2/points" to="$(var lidar2_topic)"/>
-        
+
         <!-- Debug mode remappings -->
         <group if="$(var debug)">
             <remap from="/lidar1/board_detection" to="/debug/lidar1/board_detection"/>
             <remap from="/lidar2/board_detection" to="/debug/lidar2/board_detection"/>
         </group>
-        
+
         <!-- ROS arguments -->
         <ros>
             <arg value="--log-level"/>
             <arg value="$(var log_level)"/>
         </ros>
     </node>
-    
+
     <!-- RViz2 Visualization -->
     <group if="$(var use_rviz)">
-        <node pkg="rviz2" 
-              exec="rviz2" 
+        <node pkg="rviz2"
+              exec="rviz2"
               name="rviz2"
               output="screen">
             <arg value="-d"/>
             <arg value="$(find-pkg-share multi_wayside_node)/config/multi_wayside.rviz"/>
         </node>
     </group>
-    
+
     <!-- Rosbag Playback -->
     <group if="$(var use_rosbag)">
-        <arg name="bag_file" 
+        <arg name="bag_file"
              default=""
              description="Path to the rosbag file to play"/>
-        
-        <node pkg="ros2bag" 
-              exec="play" 
+
+        <node pkg="ros2bag"
+              exec="play"
               name="rosbag_player"
               args="$(var bag_file) --loop"
               if="$(eval '$(var bag_file)' != '')"/>
     </group>
-    
+
     <!-- Data Recording -->
     <group if="$(var record_data)">
-        <arg name="bag_name" 
+        <arg name="bag_name"
              default="multi_wayside_$(eval 'import datetime; datetime.datetime.now().strftime(\"%Y%m%d_%H%M%S\")')"
              description="Name for the recorded bag file"/>
-        
-        <node pkg="ros2bag" 
-              exec="record" 
+
+        <node pkg="ros2bag"
+              exec="record"
               name="rosbag_recorder"
               args="-o $(var bag_name)
                     /lidar1/points
@@ -151,22 +151,22 @@
                     /tf
                     /tf_static"/>
     </group>
-    
+
     <!-- TF Static Transforms (example) -->
-    <node pkg="tf2_ros" 
-          exec="static_transform_publisher" 
+    <node pkg="tf2_ros"
+          exec="static_transform_publisher"
           name="world_to_lidar1"
           args="0 0 0 0 0 0 world $(var lidar1_frame)"/>
-    
-    <node pkg="tf2_ros" 
-          exec="static_transform_publisher" 
+
+    <node pkg="tf2_ros"
+          exec="static_transform_publisher"
           name="world_to_lidar2"
           args="2 0 0 0 0 0 world $(var lidar2_frame)"/>
-    
+
     <!-- Diagnostics Aggregator (optional) -->
     <group if="$(eval '$(var environment)' == 'outdoor')">
-        <node pkg="diagnostic_aggregator" 
-              exec="aggregator_node" 
+        <node pkg="diagnostic_aggregator"
+              exec="aggregator_node"
               name="diagnostic_aggregator"
               output="screen">
             <param from="$(find-pkg-share multi_wayside_node)/config/diagnostics.yaml"/>

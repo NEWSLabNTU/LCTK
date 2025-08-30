@@ -4,7 +4,7 @@
 board:
   # Board dimensions (in meters)
   width: 1.0      # 1000mm
-  height: 1.0     # 1000mm  
+  height: 1.0     # 1000mm
   thickness: 0.02 # 20mm
 
   # Hole configuration - 4 holes in square arrangement
@@ -14,7 +14,7 @@ board:
       id: "hole_1"
     - center: [0.2, -0.2, 0.0]
       radius: 0.15
-      id: "hole_2"  
+      id: "hole_2"
     - center: [0.2, 0.2, 0.0]
       radius: 0.15
       id: "hole_3"

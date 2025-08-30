@@ -5,7 +5,7 @@ ROS 2 node for automatic LiDAR-to-LiDAR calibration using hollow board detection
 ## Features
 
 - **Automatic Calibration** (Phase 7): Real-time detection and calibration without manual intervention
-- **Quality Assessment**: Confidence scoring and validation of calibration results  
+- **Quality Assessment**: Confidence scoring and validation of calibration results
 - **Time Synchronization**: Automatic pairing of detections across sensors
 - **Interactive ROI**: Service-based region of interest adjustment
 - **Manual Refinement**: Pose adjustment for challenging scenarios
@@ -131,7 +131,7 @@ The included RViz2 configuration (`config/multi_wayside.rviz`) provides comprehe
 ## Configuration Files
 
 - `config/hollow_board.json5` - Board geometry configuration
-- `config/detector.json5` - Detection algorithm parameters  
+- `config/detector.json5` - Detection algorithm parameters
 - `config/aruco_pattern.json5` - ArUco marker pattern definition
 - `config/multi_wayside.rviz` - RViz2 display configuration
 
@@ -260,7 +260,7 @@ ros2 launch multi_wayside_node multi_wayside_advanced.launch.xml \
 ### Topic Configuration
 All topic names are configurable via parameters under the `topics` namespace:
 - `topics.lidar1_input`: Input point cloud from LiDAR 1
-- `topics.lidar2_input`: Input point cloud from LiDAR 2  
+- `topics.lidar2_input`: Input point cloud from LiDAR 2
 - `topics.lidar1_detection`: Detection output for LiDAR 1
 - `topics.lidar2_detection`: Detection output for LiDAR 2
 - `topics.calibration_markers`: Visualization markers for detections

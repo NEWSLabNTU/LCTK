@@ -7,7 +7,7 @@ This document explains how to use external verified datasets with the board-fitt
 The board-fitter supports three approaches for using external verified datasets:
 
 1. **Git Committed Small Samples** - Small verified samples committed to the repository
-2. **Download Script** - Automated downloading of larger datasets  
+2. **Download Script** - Automated downloading of larger datasets
 3. **On-the-fly Download** - Automatic downloading during tests (optional feature)
 
 ## 1. Git Committed Small Samples
@@ -30,7 +30,7 @@ use board_fitter::io::load_point_cloud;
 fn test_with_committed_sample() {
     let cloud = load_point_cloud("test_data/small_samples/perfect_diamond_board.xyz")
         .expect("Failed to load committed sample");
-    
+
     // Test with known good data
     assert_eq!(cloud.points.len(), 39);
 }
@@ -38,7 +38,7 @@ fn test_with_committed_sample() {
 
 ### Benefits
 - ✅ Always available in CI/CD
-- ✅ Fast test execution  
+- ✅ Fast test execution
 - ✅ Version controlled
 - ✅ No network dependencies
 
@@ -71,7 +71,7 @@ make setup-data
   - Organized point cloud with color information
   - Tests color processing pipeline
 
-#### Open3D  
+#### Open3D
 - `test_data/external/open3d/fragment.ply` (1.2MB)
   - Point cloud fragment with surface normals
   - Source: https://github.com/isl-org/Open3D
@@ -103,13 +103,13 @@ make setup-data
 #[test]
 fn test_pcl_data() {
     let data_path = "test_data/external/pcl/table_scene_lms400.pcd";
-    
+
     // Skip if data not available
     if !Path::new(data_path).exists() {
         eprintln!("Skipping PCL test - run ./scripts/download_test_data.sh");
         return;
     }
-    
+
     let cloud = load_point_cloud(data_path).unwrap();
     // ... test logic
 }
@@ -138,7 +138,7 @@ use board_fitter::io::downloader::{ExternalDataConfig, TestDataDownloader};
 fn test_auto_download() {
     let config = ExternalDataConfig::default();
     let downloader = TestDataDownloader::new(config);
-    
+
     // Automatically downloads if not cached
     let cloud = downloader.get_dataset("pcl/table_scene_lms400.pcd").unwrap();
     assert!(!cloud.points.is_empty());
@@ -157,7 +157,7 @@ let config = ExternalDataConfig {
 
 ### PCD (Point Cloud Data)
 ```
-# .PCD v0.7 - Point Cloud Data file format  
+# .PCD v0.7 - Point Cloud Data file format
 VERSION 0.7
 FIELDS x y z intensity
 SIZE 4 4 4 4
@@ -177,7 +177,7 @@ ply
 format ascii 1.0
 element vertex 1000
 property float x
-property float y  
+property float y
 property float z
 end_header
 1.0 2.0 3.0
@@ -224,7 +224,7 @@ make bench           # Run benchmarks with external data
 
 ### Test Organization
 1. **Always provide fallback**: Tests should skip gracefully if external data isn't available
-2. **Document data sources**: Include licensing and source information  
+2. **Document data sources**: Include licensing and source information
 3. **Verify checksums**: Validate downloaded data integrity
 4. **Cache wisely**: Use `.gitignore` to exclude large datasets from version control
 

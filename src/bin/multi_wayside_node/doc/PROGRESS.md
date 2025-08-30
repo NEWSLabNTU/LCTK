@@ -29,7 +29,7 @@ The multi_wayside_node is currently undergoing ROS 2 conversion. The modular arc
 - **Main Application**: Wiring together the modular components with ROS 2 (basic structure complete)
 - **Calibration Pipeline**: Complete automatic calibration computation and publishing
 
-#### 🚧 In Progress Components  
+#### 🚧 In Progress Components
 - **Build System Integration**: Resolving ROS 2 linking dependencies for successful compilation
 
 #### ⏳ Pending Components
@@ -50,7 +50,7 @@ The multi_wayside_node is currently undergoing ROS 2 conversion. The modular arc
 
 ### Core Module Extraction
 | Task                | Description                 | Status      | Notes                    |
-|---------------------|-----------------------------|-------------|--------------------------| 
+|---------------------|-----------------------------|-------------|--------------------------|
 | Module structure    | Directory organization      | ✅ Complete | All modules created      |
 | Point cloud parsing | Extract to module           | ✅ Complete | `pointcloud/parser.rs`   |
 | ROI management      | Extract to module           | ✅ Complete | `roi/manager.rs`         |
@@ -67,7 +67,7 @@ The multi_wayside_node is currently undergoing ROS 2 conversion. The modular arc
 
 ### Detection Pipeline
 | Task                   | Description            | Status      | Notes                       |
-|------------------------|------------------------|-------------|-----------------------------| 
+|------------------------|------------------------|-------------|-----------------------------|
 | Detection processor    | Create trait interface | ✅ Complete | `detection/processor.rs`    |
 | Detection logic        | Extract to module      | ✅ Complete | Modular design              |
 | Synchronizer           | Extract sync logic     | ✅ Complete | `detection/synchronizer.rs` |

@@ -36,7 +36,7 @@ config/
 Configuration files are referenced in launch files using the ROS 2 package share directory:
 
 ```xml
-<arg name="aruco_config_file" 
+<arg name="aruco_config_file"
      default="$(find-pkg-share calib_launch)/config/aruco/aruco_pattern.json5"/>
 
 <arg name="board_config_file"

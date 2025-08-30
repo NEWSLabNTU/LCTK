@@ -165,7 +165,7 @@ pub struct SpatialIndex {
 // SoA (Structure of Arrays) for better cache locality
 pub struct PointCloudSoA {
     x: Vec<f32>,
-    y: Vec<f32>, 
+    y: Vec<f32>,
     z: Vec<f32>,
 }
 ```
@@ -284,7 +284,7 @@ cargo bench -- --baseline main
 cargo flamegraph --bench detection_benchmark
 
 # Run with specific features
-cargo bench --features "cuda simd" 
+cargo bench --features "cuda simd"
 
 # Long-running stress test
 cargo bench -- --measurement-time 60

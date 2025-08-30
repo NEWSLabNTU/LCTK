@@ -1,19 +1,19 @@
 <?xml version="1.0"?>
 <!--
     Launch file for publishing PointCloud2 topic from a PCAP file using Velodyne driver.
-    
-    This launch file uses the velodyne_driver package to read VLP-32C data from 
+
+    This launch file uses the velodyne_driver package to read VLP-32C data from
     a PCAP file and convert it to sensor_msgs/PointCloud2 messages.
-    
+
     Requirements:
     - ros-humble-velodyne (install with: sudo apt install ros-humble-velodyne)
 -->
 <launch>
     <!-- Launch Arguments -->
-    <arg name="pcap_file" 
+    <arg name="pcap_file"
          description="Path to the PCAP file containing Velodyne VLP-32C data"/>
-    
-    <arg name="pointcloud_topic" 
+
+    <arg name="pointcloud_topic"
          default="/velodyne_points"
          description="Output PointCloud2 topic name"/>
 
@@ -25,42 +25,42 @@
     <arg name="frame_id"
          default="velodyne"
          description="Frame ID for the point cloud messages"/>
-    
-    <arg name="rpm" 
+
+    <arg name="rpm"
          default="600.0"
          description="Device rotation rate (RPM)"/>
-    
-    <arg name="port" 
+
+    <arg name="port"
          default="2368"
          description="UDP port number for Velodyne data"/>
-    
-    <arg name="read_once" 
+
+    <arg name="read_once"
          default="false"
          description="Read PCAP file only once (true) or loop (false)"/>
-    
-    <arg name="read_fast" 
+
+    <arg name="read_fast"
          default="false"
          description="Read PCAP file as fast as possible (true) or preserve timing (false)"/>
-    
-    <arg name="repeat_delay" 
+
+    <arg name="repeat_delay"
          default="1.0"
          description="Delay before repeating PCAP playback (seconds)"/>
-    
-    <arg name="model" 
+
+    <arg name="model"
          default="32C"
          description="Velodyne model (32C, VLP16, etc.)"/>
-    
-    <arg name="cut_angle" 
+
+    <arg name="cut_angle"
          default="-0.01"
          description="Angle at which to cut the scan for organized clouds (-pi to pi, negative disables)"/>
-    
-    <arg name="timestamp_first_packet" 
+
+    <arg name="timestamp_first_packet"
          default="false"
          description="Use first packet timestamp for entire scan"/>
-    
+
     <!-- Velodyne driver node for PCAP playback -->
-    <node pkg="velodyne_driver" 
-          exec="velodyne_driver_node" 
+    <node pkg="velodyne_driver"
+          exec="velodyne_driver_node"
           name="velodyne_driver_node"
           output="screen">
         <!-- Parameters -->
@@ -77,10 +77,10 @@
         <!-- Topic remapping -->
         <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>
     </node>
-    
+
     <!-- Velodyne pointcloud transform node -->
-    <node pkg="velodyne_pointcloud" 
-          exec="velodyne_transform_node" 
+    <node pkg="velodyne_pointcloud"
+          exec="velodyne_transform_node"
           name="velodyne_transform_node"
           output="screen">
         <!-- Parameters -->
@@ -90,7 +90,7 @@
         <param name="max_range" value="130.0"/>
         <param name="view_direction" value="0.0"/>
         <param name="organize_cloud" value="false"/>
-        
+
         <!-- Topic remapping -->
         <remap from="velodyne_points" to="$(var pointcloud_topic)"/>
         <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>

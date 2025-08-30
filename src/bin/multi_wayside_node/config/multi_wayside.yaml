@@ -4,19 +4,19 @@ multi_wayside_node:
     board_config_file: "config/hollow_board.yaml"
     detector_config_file: "config/detector.yaml"
     aruco_pattern_file: "config/aruco_pattern.json5"
-    
+
     # Calibration mode parameters
     same_face_mode: true  # true if both LiDARs see the same face of board
     apply_bug_fix: false  # Apply VLP16 coordinate system correction
-    
+
     # Synchronization parameters
     max_queue_size: 100
     sync_tolerance_ms: 100
-    
+
     # Frame IDs
     lidar1_frame: "lidar1"
     lidar2_frame: "lidar2"
-    
+
     # Topic names
     topics:
       lidar1_input: "/lidar1/points"
@@ -30,26 +30,26 @@ multi_wayside_node:
       calibration_transform: "/calibration_transform"
       lidar1_pose_adjustment: "/lidar1/board_pose_adjustment"
       lidar2_pose_adjustment: "/lidar2/board_pose_adjustment"
-    
+
     # Service names
     services:
       trigger_calibration: "/trigger_calibration"
       reset_adjustments: "/reset_adjustments"
       save_adjustments: "/save_adjustments"
       load_adjustments: "/load_adjustments"
-    
+
     # Visualization parameters
     visualization:
       publish_filtered_clouds: true
       marker_lifetime_sec: 5.0
       adjustment_marker_scale: 0.4
       detection_marker_scale: 0.3
-    
+
     # Adjustment constraints
     adjustment_constraints:
       max_translation: 2.0      # meters
       max_rotation_deg: 30.0    # degrees
-    
+
     # File paths
     files:
       adjustment_save_path: "config/pose_adjustments.json"

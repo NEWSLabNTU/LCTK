@@ -1,13 +1,13 @@
 # Multi-wayside project
 
-This module consumes two lidar point cloud data, performs calibration board detection on each of them, and shows a point cloud fusion example.  
-After execution, it will save two transformation protobuf files including "lidar1_to_lidar2_pose.pb2" and "lidar2_to_lidar1_pose.pb2".  
+This module consumes two lidar point cloud data, performs calibration board detection on each of them, and shows a point cloud fusion example.
+After execution, it will save two transformation protobuf files including "lidar1_to_lidar2_pose.pb2" and "lidar2_to_lidar1_pose.pb2".
 Point cloud fusing can be done by transforming lidar1 points by "lidar1_to_lidar2_pose.pb2", or by transforming lidar2 points by "lidar2_to_lidar1_pose.pb2".
 ## Usage
 
 ### Run program
 
-- Run `cd wayside-portal/multi-wayside` to change your directory to multi-wayside. 
+- Run `cd wayside-portal/multi-wayside` to change your directory to multi-wayside.
 - Modify the `config.json` to configure the program.
 - Run `cargo run --relese` to start the program.
 
@@ -20,14 +20,14 @@ After running the program, it will start to detect board on first point clode da
 ### Configuration
 
 The configuration is structured as the following.
-- `using_the_same_face_of_marker`: Set true if two lidar sensors was observing the same face of calibration board. Set false otherwise. 
+- `using_the_same_face_of_marker`: Set true if two lidar sensors was observing the same face of calibration board. Set false otherwise.
 - `output_dir`: The absolute path for a directory to save outputs.
 - `pcap1_config`: The config for first pcap file.
 - `pcap2_config`: The config for second pcap file.
 
 ```toml
 {
-    "using_same_face_of_marker": true, 
+    "using_same_face_of_marker": true,
     "output_dir": "output",
     "pcap1_config": { /* config for pcap file 1 */ },
     "pcap2_config": { /* config for pcap file 2 */ }
@@ -36,9 +36,9 @@ The configuration is structured as the following.
 ```
 
 The config for pcap file is structured as following.
-- `sensor`: This field should be set to "vlp16" or "vlp32", indicating which sensor collected the pcap file. 
+- `sensor`: This field should be set to "vlp16" or "vlp32", indicating which sensor collected the pcap file.
 - `file_path`: The absolute path for a pcap file.
-- `automatically_setting_bounding_box`: This field is recommended to be set to false. Set true only if you know the following three fields value and want to set bounding box automatically.  
+- `automatically_setting_bounding_box`: This field is recommended to be set to false. Set true only if you know the following three fields value and want to set bounding box automatically.
 - `horizontal_distance_between_lidar_and_marker`: This field will be ignored if `automatically_setting_bounding_box` is set to false.
 - `vertical_distance_between_lidar_and_marker`: This field will be ignored if `automatically_setting_bounding_box` is set to false.
 - `pcap2_configangle_between_horizontal_line_and_x_axis`: This field will be ignored if `automatically_setting_bounding_box` is set to false.

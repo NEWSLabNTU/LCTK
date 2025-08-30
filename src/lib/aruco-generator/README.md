@@ -131,7 +131,7 @@ The following ArUco dictionaries are available:
 - `Dict7X71000`
 - `DictApriltag16H5`
 - `DictApriltag25H9`
-- `DictApriltag36H10` 
+- `DictApriltag36H10`
 - `DictApriltag36H11`
 - `DictAruco`
 

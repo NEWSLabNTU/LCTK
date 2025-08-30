@@ -27,7 +27,7 @@ impl DataCallback for MyCallback {
         // Handle intermediate data
         println!("Stage {}: {:?}", stage, data);
     }
-    
+
     fn on_point_cloud(&self, stage: &str, cloud: &PointCloud) {
         println!("Stage {}: {} points", stage, cloud.points.len());
     }
@@ -38,7 +38,7 @@ let debug_config = DebugConfigBuilder::new()
     .with_timing()                    // Enable timing measurements
     .capture_stages([                 // Select stages to capture
         "plane_detection",
-        "diamond_fitting", 
+        "diamond_fitting",
         "hole_detection",
     ])
     .build();
@@ -79,7 +79,7 @@ impl TimingCallback for MyTimer {
     fn on_stage_start(&self, stage: &str, timestamp: Instant) {
         println!("Stage {} started", stage);
     }
-    
+
     fn on_stage_end(&self, stage: &str, duration: Duration, memory_usage: Option<usize>) {
         println!("Stage {} took {:?}", stage, duration);
     }
@@ -115,16 +115,16 @@ Collects performance metrics:
 ```rust
 impl MetricsCallback for MyMetrics {
     fn on_metrics(&self, stage: &str, metrics: &StageMetrics) {
-        println!("{}: {} → {} points in {:?}", 
-            stage, 
+        println!("{}: {} → {} points in {:?}",
+            stage,
             metrics.input_points,
             metrics.output_points,
             metrics.processing_time
         );
     }
-    
+
     fn on_algorithm_stats(&self, stage: &str, stats: &AlgorithmStats) {
-        println!("{}: {} iterations, converged: {}", 
+        println!("{}: {} iterations, converged: {}",
             stage,
             stats.iterations,
             stats.converged

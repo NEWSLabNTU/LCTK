@@ -39,7 +39,7 @@ The detection pipeline employs a coarse-to-fine approach:
 
 - **Purpose**: Identify planar surfaces that could contain boards
 - **Design**: Adaptive RANSAC with early termination
-- **Parameters**: 
+- **Parameters**:
   - Min inliers: 100 points
   - Distance threshold: 2cm
   - Max iterations: 1000

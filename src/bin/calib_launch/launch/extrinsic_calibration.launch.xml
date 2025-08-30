@@ -1,16 +1,16 @@
 <?xml version="1.0"?>
 <!--
     Launch file for extrinsic calibration computation.
-    
+
     This launch file starts the synchronizer and extrinsic solver nodes that
     combine detections from image and point cloud processing pipelines to
     compute the extrinsic calibration between sensors.
-    
+
     Input topics:
     - ArUco detections from image processing
     - Board detections from point cloud processing
     - Camera info
-    
+
     Output topics:
     - Synchronized detections
     - Extrinsic transform
@@ -20,35 +20,35 @@
     <arg name="aruco_detections_topic"
          default="/calibration/aruco_locator/aruco_detections"
          description="Input ArUco detections topic"/>
-    
+
     <arg name="board_detections_topic"
          default="/calibration/calibration_board_detections"
          description="Input board detections topic"/>
-    
+
     <arg name="camera_info_topic"
          default="/sensing/camera/front_center/camera_info"
          description="Input camera info topic"/>
-    
+
     <arg name="namespace"
          default="calibration"
          description="Namespace for the nodes"/>
-    
+
     <arg name="sync_window_ms"
          default="50"
          description="Synchronization window size in milliseconds"/>
-    
+
     <arg name="solver_method"
          default="SQPNP"
          description="Solver method for extrinsic calibration"/>
-    
+
     <arg name="min_detections_required"
          default="5"
          description="Minimum number of detections required for calibration"/>
-    
+
     <arg name="debug_mode"
          default="false"
          description="Enable debug logging and visualization"/>
-    
+
     <!-- Synchronizer Node -->
     <node pkg="synchronizer"
           exec="synchronizer"
@@ -63,7 +63,7 @@
         <remap from="board_detections" to="$(var board_detections_topic)"/>
         <remap from="synchronized_detections" to="/$(var namespace)/synchronizer/synchronized_detections"/>
     </node>
-    
+
     <!-- Extrinsic Solver Node -->
     <node pkg="extrinsic_solver"
           exec="extrinsic_solver"

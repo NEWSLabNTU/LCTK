@@ -54,8 +54,8 @@ let config = IcpStageConfig {
     registration_type: RegistrationType::PlaneICP,
     max_iterations: 20,
     convergence_threshold: 1e-4,
-    dof_restriction: Some(DofRestrictionConfig::Planar { 
-        plane_normal 
+    dof_restriction: Some(DofRestrictionConfig::Planar {
+        plane_normal
     }),
 };
 ```
@@ -74,7 +74,7 @@ pub fn refine_square_pose(
 ) -> Result<DiamondSquare> {
     // Generate ideal square points
     let target = generate_ideal_square_points(initial_square.size);
-    
+
     // Configure PlaneICP with planar DOF
     let registration = register_advanced(
         points,
@@ -82,7 +82,7 @@ pub fn refine_square_pose(
         Some(initial_square.to_transform()),
         &config,
     )?;
-    
+
     // Apply refined transform
     Ok(initial_square.apply_transform(registration.transformation))
 }
@@ -177,11 +177,11 @@ pub fn apply_temporal_smoothing(
     let smoothed_rot = previous.rotation
         .quaternion()
         .slerp(&current.rotation.quaternion(), 1.0 - smoothing_factor);
-    
+
     // Linear interpolation for translation
     let smoothed_trans = previous.translation.vector
         .lerp(&current.translation.vector, 1.0 - smoothing_factor);
-    
+
     Isometry3::from_parts(smoothed_trans.into(), smoothed_rot.into())
 }
 ```
@@ -195,12 +195,12 @@ pub struct IcpConfig {
     pub enable_hole_alignment: bool,
     pub enable_board_refinement: bool,
     pub enable_temporal_alignment: bool,
-    
+
     pub square_config: IcpStageConfig,
     pub hole_config: IcpStageConfig,
     pub board_config: IcpStageConfig,
     pub temporal_config: IcpStageConfig,
-    
+
     pub global_settings: GlobalIcpSettings,
 }
 
@@ -264,10 +264,10 @@ impl ConvergenceMonitor {
         if self.error_history.len() < 2 {
             return false;
         }
-        
-        let improvement = (self.error_history[n-2] - self.error_history[n-1]) 
+
+        let improvement = (self.error_history[n-2] - self.error_history[n-1])
                          / self.error_history[n-2];
-        
+
         improvement < self.improvement_threshold
     }
 }

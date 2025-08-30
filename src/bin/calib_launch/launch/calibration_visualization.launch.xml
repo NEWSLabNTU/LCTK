@@ -1,15 +1,15 @@
 <?xml version="1.0"?>
 <!--
     Launch file for calibration visualization.
-    
+
     This launch file starts the pointcloud image overlay node that visualizes
     the calibration results by projecting point clouds onto camera images.
-    
+
     Input topics:
     - Synchronized point cloud and image
     - Camera info
     - Extrinsic transform
-    
+
     Output topics:
     - Visualization markers and overlays
 -->
@@ -18,31 +18,31 @@
     <arg name="pointcloud_topic"
          default="/calibration/synchronizer/synchronized_pointcloud"
          description="Input synchronized point cloud topic"/>
-    
+
     <arg name="image_topic"
          default="/calibration/synchronizer/synchronized_image"
          description="Input synchronized image topic"/>
-    
+
     <arg name="camera_info_topic"
          default="/sensing/camera/front_center/camera_info"
          description="Input camera info topic"/>
-    
+
     <arg name="extrinsic_transform_topic"
          default="/calibration/extrinsic_solver/extrinsic_transform"
          description="Input extrinsic transform topic"/>
-    
+
     <arg name="namespace"
          default="calibration"
          description="Namespace for the nodes"/>
-    
+
     <arg name="max_distance"
          default="10.0"
          description="Maximum distance for point cloud filtering (meters)"/>
-    
+
     <arg name="min_distance"
          default="1.0"
          description="Minimum distance for point cloud filtering (meters)"/>
-    
+
     <!-- Pointcloud Image Overlay Node (with Rerun visualization) -->
     <node pkg="pointcloud_image_overlay"
           exec="pointcloud_image_overlay"

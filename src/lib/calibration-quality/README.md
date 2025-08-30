@@ -85,13 +85,13 @@ let mut monitor = ConvergenceMonitor::with_config(config);
 // Update during calibration iterations
 for (transform, metrics) in calibration_iterations {
     monitor.update(&transform, &metrics);
-    
+
     let status = monitor.status();
     if status.is_converged {
         println!("Calibration converged after {} iterations", status.iterations);
         break;
     }
-    
+
     if let Some(remaining) = status.estimated_iterations_remaining {
         println!("Estimated iterations remaining: {}", remaining);
     }
@@ -151,7 +151,7 @@ impl CalibrationNode {
             &result.correspondences,
             result.confidence,
         )?;
-        
+
         // Publish quality metrics
         let quality_msg = QualityMessage {
             overall_score: quality.overall_score,
@@ -159,9 +159,9 @@ impl CalibrationNode {
             is_converged: quality.convergence.is_converged,
             messages: quality.validation.messages,
         };
-        
+
         self.quality_publisher.publish(quality_msg)?;
-        
+
         // Only accept high-quality calibrations
         if quality.meets_requirements(0.8) {
             self.accept_calibration(result);

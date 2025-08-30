@@ -18,13 +18,15 @@ from tf_transformations import quaternion_from_euler
 
 class PoseAdjuster(Node):
     def __init__(self):
-        super().__init__('pose_adjuster')
+        super().__init__("pose_adjuster")
         self.publishers = {
-            1: self.create_publisher(PoseStamped, '/lidar1/board_pose_adjustment', 10),
-            2: self.create_publisher(PoseStamped, '/lidar2/board_pose_adjustment', 10)
+            1: self.create_publisher(PoseStamped, "/lidar1/board_pose_adjustment", 10),
+            2: self.create_publisher(PoseStamped, "/lidar2/board_pose_adjustment", 10),
         }
 
-    def send_adjustment(self, lidar_id, x=0.0, y=0.0, z=0.0, roll=0.0, pitch=0.0, yaw=0.0):
+    def send_adjustment(
+        self, lidar_id, x=0.0, y=0.0, z=0.0, roll=0.0, pitch=0.0, yaw=0.0
+    ):
         """Send a pose adjustment for the specified LiDAR."""
         if lidar_id not in self.publishers:
             self.get_logger().error(f"Invalid LiDAR ID: {lidar_id}")
@@ -57,16 +59,19 @@ class PoseAdjuster(Node):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Send pose adjustments to multi_wayside_node')
-    parser.add_argument('--lidar', type=int, choices=[1, 2], required=True,
-                        help='LiDAR ID (1 or 2)')
-    parser.add_argument('--x', type=float, default=0.0, help='X translation (m)')
-    parser.add_argument('--y', type=float, default=0.0, help='Y translation (m)')
-    parser.add_argument('--z', type=float, default=0.0, help='Z translation (m)')
-    parser.add_argument('--roll', type=float, default=0.0, help='Roll rotation (rad)')
-    parser.add_argument('--pitch', type=float, default=0.0, help='Pitch rotation (rad)')
-    parser.add_argument('--yaw', type=float, default=0.0, help='Yaw rotation (rad)')
-    parser.add_argument('--yaw-deg', type=float, help='Yaw rotation (degrees)')
+    parser = argparse.ArgumentParser(
+        description="Send pose adjustments to multi_wayside_node"
+    )
+    parser.add_argument(
+        "--lidar", type=int, choices=[1, 2], required=True, help="LiDAR ID (1 or 2)"
+    )
+    parser.add_argument("--x", type=float, default=0.0, help="X translation (m)")
+    parser.add_argument("--y", type=float, default=0.0, help="Y translation (m)")
+    parser.add_argument("--z", type=float, default=0.0, help="Z translation (m)")
+    parser.add_argument("--roll", type=float, default=0.0, help="Roll rotation (rad)")
+    parser.add_argument("--pitch", type=float, default=0.0, help="Pitch rotation (rad)")
+    parser.add_argument("--yaw", type=float, default=0.0, help="Yaw rotation (rad)")
+    parser.add_argument("--yaw-deg", type=float, help="Yaw rotation (degrees)")
 
     args = parser.parse_args()
 
@@ -80,8 +85,7 @@ def main():
 
     try:
         adjuster.send_adjustment(
-            args.lidar, args.x, args.y, args.z, 
-            args.roll, args.pitch, yaw
+            args.lidar, args.x, args.y, args.z, args.roll, args.pitch, yaw
         )
         # Spin briefly to ensure message is sent
         rclpy.spin_once(adjuster, timeout_sec=0.1)
@@ -90,5 +94,5 @@ def main():
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -91,17 +91,17 @@ multi_wayside_node:
     board_config_file: "/opt/lctk/config/hollow_board.yaml"
     detector_config_file: "/opt/lctk/config/detector.yaml"
     aruco_pattern_file: "/opt/lctk/config/aruco_pattern.json5"
-    
+
     # Automatic calibration
     auto_calibrate: true
     min_detections_for_calibration: 10  # Higher threshold for production
     calibration_timeout_seconds: 60
     quality_threshold: 0.8  # Stricter quality requirement
-    
+
     # Performance tuning
     max_queue_size: 200
     sync_tolerance_ms: 50  # Tighter synchronization
-    
+
     # ROI configuration (site-specific)
     roi_box_position_x: 3.0
     roi_box_position_y: 0.0
@@ -109,11 +109,11 @@ multi_wayside_node:
     roi_box_size_x: 6.0
     roi_box_size_y: 6.0
     roi_box_size_z: 3.0
-    
+
     # Filtering
     min_range: 1.0  # Filter very close points
     max_range: 30.0  # Limit to relevant range
-    
+
     # Logging
     log_level: "info"  # Reduce verbosity in production
 ```
@@ -127,22 +127,22 @@ Create `launch/production.launch.xml`:
     <arg name="config_file" default="/opt/lctk/config/production_params.yaml"/>
     <arg name="enable_diagnostics" default="true"/>
     <arg name="enable_monitoring" default="true"/>
-    
+
     <!-- Multi-wayside node -->
-    <node pkg="multi_wayside_node" exec="multi_wayside_node" name="multi_wayside_production" 
+    <node pkg="multi_wayside_node" exec="multi_wayside_node" name="multi_wayside_production"
           output="screen" respawn="true" respawn_delay="5">
         <param from="$(var config_file)"/>
-        
+
         <!-- Topic remapping for production -->
         <remap from="/lidar1/points" to="/sensors/lidar1/points"/>
         <remap from="/lidar2/points" to="/sensors/lidar2/points"/>
     </node>
-    
+
     <!-- Diagnostics aggregator -->
     <node pkg="diagnostic_aggregator" exec="aggregator_node" name="diagnostic_aggregator" if="$(var enable_diagnostics)">
         <param from="/opt/lctk/config/diagnostics.yaml"/>
     </node>
-    
+
     <!-- Monitoring node -->
     <node pkg="multi_wayside_node" exec="health_monitor.py" name="health_monitor" if="$(var enable_monitoring)">
         <param name="alert_email" value="ops@example.com"/>
@@ -221,28 +221,28 @@ class HealthMonitor(Node):
         super().__init__('health_monitor')
         self.declare_parameter('alert_email', '')
         self.declare_parameter('check_interval', 30.0)
-        
+
         self.last_detection = {
             'lidar1': None,
             'lidar2': None
         }
         self.last_calibration = None
-        
+
         # Create timer for periodic checks
         interval = self.get_parameter('check_interval').value
         self.timer = self.create_timer(interval, self.check_health)
-    
+
     def check_health(self):
         # Check detection freshness
         now = datetime.now()
         for lidar, last_time in self.last_detection.items():
             if last_time and (now - last_time) > timedelta(minutes=5):
                 self.send_alert(f"No detections from {lidar} for 5 minutes")
-        
+
         # Check calibration status
         if self.last_calibration and (now - self.last_calibration) > timedelta(hours=1):
             self.send_alert("No calibration updates for 1 hour")
-    
+
     def send_alert(self, message):
         email = self.get_parameter('alert_email').value
         if email:

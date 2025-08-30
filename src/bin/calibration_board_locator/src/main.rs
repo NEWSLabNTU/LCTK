@@ -260,7 +260,10 @@ impl CalibrationBoardLocatorNode {
 
     fn read_f32_le(data: &[u8], offset: usize) -> Result<f32> {
         if offset + 4 > data.len() {
-            return Err(anyhow!("Buffer overflow when reading f32 at offset {}", offset));
+            return Err(anyhow!(
+                "Buffer overflow when reading f32 at offset {}",
+                offset
+            ));
         }
         let bytes: [u8; 4] = [
             data[offset],

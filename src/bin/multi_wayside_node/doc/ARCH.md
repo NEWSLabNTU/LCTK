@@ -268,7 +268,7 @@ pub fn process_pointcloud(&self, msg: &PointCloud2, lidar_id: u8) -> Result<Proc
     let filtered_points = self.filter.filter_nalgebra(&nalgebra_points);
     let cropped_points = self.roi_manager.apply_crop(&filtered_points, lidar_id);
     let detection = self.detector.process(&cropped_points)?;
-    
+
     Ok(ProcessingResult {
         original_points: nalgebra_points,
         filtered_points,

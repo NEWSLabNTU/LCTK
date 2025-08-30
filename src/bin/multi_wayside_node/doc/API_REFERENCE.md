@@ -98,7 +98,7 @@ The `multi_wayside_node` is a ROS 2 node that performs automatic LiDAR-to-LiDAR 
     ```
     uint8 lidar_id          # 1 or 2
     float64 center_x        # ROI center X coordinate
-    float64 center_y        # ROI center Y coordinate  
+    float64 center_y        # ROI center Y coordinate
     float64 center_z        # ROI center Z coordinate
     float64 size_x          # ROI size along X axis
     float64 size_y          # ROI size along Y axis
