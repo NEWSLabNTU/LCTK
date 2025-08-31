@@ -8,7 +8,11 @@ use opencv::{
 };
 use rclrs::{log_error, log_info, log_warn, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
 use std_msgs::msg::Header;
 use vision_msgs::msg::{
     BoundingBox2D, Detection2D, Detection2DArray, ObjectHypothesis, ObjectHypothesisWithPose,
@@ -658,11 +662,36 @@ pub fn run_node() -> Result<()> {
     let _aruco_node = ArucoLocatorNode::new(&node)?;
     log_info!(LOGGER_NAME, "ArUco Locator node started");
 
-    // Spin the executor
-    executor
-        .spin(SpinOptions::default())
-        .first_error()
-        .map_err(|err| anyhow!("Failed to spin executor: {err}"))
+    // Set up signal handling
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    ctrlc::set_handler(move || {
+        log_info!(
+            LOGGER_NAME,
+            "Received interrupt signal, shutting down gracefully..."
+        );
+        r.store(false, Ordering::SeqCst);
+    })?;
+
+    // Spin the executor with a timeout, checking for signals
+    while running.load(Ordering::SeqCst) {
+        // Spin once with a short timeout to allow checking the signal flag
+        let spin_options = SpinOptions::spin_once().timeout(Duration::from_millis(100));
+
+        let spin_result = executor.spin(spin_options);
+
+        // Check for errors
+        if !spin_result.is_empty() {
+            for err in &spin_result {
+                log_error!(LOGGER_NAME, "Executor error: {err}");
+            }
+            return Err(anyhow!("Failed to spin executor: {:?}", spin_result));
+        }
+    }
+
+    log_info!(LOGGER_NAME, "ArUco Locator node shutting down");
+    Ok(())
 }
 
 fn main() -> Result<()> {
