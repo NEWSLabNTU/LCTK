@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use aruco_detector::multi_aruco::ImageMarker;
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use opencv::{
@@ -8,11 +9,13 @@ use opencv::{
 };
 use rclrs::{log_error, log_info, log_warn, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
-use std::time::Duration;
 use std_msgs::msg::Header;
 use vision_msgs::msg::{
     BoundingBox2D, Detection2D, Detection2DArray, ObjectHypothesis, ObjectHypothesisWithPose,
@@ -35,8 +38,8 @@ fn convert_detection_result(
     // Convert each detected marker
     if result.markers_found {
         for (i, &marker_id) in result.marker_ids.iter().enumerate() {
-            if let Some(marker_data) = result.markers.get(i) {
-                match convert_marker_to_detection2d(marker_id, marker_data, &header) {
+            if let Some(marker) = result.markers.get(i) {
+                match convert_marker_to_detection2d(marker_id, marker, &header) {
                     Ok(detection) => detections.push(detection),
                     Err(e) => {
                         log_warn!(LOGGER_NAME, "Failed to convert marker {marker_id}: {e}");
@@ -50,14 +53,21 @@ fn convert_detection_result(
     Detection2DArray { header, detections }
 }
 
-/// Convert a single marker from JSON to Detection2D message
+/// Convert a single marker to Detection2D message
 fn convert_marker_to_detection2d(
     marker_id: i32,
-    marker_data: &serde_json::Value,
+    marker: &ImageMarker,
     header: &Header,
 ) -> Result<Detection2D> {
-    // Extract corners from the JSON data
-    let corners = extract_corners_from_json(marker_data)?;
+    // Convert corners from nalgebra Point2 to vision_msgs Point2D
+    let corners: Vec<Point2D> = marker
+        .corners
+        .iter()
+        .map(|corner| Point2D {
+            x: corner.x as f64,
+            y: corner.y as f64,
+        })
+        .collect();
 
     // Calculate bounding box from corners
     let bbox = calculate_bounding_box(&corners);
@@ -97,34 +107,6 @@ fn convert_marker_to_detection2d(
         bbox,
         id: format!("aruco_{marker_id}"),
     })
-}
-
-/// Extract corner points from JSON marker data
-fn extract_corners_from_json(marker_data: &serde_json::Value) -> Result<Vec<Point2D>> {
-    let corners_array = marker_data
-        .get("corners")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow!("Missing or invalid corners array"))?;
-
-    let mut corners = Vec::new();
-    for corner in corners_array {
-        let x = corner
-            .get("x")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow!("Missing or invalid corner x coordinate"))?;
-        let y = corner
-            .get("y")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow!("Missing or invalid corner y coordinate"))?;
-
-        corners.push(Point2D { x, y });
-    }
-
-    if corners.len() != 4 {
-        bail!("Expected 4 corners, got {}", corners.len());
-    }
-
-    Ok(corners)
 }
 
 /// Calculate bounding box from corner points
@@ -571,23 +553,16 @@ impl ArucoLocatorNode {
                             );
                         }
 
-                        // 打印每個標記的詳細數據並驗證格式
-                        if let Some(marker_data) = detection_result.markers.get(i) {
-                            // Check if marker data has expected structure
-                            if marker_data.get("corners").is_none() {
-                                log_error!(
-                                    LOGGER_NAME,
-                                    "Marker {} missing 'corners' field in JSON data",
-                                    i
-                                );
-                            }
-
+                        // Log marker data details
+                        if let Some(marker) = detection_result.markers.get(i) {
                             log_info!(
                                 LOGGER_NAME,
-                                "  Marker {} data: {}",
+                                "  Marker {} corners: [{:.1},{:.1}], [{:.1},{:.1}], [{:.1},{:.1}], [{:.1},{:.1}]",
                                 i,
-                                serde_json::to_string(marker_data)
-                                    .unwrap_or_else(|_| "Invalid JSON".to_string())
+                                marker.corners[0].x, marker.corners[0].y,
+                                marker.corners[1].x, marker.corners[1].y,
+                                marker.corners[2].x, marker.corners[2].y,
+                                marker.corners[3].x, marker.corners[3].y
                             );
                         } else {
                             log_error!(LOGGER_NAME, "Missing marker data for marker {}", i);
@@ -681,12 +656,19 @@ pub fn run_node() -> Result<()> {
 
         let spin_result = executor.spin(spin_options);
 
-        // Check for errors
+        // Check for errors (but ignore timeout errors as they're expected)
         if !spin_result.is_empty() {
-            for err in &spin_result {
-                log_error!(LOGGER_NAME, "Executor error: {err}");
+            let has_real_error = spin_result.iter().any(|err| {
+                // Check if it's not a timeout error
+                !format!("{:?}", err).contains("Timeout")
+            });
+
+            if has_real_error {
+                for err in &spin_result {
+                    log_error!(LOGGER_NAME, "Executor error: {err}");
+                }
+                return Err(anyhow!("Failed to spin executor: {:?}", spin_result));
             }
-            return Err(anyhow!("Failed to spin executor: {:?}", spin_result));
         }
     }
 

@@ -2,6 +2,7 @@ pub mod config;
 
 use anyhow::{bail, Result};
 use aruco_config::MultiArucoPattern;
+use aruco_detector::multi_aruco::ImageMarker;
 use config::MrptCalibration;
 use opencv::{
     aruco, calib3d,
@@ -48,7 +49,7 @@ impl ArucoDetectorConfig {
 pub struct DetectionResult {
     pub markers_found: bool,
     pub marker_ids: Vec<i32>,
-    pub markers: Vec<serde_json::Value>,
+    pub markers: Vec<ImageMarker>,
 }
 
 /// ArUco detector implementation
@@ -79,10 +80,7 @@ impl ArucoDetector {
 
         if let Some(detection) = detection {
             let marker_ids: Vec<i32> = detection.id().to_vec();
-            let markers: Vec<serde_json::Value> = detection
-                .markers()
-                .map(|marker| serde_json::to_value(marker).unwrap_or(serde_json::Value::Null))
-                .collect();
+            let markers: Vec<ImageMarker> = detection.markers().collect();
 
             Ok(DetectionResult {
                 markers_found: true,

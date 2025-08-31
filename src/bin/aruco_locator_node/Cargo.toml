@@ -9,6 +9,7 @@ opencv = { workspace = true, default-features = false, features = ["aruco", "cal
 serde_json = { workspace = true }
 aruco-locator = { version = "0.1.0", path = "../../lib/aruco-locator" }
 aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
+aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
 ctrlc = "3.4"
 
 # ROS 2 dependencies
