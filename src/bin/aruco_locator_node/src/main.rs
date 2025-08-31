@@ -235,7 +235,13 @@ impl ArucoLocatorNode {
         camera_info: CameraInfo,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
     ) {
-        log_info!(LOGGER_NAME, "Initializing ArUco detector with camera info");
+        // Check if detector is already initialized
+        let already_initialized = {
+            match detector_state.lock() {
+                Ok(state) => state.is_some(),
+                Err(_) => false,
+            }
+        };
 
         let aruco_pattern = match Self::load_aruco_pattern() {
             Ok(pattern) => pattern,
@@ -267,27 +273,17 @@ impl ArucoLocatorNode {
         };
 
         *state = Some(Arc::new(detector));
-        log_info!(LOGGER_NAME, "ArUco detector successfully initialized");
+
+        // Only log initialization message once
+        if !already_initialized {
+            log_info!(LOGGER_NAME, "ArUco detector initialized");
+        }
     }
 
     /// Load ArUco pattern from config file
     fn load_aruco_pattern() -> Result<aruco_config::MultiArucoPattern> {
-        log_info!(
-            LOGGER_NAME,
-            "Loading ArUco pattern from: {}",
-            ARUCO_PATTERN_CONFIG
-        );
-
         let json5_text = std::fs::read_to_string(ARUCO_PATTERN_CONFIG)?;
         let pattern: aruco_config::MultiArucoPattern = json5::from_str(&json5_text)?;
-
-        // Validate pattern configuration
-        log_info!(
-            LOGGER_NAME,
-            "ArUco config loaded: {} markers, dictionary: {:?}",
-            pattern.marker_ids.len(),
-            pattern.dictionary
-        );
 
         // Check if expected markers match our test pattern
         let expected_markers = [696, 64, 306, 195];
@@ -317,17 +313,6 @@ impl ArucoLocatorNode {
 
     /// Convert ROS Image message to OpenCV Mat with proper encoding handling
     fn ros_image_to_opencv_mat(msg: &ImageMsg) -> Result<Mat> {
-        // Log image properties for debugging
-        log_info!(
-            LOGGER_NAME,
-            "Converting image: {}x{}, encoding: {}, step: {}, data_size: {}",
-            msg.width,
-            msg.height,
-            msg.encoding,
-            msg.step,
-            msg.data.len()
-        );
-
         // Validate data size
         let expected_size = (msg.step * msg.height) as usize;
         if msg.data.len() < expected_size {
@@ -505,71 +490,8 @@ impl ArucoLocatorNode {
             }
         };
 
-        // Process the image
-        log_info!(
-            LOGGER_NAME,
-            "-----------Processing image: {}x{}",
-            msg.width,
-            msg.height
-        );
-
         match Self::process_image(&msg, &detector) {
             Ok(detection_result) => {
-                // 檢查檢測結果是否為空
-                if !detection_result.markers_found || detection_result.marker_ids.is_empty() {
-                    log_warn!(
-                        LOGGER_NAME,
-                        "No ArUco markers detected in image {}x{}",
-                        msg.width,
-                        msg.height
-                    );
-                } else {
-                    // 打印檢測到的標記詳細信息
-                    log_info!(
-                        LOGGER_NAME,
-                        "Successfully detected {} ArUco markers",
-                        detection_result.marker_ids.len()
-                    );
-
-                    // Validate detection consistency
-                    if detection_result.marker_ids.len() != detection_result.markers.len() {
-                        log_error!(
-                            LOGGER_NAME,
-                            "Inconsistent detection data: {} IDs but {} marker data entries",
-                            detection_result.marker_ids.len(),
-                            detection_result.markers.len()
-                        );
-                    }
-
-                    for (i, &marker_id) in detection_result.marker_ids.iter().enumerate() {
-                        log_info!(LOGGER_NAME, "Marker {}: ID={}", i, marker_id);
-
-                        // Validate marker ID is in expected range
-                        if marker_id < 0 || marker_id > 1023 {
-                            log_warn!(
-                                LOGGER_NAME,
-                                "Suspicious marker ID: {} (outside typical range 0-1023)",
-                                marker_id
-                            );
-                        }
-
-                        // Log marker data details
-                        if let Some(marker) = detection_result.markers.get(i) {
-                            log_info!(
-                                LOGGER_NAME,
-                                "  Marker {} corners: [{:.1},{:.1}], [{:.1},{:.1}], [{:.1},{:.1}], [{:.1},{:.1}]",
-                                i,
-                                marker.corners[0].x, marker.corners[0].y,
-                                marker.corners[1].x, marker.corners[1].y,
-                                marker.corners[2].x, marker.corners[2].y,
-                                marker.corners[3].x, marker.corners[3].y
-                            );
-                        } else {
-                            log_error!(LOGGER_NAME, "Missing marker data for marker {}", i);
-                        }
-                    }
-                }
-
                 // Create message header
                 let header = Header {
                     stamp: msg.header.stamp.clone(),
@@ -579,26 +501,34 @@ impl ArucoLocatorNode {
                 // Convert detection result to vision_msgs Detection2DArray
                 let detection_msg = convert_detection_result(&detection_result, header);
 
-                // 驗證轉換後的消息
-                if detection_msg.detections.is_empty() && detection_result.markers_found {
-                    log_error!(LOGGER_NAME, "Conversion error: DetectionResult has markers but Detection2DArray is empty");
-                } else if !detection_msg.detections.is_empty() {
-                    log_info!(
-                        LOGGER_NAME,
-                        "Successfully converted {} markers to Detection2DArray",
-                        detection_msg.detections.len()
-                    );
-
-                    // 打印轉換後的檢測消息詳細信息
-                    for (i, detection) in detection_msg.detections.iter().enumerate() {
-                        if let Some(result) = detection.results.first() {
+                // Only log summary info, not details
+                if detection_msg.detections.is_empty() {
+                    // Only log occasionally for no detections to avoid spam
+                    static mut NO_DETECTION_COUNT: u32 = 0;
+                    unsafe {
+                        NO_DETECTION_COUNT += 1;
+                        if NO_DETECTION_COUNT % 30 == 1 {
+                            // Log every 30th frame (approximately once per second at 30fps)
+                            log_warn!(
+                                LOGGER_NAME,
+                                "No ArUco markers detected (suppressing repeated messages)"
+                            );
+                        }
+                    }
+                } else {
+                    // Log only a brief summary when markers are detected
+                    static mut LAST_DETECTION_COUNT: usize = 0;
+                    let current_count = detection_msg.detections.len();
+                    unsafe {
+                        if LAST_DETECTION_COUNT != current_count {
+                            // Only log when the number of detected markers changes
                             log_info!(
                                 LOGGER_NAME,
-                                "Detection {}: ID={}, Score={}",
-                                i,
-                                result.hypothesis.class_id,
-                                result.hypothesis.score
+                                "Detected {} ArUco markers: {:?}",
+                                current_count,
+                                detection_result.marker_ids
                             );
+                            LAST_DETECTION_COUNT = current_count;
                         }
                     }
                 }
@@ -606,21 +536,10 @@ impl ArucoLocatorNode {
                 // Publish the detection result
                 if let Err(e) = publisher.publish(&detection_msg) {
                     log_error!(LOGGER_NAME, "Failed to publish detection result: {e}");
-                } else {
-                    log_info!(
-                        LOGGER_NAME,
-                        "Successfully published detection message with {} detections",
-                        detection_msg.detections.len()
-                    );
                 }
             }
             Err(e) => {
-                log_error!(
-                    LOGGER_NAME,
-                    "ArUco detection failed for image {}x{}: {e}",
-                    msg.width,
-                    msg.height
-                );
+                log_error!(LOGGER_NAME, "ArUco detection failed: {e}");
             }
         }
     }
