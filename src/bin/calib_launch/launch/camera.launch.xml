@@ -42,7 +42,7 @@
           exec="gscam_node"
           name="camera_driver"
           namespace="$(var camera_namespace)"
-          output="screen">
+          output="log">
         <!-- Parameters -->
         <!-- GStreamer pipeline: Simple pipeline using decodebin for auto-detection -->
         <param name="gscam_config" value="filesrc location=$(var video_file) ! decodebin ! videoconvert"/>

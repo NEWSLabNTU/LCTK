@@ -62,7 +62,7 @@
     <node pkg="velodyne_driver"
           exec="velodyne_driver_node"
           name="velodyne_driver_node"
-          output="screen">
+          output="log">
         <!-- Parameters -->
         <param name="model" value="$(var model)"/>
         <param name="rpm" value="$(var rpm)"/>
@@ -82,7 +82,7 @@
     <node pkg="velodyne_pointcloud"
           exec="velodyne_transform_node"
           name="velodyne_transform_node"
-          output="screen">
+          output="log">
         <!-- Parameters -->
         <param name="model" value="$(var model)"/>
         <param name="calibration" value="$(find-pkg-share velodyne_pointcloud)/params/VeloView-VLP-32C.yaml"/>
