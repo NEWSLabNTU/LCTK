@@ -27,6 +27,8 @@ install(FILES
   # Refactored calibration launch files
   launch/lidar_camera_calibration.launch.xml
   launch/two_lidar_calibration.launch.xml
+  # Visualization launch files
+  launch/aruco_visualization.launch.xml
   DESTINATION share/${PROJECT_NAME}/launch
 )
 

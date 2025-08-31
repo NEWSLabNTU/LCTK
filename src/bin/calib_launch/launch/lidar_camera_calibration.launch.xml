@@ -89,6 +89,9 @@
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>
 
+    <!-- ArUco Detection Visualization Overlay -->
+    <include file="$(find-pkg-share calib_launch)/launch/aruco_visualization.launch.xml"/>
+
     <!-- Point Cloud Processing Pipeline -->
     <!-- <include file="$(find-pkg-share calib_launch)/launch/pointcloud_processing.launch.xml">
         <arg name="board_config_file" value="$(var board_config_file)"/>

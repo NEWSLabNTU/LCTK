@@ -1,0 +1,1 @@
+# ArUco detection overlay package for RViz visualization
