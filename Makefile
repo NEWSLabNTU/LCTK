@@ -82,8 +82,6 @@ launch_lidar_camera_calibration:
 	ros2 launch calib_launch lidar_camera_calibration.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
-		aruco_config_file:=$(shell ros2 pkg prefix calib_launch)/share/calib_launch/config/aruco/aruco_pattern.json5 \
-		board_config_file:=$(shell ros2 pkg prefix calib_launch)/share/calib_launch/config/board/board_pattern.json5 \
 		loop:=true
 
 launch_two_lidar_calibration:
@@ -92,5 +90,4 @@ launch_two_lidar_calibration:
 	. install/setup.sh && \
 	ros2 launch calib_launch two_lidar_calibration.launch.xml \
 		lidar1_pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
-		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap \
-		board_config_file:=$(shell ros2 pkg prefix calib_launch)/share/calib_launch/config/board/board_pattern.json5
+		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap

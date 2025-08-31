@@ -14,11 +14,11 @@
 <launch>
     <!-- Common Arguments -->
     <arg name="aruco_config_file"
-         default=""
+         default="$(find-pkg-share calib_launch)/config/aruco/aruco_pattern.json5"
          description="Path to ArUco pattern configuration JSON5 file"/>
 
     <arg name="board_config_file"
-         default=""
+         default="$(find-pkg-share calib_launch)/config/board/board_pattern.json5"
          description="Path to calibration board configuration JSON5 file"/>
 
     <arg name="camera_topic"
