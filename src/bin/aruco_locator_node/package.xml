@@ -1,5 +1,5 @@
 <package format="3">
-  <name>aruco_locator_service</name>
+  <name>aruco_locator_node</name>
   <version>0.1.0</version>
   <description>ROS 2 node for ArUco marker detection in camera images</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
