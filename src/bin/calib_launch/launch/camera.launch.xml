@@ -26,7 +26,7 @@
          description="Camera namespace for topics"/>
 
     <arg name="camera_info_url"
-         default=""
+         default="file://$(find-pkg-share calib_launch)/config/camera/front_center_camera_info.yaml"
          description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
 
     <arg name="frame_id"
