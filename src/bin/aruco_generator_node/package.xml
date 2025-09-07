@@ -11,6 +11,7 @@
   <depend>std_srvs</depend>
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
+  <depend>libopencv-dev</depend>
 
   <export>
     <build_type>ament_cargo</build_type>
