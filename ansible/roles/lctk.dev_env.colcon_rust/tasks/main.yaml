@@ -1,9 +1,17 @@
 ---
-- name: Install colcon extensions for Rust
+- name: Install colcon extensions for Rust with empy constraint
   ansible.builtin.pip:
     name:
+      - "empy<4"
       - git+https://github.com/jerry73204/colcon-cargo.git
       - git+https://github.com/colcon/colcon-ros-cargo.git
     extra_args: --user --force-reinstall
     executable: /usr/bin/pip3
     state: present
+
+- name: Remove pip-installed empy after colcon installation
+  ansible.builtin.pip:
+    name: empy
+    state: absent
+    executable: /usr/bin/pip3
+  failed_when: false  # Don't fail if not installed
