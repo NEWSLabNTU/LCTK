@@ -456,6 +456,19 @@ Key parameters that can be configured:
    - Install SFCGAL: `sudo apt install libsfcgal-dev`
    - Or run the setup script which installs all dependencies
 
+5. **Build fails with missing C++ headers ('memory', 'limits', etc.) in opencv-rust binding generation**
+   - This error occurs when bindgen/clang cannot find C++ standard library headers
+   - **Solution 1 (Recommended):** Install C++ development headers:
+     ```bash
+     sudo apt install libstdc++-12-dev
+     ```
+   - **Solution 2:** If you have a partial GCC 13 installation (e.g., from previously installed packages like Emacs 30), remove it:
+     ```bash
+     sudo apt remove libgccjit0 libgcc-13-dev gcc-13-base
+     ```
+   - **Root cause:** Clang selects the highest GCC version found in `/usr/lib/gcc/x86_64-linux-gnu/`. If GCC 13 runtime libraries exist without corresponding C++ headers (libstdc++-13-dev is not available in Ubuntu 22.04), the build fails
+   - Related issue: https://github.com/twistedfall/opencv-rust/issues/419
+
 For more troubleshooting information, see [CLAUDE.md](CLAUDE.md).
 
 ## Contributing
