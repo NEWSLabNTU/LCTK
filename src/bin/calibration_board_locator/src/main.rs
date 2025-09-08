@@ -9,10 +9,7 @@ use hollow_board_detector::{
 };
 use nalgebra as na;
 use once_cell::sync::Lazy;
-use rclrs::{
-    log_info, log_warn, Context, CreateBasicExecutor, InitOptions, Node, Publisher,
-    RclrsErrorFilter, SpinOptions, Subscription, ToLogParams,
-};
+use rclrs::*;
 use sensor_msgs::msg::PointCloud2;
 use std::{
     fs,
@@ -72,17 +69,14 @@ impl CalibrationBoardLocatorNode {
         ));
 
         // Create publisher for detections
-        let detection_publisher =
-            node.create_publisher::<Detection3DArray>("calibration_board_detections")?;
+        let detection_publisher = node.create_publisher("calibration_board_detections")?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
 
         // Create subscription to PointCloud2
-        let pointcloud_subscription = node.create_subscription::<PointCloud2, _>(
-            "input_pointcloud",
-            move |msg: PointCloud2| {
+        let pointcloud_subscription =
+            node.create_subscription("input_pointcloud", move |msg: PointCloud2| {
                 Self::pointcloud_callback(msg, &detector, &detection_publisher_shared, &bbox);
-            },
-        )?;
+            })?;
 
         log_info!(
             LOGGER_NAME,
@@ -329,8 +323,7 @@ impl CalibrationBoardLocatorNode {
 }
 
 fn main() -> Result<()> {
-    let context = Context::new(std::env::args(), InitOptions::default())?;
-    let mut executor = context.create_basic_executor();
+    let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("calibration_board_locator")?;
     let _calibration_board_locator_node = CalibrationBoardLocatorNode::new(node)?;
 

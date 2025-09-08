@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+rust-version = "1.70.0"  # Minimum supported Rust version (MSRV)
 members = [
     "src/bin/*",
     "src/lib/*",

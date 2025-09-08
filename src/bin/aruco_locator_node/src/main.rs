@@ -7,7 +7,7 @@ use opencv::{
     imgproc,
     prelude::*,
 };
-use rclrs::{log_error, log_info, log_warn, *};
+use rclrs::*;
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::{
     sync::{
@@ -188,7 +188,7 @@ impl ArucoLocatorNode {
         ];
 
         // Create detection publisher
-        let detection_publisher = node.create_publisher::<Detection2DArray>("aruco_detections")?;
+        let detection_publisher = node.create_publisher("aruco_detections")?;
 
         // Subscribe to camera_info
         let detector_state_camera_info = Arc::clone(&detector_state);
@@ -548,8 +548,7 @@ impl ArucoLocatorNode {
 /// Main function for ROS node
 pub fn run_node() -> Result<()> {
     // Initialize ROS 2
-    let context = Context::new(std::env::args(), InitOptions::new())?;
-    let mut executor = context.create_basic_executor();
+    let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("aruco_locator_node")?;
 
     // Create the node (automatically creates all its components)
@@ -573,20 +572,14 @@ pub fn run_node() -> Result<()> {
         // Spin once with a short timeout to allow checking the signal flag
         let spin_options = SpinOptions::spin_once().timeout(Duration::from_millis(100));
 
-        let spin_result = executor.spin(spin_options);
+        let spin_results = executor.spin(spin_options);
 
         // Check for errors (but ignore timeout errors as they're expected)
-        if !spin_result.is_empty() {
-            let has_real_error = spin_result.iter().any(|err| {
-                // Check if it's not a timeout error
-                !format!("{:?}", err).contains("Timeout")
-            });
-
-            if has_real_error {
-                for err in &spin_result {
-                    log_error!(LOGGER_NAME, "Executor error: {err}");
-                }
-                return Err(anyhow!("Failed to spin executor: {:?}", spin_result));
+        for err in spin_results {
+            // Check if it's not a timeout error
+            if !format!("{:?}", err).contains("Timeout") {
+                log_error!(LOGGER_NAME, "Executor error: {err}");
+                return Err(anyhow!("Failed to spin executor: {err}"));
             }
         }
     }

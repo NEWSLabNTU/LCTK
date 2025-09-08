@@ -14,7 +14,7 @@ hollow-board-detector = { version = "0.1.0", path = "../../lib/hollow-board-dete
 json5 = { workspace = true }
 once_cell = { workspace = true }
 pcd-rs = { workspace = true }
-rclrs = "0.4.0"
+rclrs = "0.5"
 sensor_msgs = "4.8.0"
 serde = { workspace = true }
 serde_json = { workspace = true }

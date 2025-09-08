@@ -3,10 +3,7 @@ use builtin_interfaces::msg::Time;
 use futures::{stream, StreamExt};
 use indexmap::IndexMap;
 use multi_stream_synchronizer::{sync, Config, WithTimestamp};
-use rclrs::{
-    log_info, log_warn, Context, CreateBasicExecutor, InitOptions, Node, Publisher,
-    RclrsErrorFilter, SpinOptions, Subscription, ToLogParams,
-};
+use rclrs::*;
 use std::{
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -77,10 +74,6 @@ struct SynchronizerState {
 pub struct SynchronizerNode {
     _state: Arc<SynchronizerState>,
     _node: Node,
-    _aruco_subscription: Subscription<Detection2DArray>,
-    _board_subscription: Subscription<Detection3DArray>,
-    _sync_2d_publisher: Publisher<Detection2DArray>,
-    _sync_3d_publisher: Publisher<Detection3DArray>,
 }
 
 impl SynchronizerNode {
@@ -130,10 +123,8 @@ impl SynchronizerNode {
         });
 
         // Create publishers for synchronized detections
-        let sync_2d_publisher =
-            node.create_publisher::<Detection2DArray>("synchronized_aruco_detections")?;
-        let sync_3d_publisher =
-            node.create_publisher::<Detection3DArray>("synchronized_board_detections")?;
+        let sync_2d_publisher = node.create_publisher("synchronized_aruco_detections")?;
+        let sync_3d_publisher = node.create_publisher("synchronized_board_detections")?;
 
         // Start the synchronizer task
         {
@@ -153,21 +144,18 @@ impl SynchronizerNode {
         }
 
         // Create subscribers
-        let aruco_subscription = {
+        let _aruco_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription::<Detection2DArray, _>(
-                "aruco_detections",
-                move |msg: Detection2DArray| {
-                    Self::aruco_callback(msg, &state);
-                },
-            )?
+            node.create_subscription("aruco_detections", move |msg: Detection2DArray| {
+                Self::aruco_callback(msg, &state);
+            })?
         };
 
-        let board_subscription = {
+        let _board_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription::<Detection3DArray, _>(
+            node.create_subscription(
                 "calibration_board_detections",
                 move |msg: Detection3DArray| {
                     Self::board_callback(msg, &state);
@@ -183,10 +171,6 @@ impl SynchronizerNode {
         Ok(Self {
             _state: state,
             _node: node,
-            _aruco_subscription: aruco_subscription,
-            _board_subscription: board_subscription,
-            _sync_2d_publisher: sync_2d_publisher,
-            _sync_3d_publisher: sync_3d_publisher,
         })
     }
 
@@ -395,8 +379,7 @@ fn calculate_sync_quality(time_diff_ns: u64) -> u8 {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let context = Context::new(std::env::args(), InitOptions::default())?;
-    let mut executor = context.create_basic_executor();
+    let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("synchronizer")?;
     let _synchronizer_node = SynchronizerNode::new(node)?;
 

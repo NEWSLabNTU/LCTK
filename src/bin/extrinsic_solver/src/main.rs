@@ -16,10 +16,7 @@ use nalgebra as na;
 use once_cell::sync::Lazy;
 use opencv::core::{Point2d, Point2f, Point3d};
 use pnp_solver::{PnpMethod, PnpSolver};
-use rclrs::{
-    log_info, log_warn, Context, CreateBasicExecutor, InitOptions, Node, Publisher,
-    RclrsErrorFilter, SpinOptions, Subscription, ToLogParams,
-};
+use rclrs::*;
 use sensor_msgs::msg::CameraInfo;
 use std::{
     collections::HashMap,
@@ -151,12 +148,10 @@ impl ExtrinsicSolverNode {
         });
 
         // Create publisher for extrinsic transforms
-        let transform_publisher =
-            node.create_publisher::<TransformStamped>("extrinsic_transform")?;
+        let transform_publisher = node.create_publisher("extrinsic_transform")?;
 
         // Create publisher for calibration quality metrics
-        let quality_publisher =
-            node.create_publisher::<std_msgs::msg::String>("calibration_quality")?;
+        let quality_publisher = node.create_publisher("calibration_quality")?;
 
         // Create subscribers
         let aruco_subscription = {
@@ -164,12 +159,9 @@ impl ExtrinsicSolverNode {
             let transform_publisher = Arc::clone(&transform_publisher);
             let quality_publisher = Arc::clone(&quality_publisher);
 
-            node.create_subscription::<Detection2DArray, _>(
-                "aruco_detections",
-                move |msg: Detection2DArray| {
-                    Self::aruco_callback(msg, &state, &transform_publisher, &quality_publisher);
-                },
-            )?
+            node.create_subscription("aruco_detections", move |msg: Detection2DArray| {
+                Self::aruco_callback(msg, &state, &transform_publisher, &quality_publisher);
+            })?
         };
 
         let board_subscription = {
@@ -177,7 +169,7 @@ impl ExtrinsicSolverNode {
             let transform_publisher = Arc::clone(&transform_publisher);
             let quality_publisher = Arc::clone(&quality_publisher);
 
-            node.create_subscription::<Detection3DArray, _>(
+            node.create_subscription(
                 "calibration_board_detections",
                 move |msg: Detection3DArray| {
                     Self::board_callback(msg, &state, &transform_publisher, &quality_publisher);
@@ -188,7 +180,7 @@ impl ExtrinsicSolverNode {
         let camera_info_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription::<CameraInfo, _>("camera_info", move |msg: CameraInfo| {
+            node.create_subscription("camera_info", move |msg: CameraInfo| {
                 Self::camera_info_callback(msg, &state);
             })?
         };
@@ -764,8 +756,7 @@ impl ExtrinsicSolverNode {
 }
 
 fn main() -> Result<()> {
-    let context = Context::new(std::env::args(), InitOptions::default())?;
-    let mut executor = context.create_basic_executor();
+    let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("solve_extrinsic_params")?;
     let _solve_extrinsic_params_node = ExtrinsicSolverNode::new(node)?;
 
