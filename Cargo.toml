@@ -10,7 +10,6 @@ exclude = [
     "src/bin/rosbag_deck",
     # Python ROS package
     "src/bin/aruco_detection_overlay",
-    "src/ros2_rust_ws",
 ]
 
 [workspace.dependencies]
