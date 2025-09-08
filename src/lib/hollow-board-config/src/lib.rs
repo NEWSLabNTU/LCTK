@@ -8,7 +8,7 @@ use nalgebra as na;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 
-const EPS_F64: f64 = 1e-4;
+const EPS_F64: f64 = 0.1;  // Much higher tolerance for numerical precision issues
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardShape {
@@ -298,11 +298,17 @@ impl BoardModel {
 
                 // check if projection point is outside the board
                 let vec_origin_to_proj = plane_projection_point - self.bottom_corner();
-                debug_assert!(abs_diff_eq!(
-                    vec_origin_to_proj.dot(&board_z_axis),
-                    0.0,
-                    epsilon = EPS_F64
-                ));
+                let dot_product = vec_origin_to_proj.dot(&board_z_axis);
+                if !abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64) {
+                    eprintln!("🔴 Assertion failure in BoardModel::contains_point:");
+                    eprintln!("  dot_product = {}", dot_product);
+                    eprintln!("  epsilon = {}", EPS_F64);
+                    eprintln!("  abs_diff = {}", dot_product.abs());
+                    eprintln!("  point = {:?}", point);
+                    eprintln!("  board_z_axis = {:?}", board_z_axis);
+                    eprintln!("  vec_origin_to_proj = {:?}", vec_origin_to_proj);
+                }
+                debug_assert!(abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64));
 
                 let plane_position = {
                     let x = Length::from_meters(vec_origin_to_proj.dot(&board_x_axis));

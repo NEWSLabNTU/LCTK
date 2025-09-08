@@ -205,7 +205,7 @@ impl ExtrinsicSolverNode {
         // Store the CameraInfo directly
         if let Ok(mut camera_info_guard) = state.camera_info.lock() {
             *camera_info_guard = Some(msg);
-            log_info!(LOGGER_NAME, "Updated camera info from CameraInfo topic");
+            // log_info!(LOGGER_NAME, "Updated camera info from CameraInfo topic");
         } else {
             log_warn!(LOGGER_NAME, "Failed to lock camera info mutex");
         }

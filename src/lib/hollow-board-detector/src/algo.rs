@@ -19,7 +19,23 @@ use std::{
         self,
         consts::{FRAC_PI_2, FRAC_PI_4, PI},
     },
+    fs::File,
+    io::Write,
 };
+
+/// Helper function to save 3D points to CSV for visualization
+fn save_points_to_csv_3d(points: &[impl Borrow<Point3<f64>>], filename: &str) -> std::io::Result<()> {
+    let mut file = File::create(filename)?;
+    writeln!(file, "x,y,z")?;
+    
+    for point in points {
+        let p = point.borrow();
+        writeln!(file, "{},{},{}", p.x, p.y, p.z)?;
+    }
+    
+    println!("  💾 Saved {} points to {}", points.len(), filename);
+    Ok(())
+}
 
 unzip_n::unzip_n!(2);
 
@@ -36,16 +52,54 @@ pub fn fit_plane_ransac<'a>(
         ..
     } = *board_detector;
 
+    println!("🔍 RANSAC Debug: Starting plane fitting");
+    println!("  📊 Input points: {}", points.len());
+    println!("  🎯 Inlier threshold: {}", plane_ransac_inlier_threshold);
+    println!("  🔄 Max iterations: {}", plane_ransac_max_iterations);
+
+    // Check minimum points requirement
+    if points.len() < 3 {
+        println!("  ❌ RANSAC failed: Need at least 3 points, got {}", points.len());
+        return Ok(None);
+    }
+
     let mut arrsac = Arrsac::new(plane_ransac_inlier_threshold, rand::thread_rng())
         .max_candidate_hypotheses(plane_ransac_max_iterations);
     let estimator = PlaneEstimator::new();
+    
     let (plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
-            Some(ret) => ret,
-            None => return Ok(None),
+            Some(ret) => {
+                println!("  ✅ RANSAC succeeded!");
+                println!("    📈 Inliers found: {}", ret.1.len());
+                println!("    📊 Inlier ratio: {:.2}%", (ret.1.len() as f64 / points.len() as f64) * 100.0);
+                ret
+            },
+            None => {
+                println!("  ❌ RANSAC failed: No valid plane found");
+                println!("    Possible reasons:");
+                println!("    - Points are too noisy/scattered");
+                println!("    - Inlier threshold ({}) too strict", plane_ransac_inlier_threshold);
+                println!("    - Not enough iterations ({})", plane_ransac_max_iterations);
+                println!("    - Points don't form a plane");
+                return Ok(None);
+            }
         }
     };
+
     let inlier_points: Vec<_> = inlier_indices.into_iter().map(|idx| &points[idx]).collect();
+
+    // Log plane model details
+    println!("  🎯 Plane model found:");
+    println!("    Normal: ({:.4}, {:.4}, {:.4})", 
+             plane_model.normal[0], plane_model.normal[1], plane_model.normal[2]);
+    println!("    Center: ({:.4}, {:.4}, {:.4})", 
+             plane_model.center.x, plane_model.center.y, plane_model.center.z);
+
+    // Save RANSAC inliers to CSV for 3D visualization
+    if let Err(e) = save_points_to_csv_3d(&inlier_points, "ransac_plane_inliers.csv") {
+        println!("  ⚠️ Failed to save RANSAC inliers: {}", e);
+    }
 
     let viz_msg = PlaneRansacData {
         plane_model: plane_model.clone(),
@@ -71,6 +125,9 @@ pub fn fit_board_icp(
                                            // let good_fit_threshold = 0.1; // ouster os-1
     const OUTLIER_THRESHOLD: f64 = 0.1;
 
+    println!("🔧 ICP Debug: Starting board fitting");
+    println!("  📊 Plane inlier points: {}", plane_inlier_points.len());
+
     let Config {
         board_shape:
             BoardShape {
@@ -83,6 +140,11 @@ pub fn fit_board_icp(
         icp_rejection_threshold,
         ..
     } = *board_detector;
+    
+    println!("  ⚙️ ICP Parameters:");
+    println!("    Max iterations: {}", max_icp_iterations);
+    println!("    Pose weight threshold: {}", icp_pose_weight_threshold);
+    println!("    Rejection threshold: {}", icp_rejection_threshold);
     let marker_paper_size = aruco_detector.paper_size();
 
     let (board_pose, icp_losses, viz_msg) = {
@@ -319,6 +381,45 @@ pub fn fit_board_icp(
             return Ok(None);
         }
     }
+
+    // Save ICP results to CSV for 3D visualization
+    let board_model = BoardModel {
+        pose: board_pose,
+        board_shape: BoardShape {
+            board_width,
+            hole_radius,
+            hole_center_shift,
+        },
+        marker_paper_size,
+    };
+    
+    // Save board corners
+    let board_width_f64: f64 = board_width.as_meters();
+    let board_corners = vec![
+        board_model.bottom_corner(),
+        board_model.top_corner(),
+        board_model.top_corner() + board_model.board_x_axis().as_ref() * board_width_f64,
+        board_model.bottom_corner() + board_model.board_x_axis().as_ref() * board_width_f64,
+    ];
+    
+    if let Err(e) = save_points_to_csv_3d(&board_corners, "icp_board_corners.csv") {
+        println!("  ⚠️ Failed to save ICP board corners: {}", e);
+    }
+    
+    // Save board center and pose information
+    let board_info = vec![
+        board_model.board_center(),
+        board_model.board_center() + board_model.board_x_axis().as_ref() * 0.1, // X axis indicator
+        board_model.board_center() + board_model.board_y_axis().as_ref() * 0.1, // Y axis indicator  
+        board_model.board_center() + board_model.board_z_axis().as_ref() * 0.1, // Z axis indicator
+    ];
+    
+    if let Err(e) = save_points_to_csv_3d(&board_info, "icp_board_pose.csv") {
+        println!("  ⚠️ Failed to save ICP board pose: {}", e);
+    }
+
+    let final_loss = icp_losses.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+    println!("  🎯 ICP completed successfully! Loss: {:.6}", final_loss);
 
     Ok(Some(FitBoardIcp {
         board_pose,
