@@ -12,6 +12,7 @@ use rclrs::*;
 use sensor_msgs::msg::PointCloud2;
 use std::{
     fs,
+    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -143,6 +144,11 @@ impl CalibrationBoardLocatorNode {
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
         let points = Self::convert_pointcloud2_to_points(msg)?;
+        
+        // Save all points to CSV for debugging
+        if let Err(e) = Self::save_points_to_csv(&points, "points_all.csv") {
+            log_warn!(LOGGER_NAME, "Failed to save all points to CSV: {e}");
+        }
 
         // Filter points using bbox
         let bbox_guard = bbox
@@ -163,8 +169,30 @@ impl CalibrationBoardLocatorNode {
             });
         }
 
-        // Detect calibration board
-        let detection: Option<BoardDetection> = detector.detect(&active_points)?;
+        // Save filtered points to CSV for debugging
+        if let Err(e) = Self::save_points_to_csv(&active_points, "points_filtered.csv") {
+            log_warn!(LOGGER_NAME, "Failed to save filtered points to CSV: {e}");
+        }
+
+        // Add point cloud statistics before detection
+        Self::log_point_cloud_statistics(&active_points);
+
+        // Detect calibration board with detailed debugging
+        log_info!(LOGGER_NAME, "Starting board detection with {} filtered points", active_points.len());
+        let detection: Option<BoardDetection> = match detector.detect(&active_points) {
+            Ok(Some(det)) => {
+                log_info!(LOGGER_NAME, "✓ Detection successful!");
+                Some(det)
+            },
+            Ok(None) => {
+                log_warn!(LOGGER_NAME, "✗ Detection returned None - board not found");
+                None
+            },
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "✗ Detection failed with error: {}", e);
+                return Err(e.into());
+            }
+        };
 
         let mut detections = Vec::new();
         if let Some(board_detection) = detection {
@@ -172,11 +200,89 @@ impl CalibrationBoardLocatorNode {
                 Self::convert_board_detection_to_detection3d(&board_detection, &msg.header)?;
             detections.push(detection_3d);
         }
-
-        Ok(Detection3DArray {
+        
+        let detection_array = Detection3DArray {
             header: msg.header.clone(),
             detections,
-        })
+        };
+        
+        // Print Detection3DArray for debugging
+        log_info!(LOGGER_NAME, "Detection3DArray: {:?}", detection_array);
+        
+        Ok(detection_array)
+    }
+
+    fn save_points_to_csv(points: &[na::Point3<f64>], filename: &str) -> Result<()> {
+        let mut file = fs::File::create(filename)?;
+        writeln!(file, "x,y,z")?;
+        
+        for point in points {
+            writeln!(file, "{},{},{}", point.x, point.y, point.z)?;
+        }
+        
+        log_info!(LOGGER_NAME, "Saved {} points to {}", points.len(), filename);
+        Ok(())
+    }
+
+    fn log_point_cloud_statistics(points: &[na::Point3<f64>]) {
+        if points.is_empty() {
+            log_warn!(LOGGER_NAME, "Point cloud is empty!");
+            return;
+        }
+
+        // Calculate basic statistics
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        let mut min_z = f64::INFINITY;
+        let mut max_z = f64::NEG_INFINITY;
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        let mut sum_z = 0.0;
+
+        for point in points {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_y = min_y.min(point.y);
+            max_y = max_y.max(point.y);
+            min_z = min_z.min(point.z);
+            max_z = max_z.max(point.z);
+            sum_x += point.x;
+            sum_y += point.y;
+            sum_z += point.z;
+        }
+
+        let count = points.len() as f64;
+        let mean_x = sum_x / count;
+        let mean_y = sum_y / count;
+        let mean_z = sum_z / count;
+
+        // Calculate z-variance to assess planarity
+        let mut z_variance = 0.0;
+        for point in points {
+            let diff = point.z - mean_z;
+            z_variance += diff * diff;
+        }
+        z_variance /= count;
+        let z_std_dev = z_variance.sqrt();
+
+        log_info!(LOGGER_NAME, "📊 Point Cloud Statistics:");
+        log_info!(LOGGER_NAME, "  Count: {}", points.len());
+        log_info!(LOGGER_NAME, "  X range: [{:.3}, {:.3}] (span: {:.3})", min_x, max_x, max_x - min_x);
+        log_info!(LOGGER_NAME, "  Y range: [{:.3}, {:.3}] (span: {:.3})", min_y, max_y, max_y - min_y);
+        log_info!(LOGGER_NAME, "  Z range: [{:.3}, {:.3}] (span: {:.3})", min_z, max_z, max_z - min_z);
+        log_info!(LOGGER_NAME, "  Centroid: ({:.3}, {:.3}, {:.3})", mean_x, mean_y, mean_z);
+        log_info!(LOGGER_NAME, "  Z std dev: {:.4} (planarity indicator)", z_std_dev);
+        
+        // Planarity assessment
+        if z_std_dev < 0.05 {
+            log_info!(LOGGER_NAME, "  ✓ Points appear to be roughly planar (z_std < 0.05)");
+        } else if z_std_dev < 0.1 {
+            log_info!(LOGGER_NAME, "  ⚠ Points are somewhat planar (0.05 < z_std < 0.1)");
+        } else {
+            log_warn!(LOGGER_NAME, "  ✗ Points are highly non-planar (z_std > 0.1) - RANSAC may struggle");
+        }
     }
 
     fn convert_pointcloud2_to_points(msg: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
