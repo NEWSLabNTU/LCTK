@@ -1,32 +1,34 @@
-.PHONY: default build build_ros2_rust build_interface build_packages clean prepare lint format build_cargo launch_sensor launch_lidar_camera_calibration launch_two_lidar_calibration
-
 COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 LOG_DIR := build_logs
 
+.PHONY: default
 default: build
 
-prepare:
+.PHONY: setup
+setup:
 	@echo "Setting up LCTK development environment..."
 	@echo "This will install all required dependencies using Ansible."
 	@echo ""
 	@./setup-dev-env.sh
 
-prepare-minimal:
-	@echo "Setting up minimal LCTK environment (no CUDA or dev tools)..."
-	@./setup-dev-env.sh -y --minimal
+.PHONY: rosdep
+rosdep:
+	@echo "Installing ROS dependencies with rosdep..."
+	. /opt/ros/humble/setup.sh && \
+	rosdep update && \
+	rosdep install --from-paths src --ignore-src -r -y
 
-prepare-ci:
-	@echo "Setting up LCTK environment for CI (non-interactive)..."
-	@./setup-dev-env.sh -y
-
+.PHONY: build
 build: build_ros2_rust build_interface build_packages
 
+.PHONY: build_ros2_rust
 build_ros2_rust:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS2 Rust packages... (log: $(LOG_DIR)/ros2_rust.log)"
 	. /opt/ros/humble/setup.sh && \
 	$(MAKE) -C src/ros2_rust_ws 2>&1 | tee $(LOG_DIR)/ros2_rust.log
 
+.PHONY: build_interface
 build_interface:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building interface packages... (log: $(LOG_DIR)/interface.log)"
@@ -34,6 +36,7 @@ build_interface:
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/interface 2>&1 | tee $(LOG_DIR)/interface.log
 
+.PHONY: build_packages
 build_packages:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS nodes... (log: $(LOG_DIR)/packages.log)"
@@ -42,10 +45,12 @@ build_packages:
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/bin 2>&1 | tee $(LOG_DIR)/packages.log
 
+.PHONY: build_cargo
 build_cargo:
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	cargo build --all-targets
 
+.PHONY: format
 format:
 	@echo "Formatting Rust code..."
 	@cargo +nightly fmt
@@ -57,15 +62,18 @@ format:
 	@echo "Removing trailing spaces in Markdown files..."
 	@find . -name "*.md" -type f -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" -not -path "./src/ros2_rust_ws/*" | xargs -r sed -i 's/[[:space:]]*$$//' 2>/dev/null || true
 
+.PHONY: lint
 lint:
 	@echo "Checking Rust code formatting and linting..."
 	cargo +nightly fmt --check
 	cargo clippy --all-targets --all-features -- -D warnings
 
+.PHONY: clean
 clean:
 	rm -rf build install log target .cargo $(LOG_DIR)
 	$(MAKE) -C src/ros2_rust_ws clean
 
+.PHONY: launch_sensor
 launch_sensor:
 	@echo "Launching sensor publishers with sample data..."
 	. /opt/ros/humble/setup.sh && \
@@ -75,6 +83,7 @@ launch_sensor:
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true
 
+.PHONY: launch_lidar_camera_calibration
 launch_lidar_camera_calibration:
 	@echo "Launching LiDAR-Camera calibration with sample data..."
 	. /opt/ros/humble/setup.sh && \
@@ -84,6 +93,7 @@ launch_lidar_camera_calibration:
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true
 
+.PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:
 	@echo "Launching two LiDAR calibration with sample data..."
 	. /opt/ros/humble/setup.sh && \
