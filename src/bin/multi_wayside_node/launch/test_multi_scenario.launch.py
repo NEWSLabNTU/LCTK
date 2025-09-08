@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 
 import os
+
+import launch
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    ExecuteProcess,
-    TimerAction,
-    GroupAction,
-)
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
+                            TimerAction)
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.conditions import IfCondition, UnlessCondition
-import launch
 
 
 def generate_launch_description():

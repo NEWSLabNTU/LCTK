@@ -6,23 +6,24 @@ This script monitors and analyzes the performance of the multi_wayside_node,
 including CPU usage, memory consumption, message rates, and processing latencies.
 """
 
+import argparse
+import json
+import os
+import threading
+import time
+from collections import deque
+from datetime import datetime
+
+import matplotlib.pyplot as plt
+import numpy as np
+import psutil
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import PointCloud2
-from vision_msgs.msg import Detection3DArray
 from geometry_msgs.msg import TransformStamped
 from rcl_interfaces.msg import Log
-import psutil
-import time
-import threading
-import json
-import argparse
-from datetime import datetime
-from collections import deque
-import numpy as np
-import matplotlib.pyplot as plt
-import os
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import PointCloud2
+from vision_msgs.msg import Detection3DArray
 
 
 class PerformanceProfiler(Node):

@@ -9,14 +9,15 @@ This script:
 4. Provides detailed diagnostics for debugging
 """
 
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import TransformStamped
 import argparse
+import math
 import sys
 import time
-import math
 from typing import Optional, Tuple
+
+import rclpy
+from geometry_msgs.msg import TransformStamped
+from rclpy.node import Node
 
 
 class CalibrationValidator(Node):
@@ -69,7 +70,7 @@ class CalibrationValidator(Node):
 
         # Compute magnitudes
         translation_magnitude = math.sqrt(
-            translation.x**2 + translation.y**2 + translation.z**2
+            translation.x ** 2 + translation.y ** 2 + translation.z ** 2
         )
 
         # Convert quaternion to rotation angle (simplified)
