@@ -95,6 +95,7 @@
     <!-- Point Cloud Processing Pipeline -->
     <include file="$(find-pkg-share calib_launch)/launch/pointcloud_processing.launch.xml">
         <arg name="board_config_file" value="$(var board_config_file)"/>
+        <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
         <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>

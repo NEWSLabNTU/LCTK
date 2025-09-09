@@ -25,9 +25,6 @@ use vision_msgs::msg::{
 // Binary name for logging
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
-const ARUCO_PATTERN_CONFIG: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/config/aruco_pattern.json5");
-
 /// Convert aruco_locator::DetectionResult to Detection2DArray message
 fn convert_detection_result(
     result: &aruco_locator::DetectionResult,
@@ -160,6 +157,7 @@ pub struct ArucoLocatorNode {
     detection_publisher: Publisher<Detection2DArray>,
     _camera_namespace: String,
     detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
+    _aruco_config_file: String,
 }
 
 impl ArucoLocatorNode {
@@ -167,6 +165,15 @@ impl ArucoLocatorNode {
     pub fn new(node: &Node) -> Result<Self> {
         // Create the detector state
         let detector_state = Arc::new(Mutex::new(None));
+
+        // Get the aruco_config_file parameter (mandatory - must be set by user)
+        let aruco_config_file = node
+            .declare_parameter::<Arc<str>>("aruco_config_file")
+            .mandatory()?
+            .get()
+            .to_string();
+
+        log_info!(LOGGER_NAME, "Using ArUco config file: {aruco_config_file}");
 
         // Try to declare the parameter with default value
         let camera_namespace = node
@@ -192,10 +199,15 @@ impl ArucoLocatorNode {
 
         // Subscribe to camera_info
         let detector_state_camera_info = Arc::clone(&detector_state);
+        let config_file_for_callback = aruco_config_file.clone();
         let camera_info_subscription = node.create_subscription::<CameraInfo, _>(
             &camera_info_topic,
             move |msg: CameraInfo| {
-                Self::camera_info_callback(msg, Arc::clone(&detector_state_camera_info));
+                Self::camera_info_callback(
+                    msg,
+                    Arc::clone(&detector_state_camera_info),
+                    &config_file_for_callback,
+                );
             },
         )?;
         log_info!(LOGGER_NAME, "Camera namespace: {camera_namespace}");
@@ -211,6 +223,7 @@ impl ArucoLocatorNode {
             _camera_namespace: camera_namespace,
             detection_publisher,
             detector_state,
+            _aruco_config_file: aruco_config_file,
         };
 
         // Try to find an available image topic and subscribe to it with image processing callback
@@ -234,6 +247,7 @@ impl ArucoLocatorNode {
     fn camera_info_callback(
         camera_info: CameraInfo,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
+        aruco_config_file: &str,
     ) {
         // Check if detector is already initialized
         let already_initialized = {
@@ -243,7 +257,7 @@ impl ArucoLocatorNode {
             }
         };
 
-        let aruco_pattern = match Self::load_aruco_pattern() {
+        let aruco_pattern = match Self::load_aruco_pattern(aruco_config_file) {
             Ok(pattern) => pattern,
             Err(e) => {
                 log_error!(LOGGER_NAME, "Failed to load ArUco pattern: {e}");
@@ -281,8 +295,8 @@ impl ArucoLocatorNode {
     }
 
     /// Load ArUco pattern from config file
-    fn load_aruco_pattern() -> Result<aruco_config::MultiArucoPattern> {
-        let json5_text = std::fs::read_to_string(ARUCO_PATTERN_CONFIG)?;
+    fn load_aruco_pattern(config_file: &str) -> Result<aruco_config::MultiArucoPattern> {
+        let json5_text = std::fs::read_to_string(config_file)?;
         let pattern: aruco_config::MultiArucoPattern = json5::from_str(&json5_text)?;
 
         // Check if expected markers match our test pattern

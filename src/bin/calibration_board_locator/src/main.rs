@@ -8,7 +8,6 @@ use hollow_board_detector::{
     Config as BoardDetectorConfig, Detection as BoardDetection, Detector as BoardDetector,
 };
 use nalgebra as na;
-use once_cell::sync::Lazy;
 use rclrs::*;
 use sensor_msgs::msg::PointCloud2;
 use std::{
@@ -20,21 +19,7 @@ use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypot
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
-static DEFAULT_BOARD_DETECTOR_CONFIG: Lazy<BoardDetectorConfig> = Lazy::new(|| {
-    let text = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/config/board_detector.json5"
-    ));
-    json5::from_str(text).unwrap()
-});
-
-static DEFAULT_ARUCO_PATTERN_CONFIG: Lazy<MultiArucoPattern> = Lazy::new(|| {
-    let text = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/config/aruco_pattern.json5"
-    ));
-    json5::from_str(text).unwrap()
-});
+// Config files are now mandatory parameters - no defaults
 
 pub struct CalibrationBoardLocatorNode {
     _node: Node,
@@ -93,30 +78,30 @@ impl CalibrationBoardLocatorNode {
 
     fn load_board_detector_config(file_path: &str) -> Result<BoardDetectorConfig> {
         if file_path.is_empty() {
-            log_debug!(LOGGER_NAME, "Using default board detector configuration");
-            return Ok(DEFAULT_BOARD_DETECTOR_CONFIG.clone());
+            return Err(anyhow!("board_detector_file parameter is required but was empty"));
         }
 
+        log_info!(LOGGER_NAME, "Loading board detector config from: {file_path}");
         let path = PathBuf::from(file_path);
         Self::load_json5_file(&path)
     }
 
     fn load_aruco_pattern_config(file_path: &str) -> Result<MultiArucoPattern> {
         if file_path.is_empty() {
-            log_debug!(LOGGER_NAME, "Using default ArUco pattern configuration");
-            return Ok(DEFAULT_ARUCO_PATTERN_CONFIG.clone());
+            return Err(anyhow!("aruco_pattern_file parameter is required but was empty"));
         }
 
+        log_info!(LOGGER_NAME, "Loading ArUco pattern config from: {file_path}");
         let path = PathBuf::from(file_path);
         Self::load_json5_file(&path)
     }
 
     fn load_bbox_config(file_path: &str) -> Result<BBox> {
         if file_path.is_empty() {
-            log_debug!(LOGGER_NAME, "Using default bounding box configuration");
-            return Ok(BBox::default());
+            return Err(anyhow!("bbox_file parameter is required but was empty"));
         }
 
+        log_info!(LOGGER_NAME, "Loading bounding box config from: {file_path}");
         let path = PathBuf::from(file_path);
         Self::load_json5_file(&path)
     }

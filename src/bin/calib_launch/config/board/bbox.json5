@@ -1,0 +1,12 @@
+{
+    // Bounding box configuration for filtering point cloud data
+    // The pose defines the position and orientation of the box center
+    "pose": {
+        // Translation from origin (x, y, z in meters)
+        "translation": [0.0, 0.0, 0.0],
+        // Rotation as quaternion (w, x, y, z)
+        "rotation": [1.0, 0.0, 0.0, 0.0]
+    },
+    // Size of the bounding box in meters (x, y, z)
+    "size_xyz": [1.4, 0.4, 1.4]
+}
