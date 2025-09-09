@@ -22,7 +22,7 @@ pub struct MarkerDefinition {
 }
 ```
 
-#### aruco-detector  
+#### aruco-detector
 ArUco marker detection algorithms.
 
 ```rust
@@ -73,8 +73,8 @@ pub struct PnPSolver {
 
 impl PnPSolver {
     pub fn new(method: PnPMethod) -> Self;
-    pub fn solve(&self, points_2d: &[Point2<f64>], 
-                 points_3d: &[Point3<f64>], 
+    pub fn solve(&self, points_2d: &[Point2<f64>],
+                 points_3d: &[Point3<f64>],
                  camera_matrix: &Matrix3<f64>) -> Result<Transform>;
 }
 ```
@@ -98,7 +98,7 @@ impl PnPSolver {
 
 ### calibration_board_locator
 
-#### Topics  
+#### Topics
 **Subscriptions:**
 - `/sensing/lidar/top/pointcloud_raw` (sensor_msgs/PointCloud2)
 
@@ -133,7 +133,7 @@ impl PnPSolver {
 ```yaml
 # Calibration quality metrics
 float64 reprojection_error
-float64 detection_consistency  
+float64 detection_consistency
 float64 geometric_validation
 float64 temporal_stability
 float64 convergence_score
@@ -161,7 +161,7 @@ int32[] marker_ids       # List of marker IDs
 string output_format     # Output format (pdf, png, svg)
 
 ---
-# Response  
+# Response
 bool success
 string message
 string output_path       # Path to generated file
@@ -198,7 +198,7 @@ geometry_msgs/Transform result
 }
 ```
 
-### Board Configuration (JSON5)  
+### Board Configuration (JSON5)
 ```json5
 {
   "board_size": [0.6, 0.4],

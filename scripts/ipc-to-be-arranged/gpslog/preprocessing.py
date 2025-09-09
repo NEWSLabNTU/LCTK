@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import csv
+import sys
 
 time_list = list()
 filename = sys.argv[1]
@@ -13,8 +13,8 @@ with open(filename) as f:
         if len(gpsdata) == 13:
             time_list.append([l[0], int(gpsdata[1])])
 
-with open("processed_" + filename.split(".")[0] + ".csv", 'w', newline='') as csvfile:
+with open("processed_" + filename.split(".")[0] + ".csv", "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
-    writer.writerow(['Unix_time', 'GPS_time'])
+    writer.writerow(["Unix_time", "GPS_time"])
     for i in time_list:
         writer.writerow(i)

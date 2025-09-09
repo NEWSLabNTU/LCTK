@@ -10,7 +10,7 @@ LCTK is undergoing comprehensive refactoring to become fully ROS 2 compatible, t
 All core nodes are production-ready with full ROS 2 integration:
 
 - **`aruco_locator_node`**: ArUco marker detection in camera images
-- **`calibration_board_locator`**: Hollow board detection in point clouds  
+- **`calibration_board_locator`**: Hollow board detection in point clouds
 - **`extrinsic_solver`**: LiDAR-camera extrinsic parameter solving
 - **`synchronizer`**: Temporal synchronization of detections
 - **`pointcloud_image_overlay`**: 3D visualization and overlay

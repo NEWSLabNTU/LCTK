@@ -6,11 +6,11 @@ LCTK employs a comprehensive testing strategy covering unit tests, integration t
 
 ### Unit Tests
 - **Core algorithms**: Individual function and method testing
-- **Data structures**: Validation of serialization/deserialization  
+- **Data structures**: Validation of serialization/deserialization
 - **Mathematical operations**: Precision and correctness verification
 - **Error handling**: Edge case and failure mode testing
 
-### Integration Tests  
+### Integration Tests
 - **ROS 2 node functionality**: End-to-end message flow validation
 - **Calibration pipelines**: Complete workflow testing
 - **Cross-component communication**: Interface contract verification
@@ -40,11 +40,11 @@ cargo bench
 ```
 
 ### ROS 2 Testing
-```bash  
+```bash
 # Integration tests
 colcon test --packages-select <package>
 
-# Test results  
+# Test results
 colcon test-result --verbose
 ```
 
@@ -65,7 +65,7 @@ make test_calibration
 - Known ground truth transformations
 - Controlled noise and occlusion scenarios
 
-### Real-world Datasets  
+### Real-world Datasets
 - Multi-environment calibration data
 - Various sensor configurations
 - Different lighting and weather conditions
@@ -75,7 +75,7 @@ make test_calibration
 
 The project uses automated testing for:
 - Pull request validation
-- Performance regression detection  
+- Performance regression detection
 - Cross-platform compatibility
 - Documentation generation
 

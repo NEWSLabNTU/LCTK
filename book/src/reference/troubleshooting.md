@@ -8,7 +8,7 @@ This guide helps resolve common issues encountered when using LCTK.
 
 **Error**: `fatal error: 'memory' file not found`
 
-**Cause**: Missing C++ development headers  
+**Cause**: Missing C++ development headers
 **Solution**:
 ```bash
 sudo apt-get install libstdc++-12-dev libclang-dev
@@ -21,7 +21,7 @@ make build
 
 **Error**: `SFCGAL/capi/sfcgal_c.h: No such file or directory`
 
-**Cause**: Missing SFCGAL development libraries  
+**Cause**: Missing SFCGAL development libraries
 **Solution**:
 ```bash
 # Install SFCGAL
@@ -35,7 +35,7 @@ colcon build --packages-skip multi_wayside multi_wayside_node extrinsic_solver
 
 **Error**: One package failure causes all subsequent packages to abort
 
-**Cause**: Colcon's dependency resolution stops on first failure  
+**Cause**: Colcon's dependency resolution stops on first failure
 **Solution**:
 ```bash
 # Fix the failing package's dependencies first
@@ -52,7 +52,7 @@ colcon build --continue-on-error
 
 **Error**: `JSONDecodeError: Expecting value: line 1 column 1`
 
-**Cause**: Cargo metadata output contains patch warnings  
+**Cause**: Cargo metadata output contains patch warnings
 **Solution**: Fixed by modifying colcon-cargo to use `--quiet` flag
 ```bash
 # If still encountering this issue, ensure you have the latest colcon-cargo
@@ -181,7 +181,7 @@ ros2 topic echo /calibration/extrinsic_solver/calibration_quality
 
 ## Performance Issues
 
-### Slow Detection Times  
+### Slow Detection Times
 
 **Symptoms**: Detection processing takes >1 second per frame
 
@@ -330,7 +330,7 @@ When reporting issues, include:
 ### Advanced Debugging
 For complex issues:
 1. Enable debug mode in launch files
-2. Increase logging verbosity  
+2. Increase logging verbosity
 3. Use GDB for crash analysis
 4. Capture network traffic for communication issues
 5. Profile performance bottlenecks

@@ -50,7 +50,7 @@ Visualizes ArUco detections on camera images.
 
 ### rosbag_deck
 Advanced tool for working with ROS 2 bag files.
-- **Features**: 
+- **Features**:
   - Multi-bag playback synchronization
   - Rate control and looping
   - Topic filtering and remapping

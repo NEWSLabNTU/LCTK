@@ -4,7 +4,7 @@ This is a script that uses rsync to sync files between the remote server and loc
 
 ## Prerequisite
 
-Before using this script, please make sure you have registered the public key on the remote server for remote log in. 
+Before using this script, please make sure you have registered the public key on the remote server for remote log in.
 
 For how to setup the key, please refer to this [link](https://blog.gtwang.org/linux/linux-ssh-public-key-authentication/).
 
@@ -31,7 +31,7 @@ or
 
 ## Common Issues
 
-Error: 
+Error:
 
 ```
 bash: ./sync.sh: Permission denied

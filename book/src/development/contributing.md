@@ -26,7 +26,7 @@ Thank you for your interest in contributing to LCTK! This guide will help you ge
   let subscription = {
       let state = Arc::clone(&state);
       let publisher = Arc::clone(&publisher);
-      
+
       node.create_subscription::<MessageType, _>(
           "topic_name",
           move |msg| callback(msg, &state, &publisher),
@@ -56,7 +56,7 @@ Thank you for your interest in contributing to LCTK! This guide will help you ge
 ## Pull Request Process
 
 1. **Fork and Clone**: Fork the repository and clone your fork
-2. **Create Branch**: Create a feature branch from main  
+2. **Create Branch**: Create a feature branch from main
 3. **Implement Changes**: Make your changes following coding standards
 4. **Test**: Run tests and ensure they pass
 5. **Document**: Update documentation if needed
@@ -64,7 +64,7 @@ Thank you for your interest in contributing to LCTK! This guide will help you ge
 
 ### PR Requirements
 - [ ] Code follows style guidelines
-- [ ] Tests added for new functionality  
+- [ ] Tests added for new functionality
 - [ ] All tests pass
 - [ ] Documentation updated
 - [ ] No merge conflicts with main
@@ -77,7 +77,7 @@ Thank you for your interest in contributing to LCTK! This guide will help you ge
 - Calibration accuracy improvements
 - Documentation and examples
 
-### Medium Priority  
+### Medium Priority
 - UI/UX improvements for visualization
 - Additional calibration algorithms
 - Cross-platform compatibility
@@ -100,7 +100,7 @@ Thank you for your interest in contributing to LCTK! This guide will help you ge
 ### Code of Conduct
 We follow a standard code of conduct:
 - Be welcoming and inclusive
-- Respect different viewpoints and experiences  
+- Respect different viewpoints and experiences
 - Accept constructive criticism gracefully
 - Focus on what's best for the community
 

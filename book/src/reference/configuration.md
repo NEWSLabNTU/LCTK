@@ -5,7 +5,7 @@ LCTK uses multiple configuration mechanisms to provide flexibility while maintai
 ## Configuration Hierarchy
 
 1. **Default values**: Built into the code
-2. **Configuration files**: JSON5 files for complex structures  
+2. **Configuration files**: JSON5 files for complex structures
 3. **Launch parameters**: ROS 2 launch file arguments
 4. **Runtime parameters**: ROS 2 parameter server
 5. **Environment variables**: System-level configuration
@@ -22,9 +22,9 @@ LCTK uses multiple configuration mechanisms to provide flexibility while maintai
 </launch>
 ```
 
-### Advanced Parameters  
+### Advanced Parameters
 ```xml
-<arg name="aruco_config_file" 
+<arg name="aruco_config_file"
      default="$(find-pkg-share calib_launch)/config/aruco/aruco_pattern.json5"/>
 <arg name="board_config_file"
      default="$(find-pkg-share calib_launch)/config/board/board_pattern.json5"/>
@@ -41,18 +41,18 @@ Location: `config/aruco/aruco_pattern.json5`
 {
   // ArUco dictionary selection
   "dictionary": "DICT_5X5_1000",
-  
+
   // Physical marker size in meters
   "marker_size": 0.05,
-  
+
   // Marker definitions
   "markers": [
     {"id": 696, "position": [0.0, 0.0]},    // Bottom-left
-    {"id": 64,  "position": [0.1, 0.0]},    // Bottom-right  
+    {"id": 64,  "position": [0.1, 0.0]},    // Bottom-right
     {"id": 306, "position": [0.0, 0.1]},    // Top-left
     {"id": 195, "position": [0.1, 0.1]}     // Top-right
   ],
-  
+
   // Detection parameters
   "detection": {
     "corner_refinement": "CORNER_REFINE_SUBPIX",
@@ -71,14 +71,14 @@ Location: `config/board/board_pattern.json5`
 {
   // Physical board dimensions in meters
   "board_size": [0.6, 0.4],  // [width, height]
-  
+
   // Hole specifications
   "hole_diameter": 0.05,
   "hole_positions": [
     [0.1, 0.1], [0.5, 0.1],  // Bottom row
     [0.1, 0.3], [0.5, 0.3]   // Top row
   ],
-  
+
   // Detection parameters
   "detection_params": {
     "min_plane_points": 100,
@@ -87,7 +87,7 @@ Location: `config/board/board_pattern.json5`
     "hole_detection_tolerance": 0.005,
     "min_hole_points": 50
   },
-  
+
   // Filtering parameters
   "filtering": {
     "voxel_size": 0.01,
@@ -120,7 +120,7 @@ distortion_coefficients:
 
 rectification_matrix:
   rows: 3
-  cols: 3  
+  cols: 3
   data: [1.0, 0.0, 0.0,
          0.0, 1.0, 0.0,
          0.0, 0.0, 1.0]
@@ -157,7 +157,7 @@ ros2 param get /calibration/aruco_locator aruco_config_file
     debug_mode: true
     camera_namespace: "/sensing/camera/front_center"
     detection_frequency: 30.0
-    
+
 /calibration/extrinsic_solver:
   ros__parameters:
     pnp_method: "SQPNP"
@@ -212,7 +212,7 @@ export LCTK_VISUALIZATION_BACKEND=rviz
         }
       },
       "rear": {
-        "topic": "/sensing/lidar/rear/pointcloud_raw", 
+        "topic": "/sensing/lidar/rear/pointcloud_raw",
         "frame_id": "lidar_rear"
       }
     },
@@ -252,7 +252,7 @@ export LCTK_VISUALIZATION_BACKEND=rviz
     "cache_size": 1000,
     "parallel_processing": {
       "aruco_detection": true,
-      "board_detection": true, 
+      "board_detection": true,
       "synchronization": false
     }
   }
@@ -285,7 +285,7 @@ ros2 run lctk_tools test_sensors --config config/sensors.json5
 - Use environment-specific configuration branches
 - Document configuration changes in commit messages
 
-### Deployment  
+### Deployment
 - Use configuration templates for different environments
 - Validate configurations in CI/CD pipelines
 - Provide configuration migration tools for updates

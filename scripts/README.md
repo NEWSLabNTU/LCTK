@@ -14,7 +14,7 @@
 
 - **00_convert-to-LCTK.sh**
     - Convert the recording data to fit LCTK format.
-- You can execute the steps of calibration separately : 
+- You can execute the steps of calibration separately :
 ```bash=
 ./01_convert-to-pcd.sh
 ./02_convert-to-image.sh
