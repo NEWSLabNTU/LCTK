@@ -79,7 +79,7 @@ class DetectionOverlayNode(Node):
             self.detection_cache.append(msg)
             self.detection_count += 1
             if self.detection_count % 10 == 0:
-                self.get_logger().info(
+                self.get_logger().debug(
                     f"Received {self.detection_count} detection messages"
                 )
 
@@ -219,7 +219,9 @@ class DetectionOverlayNode(Node):
 
             self.image_count += 1
             if self.image_count % 30 == 0:
-                self.get_logger().info(f"Published {self.image_count} annotated images")
+                self.get_logger().debug(
+                    f"Published {self.image_count} annotated images"
+                )
 
         except Exception as e:
             self.get_logger().error(f"Error in image callback: {str(e)}")
