@@ -8,6 +8,13 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- GStreamer dependencies for video playback -->
+  <exec_depend>gstreamer1.0-plugins-base</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-good</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-bad</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-ugly</exec_depend>
+  <exec_depend>gstreamer1.0-libav</exec_depend>
+
   <exec_depend>gscam</exec_depend>
   <exec_depend>aruco_locator_node</exec_depend>
   <exec_depend>calibration_board_locator</exec_depend>
