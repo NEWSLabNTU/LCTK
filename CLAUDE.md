@@ -178,7 +178,7 @@ The environment setup script is in `setup/setup-env.sh`.
 
 1. **OpenCV version 0.0.0 issue**: The Makefile now automatically sets `OPENCV_PKGCONFIG_NAME=opencv4` to use the system OpenCV installation instead of the non-existent `/opt/opencv4.6.0` path.
 
-2. **Ansible configuration errors**: 
+2. **Ansible configuration errors**:
    - The ansible.builtin collection is built-in and shouldn't be in ansible-galaxy-requirements.yaml
    - Ansible needs the ANSIBLE_CONFIG environment variable set to find the correct roles path
    - The setup script now exports ANSIBLE_CONFIG to ensure roles are found
@@ -199,10 +199,15 @@ The environment setup script is in `setup/setup-env.sh`.
 6. **gscam node crashes**: If the gscam node fails to play video files:
    - Install required GStreamer plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`
    - The camera.launch.xml file has been updated to use a simple decodebin pipeline that auto-detects video formats
+   - If you get "undefined symbol: av_timecode_make_smpte_tc_string2" error:
+     * This is a libav/ffmpeg version mismatch issue
+     * Try: `sudo apt-get install --reinstall gstreamer1.0-libav libavutil56 libavfilter7`
+     * Or use the test pattern launch file: `ros2 launch calib_launch camera_test.launch.xml`
+     * Or if you have NVIDIA GPU, modify the pipeline to use nvcodec decoders
 
 7. **rosdep missing dependencies**: The `libpcap` dependency is correctly specified in package.xml files (not `libpcap-dev`)
 
-8. **rosdep initialization errors**: 
+8. **rosdep initialization errors**:
    - `rosdep init` must be run as root (creates /etc/ros/rosdep/sources.list.d/20-default.list)
    - `rosdep update` must be run as a regular user (updates ~/.ros/rosdep/sources.cache)
    - The Ansible playbooks now check if rosdep is already initialized before attempting to run init
@@ -301,7 +306,7 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   let subscription = {
       let state = Arc::clone(&state);
       let publisher = Arc::clone(&publisher);
-      
+
       node.create_subscription::<MessageType, _>(
           "topic_name",
           move |msg| {
@@ -309,12 +314,12 @@ make launch_sensor  # Plays LiDAR and camera data in loop
           },
       )?
   };
-  
+
   // Instead of
   let state_clone = Arc::clone(&state);
   let publisher_clone = Arc::clone(&publisher);
   let subscription = node.create_subscription::<MessageType, _>(
-      "topic_name", 
+      "topic_name",
       move |msg| {
           callback(msg, &state_clone, &publisher_clone);
       },
