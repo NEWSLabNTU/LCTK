@@ -297,6 +297,14 @@ make launch_sensor  # Plays LiDAR and camera data in loop
 - OpenCV environment variables are set automatically in the Makefile to avoid version 0.0.0 issues.
 - Dependencies are now managed through Ansible playbooks in an Autoware-style setup (setup-dev-env.sh)
 - Git ignores build artifacts: ansible_collections/, build/, install/, log/, build_logs/, .cargo/, ros2_rust_ws/{build,install,log}/
+- **Config File Parameters**: All ROS2 nodes now require mandatory config file parameters - no hardcoded defaults:
+  - `aruco_locator_node`: Requires `aruco_config_file` parameter (no default path)
+  - `calibration_board_locator`: Requires `board_detector_file`, `aruco_pattern_file`, and `bbox_file` parameters
+  - Config files are passed from launch files to ensure explicit configuration
+- **GStreamer Video Playback**: The camera.launch.xml now uses `filesrc location=$(var video_file) ! decodebin ! videoconvert` instead of test patterns
+- **ROS2 Daemon Issues**: If ROS2 daemon becomes unresponsive, kill it with: `pkill -9 -f ros2-daemon`
+- **Workspace Dependencies**: ROS2 Rust dependencies use workspace.dependencies in root Cargo.toml, not patch.crates-io
+- **rclrs API Migration**: Updated from v0.4.x to v0.5.x - executor.spin() now returns Vec<RclrsError> instead of Vec<Result<_, RclrsError>>
 
 ## Coding Style
 
