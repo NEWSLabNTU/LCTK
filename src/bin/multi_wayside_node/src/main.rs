@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
 use eyre::Result;
-use rclrs::{
-    log_info, Context, CreateBasicExecutor, InitOptions, RclrsErrorFilter, SpinOptions,
-};
+use rclrs::{log_info, Context, CreateBasicExecutor, InitOptions, RclrsErrorFilter, SpinOptions};
 use std::sync::{Arc, Mutex};
 
 // Modules
