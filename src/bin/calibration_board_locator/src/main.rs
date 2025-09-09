@@ -93,7 +93,7 @@ impl CalibrationBoardLocatorNode {
 
     fn load_board_detector_config(file_path: &str) -> Result<BoardDetectorConfig> {
         if file_path.is_empty() {
-            log_info!(LOGGER_NAME, "Using default board detector configuration");
+            log_debug!(LOGGER_NAME, "Using default board detector configuration");
             return Ok(DEFAULT_BOARD_DETECTOR_CONFIG.clone());
         }
 
@@ -103,7 +103,7 @@ impl CalibrationBoardLocatorNode {
 
     fn load_aruco_pattern_config(file_path: &str) -> Result<MultiArucoPattern> {
         if file_path.is_empty() {
-            log_info!(LOGGER_NAME, "Using default ArUco pattern configuration");
+            log_debug!(LOGGER_NAME, "Using default ArUco pattern configuration");
             return Ok(DEFAULT_ARUCO_PATTERN_CONFIG.clone());
         }
 
@@ -113,7 +113,7 @@ impl CalibrationBoardLocatorNode {
 
     fn load_bbox_config(file_path: &str) -> Result<BBox> {
         if file_path.is_empty() {
-            log_info!(LOGGER_NAME, "Using default bounding box configuration");
+            log_debug!(LOGGER_NAME, "Using default bounding box configuration");
             return Ok(BBox::default());
         }
 
@@ -171,7 +171,7 @@ impl CalibrationBoardLocatorNode {
         drop(bbox_guard);
 
         if active_points.is_empty() {
-            log_warn!(LOGGER_NAME, "No points within bounding box");
+            log_debug!(LOGGER_NAME, "No points within bounding box");
             return Ok(Detection3DArray {
                 header: msg.header.clone(),
                 detections: Vec::new(),
@@ -243,7 +243,7 @@ impl CalibrationBoardLocatorNode {
             }
         }
 
-        log_info!(
+        log_debug!(
             LOGGER_NAME,
             "Parsed {} valid points from PointCloud2 message",
             points.len()
