@@ -5,7 +5,7 @@ use nalgebra as na;
 use palette::{Hsv, IntoColor, RgbHue, Srgb};
 use rclrs::{
     log_info, log_warn, Context, CreateBasicExecutor, InitOptions, Node, RclrsErrorFilter,
-    SpinOptions, Subscription, ToLogParams,
+    SpinOptions, Subscription,
 };
 use rerun::{ChannelDatatype, ColorModel, Image as RerunImage, Pinhole, Points3D, RecordingStream};
 use sensor_msgs::msg::{CameraInfo, Image, PointCloud2};
