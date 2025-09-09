@@ -15,7 +15,7 @@ log = { workspace = true }
 noisy_float = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = { workspace = true }
-sensor_msgs = "4.8.0"
+sensor_msgs.workspace = true
 
 [dependencies.opencv]
 workspace = true
@@ -36,5 +36,5 @@ features = ["aruco", "imgcodecs"]
 
 [dev-dependencies]
 clap = { workspace = true }
-sensor_msgs = "4.8.0"
-std_msgs = { version = "*" }
+sensor_msgs.workspace = true
+std_msgs.workspace = true

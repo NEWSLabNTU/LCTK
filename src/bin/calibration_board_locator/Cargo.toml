@@ -8,18 +8,18 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../lib/aruco-config" }
-geometry_msgs = "4.8.0"
+geometry_msgs.workspace = true
 hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config", features = ["kiss3d"] }
 hollow-board-detector = { version = "0.1.0", path = "../../lib/hollow-board-detector" }
 json5 = { workspace = true }
 once_cell = { workspace = true }
 pcd-rs = { workspace = true }
-rclrs = "0.5"
-sensor_msgs = "4.8.0"
+rclrs.workspace = true
+sensor_msgs.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
-std_msgs = "4.8.0"
-vision_msgs = "4.1.1"
+std_msgs.workspace = true
+vision_msgs.workspace = true
 
 [dependencies.nalgebra]
 workspace = true

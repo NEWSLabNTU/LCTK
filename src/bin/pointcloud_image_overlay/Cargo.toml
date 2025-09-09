@@ -7,12 +7,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-builtin_interfaces = "*"
-geometry_msgs = "*"
+builtin_interfaces.workspace = true
+geometry_msgs.workspace = true
 nalgebra = { workspace = true }
 palette = "0.7.3"
-rclrs = "*"
+rclrs.workspace = true
 rerun.workspace = true
-sensor_msgs = "4.8.0"
-std_msgs = "*"
+sensor_msgs.workspace = true
+std_msgs.workspace = true
 unzip-n.workspace = true

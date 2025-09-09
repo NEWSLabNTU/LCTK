@@ -61,3 +61,13 @@ rerun = { version = "0.23.4" }
 # newslab-serde crates
 newslab-serde-measurements = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }
 newslab-serde-nalgebra = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }
+
+# ROS2 dependencies from workspace
+rclrs = { path = "src/ros2_rust_ws/install/rclrs/share/rclrs/rust" }
+geometry_msgs = { path = "src/ros2_rust_ws/install/geometry_msgs/share/geometry_msgs/rust" }
+sensor_msgs = { path = "src/ros2_rust_ws/install/sensor_msgs/share/sensor_msgs/rust" }
+std_msgs = { path = "src/ros2_rust_ws/install/std_msgs/share/std_msgs/rust" }
+vision_msgs = { path = "src/ros2_rust_ws/install/vision_msgs/share/vision_msgs/rust" }
+visualization_msgs = { path = "src/ros2_rust_ws/install/visualization_msgs/share/visualization_msgs/rust" }
+builtin_interfaces = { path = "src/ros2_rust_ws/install/builtin_interfaces/share/builtin_interfaces/rust" }
+tf2_msgs = { path = "src/ros2_rust_ws/install/tf2_msgs/share/tf2_msgs/rust" }

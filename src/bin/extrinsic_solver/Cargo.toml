@@ -12,7 +12,7 @@ aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
 calibration-quality = { version = "0.1.0", path = "../../lib/calibration-quality" }
 cv-convert = { workspace = true, features = ["nalgebra"] }
 dynamic-calibration = { version = "0.1.0", path = "../../lib/dynamic-calibration" }
-geometry_msgs = "4.8.0"
+geometry_msgs.workspace = true
 hollow-board-config = { version = "0.1.0", path = "../../lib/hollow-board-config" }
 itertools = { workspace = true }
 json5 = { workspace = true }
@@ -22,10 +22,10 @@ noisy_float = { workspace = true }
 once_cell = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["calib3d", "imgproc", "clang-runtime"] }  # imgproc is not used but is required to fix compile error
 pnp-solver = { version = "0.1.0", path = "../../lib/pnp-solver" }
-rclrs = "0.5"
-sensor_msgs = "4.8.0"
+rclrs.workspace = true
+sensor_msgs.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 serde_yaml = { workspace = true }
-std_msgs = "4.8.0"
-vision_msgs = "4.1.1"
+std_msgs.workspace = true
+vision_msgs.workspace = true

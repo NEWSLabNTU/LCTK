@@ -5,13 +5,13 @@ edition = "2021"
 
 [dependencies]
 # ROS 2 dependencies
-rclrs = "0.5"
-builtin_interfaces = "1.2.1"
-std_msgs = "4.8.0"
-sensor_msgs = "4.8.0"
-geometry_msgs = "4.8.0"
-vision_msgs = "4.1.1"
-visualization_msgs = "4.8.0"
+rclrs.workspace = true
+builtin_interfaces.workspace = true
+std_msgs.workspace = true
+sensor_msgs.workspace = true
+geometry_msgs.workspace = true
+vision_msgs.workspace = true
+visualization_msgs.workspace = true
 
 # Core dependencies
 eyre = { workspace = true }

@@ -13,9 +13,9 @@ aruco-detector = { version = "0.1.0", path = "../../lib/aruco-detector" }
 ctrlc = "3.4"
 
 # ROS 2 dependencies
-rclrs = { version = "*" }
-sensor_msgs = { version = "*" }
-std_msgs = { version = "*" }
-geometry_msgs = { version = "*" }
-vision_msgs = { version = "*" }
+rclrs.workspace = true
+sensor_msgs.workspace = true
+std_msgs.workspace = true
+geometry_msgs.workspace = true
+vision_msgs.workspace = true
 json5.workspace = true

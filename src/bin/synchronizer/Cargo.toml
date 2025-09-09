@@ -7,17 +7,17 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-builtin_interfaces = "1.2.1"
+builtin_interfaces.workspace = true
 eyre = "0.6.12"
 futures = "0.3.28"
-geometry_msgs = "4.8.0"
+geometry_msgs.workspace = true
 indexmap = { version = "2.0.2", features = ["serde"] }
 multi-stream-synchronizer = { version = "0.1.0", path = "../../lib/multi-stream-synchronizer" }
 once_cell = { workspace = true }
-rclrs = "0.5"
+rclrs.workspace = true
 serde = { workspace = true }
 serde_yaml = { workspace = true }
-std_msgs = "4.8.0"
+std_msgs.workspace = true
 tokio = { version = "1.33.0", features = ["sync", "rt", "rt-multi-thread", "macros"] }
 tracing = "0.1.37"
-vision_msgs = "4.1.1"
+vision_msgs.workspace = true
