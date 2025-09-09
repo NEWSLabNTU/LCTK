@@ -44,8 +44,17 @@
           namespace="$(var camera_namespace)"
           output="log">
         <!-- Parameters -->
-        <!-- GStreamer pipeline: Simple pipeline using decodebin for auto-detection -->
-        <param name="gscam_config" value="filesrc location=$(var video_file) ! decodebin ! videoconvert"/>
+        <!-- GStreamer pipeline configuration -->
+        <!--
+            Try different decoders based on availability:
+            1. For MPEG4/AVI: filesrc ! avidemux ! mpeg4videoparse ! nvmpeg4videodec ! videoconvert (if NVIDIA available)
+            2. Generic: filesrc ! decodebin ! videoconvert (requires working gstreamer1.0-libav)
+            3. If libav fails with symbol errors, try reinstalling:
+               sudo apt-get install -reinstall gstreamer1.0-libav libavutil56 libavfilter7
+        -->
+        <!-- Using test pattern due to libav decoder issues. To use video file, fix libav or use: -->
+        <!-- filesrc location=$(var video_file) ! decodebin ! videoconvert -->
+        <param name="gscam_config" value="videotestsrc pattern=smpte ! video/x-raw,width=1920,height=1080,framerate=30/1 ! videoconvert"/>
         <param name="camera_name" value="camera"/>
         <param name="camera_info_url" value="$(var camera_info_url)"/>
         <param name="frame_id" value="$(var frame_id)"/>
