@@ -2,7 +2,7 @@ use crate::{
     roi::{bounds_from_center_size, center_size_from_bounds, RoiManager},
     visualization::RoiMarkerGenerator,
 };
-use rclrs::{log_error, log_info, rmw_request_id_t as ServiceRequestHeader, Node, ToLogParams};
+use rclrs::{log_error, log_info, rmw_request_id_t as ServiceRequestHeader, Node};
 // Temporarily disabled - rosbag_deck_interface not available as Rust crate
 // use rosbag_deck_interface::srv::{SetRoiBoundsRequest, SetRoiBoundsResponse};
 

@@ -1,6 +1,6 @@
 use crate::types::RoiBounds;
 use eyre::Result;
-use rclrs::{log_info, Node, ToLogParams};
+use rclrs::{log_info, Node};
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 /// Configuration parameters for the multi-wayside node

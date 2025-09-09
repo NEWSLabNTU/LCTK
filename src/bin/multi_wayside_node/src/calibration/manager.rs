@@ -10,7 +10,7 @@ use builtin_interfaces::msg::Time;
 use eyre::Result;
 use geometry_msgs::msg::TransformStamped;
 use nalgebra::Isometry3;
-use rclrs::{log_error, log_info, log_warn, ToLogParams};
+use rclrs::{log_error, log_info, log_warn};
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},

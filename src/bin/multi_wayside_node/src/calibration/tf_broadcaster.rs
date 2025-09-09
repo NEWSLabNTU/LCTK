@@ -3,7 +3,7 @@ use builtin_interfaces::msg::Time;
 use eyre::Result;
 use geometry_msgs::msg::TransformStamped;
 use nalgebra::Isometry3;
-use rclrs::{log_info, Node, Publisher, ToLogParams};
+use rclrs::{log_info, Node, Publisher};
 use std::{
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
