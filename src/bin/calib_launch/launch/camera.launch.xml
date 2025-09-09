@@ -52,9 +52,8 @@
             3. If libav fails with symbol errors, try reinstalling:
                sudo apt-get install -reinstall gstreamer1.0-libav libavutil56 libavfilter7
         -->
-        <!-- Using test pattern due to libav decoder issues. To use video file, fix libav or use: -->
-        <!-- filesrc location=$(var video_file) ! decodebin ! videoconvert -->
-        <param name="gscam_config" value="videotestsrc pattern=smpte ! video/x-raw,width=1920,height=1080,framerate=30/1 ! videoconvert"/>
+        <!-- Using decodebin for automatic format detection -->
+        <param name="gscam_config" value="filesrc location=$(var video_file) ! decodebin ! videoconvert"/>
         <param name="camera_name" value="camera"/>
         <param name="camera_info_url" value="$(var camera_info_url)"/>
         <param name="frame_id" value="$(var frame_id)"/>
