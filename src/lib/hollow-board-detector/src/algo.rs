@@ -3,7 +3,6 @@ use crate::{
     detection::{FitBoardIcp, FitPlaneRansac, IcpData, PlaneRansacData},
 };
 use anyhow::Result;
-use approx::abs_diff_eq;
 use arrsac::Arrsac;
 use aruco_config::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
@@ -17,7 +16,6 @@ use std::{
     borrow::Borrow,
     f64::{
         self,
-        consts::{FRAC_PI_2, FRAC_PI_4, PI},
     },
     fs::File,
     io::Write,
@@ -167,33 +165,18 @@ pub fn fit_board_icp(
                 }
             };
 
-            // let the xy-plane projections of board normal and plane normal overlap
-            // it decreases the chance of falling into local minimum
+            // Align the board's Z-axis with the plane normal
+            // This is a much simpler and more direct approach
             let rotation = {
-                let lifting_rotation = UnitQuaternion::from_euler_angles(0.0, -FRAC_PI_2, 0.0)
-                    * UnitQuaternion::from_euler_angles(0.0, 0.0, -FRAC_PI_4);
-                let lifted_normal = lifting_rotation * Vector3::z_axis();
-                debug_assert!(abs_diff_eq!(
-                    (*lifted_normal + *Vector3::x_axis()).norm(),
-                    0.0,
-                    epsilon = EPS_F64
-                ));
-
-                let planar_rotation = {
-                    let planar_plane_normal = Vector3::new(plane_normal.x, plane_normal.y, 0.0);
-                    UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
-                        .unwrap_or_else(|| {
-                            if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
-                                UnitQuaternion::identity()
-                            } else {
-                                UnitQuaternion::from_euler_angles(0.0, 0.0, PI)
-                            }
-                        })
-                };
-                planar_rotation * lifting_rotation
+                let board_z_axis = Vector3::z_axis();
+                UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
+                    .unwrap_or_else(|| {
+                        // If the vectors are parallel, use identity
+                        UnitQuaternion::identity()
+                    })
             };
 
-            Isometry3::from_parts(Translation3::identity(), rotation)
+            Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
         };
         let init_inlier_points: Vec<&Point3<_>> = plane_inlier_points
             .iter()
@@ -201,8 +184,8 @@ pub fn fit_board_icp(
             .collect();
 
         let (inlier_points, corresponding_points, icp_losses, pose) = {
-            let mut inlier_points = init_inlier_points;
-            let mut losses = vec![];
+            let mut inlier_points: Vec<Point3<f64>> = init_inlier_points.iter().map(|&p| *p).collect();
+            let mut losses: Vec<f64> = vec![];
             let mut termination_count = 0;
             let mut pose = init_pose;
             let mut step = 0;
@@ -217,55 +200,79 @@ pub fn fit_board_icp(
                     },
                     marker_paper_size,
                 };
+                
+                if step == 0 || step % 10 == 0 { // Show details for first step and every 10th step
+                    println!("  🔧 ICP Step {}: Board model created", step);
+                    println!("    📍 Board pose translation: ({:.4}, {:.4}, {:.4})",
+                             pose.translation.x, pose.translation.y, pose.translation.z);
+                    println!("    🔄 Board pose rotation: ({:.4}, {:.4}, {:.4}, {:.4})",
+                             pose.rotation.i, pose.rotation.j, pose.rotation.k, pose.rotation.w);
+                    println!("    📊 Input inlier points: {}", inlier_points.len());
+                }
 
-                let correspondings = board_model.find_correspondences(inlier_points);
-                let correspondings = match correspondings {
-                    Some(corr) => corr,
-                    None => return Ok(None),
-                };
-                debug_assert!({
-                    correspondings
-                        .iter()
-                        .all(|(_data_point, corresponding_point)| {
-                            let center = board_model.board_center();
 
-                            abs_diff_eq!(
-                                board_model
-                                    .board_z_axis()
-                                    .dot(&(corresponding_point - center)),
-                                0.0,
-                                epsilon = EPS_F64
-                            )
-                        })
-                });
+                // Simple correspondence finding: project points onto board plane
+                let correspondings: Vec<(Point3<f64>, Point3<f64>)> = inlier_points
+                    .iter()
+                    .map(|input_point| {
+                        // Project point onto board plane
+                        let board_center = board_model.board_center();
+                        let board_normal = board_model.board_z_axis();
+                        let vec_to_point: Vector3<f64> = *input_point - board_center;
+                        let distance_to_plane = vec_to_point.dot(&board_normal);
+                        let projected_point = *input_point - board_normal.scale(distance_to_plane);
+                        
+                        (*input_point, projected_point)
+                    })
+                    .collect();
+
+                if step == 0 || step % 10 == 0 { // Show details for first step and every 10th step
+                    println!("    ✅ Found {} correspondences", correspondings.len());
+                    println!("    📊 Correspondence details (showing first 5):");
+                    for (i, (input_point, corresponding_point)) in correspondings.iter().take(5).enumerate() {
+                        let distance = (input_point - corresponding_point).norm();
+                        println!("      {}: Input({:.4}, {:.4}, {:.4}) -> Corresponding({:.4}, {:.4}, {:.4}) | Distance: {:.6}",
+                            i+1,
+                            input_point.x, input_point.y, input_point.z,
+                            corresponding_point.x, corresponding_point.y, corresponding_point.z,
+                            distance
+                        );
+                    }
+                    if correspondings.len() > 5 {
+                        println!("      ... and {} more correspondences", correspondings.len() - 5);
+                    }
+                }
 
                 // reject outliers
-                let (good_inlier_points, good_corresponding_points, avg_loss) = {
-                    let losses: Vec<_> = correspondings
-                        .iter()
-                        .map(|(input_point, corresponding_point)| {
-                            let loss = (input_point.borrow() - corresponding_point).norm();
-                            loss
-                        })
-                        .collect();
-                    let avg_loss = losses.iter().sum::<f64>() / correspondings.len() as f64;
+                let correspondence_losses: Vec<_> = correspondings
+                    .iter()
+                    .map(|(input_point, corresponding_point)| {
+                        let loss = (input_point - corresponding_point).norm();
+                        loss
+                    })
+                    .collect();
+                let avg_loss = correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
+                
+                if step == 0 || step % 10 == 0 { // Show details for first step and every 10th step
+                    let min_loss = correspondence_losses.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                    let max_loss = correspondence_losses.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                    println!("    📈 Loss statistics: avg={:.6}, min={:.6}, max={:.6}", avg_loss, min_loss, max_loss);
+                    println!("    🎯 Good fit threshold: {}, Outlier threshold: {}", GOOD_FIT_THRESHOLD, OUTLIER_THRESHOLD);
+                }
 
-                    let good_correspondences: Vec<_> = if avg_loss <= GOOD_FIT_THRESHOLD {
-                        izip!(correspondings, losses.iter().cloned())
-                            .filter_map(|((inlier_point, corresponding_point), loss)| {
-                                (loss < OUTLIER_THRESHOLD)
-                                    .then_some((inlier_point, corresponding_point))
-                            })
-                            .collect()
-                    } else {
-                        correspondings
-                    };
+                let good_correspondences: Vec<_> = correspondings
+                    .iter()
+                    .zip(losses.iter())
+                    .filter_map(|((input_point, corresponding_point), &loss)| {
+                        if loss <= OUTLIER_THRESHOLD {
+                            Some((*input_point, *corresponding_point))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                    let (good_inlier_points, good_corresponding_points) =
-                        good_correspondences.into_iter().unzip_n_vec();
-
-                    (good_inlier_points, good_corresponding_points, avg_loss)
-                };
+                let (good_inlier_points, good_corresponding_points): (Vec<Point3<f64>>, Vec<Point3<f64>>) = good_correspondences.into_iter().unzip();
 
                 // compute transformation
                 let align_pose: Isometry3<_> = {
@@ -273,7 +280,7 @@ pub fn fit_board_icp(
                     let pairs = izip!(
                         good_inlier_points
                             .iter()
-                            .map(|&&p| -> [f64; 3] { p.into() }),
+                            .map(|&p| -> [f64; 3] { p.into() }),
                         good_corresponding_points
                             .iter()
                             .map(|&p| -> [f64; 3] { p.into() }),
@@ -318,6 +325,16 @@ pub fn fit_board_icp(
                             .unwrap_or(0.0);
                         translation_weight + rotation_weight
                     };
+                    
+                    if step == 0 || step % 10 == 0 { // Show details for first step and every 10th step
+                        println!("    🔄 ICP Step {}: Pose weight analysis", step);
+                        println!("      📏 Translation weight: {:.8}", align_pose.translation.vector.norm());
+                        println!("      🔄 Rotation weight: {:.8}", align_pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0));
+                        println!("      ⚖️ Total pose weight: {:.8}", pose_weight);
+                        println!("      🎯 Threshold: {:.8}", icp_pose_weight_threshold);
+                        println!("      📊 Avg loss: {:.8}", avg_loss);
+                    }
+                    
                     if pose_weight <= icp_pose_weight_threshold {
                         termination_count + 1
                     } else {
@@ -327,11 +344,18 @@ pub fn fit_board_icp(
 
                 // update state
                 losses.push(avg_loss);
+                // Convert back to the expected format for the next iteration
                 inlier_points = good_inlier_points;
-                pose = align_pose * pose;
+                pose = pose * align_pose;
                 step += 1;
 
+                if step == 0 || step % 10 == 0 { // Show details for first step and every 10th step
+                    println!("    📊 Termination count: {}/16", termination_count);
+                    println!("    🔢 Step: {}/{}", step, max_icp_iterations);
+                }
+                
                 if step == max_icp_iterations || termination_count > 16 {
+                    println!("    🛑 ICP terminating: step={}, termination_count={}", step, termination_count);
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
             }
