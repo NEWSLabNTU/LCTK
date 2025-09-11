@@ -1,5 +1,6 @@
 use crate::{
     config::Config,
+    debug_visualization::{create_debug_publisher, DebugVisualizationData, DebugVisualizationPublisher},
     detection::{FitBoardIcp, FitPlaneRansac, IcpData, PlaneRansacData},
 };
 use anyhow::Result;
@@ -65,6 +66,26 @@ pub fn fit_board_icp(
     aruco_detector: &MultiArucoPattern,
     plane_model: &PlaneModel,
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
+) -> Result<Option<FitBoardIcp>> {
+    // Create debug publisher if enabled
+    let debug_publisher = create_debug_publisher(board_detector);
+    
+    fit_board_icp_with_debug(
+        board_detector,
+        aruco_detector,
+        plane_model,
+        plane_inlier_points,
+        debug_publisher,
+    )
+}
+
+/// Estimates the board pose from a point set using ICP algorithm with debug visualization.
+pub fn fit_board_icp_with_debug(
+    board_detector: &Config,
+    aruco_detector: &MultiArucoPattern,
+    plane_model: &PlaneModel,
+    plane_inlier_points: &[impl Borrow<Point3<f64>>],
+    debug_publisher: std::sync::Arc<dyn DebugVisualizationPublisher>,
 ) -> Result<Option<FitBoardIcp>> {
     // find board by modified ICP algoirthm
     const GOOD_FIT_THRESHOLD: f64 = 0.015; // velodyne 32-MR
@@ -156,6 +177,35 @@ pub fn fit_board_icp(
                     marker_paper_size,
                 };
 
+                // Publish debug visualization data for this ICP iteration
+                if board_detector.enable_debug_visualization {
+                    let debug_data = DebugVisualizationData {
+                        iteration: step,
+                        board_model: board_model.clone(),
+                        inlier_points: inlier_points.iter().map(|&&p| p).collect(),
+                        corresponding_points: vec![], // Will be filled after correspondences are found
+                        current_loss: 0.0, // Will be filled after loss calculation
+                        pose_weight: 0.0, // Will be filled after pose weight calculation
+                        plane_ransac_data: PlaneRansacData {
+                            plane_model: plane_model.clone(),
+                            inlier_points: plane_inlier_points.iter().map(|p| (*p.borrow()).clone()).collect(),
+                        },
+                    };
+                    
+                    // Publish board model markers for visualization
+                    if let Err(e) = debug_publisher.publish_board_model_markers(&board_model, step) {
+                        eprintln!("Warning: Failed to publish board model markers: {}", e);
+                    }
+                    
+                    // Publish input point cloud
+                    if let Err(e) = debug_publisher.publish_point_cloud_debug(
+                        &inlier_points.iter().map(|&&p| p).collect::<Vec<_>>(),
+                        "input_points"
+                    ) {
+                        eprintln!("Warning: Failed to publish input point cloud: {}", e);
+                    }
+                }
+
                 let correspondings = board_model.find_correspondences(inlier_points);
                 let correspondings = match correspondings {
                     Some(corr) => corr,
@@ -232,11 +282,7 @@ pub fn fit_board_icp(
                     //     let model_centroid: Point3<f64> =
                     //         geom_algo::centroid_of_points(good_corresponding_points.iter()).unwrap();
                     //     Translation3::from(input_centroid - model_centroid)
-                    // };
-
-                    // let align_quaternion = {
-                    //     let input_target_pairs = good_corresponding_points
-                    //         .iter()
+                    // };，
                     //         .map(|point| align_translation * point)
                     //         .zip(good_inlier_points.iter().copied());
 
@@ -256,6 +302,35 @@ pub fn fit_board_icp(
                             .unwrap_or(0.0);
                         translation_weight + rotation_weight
                     };
+                    
+                    // Publish complete debug visualization data with calculated values
+                    if board_detector.enable_debug_visualization {
+                        let debug_data = DebugVisualizationData {
+                            iteration: step,
+                            board_model: board_model.clone(),
+                            inlier_points: good_inlier_points.iter().map(|&&p| p).collect(),
+                            corresponding_points: good_corresponding_points.clone(),
+                            current_loss: avg_loss,
+                            pose_weight,
+                            plane_ransac_data: PlaneRansacData {
+                                plane_model: plane_model.clone(),
+                                inlier_points: plane_inlier_points.iter().map(|p| (*p.borrow()).clone()).collect(),
+                            },
+                        };
+                        
+                        if let Err(e) = debug_publisher.publish_icp_debug_data(&debug_data) {
+                            eprintln!("Warning: Failed to publish ICP debug data: {}", e);
+                        }
+                        
+                        // Publish corresponding points
+                        if let Err(e) = debug_publisher.publish_point_cloud_debug(
+                            &good_corresponding_points,
+                            "corresponding_points"
+                        ) {
+                            eprintln!("Warning: Failed to publish corresponding points: {}", e);
+                        }
+                    }
+                    
                     if pose_weight <= icp_pose_weight_threshold {
                         termination_count + 1
                     } else {

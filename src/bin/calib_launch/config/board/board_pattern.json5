@@ -10,6 +10,8 @@
     "icp_pose_weight_threshold": 5e-13,
     // the maximum accepted ICP loss
     "icp_rejection_threshold": 1.0,
+    // enable debug visualization topics for ICP iterations
+    "enable_debug_visualization": true,
     // the length of border margin
     "board_width": "1000mm",    // mm
     // the radius of circle holes

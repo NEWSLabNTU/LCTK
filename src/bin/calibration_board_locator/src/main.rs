@@ -39,9 +39,24 @@ impl CalibrationBoardLocatorNode {
             .mandatory()?
             .get();
         let bbox_file_param: Arc<str> = node.declare_parameter("bbox_file").mandatory()?.get();
+        
+        // Declare debug mode parameter
+        let debug_mode: bool = node
+            .declare_parameter("debug_mode")
+            .default(false)
+            .mandatory()?
+            .get();
 
         // Load configurations
-        let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
+        let mut board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
+        
+        // Override debug visualization setting based on debug_mode parameter
+        board_detector_config.enable_debug_visualization = debug_mode;
+        
+        if debug_mode {
+            log_info!(LOGGER_NAME, "Debug visualization enabled - debug topics will be published");
+        }
+        
         let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
 
         let bbox = Self::load_bbox_config(&bbox_file_param)?;

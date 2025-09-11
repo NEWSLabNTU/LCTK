@@ -49,5 +49,9 @@
         <param name="debug_mode" value="$(var debug_mode)"/>
         <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
         <remap from="board_detections" to="$(var board_detections_topic)"/>
+        <remap from="debug/board_model_markers" to="$(var namespace)/debug/board_model_markers"/>
+        <remap from="debug/input_point_cloud" to="$(var namespace)/debug/input_point_cloud"/>
+        <remap from="debug/corresponding_points" to="$(var namespace)/debug/corresponding_points"/>
+        <remap from="debug/icp_iteration_data" to="$(var namespace)/debug/icp_iteration_data"/>
     </node>
 </launch>

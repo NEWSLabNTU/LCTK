@@ -18,27 +18,18 @@ impl HollowBoardDetectionProcessor {
         Self { detector }
     }
 
-    pub fn from_config_file(_config_path: &str) -> Result<Self> {
-        // For now, create a minimal detector for compilation
-        // TODO: Implement proper config loading from file
+    pub fn from_config_file(config_path: &str) -> Result<Self> {
         use aruco_config::{ArucoDictionary, MultiArucoPattern};
-        use hollow_board_config::BoardShape;
         use hollow_board_detector::Config;
         use measurements::Length;
         use noisy_float::prelude::*;
+        use std::fs;
 
-        let config = Config {
-            max_icp_iterations: 100,
-            icp_pose_weight_threshold: 0.95,
-            icp_rejection_threshold: 0.01,
-            plane_ransac_max_iterations: 1000,
-            plane_ransac_inlier_threshold: 0.05,
-            board_shape: BoardShape {
-                board_width: Length::from_inches(12.0),
-                hole_radius: Length::from_inches(0.5),
-                hole_center_shift: Length::from_inches(2.0),
-            },
-        };
+        // Load config from file
+        let config_content = fs::read_to_string(config_path)
+            .map_err(|e| eyre::eyre!("Failed to read config file {}: {}", config_path, e))?;
+        let config: Config = json5::from_str(&config_content)
+            .map_err(|e| eyre::eyre!("Failed to parse config file {}: {}", config_path, e))?;
 
         let aruco_pattern = MultiArucoPattern {
             marker_ids: vec![1, 2, 3, 4],

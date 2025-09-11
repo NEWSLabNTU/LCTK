@@ -8,6 +8,8 @@ pub struct Config {
     pub icp_rejection_threshold: f64,
     pub plane_ransac_max_iterations: usize,
     pub plane_ransac_inlier_threshold: f64,
+    /// Enable debug visualization topics for ICP iterations
+    pub enable_debug_visualization: bool,
     #[serde(flatten)]
     pub board_shape: BoardShape,
 }

@@ -20,6 +20,13 @@ hollow-board-config = { version = "0.1.0", path = "../hollow-board-config" }
 aruco-config = { version = "0.1.0", path = "../aruco-config" }
 plane-estimator = { version = "0.1.0", path = "../plane-estimator" }
 
+# ROS2 dependencies for debug visualization
+rclrs = { workspace = true }
+visualization_msgs = { workspace = true }
+sensor_msgs = { workspace = true }
+std_msgs = { workspace = true }
+builtin_interfaces = { workspace = true }
+
 [dependencies.newslab-geom-algo]
 git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
 tag = "v0.2.1"
