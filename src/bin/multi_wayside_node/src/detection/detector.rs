@@ -32,7 +32,7 @@ impl HollowBoardDetectionProcessor {
             icp_pose_weight_threshold: 0.95,
             icp_rejection_threshold: 0.01,
             plane_ransac_max_iterations: 1000,
-            plane_ransac_inlier_threshold: 0.05,
+            plane_ransac_inlier_threshold: 0.5,
             board_shape: BoardShape {
                 board_width: Length::from_inches(12.0),
                 hole_radius: Length::from_inches(0.5),
