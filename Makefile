@@ -2,7 +2,34 @@ COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 LOG_DIR := build_logs
 
 .PHONY: default
-default: build
+default: help
+
+.PHONY: help
+help:
+	@echo "LCTK (LiDAR and Camera Toolkit) - Available targets:"
+	@echo ""
+	@echo "Setup & Environment:"
+	@echo "  make setup                      - Set up development environment (installs all dependencies)"
+	@echo "  make rosdep                     - Install ROS dependencies with rosdep"
+	@echo ""
+	@echo "Build Commands:"
+	@echo "  make build                      - Build entire project (all 3 passes)"
+	@echo "  make build_ros2_rust            - Build ROS2 Rust base packages"
+	@echo "  make build_interface            - Build interface types"
+	@echo "  make build_packages             - Build ROS nodes"
+	@echo "  make build_cargo                - Build with cargo directly (non-ROS)"
+	@echo ""
+	@echo "Launch Commands:"
+	@echo "  make launch_sensor              - Launch sensor publishers with sample data"
+	@echo "  make launch_lidar_camera_calibration - Launch LiDAR-Camera calibration"
+	@echo "  make launch_two_lidar_calibration    - Launch two LiDAR calibration"
+	@echo ""
+	@echo "Development Tools:"
+	@echo "  make format                     - Format all code (Rust, Python, configs)"
+	@echo "  make lint                       - Run linters and formatters check"
+	@echo "  make clean                      - Clean all build artifacts"
+	@echo ""
+	@echo "For more information, see README.md and CLAUDE.md"
 
 .PHONY: setup
 setup:
