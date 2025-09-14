@@ -8,7 +8,7 @@ use nalgebra as na;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 
-const EPS_F64: f64 = 0.1;  // Much higher tolerance for numerical precision issues
+const EPS_F64: f64 = 0.1; // Much higher tolerance for numerical precision issues
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardShape {
