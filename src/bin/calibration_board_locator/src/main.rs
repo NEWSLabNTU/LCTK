@@ -12,7 +12,6 @@ use rclrs::*;
 use sensor_msgs::msg::PointCloud2;
 use std::{
     fs,
-    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -26,6 +25,10 @@ pub struct CalibrationBoardLocatorNode {
     _node: Node,
     _detection_publisher: Publisher<Detection3DArray>,
     _pointcloud_subscription: Subscription<PointCloud2>,
+    // Debug publishers - only created when debug mode is enabled
+    _debug_all_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
+    _debug_filtered_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
+    _debug_plane_inliers_publisher: Option<Arc<Publisher<PointCloud2>>>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -40,6 +43,13 @@ impl CalibrationBoardLocatorNode {
             .mandatory()?
             .get();
         let bbox_file_param: Arc<str> = node.declare_parameter("bbox_file").mandatory()?.get();
+
+        // Debug mode parameter (optional, defaults to false)
+        let debug_param = node
+            .declare_parameter("enable_debug")
+            .default(false)
+            .optional()?;
+        let enable_debug = debug_param.get().unwrap_or(false);
 
         // Load configurations
         let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
@@ -58,41 +68,85 @@ impl CalibrationBoardLocatorNode {
         let detection_publisher = node.create_publisher("calibration_board_detections")?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
 
+        // Create debug publishers if debug mode is enabled
+        let debug_all_points_publisher = if enable_debug {
+            log_info!(
+                LOGGER_NAME,
+                "Debug mode enabled - creating debug publishers"
+            );
+            Some(Arc::new(node.create_publisher("debug/all_points")?))
+        } else {
+            None
+        };
+        let debug_all_points_shared = debug_all_points_publisher.clone();
+
+        let debug_filtered_points_publisher = if enable_debug {
+            Some(Arc::new(node.create_publisher("debug/filtered_points")?))
+        } else {
+            None
+        };
+        let debug_filtered_points_shared = debug_filtered_points_publisher.clone();
+
+        let debug_plane_inliers_publisher = if enable_debug {
+            Some(Arc::new(node.create_publisher("debug/plane_inliers")?))
+        } else {
+            None
+        };
+        let debug_plane_inliers_shared = debug_plane_inliers_publisher.clone();
+
         // Create subscription to PointCloud2
         let pointcloud_subscription =
             node.create_subscription("input_pointcloud", move |msg: PointCloud2| {
-                Self::pointcloud_callback(msg, &detector, &detection_publisher_shared, &bbox);
+                Self::pointcloud_callback(
+                    msg,
+                    &detector,
+                    &detection_publisher_shared,
+                    &bbox,
+                    &debug_all_points_shared,
+                    &debug_filtered_points_shared,
+                    &debug_plane_inliers_shared,
+                );
             })?;
 
-        log_info!(
-            LOGGER_NAME,
-            "Calibration board locator node initialized. Subscribing to: input_pointcloud, Publishing to: calibration_board_detections"
-        );
+        if enable_debug {
+            log_info!(
+                LOGGER_NAME,
+                "Calibration board locator node initialized with debug mode"
+            );
+            log_info!(
+                LOGGER_NAME,
+                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers"
+            );
+        }
 
         Ok(Self {
             _node: node,
             _detection_publisher: detection_publisher,
             _pointcloud_subscription: pointcloud_subscription,
-            // bbox: bbox_shared,
+            _debug_all_points_publisher: debug_all_points_publisher,
+            _debug_filtered_points_publisher: debug_filtered_points_publisher,
+            _debug_plane_inliers_publisher: debug_plane_inliers_publisher,
         })
     }
 
     fn load_board_detector_config(file_path: &str) -> Result<BoardDetectorConfig> {
         if file_path.is_empty() {
-            return Err(anyhow!("board_detector_file parameter is required but was empty"));
+            return Err(anyhow!(
+                "board_detector_file parameter is required but was empty"
+            ));
         }
 
-        log_info!(LOGGER_NAME, "Loading board detector config from: {file_path}");
         let path = PathBuf::from(file_path);
         Self::load_json5_file(&path)
     }
 
     fn load_aruco_pattern_config(file_path: &str) -> Result<MultiArucoPattern> {
         if file_path.is_empty() {
-            return Err(anyhow!("aruco_pattern_file parameter is required but was empty"));
+            return Err(anyhow!(
+                "aruco_pattern_file parameter is required but was empty"
+            ));
         }
 
-        log_info!(LOGGER_NAME, "Loading ArUco pattern config from: {file_path}");
         let path = PathBuf::from(file_path);
         Self::load_json5_file(&path)
     }
@@ -102,7 +156,6 @@ impl CalibrationBoardLocatorNode {
             return Err(anyhow!("bbox_file parameter is required but was empty"));
         }
 
-        log_info!(LOGGER_NAME, "Loading bounding box config from: {file_path}");
         let path = PathBuf::from(file_path);
         Self::load_json5_file(&path)
     }
@@ -121,8 +174,18 @@ impl CalibrationBoardLocatorNode {
         detector: &Arc<BoardDetector>,
         publisher: &Publisher<Detection3DArray>,
         bbox: &Arc<Mutex<BBox>>,
+        debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
     ) {
-        let result = Self::process_pointcloud(&msg, detector, bbox);
+        let result = Self::process_pointcloud(
+            &msg,
+            detector,
+            bbox,
+            debug_all_points_pub,
+            debug_filtered_points_pub,
+            debug_plane_inliers_pub,
+        );
 
         let detection_array = match result {
             Ok(detection_array) => detection_array,
@@ -141,13 +204,24 @@ impl CalibrationBoardLocatorNode {
         msg: &PointCloud2,
         detector: &Arc<BoardDetector>,
         bbox: &Arc<Mutex<BBox>>,
+        debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
         let points = Self::convert_pointcloud2_to_points(msg)?;
-        
-        // Save all points to CSV for debugging
-        if let Err(e) = Self::save_points_to_csv(&points, "points_all.csv") {
-            log_warn!(LOGGER_NAME, "Failed to save all points to CSV: {e}");
+
+        // Publish debug all points if enabled
+        if let Some(pub_all) = debug_all_points_pub {
+            log_debug!(
+                LOGGER_NAME,
+                "Publishing {} points to debug/all_points",
+                points.len()
+            );
+            let debug_cloud = Self::create_debug_pointcloud(&points, &msg.header)?;
+            if let Err(e) = pub_all.publish(debug_cloud) {
+                log_warn!(LOGGER_NAME, "Failed to publish debug all points: {e}");
+            }
         }
 
         // Filter points using bbox
@@ -169,27 +243,50 @@ impl CalibrationBoardLocatorNode {
             });
         }
 
-        // Save filtered points to CSV for debugging
-        if let Err(e) = Self::save_points_to_csv(&active_points, "points_filtered.csv") {
-            log_warn!(LOGGER_NAME, "Failed to save filtered points to CSV: {e}");
+        log_debug!(
+            LOGGER_NAME,
+            "Filtered {} points within bounding box",
+            active_points.len()
+        );
+
+        // Publish debug filtered points if enabled
+        if let Some(pub_filtered) = debug_filtered_points_pub {
+            log_debug!(
+                LOGGER_NAME,
+                "Publishing {} filtered points to debug/filtered_points",
+                active_points.len()
+            );
+            let debug_cloud = Self::create_debug_pointcloud(&active_points, &msg.header)?;
+            if let Err(e) = pub_filtered.publish(debug_cloud) {
+                log_warn!(LOGGER_NAME, "Failed to publish debug filtered points: {e}");
+            }
         }
 
-        // Add point cloud statistics before detection
-        Self::log_point_cloud_statistics(&active_points);
-
-        // Detect calibration board with detailed debugging
-        log_info!(LOGGER_NAME, "Starting board detection with {} filtered points", active_points.len());
+        // Detect calibration board
+        log_debug!(
+            LOGGER_NAME,
+            "Starting board detection with {} points",
+            active_points.len()
+        );
         let detection: Option<BoardDetection> = match detector.detect(&active_points) {
             Ok(Some(det)) => {
-                log_info!(LOGGER_NAME, "✓ Detection successful!");
+                log_debug!(LOGGER_NAME, "Board detection successful");
+
+                // Publish debug plane inliers if enabled
+                if let Some(_pub_inliers) = debug_plane_inliers_pub {
+                    // Access the ransac_data if available from the detection
+                    // Note: This requires the detection to expose ransac data
+                    log_debug!(LOGGER_NAME, "Debug plane inliers publisher available");
+                }
+
                 Some(det)
-            },
+            }
             Ok(None) => {
-                log_warn!(LOGGER_NAME, "✗ Detection returned None - board not found");
+                log_warn!(LOGGER_NAME, "Detection returned None - board not found");
                 None
-            },
+            }
             Err(e) => {
-                log_warn!(LOGGER_NAME, "✗ Detection failed with error: {}", e);
+                log_warn!(LOGGER_NAME, "Detection failed with error: {}", e);
                 return Err(e.into());
             }
         };
@@ -200,89 +297,20 @@ impl CalibrationBoardLocatorNode {
                 Self::convert_board_detection_to_detection3d(&board_detection, &msg.header)?;
             detections.push(detection_3d);
         }
-        
+
+        let num_detections = detections.len();
         let detection_array = Detection3DArray {
             header: msg.header.clone(),
             detections,
         };
-        
-        // Print Detection3DArray for debugging
-        log_info!(LOGGER_NAME, "Detection3DArray: {:?}", detection_array);
-        
+
+        log_debug!(
+            LOGGER_NAME,
+            "Completed processing with {} detections",
+            num_detections
+        );
+
         Ok(detection_array)
-    }
-
-    fn save_points_to_csv(points: &[na::Point3<f64>], filename: &str) -> Result<()> {
-        let mut file = fs::File::create(filename)?;
-        writeln!(file, "x,y,z")?;
-        
-        for point in points {
-            writeln!(file, "{},{},{}", point.x, point.y, point.z)?;
-        }
-        
-        log_info!(LOGGER_NAME, "Saved {} points to {}", points.len(), filename);
-        Ok(())
-    }
-
-    fn log_point_cloud_statistics(points: &[na::Point3<f64>]) {
-        if points.is_empty() {
-            log_warn!(LOGGER_NAME, "Point cloud is empty!");
-            return;
-        }
-
-        // Calculate basic statistics
-        let mut min_x = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
-        let mut min_z = f64::INFINITY;
-        let mut max_z = f64::NEG_INFINITY;
-        let mut sum_x = 0.0;
-        let mut sum_y = 0.0;
-        let mut sum_z = 0.0;
-
-        for point in points {
-            min_x = min_x.min(point.x);
-            max_x = max_x.max(point.x);
-            min_y = min_y.min(point.y);
-            max_y = max_y.max(point.y);
-            min_z = min_z.min(point.z);
-            max_z = max_z.max(point.z);
-            sum_x += point.x;
-            sum_y += point.y;
-            sum_z += point.z;
-        }
-
-        let count = points.len() as f64;
-        let mean_x = sum_x / count;
-        let mean_y = sum_y / count;
-        let mean_z = sum_z / count;
-
-        // Calculate z-variance to assess planarity
-        let mut z_variance = 0.0;
-        for point in points {
-            let diff = point.z - mean_z;
-            z_variance += diff * diff;
-        }
-        z_variance /= count;
-        let z_std_dev = z_variance.sqrt();
-
-        log_info!(LOGGER_NAME, "📊 Point Cloud Statistics:");
-        log_info!(LOGGER_NAME, "  Count: {}", points.len());
-        log_info!(LOGGER_NAME, "  X range: [{:.3}, {:.3}] (span: {:.3})", min_x, max_x, max_x - min_x);
-        log_info!(LOGGER_NAME, "  Y range: [{:.3}, {:.3}] (span: {:.3})", min_y, max_y, max_y - min_y);
-        log_info!(LOGGER_NAME, "  Z range: [{:.3}, {:.3}] (span: {:.3})", min_z, max_z, max_z - min_z);
-        log_info!(LOGGER_NAME, "  Centroid: ({:.3}, {:.3}, {:.3})", mean_x, mean_y, mean_z);
-        log_info!(LOGGER_NAME, "  Z std dev: {:.4} (planarity indicator)", z_std_dev);
-        
-        // Planarity assessment
-        if z_std_dev < 0.05 {
-            log_info!(LOGGER_NAME, "  ✓ Points appear to be roughly planar (z_std < 0.05)");
-        } else if z_std_dev < 0.1 {
-            log_info!(LOGGER_NAME, "  ⚠ Points are somewhat planar (0.05 < z_std < 0.1)");
-        } else {
-            log_warn!(LOGGER_NAME, "  ✗ Points are highly non-planar (z_std > 0.1) - RANSAC may struggle");
-        }
     }
 
     fn convert_pointcloud2_to_points(msg: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
@@ -334,12 +362,6 @@ impl CalibrationBoardLocatorNode {
             }
         }
 
-        log_debug!(
-            LOGGER_NAME,
-            "Parsed {} valid points from PointCloud2 message",
-            points.len()
-        );
-
         Ok(points)
     }
 
@@ -357,6 +379,61 @@ impl CalibrationBoardLocatorNode {
             data[offset + 3],
         ];
         Ok(f32::from_le_bytes(bytes))
+    }
+
+    fn create_debug_pointcloud(
+        points: &[na::Point3<f64>],
+        header: &std_msgs::msg::Header,
+    ) -> Result<PointCloud2> {
+        use sensor_msgs::msg::PointField;
+
+        let point_step = 12; // 3 floats * 4 bytes
+        let row_step = point_step * points.len() as u32;
+        let data_len = row_step as usize;
+        let mut data = vec![0u8; data_len];
+
+        // Write points to data buffer
+        for (i, point) in points.iter().enumerate() {
+            let offset = i * point_step as usize;
+            let x_bytes = (point.x as f32).to_le_bytes();
+            let y_bytes = (point.y as f32).to_le_bytes();
+            let z_bytes = (point.z as f32).to_le_bytes();
+
+            data[offset..offset + 4].copy_from_slice(&x_bytes);
+            data[offset + 4..offset + 8].copy_from_slice(&y_bytes);
+            data[offset + 8..offset + 12].copy_from_slice(&z_bytes);
+        }
+
+        Ok(PointCloud2 {
+            header: header.clone(),
+            height: 1,
+            width: points.len() as u32,
+            fields: vec![
+                PointField {
+                    name: "x".to_string(),
+                    offset: 0,
+                    datatype: 7, // FLOAT32
+                    count: 1,
+                },
+                PointField {
+                    name: "y".to_string(),
+                    offset: 4,
+                    datatype: 7, // FLOAT32
+                    count: 1,
+                },
+                PointField {
+                    name: "z".to_string(),
+                    offset: 8,
+                    datatype: 7, // FLOAT32
+                    count: 1,
+                },
+            ],
+            is_bigendian: false,
+            point_step,
+            row_step,
+            data,
+            is_dense: true,
+        })
     }
 
     fn convert_board_detection_to_detection3d(
@@ -417,8 +494,6 @@ fn main() -> Result<()> {
     let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("calibration_board_locator")?;
     let _calibration_board_locator_node = CalibrationBoardLocatorNode::new(node)?;
-
-    log_info!(LOGGER_NAME, "Calibration board locator node started");
 
     // Spin the executor
     executor
