@@ -130,7 +130,6 @@ pub fn fit_board_icp(
         icp_rejection_threshold,
         ..
     } = *board_detector;
-
     debug!("ICP Parameters:");
     debug!("  Max iterations: {}", max_icp_iterations);
     debug!("  Pose weight threshold: {}", icp_pose_weight_threshold);
@@ -477,7 +476,7 @@ pub fn fit_board_icp(
                 inlier_points = good_inlier_points;
 
                 // Apply damping to prevent overshooting
-                let damping_factor = 0.3; // Reduce the step size
+                let damping_factor = 0.1; // Reduce the step size
 
                 // Simple damping: interpolate between current pose and new pose
                 let damped_translation =
