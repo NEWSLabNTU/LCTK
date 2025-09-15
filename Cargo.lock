@@ -1399,6 +1399,7 @@ dependencies = [
  "serde_json",
  "std_msgs",
  "vision_msgs",
+ "visualization_msgs",
 ]
 
 [[package]]
