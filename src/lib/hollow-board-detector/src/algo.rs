@@ -17,34 +17,6 @@ use std::{
     borrow::Borrow,
     f64::{self},
 };
-#[cfg(debug_assertions)]
-use std::{fs::File, io::Write};
-
-/// Helper function to save 3D points to CSV for visualization (only in debug builds)
-#[cfg(debug_assertions)]
-fn save_points_to_csv_3d(
-    points: &[impl Borrow<Point3<f64>>],
-    filename: &str,
-) -> std::io::Result<()> {
-    let mut file = File::create(filename)?;
-    writeln!(file, "x,y,z")?;
-
-    for point in points {
-        let p = point.borrow();
-        writeln!(file, "{},{},{}", p.x, p.y, p.z)?;
-    }
-
-    debug!("Saved {} points to {}", points.len(), filename);
-    Ok(())
-}
-
-#[cfg(not(debug_assertions))]
-fn save_points_to_csv_3d(
-    _points: &[impl Borrow<Point3<f64>>],
-    _filename: &str,
-) -> std::io::Result<()> {
-    Ok(()) // No-op in release builds
-}
 
 unzip_n::unzip_n!(2);
 
@@ -118,11 +90,6 @@ pub fn fit_plane_ransac<'a>(
         "  Center: ({:.4}, {:.4}, {:.4})",
         plane_model.center.x, plane_model.center.y, plane_model.center.z
     );
-
-    // Save RANSAC inliers to CSV for 3D visualization
-    if let Err(_e) = save_points_to_csv_3d(&inlier_points, "ransac_plane_inliers.csv") {
-        warn!("Failed to save RANSAC inliers: {}", _e);
-    }
 
     let viz_msg = PlaneRansacData {
         plane_model: plane_model.clone(),
@@ -596,31 +563,6 @@ pub fn fit_board_icp(
         },
         marker_paper_size,
     };
-
-    // Save board corners
-    let board_width_f64: f64 = board_width.as_meters();
-    let board_corners = vec![
-        board_model.bottom_corner(),
-        board_model.top_corner(),
-        board_model.top_corner() + board_model.board_x_axis().as_ref() * board_width_f64,
-        board_model.bottom_corner() + board_model.board_x_axis().as_ref() * board_width_f64,
-    ];
-
-    if let Err(_e) = save_points_to_csv_3d(&board_corners, "icp_board_corners.csv") {
-        warn!("Failed to save ICP board corners: {}", _e);
-    }
-
-    // Save board center and pose information
-    let board_info = vec![
-        board_model.board_center(),
-        board_model.board_center() + board_model.board_x_axis().as_ref() * 0.1, // X axis indicator
-        board_model.board_center() + board_model.board_y_axis().as_ref() * 0.1, // Y axis indicator
-        board_model.board_center() + board_model.board_z_axis().as_ref() * 0.1, // Z axis indicator
-    ];
-
-    if let Err(_e) = save_points_to_csv_3d(&board_info, "icp_board_pose.csv") {
-        warn!("Failed to save ICP board pose: {}", _e);
-    }
 
     let _final_loss = icp_losses
         .iter()
