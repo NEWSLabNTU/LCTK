@@ -43,7 +43,7 @@
 
     <arg name="debug_mode"
          default="false"
-         description="Enable debug logging and visualization"/>
+         description="Enable debug logging and visualization. When enabled, publishes debug point clouds to debug/* topics"/>
 
     <arg name="sync_window_ms"
          default="50"

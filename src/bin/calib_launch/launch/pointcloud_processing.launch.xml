@@ -35,7 +35,7 @@
 
     <arg name="debug_mode"
          default="false"
-         description="Enable debug logging and visualization"/>
+         description="Enable debug logging and debug point cloud publishing to debug/all_points, debug/filtered_points, debug/plane_inliers"/>
 
     <!-- Calibration Board Locator Node -->
     <node pkg="calibration_board_locator"
@@ -46,7 +46,7 @@
         <param name="board_detector_file" value="$(find-pkg-share calib_launch)/config/board/board_pattern.json5"/>
         <param name="aruco_pattern_file" value="$(var aruco_config_file)"/>
         <param name="bbox_file" value="$(find-pkg-share calib_launch)/config/board/bbox.json5"/>
-        <param name="debug_mode" value="$(var debug_mode)"/>
+        <param name="enable_debug" value="$(var debug_mode)"/>
         <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
         <remap from="board_detections" to="$(var board_detections_topic)"/>
     </node>
