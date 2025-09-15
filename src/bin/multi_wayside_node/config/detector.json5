@@ -9,7 +9,7 @@
     // the ICP terminates if pose weight is blow this threshold several times
     "icp_pose_weight_threshold": 5e-13,
     // the maximum accepted ICP loss
-    "icp_rejection_threshold": 0.1,
+    "icp_rejection_threshold": 0.02,
     // the length of border margin
     "board_width": "1000mm",    // mm
     // the radius of circle holes

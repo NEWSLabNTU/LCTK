@@ -7,9 +7,9 @@
     "max_icp_iterations": 5000,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is blow this threshold several times
-    "icp_pose_weight_threshold": 1e-4,
+    "icp_pose_weight_threshold": 1e-5,
     // the maximum accepted ICP loss
-    "icp_rejection_threshold": 0.1,
+    "icp_rejection_threshold": 0.02,
     // the length of border margin
     "board_width": "1000mm",    // mm
     // the radius of circle holes
