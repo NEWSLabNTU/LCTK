@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use builtin_interfaces::msg::Time;
 use futures::{stream, StreamExt};
 use indexmap::IndexMap;
-use multi_stream_synchronizer::{sync, Config, WithTimestamp};
+use multi_stream_synchronizer::{sync, Config, StalenessConfig, WithTimestamp};
 use rclrs::*;
 use std::{
     sync::{
@@ -87,7 +87,7 @@ impl SynchronizerNode {
 
         let buffer_size: i64 = node
             .declare_parameter("buffer_size")
-            .default(100i64)
+            .default(50i64) // Larger buffer for detection pipeline synchronization
             .mandatory()?
             .get();
 
@@ -103,11 +103,14 @@ impl SynchronizerNode {
             .mandatory()?
             .get();
 
-        // Create synchronizer config
+        // Create synchronizer config with low-frequency staleness detection for detection pipeline
+        let staleness_config = StalenessConfig::low_frequency();
+
         let config = Config {
             window_size: Duration::from_millis(window_size_ms as u64),
             start_time: None,
             buf_size: buffer_size as usize,
+            staleness_config: Some(staleness_config),
         };
 
         // Create message channel for feeding the synchronizer
@@ -380,10 +383,10 @@ fn calculate_sync_quality(time_diff_ns: u64) -> u8 {
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut executor = Context::default_from_env()?.create_basic_executor();
-    let node = executor.create_node("synchronizer")?;
+    let node = executor.create_node("detection_synchronizer")?;
     let _synchronizer_node = SynchronizerNode::new(node)?;
 
-    log_info!(LOGGER_NAME, "Synchronizer node started");
+    log_info!(LOGGER_NAME, "Detection synchronizer node started");
 
     // Spin the executor
     executor

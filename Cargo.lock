@@ -2452,6 +2452,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "detection_synchronizer"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "builtin_interfaces",
+ "eyre",
+ "futures",
+ "geometry_msgs",
+ "indexmap 2.11.0",
+ "multi-stream-synchronizer",
+ "once_cell",
+ "rclrs",
+ "serde",
+ "serde_yaml",
+ "std_msgs",
+ "tokio",
+ "tracing",
+ "vision_msgs",
+]
+
+[[package]]
 name = "dialoguer"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10512,27 +10533,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "synchronizer"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "builtin_interfaces",
- "eyre",
- "futures",
- "geometry_msgs",
- "indexmap 2.11.0",
- "multi-stream-synchronizer",
- "once_cell",
- "rclrs",
- "serde",
- "serde_yaml",
- "std_msgs",
- "tokio",
- "tracing",
- "vision_msgs",
-]
-
-[[package]]
 name = "synstructure"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13219,6 +13219,10 @@ name = "composition_interfaces"
 version = "1.2.2"
 
 [[patch.unused]]
+name = "detection_synchronizer"
+version = "0.1.1"
+
+[[patch.unused]]
 name = "diagnostic_msgs"
 version = "4.9.0"
 
@@ -13277,10 +13281,6 @@ version = "4.9.0"
 [[patch.unused]]
 name = "stereo_msgs"
 version = "4.9.0"
-
-[[patch.unused]]
-name = "synchronizer"
-version = "0.1.1"
 
 [[patch.unused]]
 name = "test_msgs"

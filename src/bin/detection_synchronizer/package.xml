@@ -1,7 +1,7 @@
 <package format="3">
-  <name>synchronizer</name>
-  <version>0.1.0</version>
-  <description>ROS 2 node for synchronizing multi-stream detections from ArUco locator and calibration board locator</description>
+  <name>detection_synchronizer</name>
+  <version>0.1.1</version>
+  <description>ROS 2 node for synchronizing detection pipeline outputs from ArUco locator and calibration board locator</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
   <license>MIT</license>
 
