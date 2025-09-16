@@ -2,9 +2,9 @@
 <!--
     Launch file for extrinsic calibration computation.
 
-    This launch file starts the synchronizer and extrinsic solver nodes that
-    combine detections from image and point cloud processing pipelines to
-    compute the extrinsic calibration between sensors.
+    This launch file starts the extrinsic solver node that directly consumes
+    detections from image and point cloud processing pipelines to compute
+    the extrinsic calibration between sensors without timestamp synchronization.
 
     Input topics:
     - ArUco detections from image processing
@@ -12,7 +12,6 @@
     - Camera info
 
     Output topics:
-    - Synchronized detections
     - Extrinsic transform
 -->
 <launch>
@@ -33,14 +32,6 @@
          default="calibration"
          description="Namespace for the nodes"/>
 
-    <arg name="sync_window_ms"
-         default="200"
-         description="Synchronization window size in milliseconds"/>
-
-    <arg name="buffer_size"
-         default="400"
-         description="Synchronization buffer size"/>
-
     <arg name="solver_method"
          default="SQPNP"
          description="Solver method for extrinsic calibration"/>
@@ -53,20 +44,6 @@
          default="true"
          description="Enable debug logging and visualization"/>
 
-    <!-- Detection Synchronizer Node -->
-    <node pkg="detection_synchronizer"
-          exec="detection_synchronizer"
-          name="detection_synchronizer"
-          namespace="$(var namespace)"
-          output="screen">
-        <param name="window_size_ms" value="$(var sync_window_ms)"/>
-        <param name="buffer_size" value="$(var buffer_size)"/>
-        <param name="quality_threshold" value="0"/>
-        <param name="enable_debug" value="$(var debug_mode)"/>
-        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
-        <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
-    </node>
-
     <!-- Extrinsic Solver Node -->
     <node pkg="extrinsic_solver"
           exec="extrinsic_solver"
@@ -78,8 +55,8 @@
         <param name="max_solver_iterations" value="1000"/>
         <param name="convergence_threshold" value="1e-6"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
-        <remap from="aruco_detections" to="/$(var namespace)/synchronized_aruco_detections"/>
-        <remap from="calibration_board_detections" to="/$(var namespace)/synchronized_board_detections"/>
+        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
+        <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
         <remap from="camera_info" to="$(var camera_info_topic)"/>
         <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
     </node>
