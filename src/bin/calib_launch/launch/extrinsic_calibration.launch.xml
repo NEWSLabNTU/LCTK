@@ -22,7 +22,7 @@
          description="Input ArUco detections topic"/>
 
     <arg name="board_detections_topic"
-         default="/calibration/calibration_board_detections"
+         default="/calibration/calibration_board_locator/board_detections"
          description="Input board detections topic"/>
 
     <arg name="camera_info_topic"
