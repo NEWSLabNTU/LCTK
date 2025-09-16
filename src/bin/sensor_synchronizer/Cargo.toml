@@ -1,0 +1,21 @@
+[package]
+name = "sensor_synchronizer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+builtin_interfaces.workspace = true
+eyre = { workspace = true }
+geometry_msgs.workspace = true
+rclrs.workspace = true
+sensor_msgs.workspace = true
+std_msgs.workspace = true
+once_cell = { workspace = true }
+tokio = { version = "1.33.0", features = ["sync", "rt", "rt-multi-thread", "macros"] }
+multi-stream-synchronizer = { version = "0.2.0", path = "../../lib/multi-stream-synchronizer", features = ["tokio"] }
+futures = "0.3.28"
+indexmap = { workspace = true }
+
+[dependencies.nalgebra]
+workspace = true

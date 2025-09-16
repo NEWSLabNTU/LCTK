@@ -14,9 +14,14 @@ use sensor_msgs::msg::PointCloud2;
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
+use std_msgs::msg::{ColorRGBA, Header};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
+use visualization_msgs::msg::{Marker, MarkerArray};
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
@@ -30,6 +35,7 @@ pub struct CalibrationBoardLocatorNode {
     _debug_all_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
     _debug_filtered_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
     _debug_plane_inliers_publisher: Option<Arc<Publisher<PointCloud2>>>,
+    _bbox_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -95,9 +101,24 @@ impl CalibrationBoardLocatorNode {
         };
         let debug_plane_inliers_shared = debug_plane_inliers_publisher.clone();
 
+        // Create bbox marker publisher for visualization
+        let bbox_marker_publisher = if enable_debug {
+            Some(Arc::new(node.create_publisher("debug/bbox_marker")?))
+        } else {
+            None
+        };
+        let bbox_marker_shared = bbox_marker_publisher.clone();
+
+        // Counter for debugging message processing
+        let message_counter = Arc::new(AtomicU64::new(0));
+        let counter_clone = Arc::clone(&message_counter);
+
         // Create subscription to PointCloud2
         let pointcloud_subscription =
             node.create_subscription("input_pointcloud", move |msg: PointCloud2| {
+                let count = counter_clone.fetch_add(1, Ordering::Relaxed);
+                log_debug!(LOGGER_NAME, "Processing message #{}", count + 1);
+
                 Self::pointcloud_callback(
                     msg,
                     &detector,
@@ -106,6 +127,7 @@ impl CalibrationBoardLocatorNode {
                     &debug_all_points_shared,
                     &debug_filtered_points_shared,
                     &debug_plane_inliers_shared,
+                    &bbox_marker_shared,
                 );
             })?;
 
@@ -116,7 +138,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/bbox_marker"
             );
         }
 
@@ -127,6 +149,7 @@ impl CalibrationBoardLocatorNode {
             _debug_all_points_publisher: debug_all_points_publisher,
             _debug_filtered_points_publisher: debug_filtered_points_publisher,
             _debug_plane_inliers_publisher: debug_plane_inliers_publisher,
+            _bbox_marker_publisher: bbox_marker_publisher,
         })
     }
 
@@ -178,7 +201,31 @@ impl CalibrationBoardLocatorNode {
         debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) {
+        // Log callback invocation with timestamp and data size
+        log_debug!(
+            LOGGER_NAME,
+            "PointCloud callback triggered at timestamp: {}.{:09}, data size: {} bytes, width: {}, height: {}",
+            msg.header.stamp.sec,
+            msg.header.stamp.nanosec,
+            msg.data.len(),
+            msg.width,
+            msg.height
+        );
+
+        // Check if we have valid data
+        if msg.data.is_empty() || msg.width == 0 || msg.height == 0 {
+            log_warn!(
+                LOGGER_NAME,
+                "Received empty or invalid point cloud (data: {} bytes, {}x{})",
+                msg.data.len(),
+                msg.width,
+                msg.height
+            );
+            // Still try to publish empty debug topics to maintain consistency
+        }
+
         let result = Self::process_pointcloud(
             &msg,
             detector,
@@ -186,6 +233,7 @@ impl CalibrationBoardLocatorNode {
             debug_all_points_pub,
             debug_filtered_points_pub,
             debug_plane_inliers_pub,
+            bbox_marker_pub,
         );
 
         let detection_array = match result {
@@ -208,9 +256,22 @@ impl CalibrationBoardLocatorNode {
         debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
-        let points = Self::convert_pointcloud2_to_points(msg)?;
+        let points = match Self::convert_pointcloud2_to_points(msg) {
+            Ok(pts) => pts,
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Failed to convert point cloud: {e}");
+                return Err(e);
+            }
+        };
+
+        log_debug!(
+            LOGGER_NAME,
+            "Converted {} points from PointCloud2",
+            points.len()
+        );
 
         // Publish debug all points if enabled
         if let Some(pub_all) = debug_all_points_pub {
@@ -226,9 +287,37 @@ impl CalibrationBoardLocatorNode {
         }
 
         // Filter points using bbox
-        let bbox_guard = bbox
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock bbox: {e}"))?;
+        log_debug!(LOGGER_NAME, "Attempting to lock bbox mutex...");
+        let bbox_guard = match bbox.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Failed to lock bbox mutex: {e}");
+                return Err(anyhow!("Failed to lock bbox: {e}"));
+            }
+        };
+        log_debug!(LOGGER_NAME, "Successfully locked bbox mutex");
+
+        log_debug!(
+            LOGGER_NAME,
+            "Bounding box filter: center=[{:.2}, {:.2}, {:.2}], size=[{:.2}, {:.2}, {:.2}]",
+            bbox_guard.pose.translation.x,
+            bbox_guard.pose.translation.y,
+            bbox_guard.pose.translation.z,
+            bbox_guard.size_xyz[0],
+            bbox_guard.size_xyz[1],
+            bbox_guard.size_xyz[2]
+        );
+
+        // Publish bbox marker for visualization in RViz
+        if let Some(pub_bbox) = bbox_marker_pub {
+            let bbox_marker = Self::create_bbox_marker(&bbox_guard, &msg.header)?;
+            let mut marker_array = MarkerArray::default();
+            marker_array.markers.push(bbox_marker);
+            if let Err(e) = pub_bbox.publish(marker_array) {
+                log_warn!(LOGGER_NAME, "Failed to publish bbox marker: {e}");
+            }
+        }
+
         let active_points: Vec<_> = points
             .iter()
             .filter(|pt| bbox_guard.contains_point(pt))
@@ -236,21 +325,13 @@ impl CalibrationBoardLocatorNode {
             .collect();
         drop(bbox_guard);
 
-        if active_points.is_empty() {
-            log_debug!(LOGGER_NAME, "No points within bounding box");
-            return Ok(Detection3DArray {
-                header: msg.header.clone(),
-                detections: Vec::new(),
-            });
-        }
-
         log_debug!(
             LOGGER_NAME,
             "Filtered {} points within bounding box",
             active_points.len()
         );
 
-        // Publish debug filtered points if enabled
+        // Publish debug filtered points if enabled (always publish, even if empty)
         if let Some(pub_filtered) = debug_filtered_points_pub {
             log_debug!(
                 LOGGER_NAME,
@@ -261,6 +342,17 @@ impl CalibrationBoardLocatorNode {
             if let Err(e) = pub_filtered.publish(debug_cloud) {
                 log_warn!(LOGGER_NAME, "Failed to publish debug filtered points: {e}");
             }
+        }
+
+        if active_points.is_empty() {
+            log_debug!(
+                LOGGER_NAME,
+                "No points within bounding box - continuing with empty detection"
+            );
+            return Ok(Detection3DArray {
+                header: msg.header.clone(),
+                detections: Vec::new(),
+            });
         }
 
         // Detect calibration board
@@ -487,6 +579,45 @@ impl CalibrationBoardLocatorNode {
             bbox,
             id: "calibration_board".to_string(),
         })
+    }
+
+    fn create_bbox_marker(bbox: &BBox, header: &Header) -> Result<Marker> {
+        // Create a cube marker to visualize the bounding box
+        let mut marker = Marker::default();
+        marker.header = header.clone();
+        marker.ns = "bbox".to_string();
+        marker.id = 0;
+        marker.type_ = 1; // CUBE
+        marker.action = 0; // ADD
+
+        // Set position from bbox pose
+        marker.pose.position.x = bbox.pose.translation.x;
+        marker.pose.position.y = bbox.pose.translation.y;
+        marker.pose.position.z = bbox.pose.translation.z;
+
+        // Set orientation from bbox pose
+        let q = bbox.pose.rotation.quaternion();
+        marker.pose.orientation.x = q.i;
+        marker.pose.orientation.y = q.j;
+        marker.pose.orientation.z = q.k;
+        marker.pose.orientation.w = q.w;
+
+        // Set scale from bbox size
+        marker.scale.x = bbox.size_xyz[0];
+        marker.scale.y = bbox.size_xyz[1];
+        marker.scale.z = bbox.size_xyz[2];
+
+        // Set color (semi-transparent green)
+        marker.color.r = 0.0;
+        marker.color.g = 1.0;
+        marker.color.b = 0.0;
+        marker.color.a = 0.3;
+
+        // Set lifetime (0 = forever)
+        marker.lifetime.sec = 0;
+        marker.lifetime.nanosec = 0;
+
+        Ok(marker)
     }
 }
 

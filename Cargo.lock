@@ -1399,6 +1399,7 @@ dependencies = [
  "serde_json",
  "std_msgs",
  "vision_msgs",
+ "visualization_msgs",
 ]
 
 [[package]]
@@ -2448,6 +2449,27 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "detection_synchronizer"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "builtin_interfaces",
+ "eyre",
+ "futures",
+ "geometry_msgs",
+ "indexmap 2.11.0",
+ "multi-stream-synchronizer",
+ "once_cell",
+ "rclrs",
+ "serde",
+ "serde_yaml",
+ "std_msgs",
+ "tokio",
+ "tracing",
+ "vision_msgs",
 ]
 
 [[package]]
@@ -5477,7 +5499,7 @@ dependencies = [
 
 [[package]]
 name = "multi-stream-synchronizer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "collected",
@@ -5487,6 +5509,7 @@ dependencies = [
  "humantime-serde",
  "indexmap 2.11.0",
  "itertools 0.11.0",
+ "rand 0.9.2",
  "tokio",
  "tracing",
 ]
@@ -9836,6 +9859,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sensor_synchronizer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "builtin_interfaces",
+ "eyre",
+ "futures",
+ "geometry_msgs",
+ "indexmap 2.11.0",
+ "multi-stream-synchronizer",
+ "nalgebra 0.32.6",
+ "once_cell",
+ "rclrs",
+ "sensor_msgs",
+ "std_msgs",
+ "tokio",
+]
+
+[[package]]
 name = "seq-macro"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10489,27 +10531,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 dependencies = [
  "futures-core",
-]
-
-[[package]]
-name = "synchronizer"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "builtin_interfaces",
- "eyre",
- "futures",
- "geometry_msgs",
- "indexmap 2.11.0",
- "multi-stream-synchronizer",
- "once_cell",
- "rclrs",
- "serde",
- "serde_yaml",
- "std_msgs",
- "tokio",
- "tracing",
- "vision_msgs",
 ]
 
 [[package]]
@@ -13199,6 +13220,10 @@ name = "composition_interfaces"
 version = "1.2.2"
 
 [[patch.unused]]
+name = "detection_synchronizer"
+version = "0.1.1"
+
+[[patch.unused]]
 name = "diagnostic_msgs"
 version = "4.9.0"
 
@@ -13243,6 +13268,10 @@ name = "rosgraph_msgs"
 version = "1.2.2"
 
 [[patch.unused]]
+name = "sensor_synchronizer"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "shape_msgs"
 version = "4.9.0"
 
@@ -13257,10 +13286,6 @@ version = "4.9.0"
 [[patch.unused]]
 name = "stereo_msgs"
 version = "4.9.0"
-
-[[patch.unused]]
-name = "synchronizer"
-version = "0.1.1"
 
 [[patch.unused]]
 name = "test_msgs"

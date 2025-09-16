@@ -20,7 +20,6 @@
   failed_when: false  # Don't fail if not installed
 
 - name: Install Python libraries for scientific computing
-  become: true
   ansible.builtin.apt:
     name:
       - python3-numpy
@@ -35,6 +34,13 @@
       - cffi>=1.0.0
       - setuptools>=45
       - wheel
+    extra_args: --user
+    executable: /usr/bin/pip3
+    state: present
+
+- name: Install ros2systemd for ROS2 service management
+  ansible.builtin.pip:
+    name: https://github.com/jerry73204/ros2systemd/releases/download/v0.2.0/ros2systemd-0.2.0-py3-none-any.whl
     extra_args: --user
     executable: /usr/bin/pip3
     state: present

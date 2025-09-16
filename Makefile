@@ -19,10 +19,18 @@ help:
 	@echo "  make build_packages             - Build ROS nodes"
 	@echo "  make build_cargo                - Build with cargo directly (non-ROS)"
 	@echo ""
-	@echo "Launch Commands:"
-	@echo "  make launch_sensor              - Launch sensor publishers with sample data"
-	@echo "  make launch_lidar_camera_calibration - Launch LiDAR-Camera calibration"
-	@echo "  make launch_two_lidar_calibration    - Launch two LiDAR calibration"
+	@echo "Launch Commands (using ros2systemd for reliable service management):"
+	@echo "  make launch_sensor              - Create and start sensor publishers service"
+	@echo "  make stop_sensor                - Stop sensor publishers service"
+	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration service (add debug_mode=true for debug topics)"
+	@echo "  make stop_lidar_camera_calibration   - Stop LiDAR-Camera calibration service"
+	@echo "  make launch_two_lidar_calibration    - Create and start two LiDAR calibration service"
+	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
+	@echo ""
+	@echo "Service Management:"
+	@echo "  make service_status             - Show status of all LCTK services"
+	@echo "  make service_logs               - Show logs for all LCTK services"
+	@echo "  make service_cleanup            - Remove all LCTK systemd services"
 	@echo ""
 	@echo "Development Tools:"
 	@echo "  make format                     - Format all code (Rust, Python, configs)"
@@ -102,30 +110,100 @@ clean:
 
 .PHONY: launch_sensor
 launch_sensor:
-	@echo "Launching sensor publishers with sample data..."
-	. /opt/ros/humble/setup.sh && \
+	@echo "Creating and starting sensor publishers service with ros2systemd..."
 	. install/setup.sh && \
-	ros2 launch calib_launch sensor.launch.xml \
+	ros2 systemd remove lctk-sensor 2>/dev/null || true && \
+	ros2 systemd create --localhost-only 1 lctk-sensor launch calib_launch sensor.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
-		loop:=true
+		loop:=true && \
+	ros2 systemd start lctk-sensor
+	@echo "Sensor service started. Use 'make service_status' to check status or 'make stop_sensor' to stop."
+
+.PHONY: stop_sensor
+stop_sensor:
+	@echo "Stopping sensor service..."
+	. install/setup.sh && \
+	ros2 systemd stop lctk-sensor 2>/dev/null || echo "Service not running"
 
 .PHONY: launch_lidar_camera_calibration
 launch_lidar_camera_calibration:
-	@echo "Launching LiDAR-Camera calibration with sample data..."
-	. /opt/ros/humble/setup.sh && \
+	@echo "Creating and starting LiDAR-Camera calibration service with ros2systemd..."
+	@if [ "$(debug_mode)" = "true" ]; then \
+		echo "Debug mode enabled - additional debug topics will be published"; \
+	fi
 	. install/setup.sh && \
-	ros2 launch calib_launch lidar_camera_calibration.launch.xml \
+	ros2 systemd remove lctk-calibration 2>/dev/null || true && \
+	ros2 systemd create --localhost-only 1 lctk-calibration launch calib_launch lidar_camera_calibration.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true \
-		debug_mode:=$(or $(debug_mode),false)
+		debug_mode:=$(or $(debug_mode),false) && \
+	ros2 systemd start lctk-calibration
+	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."
+
+.PHONY: stop_lidar_camera_calibration
+stop_lidar_camera_calibration:
+	@echo "Stopping LiDAR-Camera calibration service..."
+	. install/setup.sh && \
+	ros2 systemd stop lctk-calibration 2>/dev/null || echo "Service not running"
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:
-	@echo "Launching two LiDAR calibration with sample data..."
-	. /opt/ros/humble/setup.sh && \
+	@echo "Creating and starting two LiDAR calibration service with ros2systemd..."
 	. install/setup.sh && \
-	ros2 launch calib_launch two_lidar_calibration.launch.xml \
+	ros2 systemd remove lctk-two-lidar 2>/dev/null || true && \
+	ros2 systemd create lctk-two-lidar launch calib_launch two_lidar_calibration.launch.xml \
 		lidar1_pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
-		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap
+		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap && \
+	ros2 systemd start lctk-two-lidar
+	@echo "Two LiDAR calibration service started. Use 'make service_status' to check status or 'make stop_two_lidar_calibration' to stop."
+
+.PHONY: stop_two_lidar_calibration
+stop_two_lidar_calibration:
+	@echo "Stopping two LiDAR calibration service..."
+	. install/setup.sh && \
+	ros2 systemd stop lctk-two-lidar 2>/dev/null || echo "Service not running"
+
+# Service Management Utilities
+
+.PHONY: service_status
+service_status:
+	@echo "LCTK Service Status:"
+	@echo "==================="
+	. install/setup.sh && \
+	ros2 systemd list | grep lctk || echo "No LCTK services found"
+	@echo ""
+	@echo "Detailed status:"
+	. install/setup.sh && \
+	(ros2 systemd status lctk-sensor 2>/dev/null || echo "lctk-sensor: not found") && \
+	(ros2 systemd status lctk-calibration 2>/dev/null || echo "lctk-calibration: not found") && \
+	(ros2 systemd status lctk-two-lidar 2>/dev/null || echo "lctk-two-lidar: not found")
+
+.PHONY: service_logs
+service_logs:
+	@echo "LCTK Service Logs:"
+	@echo "=================="
+	@echo "Sensor service logs:"
+	. install/setup.sh && \
+	(ros2 systemd logs lctk-sensor 2>/dev/null || echo "No logs for lctk-sensor")
+	@echo ""
+	@echo "Calibration service logs:"
+	. install/setup.sh && \
+	(ros2 systemd logs lctk-calibration 2>/dev/null || echo "No logs for lctk-calibration")
+	@echo ""
+	@echo "Two LiDAR service logs:"
+	. install/setup.sh && \
+	(ros2 systemd logs lctk-two-lidar 2>/dev/null || echo "No logs for lctk-two-lidar")
+
+.PHONY: service_cleanup
+service_cleanup:
+	@echo "Removing all LCTK systemd services..."
+	. install/setup.sh && \
+	(ros2 systemd stop lctk-sensor 2>/dev/null || true) && \
+	(ros2 systemd stop lctk-calibration 2>/dev/null || true) && \
+	(ros2 systemd stop lctk-two-lidar 2>/dev/null || true) && \
+	(ros2 systemd remove lctk-sensor 2>/dev/null || true) && \
+	(ros2 systemd remove lctk-calibration 2>/dev/null || true) && \
+	(ros2 systemd remove lctk-two-lidar 2>/dev/null || true)
+	@echo "All LCTK services cleaned up."
