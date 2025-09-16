@@ -9858,7 +9858,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sensor_sync_manager"
+name = "sensor_synchronizer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -13265,6 +13265,10 @@ version = "1.2.2"
 [[patch.unused]]
 name = "rosgraph_msgs"
 version = "1.2.2"
+
+[[patch.unused]]
+name = "sensor_synchronizer"
+version = "0.1.0"
 
 [[patch.unused]]
 name = "shape_msgs"
