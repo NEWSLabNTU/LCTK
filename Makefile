@@ -113,7 +113,7 @@ launch_sensor:
 	@echo "Creating and starting sensor publishers service with ros2systemd..."
 	. install/setup.sh && \
 	ros2 systemd remove lctk-sensor 2>/dev/null || true && \
-	ros2 systemd create --localhost-only 1 lctk-sensor launch calib_launch sensor.launch.xml \
+	ros2 systemd create lctk-sensor launch calib_launch sensor.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true && \
@@ -134,7 +134,7 @@ launch_lidar_camera_calibration:
 	fi
 	. install/setup.sh && \
 	ros2 systemd remove lctk-calibration 2>/dev/null || true && \
-	ros2 systemd create --localhost-only 1 lctk-calibration launch calib_launch lidar_camera_calibration.launch.xml \
+	ros2 systemd create lctk-calibration launch calib_launch lidar_camera_calibration.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true \
