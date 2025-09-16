@@ -258,7 +258,7 @@ impl ExtrinsicSolverNode {
         let before_cleanup = pending.len();
         Self::cleanup_old_detections(&mut pending, timestamp, state.sync_timeout);
         let after_cleanup = pending.len();
-        
+
         if before_cleanup != after_cleanup {
             log_debug!(
                 LOGGER_NAME,
@@ -329,7 +329,7 @@ impl ExtrinsicSolverNode {
         let before_cleanup = pending.len();
         Self::cleanup_old_detections(&mut pending, timestamp, state.sync_timeout);
         let after_cleanup = pending.len();
-        
+
         if before_cleanup != after_cleanup {
             log_debug!(
                 LOGGER_NAME,
@@ -585,7 +585,10 @@ impl ExtrinsicSolverNode {
             if let Err(e) = publisher.publish(transform_msg) {
                 log_warn!(LOGGER_NAME, "Failed to publish transform: {e}");
             } else {
-                log_info!(LOGGER_NAME, "Extrinsic Solver: Published extrinsic transform");
+                log_info!(
+                    LOGGER_NAME,
+                    "Extrinsic Solver: Published extrinsic transform"
+                );
                 let rotation_matrix = transform.rotation.to_rotation_matrix();
                 let r = rotation_matrix.matrix();
                 let t = &transform.translation;
@@ -599,7 +602,10 @@ impl ExtrinsicSolverNode {
                 );
             }
         } else {
-            log_warn!(LOGGER_NAME, "Extrinsic Solver: PnP solver failed to find solution");
+            log_warn!(
+                LOGGER_NAME,
+                "Extrinsic Solver: PnP solver failed to find solution"
+            );
         }
 
         Ok(())
@@ -871,7 +877,10 @@ fn main() -> Result<()> {
     let _solve_extrinsic_params_node = ExtrinsicSolverNode::new(node)?;
 
     log_info!(LOGGER_NAME, "Solve extrinsic params node started");
-    log_info!(LOGGER_NAME, "Extrinsic Solver: Waiting for synchronized detection messages...");
+    log_info!(
+        LOGGER_NAME,
+        "Extrinsic Solver: Waiting for synchronized detection messages..."
+    );
 
     // Spin the executor
     executor

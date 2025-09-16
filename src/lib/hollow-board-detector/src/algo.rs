@@ -46,9 +46,7 @@ pub fn fit_plane_ransac<'a>(
 
     let (plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
-            Some(ret) => {
-                ret
-            }
+            Some(ret) => ret,
             None => {
                 warn!("RANSAC failed: No valid plane found");
                 return Ok(None);
@@ -230,7 +228,7 @@ pub fn fit_board_icp(
                             0
                         }
                     };
-                    
+
                     // update state
                     losses.push(avg_loss);
                     // Keep the same points for next iteration
@@ -253,17 +251,11 @@ pub fn fit_board_icp(
                     );
 
                     match kabsch(pairs) {
-                        Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => {
-                            Isometry3 {
-                                rotation: UnitQuaternion::from_quaternion(Quaternion::new(
-                                    w, i, j, k,
-                                )),
-                                translation: Translation3::new(x, y, z),
-                            }
-                        }
-                        None => {
-                            Isometry3::identity()
-                        }
+                        Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => Isometry3 {
+                            rotation: UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
+                            translation: Translation3::new(x, y, z),
+                        },
+                        None => Isometry3::identity(),
                     }
                 };
 
@@ -309,7 +301,10 @@ pub fn fit_board_icp(
                 
                 // Removed premature break on small inlier count; rely on thresholds/iterations
                 if *losses.last().unwrap() < icp_rejection_threshold {
-                    debug!("🏆 ICP terminating: loss is too small: {:.8}", losses.last().unwrap());
+                    debug!(
+                        "🏆 ICP terminating: loss is too small: {:.8}",
+                        losses.last().unwrap()
+                    );
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
                     debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
                     debug!("  Avg loss: {:.8}", *losses.last().unwrap());

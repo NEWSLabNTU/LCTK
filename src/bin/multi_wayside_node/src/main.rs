@@ -190,7 +190,7 @@ impl MultiWaysideNode {
 fn main() -> Result<()> {
     // Initialize logging for the hollow-board-detector library
     init_logging();
-    
+
     // Initialize ROS 2
     let context = Context::new(std::env::args(), InitOptions::new())?;
     let mut executor = context.create_basic_executor();
