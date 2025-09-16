@@ -74,6 +74,8 @@ struct SynchronizerState {
 pub struct SynchronizerNode {
     _state: Arc<SynchronizerState>,
     _node: Node,
+    _aruco_subscription: Subscription<Detection2DArray>,
+    _board_subscription: Subscription<Detection3DArray>,
 }
 
 impl SynchronizerNode {
@@ -102,6 +104,10 @@ impl SynchronizerNode {
             .default(false)
             .mandatory()?
             .get();
+
+        // Configure topic names as parameters to avoid namespace issues
+        let aruco_topic: Arc<str> = "/calibration/aruco_locator/aruco_detections".into();
+        let board_topic: Arc<str> = "/calibration/calibration_board_detections".into();
 
         // Create synchronizer config with low-frequency staleness detection for detection pipeline
         let staleness_config = StalenessConfig::low_frequency();
@@ -146,40 +152,52 @@ impl SynchronizerNode {
             });
         }
 
-        // Create subscribers
-        let _aruco_subscription = {
+        // Create subscribers using full topic names to avoid namespace issues
+        let aruco_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription("aruco_detections", move |msg: Detection2DArray| {
+            node.create_subscription(&aruco_topic, move |msg: Detection2DArray| {
                 Self::aruco_callback(msg, &state);
             })?
         };
 
-        let _board_subscription = {
+        let board_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription(
-                "calibration_board_detections",
-                move |msg: Detection3DArray| {
-                    Self::board_callback(msg, &state);
-                },
-            )?
+            node.create_subscription(&board_topic, move |msg: Detection3DArray| {
+                Self::board_callback(msg, &state);
+            })?
         };
 
         log_info!(
             LOGGER_NAME,
             "Synchronizer node initialized. Window size: {window_size_ms}ms, Buffer size: {buffer_size}, Quality threshold: {quality_threshold}"
         );
+        log_info!(
+            LOGGER_NAME,
+            "Subscribing to: ArUco={}, Board={}",
+            aruco_topic,
+            board_topic
+        );
 
         Ok(Self {
             _state: state,
             _node: node,
+            _aruco_subscription: aruco_subscription,
+            _board_subscription: board_subscription,
         })
     }
 
     fn aruco_callback(msg: Detection2DArray, state: &Arc<SynchronizerState>) {
-        if msg.detections.is_empty() {
-            return; // Skip empty detections
+        // Allow empty detections for synchronization - calibration data may not always have ArUco markers
+        if state.enable_debug {
+            log_info!(
+                LOGGER_NAME,
+                "ArUco callback: {} detections at timestamp {}.{:09}",
+                msg.detections.len(),
+                msg.header.stamp.sec,
+                msg.header.stamp.nanosec
+            );
         }
 
         let wrapper = ArUcoDetectionWrapper { detection: msg };
@@ -196,8 +214,15 @@ impl SynchronizerNode {
     }
 
     fn board_callback(msg: Detection3DArray, state: &Arc<SynchronizerState>) {
-        if msg.detections.is_empty() {
-            return; // Skip empty detections
+        // Allow empty detections for synchronization - calibration board may not always be visible
+        if state.enable_debug {
+            log_info!(
+                LOGGER_NAME,
+                "Board callback: {} detections at timestamp {}.{:09}",
+                msg.detections.len(),
+                msg.header.stamp.sec,
+                msg.header.stamp.nanosec
+            );
         }
 
         let wrapper = BoardDetectionWrapper { detection: msg };
@@ -295,8 +320,9 @@ impl SynchronizerNode {
             if state.enable_debug {
                 log_warn!(
                     LOGGER_NAME,
-                    "Sync quality {sync_quality} below threshold {}, skipping",
-                    state.quality_threshold
+                    "Sync quality {sync_quality} below threshold {}, time diff: {:.1}ms - skipping",
+                    state.quality_threshold,
+                    time_diff_ns / 1_000_000.0
                 );
             }
             return Ok(());
