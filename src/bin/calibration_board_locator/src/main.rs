@@ -202,6 +202,10 @@ impl CalibrationBoardLocatorNode {
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) {
+        use std::time::Instant;
+
+        let start_time = Instant::now();
+
         // Log callback invocation with timestamp and data size
         log_debug!(
             LOGGER_NAME,
@@ -233,6 +237,13 @@ impl CalibrationBoardLocatorNode {
             debug_filtered_points_pub,
             debug_plane_inliers_pub,
             bbox_marker_pub,
+        );
+
+        let processing_duration = start_time.elapsed();
+        log_debug!(
+            LOGGER_NAME,
+            "Processing completed in {:.2}ms",
+            processing_duration.as_millis()
         );
 
         let detection_array = match result {
