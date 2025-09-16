@@ -504,13 +504,13 @@ pub fn fit_board_icp(
                 // // Check if we have enough inlier points to continue
                 if inlier_points.len() < 2000 {
                     debug!(
-                        "ICP terminating: insufficient inlier points ({} < 2000)",
+                        "❌ ICP terminating: insufficient inlier points ({} < 2000)",
                         inlier_points.len()
                     );
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
                 if *losses.last().unwrap() < icp_rejection_threshold {
-                    debug!("ICP terminating: loss is too small: {:.8}", losses.last().unwrap());
+                    debug!("🏆 ICP terminating: loss is too small: {:.8}", losses.last().unwrap());
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
                     debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
                     debug!("  Avg loss: {:.8}", *losses.last().unwrap());
@@ -522,7 +522,7 @@ pub fn fit_board_icp(
 
                 if step == max_icp_iterations || termination_count > 100 {
                     debug!(
-                        "ICP terminating: step={}, termination_count={}",
+                        "❌❌❌ ICP terminating: step={}, termination_count={}",
                         step, termination_count
                     );
                     break (inlier_points, good_corresponding_points, losses, pose);
