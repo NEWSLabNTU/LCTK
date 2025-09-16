@@ -44,7 +44,7 @@ pub fn fit_plane_ransac<'a>(
         .max_candidate_hypotheses(plane_ransac_max_iterations);
     let estimator = PlaneEstimator::new();
 
-    let (plane_model, inlier_indices) = {
+    let (mut plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
             Some(ret) => ret,
             None => {
@@ -53,6 +53,16 @@ pub fn fit_plane_ransac<'a>(
             }
         }
     };
+
+    // Force plane normal to point to the front (+X in world coordinates)
+    {
+        let desired_front = Vector3::x_axis();
+        let current_normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
+        if current_normal.dot(&desired_front) < 0.0 {
+            let flipped = nalgebra::Unit::new_normalize(-current_normal);
+            plane_model.normal = flipped;
+        }
+    }
 
     let inlier_points: Vec<_> = inlier_indices.into_iter().map(|idx| &points[idx]).collect();
 
@@ -74,6 +84,7 @@ pub fn fit_board_icp(
     aruco_detector: &MultiArucoPattern,
     plane_model: &PlaneModel,
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
+    mut progress_cb: Option<&mut dyn FnMut(&BoardModel)>,
 ) -> Result<FitBoardIcp> {
     // find board by modified ICP algoirthm
     const GOOD_FIT_THRESHOLD: f64 = 0.015; // velodyne 32-MR
@@ -104,7 +115,7 @@ pub fn fit_board_icp(
                 .unwrap()
                 .into();
 
-            // obtain the plane normal vector that points towards the origin
+            // obtain the plane normal vector that points towards the origin (like lib.rs)
             let plane_normal = {
                 let normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
                 if (Point3::origin() - inlier_centroid).dot(&normal) < 0.0 {
@@ -114,16 +125,29 @@ pub fn fit_board_icp(
                 }
             };
 
-            // Align the board's Z-axis with the plane normal
-            // This is a much simpler and more direct approach
+            // Let the XY-plane projections of board normal and plane normal overlap
+            // (follow the rotation initialization logic from lib.rs)
             let rotation = {
-                let board_z_axis = Vector3::z_axis();
-                UnitQuaternion::rotation_between(&board_z_axis, &plane_normal).unwrap_or_else(
-                    || {
-                        // If the vectors are parallel, use identity
-                        UnitQuaternion::identity()
-                    },
-                )
+                // Lift the board's +Z to point toward +X after two fixed rotations
+                let lifting_rotation =
+                    UnitQuaternion::from_euler_angles(0.0, -f64::consts::FRAC_PI_2, 0.0)
+                        * UnitQuaternion::from_euler_angles(0.0, 0.0, -f64::consts::FRAC_PI_4);
+                let lifted_normal = lifting_rotation * Vector3::z_axis();
+
+                // Align the lifted normal to the plane normal projected on XY plane
+                let planar_rotation = {
+                    let planar_plane_normal = Vector3::new(plane_normal.x, plane_normal.y, 0.0);
+                    UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
+                        .unwrap_or_else(|| {
+                            if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
+                                UnitQuaternion::identity()
+                            } else {
+                                UnitQuaternion::from_euler_angles(0.0, 0.0, f64::consts::PI)
+                            }
+                        })
+                };
+
+                planar_rotation * lifting_rotation
             };
 
             Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
@@ -152,59 +176,53 @@ pub fn fit_board_icp(
                     marker_paper_size,
                 };
 
-                // Proper ICP correspondence finding: find closest points on board model
-                let correspondings: Vec<(Point3<f64>, Point3<f64>)> = inlier_points
-                    .iter()
-                    .map(|input_point| {
-                        // Transform input point to board coordinate system
-                        let board_point = board_model.pose.inverse() * *input_point;
+                if let Some(cb) = progress_cb.as_mut() {
+                    cb(&board_model);
+                }
 
-                        // Find closest point on board model (project onto board plane)
-                        let board_center = Point3::origin(); // In board coordinates
-                        let board_normal = Vector3::z_axis(); // Board normal in board coordinates
-                        let vec_to_point: Vector3<f64> = board_point - board_center;
-                        let distance_to_plane = vec_to_point.dot(&board_normal);
-                        let projected_board_point =
-                            board_point - board_normal.scale(distance_to_plane);
+                // Use the board model's correspondence finding method
+                let correspondings = match board_model.find_correspondences(&inlier_points) {
+                    Some(corr) => corr,
+                    None => {
+                        debug!("ICP step {}: No correspondences found", step);
+                        break (inlier_points, vec![], losses, pose);
+                    }
+                };
 
-                        // Transform back to world coordinates
-                        let corresponding_point = board_model.pose * projected_board_point;
+                // reject outliers (mirror logic from lib.rs)
+                let (good_inlier_points, good_corresponding_points, avg_loss) = {
+                    let losses: Vec<_> = correspondings
+                        .iter()
+                        .map(|(input_point, corresponding_point)| {
+                            (*input_point - corresponding_point).norm()
+                        })
+                        .collect();
+                    let avg_loss = losses.iter().sum::<f64>() / correspondings.len() as f64;
 
-                        (*input_point, corresponding_point)
-                    })
-                    .collect();
+                    debug!("ICP step {}: avg_loss = {:.6}, correspondences = {}", step, avg_loss, correspondings.len());
+                    debug!("  -> Loss progression: {:?}", losses);
 
-                // reject outliers
-                let correspondence_losses: Vec<_> = correspondings
-                    .iter()
-                    .map(|(input_point, corresponding_point)| {
-                        let loss = (input_point - corresponding_point).norm();
-                        loss
-                    })
-                    .collect();
-                let avg_loss =
-                    correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
+                    let good_correspondences: Vec<_> = if avg_loss <= GOOD_FIT_THRESHOLD {
+                        izip!(correspondings.into_iter(), losses.into_iter())
+                            .filter_map(|((inlier_point, corresponding_point), loss)| {
+                                (loss < OUTLIER_THRESHOLD)
+                                    .then(|| (inlier_point, corresponding_point))
+                            })
+                            .collect()
+                    } else {
+                        correspondings
+                    };
 
-                // Improved outlier filtering with adaptive thresholds
-                // Use a more reasonable threshold that adapts to the current loss
-                let adaptive_threshold = (avg_loss * 3.0).max(0.05).min(1.0); // Between 0.05 and 1.0
+                    let good_correspondences_len = good_correspondences.len();
+                    let (good_inlier_points, good_corresponding_points): (
+                        Vec<Point3<f64>>,
+                        Vec<Point3<f64>>,
+                    ) = good_correspondences.into_iter().unzip();
 
-                let good_correspondences: Vec<_> = correspondings
-                    .iter()
-                    .zip(correspondence_losses.iter())
-                    .filter_map(|((input_point, corresponding_point), &loss)| {
-                        if loss <= adaptive_threshold {
-                            Some((*input_point, *corresponding_point))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                    debug!("  -> good_correspondences = {}, good_inlier_points = {}", good_correspondences_len, good_inlier_points.len());
 
-                let (good_inlier_points, good_corresponding_points): (
-                    Vec<Point3<f64>>,
-                    Vec<Point3<f64>>,
-                ) = good_correspondences.into_iter().unzip();
+                    (good_inlier_points, good_corresponding_points, avg_loss)
+                };
 
                 // Safety check: ensure we have at least 3 points for Kabsch
                 if good_inlier_points.len() < 3 {
@@ -241,22 +259,47 @@ pub fn fit_board_icp(
                     continue;
                 }
 
-                // compute transformation
+                // compute transformation (mirror lib.rs approach)
                 let align_pose: Isometry3<_> = {
-                    let pairs = izip!(
-                        good_inlier_points.iter().map(|&p| -> [f64; 3] { p.into() }),
-                        good_corresponding_points
-                            .iter()
-                            .map(|&p| -> [f64; 3] { p.into() }),
-                    );
+                    let align_translation = {
+                        let input_centroid: Point3<f64> =
+                            centroid_of_points(good_inlier_points.iter().map(|point| {
+                                let point: [f64; 3] = (*point).into();
+                                point
+                            }))
+                            .unwrap()
+                            .into();
+                        let model_centroid: Point3<f64> =
+                            centroid_of_points(good_corresponding_points.iter().map(|point| {
+                                let point: [f64; 3] = (*point).into();
+                                point
+                            }))
+                            .unwrap()
+                            .into();
+                        Translation3::from(input_centroid - model_centroid)
+                    };
 
-                    match kabsch(pairs) {
-                        Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => Isometry3 {
-                            rotation: UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
-                            translation: Translation3::new(x, y, z),
-                        },
-                        None => Isometry3::identity(),
-                    }
+                    let align_quaternion = {
+                        let input_target_pairs = good_corresponding_points
+                            .iter()
+                            .map(|point| align_translation * point)
+                            .zip(good_inlier_points.iter().copied());
+
+                        let pairs = izip!(
+                            input_target_pairs.clone().map(|(_, p)| -> [f64; 3] { p.into() }),
+                            input_target_pairs.map(|(p, _)| -> [f64; 3] { p.into() }),
+                        );
+
+                        match kabsch(pairs) {
+                            Some((XYZ([_x, _y, _z]), IJKW([i, j, k, w]))) => UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
+                            None => {
+                                debug!("ICP step {}: Failed to fit rotation, using identity", step);
+                                UnitQuaternion::identity()
+                            }
+                        }
+                    };
+
+                    Isometry3::from_parts(align_translation, align_quaternion)
                 };
 
                 // check termination criteria
@@ -280,24 +323,23 @@ pub fn fit_board_icp(
                 
                 // update state
                 losses.push(avg_loss);
-                // Convert back to the expected format for the next iteration
                 inlier_points = good_inlier_points;
 
-                // Apply damping to prevent overshooting
-                let damping_factor = 0.05; // Reduce the step size
+                debug!("  -> align_pose translation: {:.6}, rotation angle: {:.6}", 
+                       align_pose.translation.vector.norm(),
+                       align_pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0));
+                debug!("  -> pose_weight: {:.8}, termination_count: {}", 
+                       align_pose.translation.vector.norm() + align_pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0),
+                       termination_count);
 
-                // Simple damping: interpolate between current pose and new pose
-                let damped_translation =
-                    Translation3::from(align_pose.translation.vector * damping_factor);
-                let damped_rotation = UnitQuaternion::slerp(
-                    &UnitQuaternion::identity(),
-                    &align_pose.rotation,
-                    damping_factor,
-                );
-                let damped_align_pose = Isometry3::from_parts(damped_translation, damped_rotation);
-
-                pose = pose * damped_align_pose;
+                // Apply pose update (mirror lib.rs: align_pose * pose)
+                pose = align_pose * pose;
                 step += 1;
+
+                debug!("  -> new pose translation: {:.6}, rotation angle: {:.6}", 
+                       pose.translation.vector.norm(),
+                       pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0));
+                debug!("  -> Updated loss: {:.8}, inlier_count: {}", avg_loss, inlier_points.len());
                 
                 // Removed premature break on small inlier count; rely on thresholds/iterations
                 if *losses.last().unwrap() < icp_rejection_threshold {

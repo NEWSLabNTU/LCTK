@@ -59,6 +59,7 @@ impl Detector {
             &self.aruco_pattern,
             &plane_model,
             &plane_inlier_points,
+            None,
         )?;
 
         if !successful {
@@ -105,6 +106,99 @@ impl Detector {
             };
 
             // Construct the corrected pose
+            fixup_translation * fixup_rotation * board_model.pose.rotation
+        };
+
+        let detection = Detection {
+            board_model: BoardModel {
+                pose,
+                ..board_model
+            },
+            plane_ransac_data,
+            icp_data,
+            icp_losses,
+        };
+
+        Ok(Some(detection))
+    }
+
+    pub fn detect_with_progress<F>(&self, points: &[na::Point3<f64>], mut progress: F) -> Result<Option<Detection>>
+    where
+        F: FnMut(&BoardModel),
+    {
+        let Config {
+            board_shape:
+                BoardShape {
+                    board_width,
+                    hole_radius,
+                    hole_center_shift,
+                },
+            ..
+        } = self.config;
+        let marker_paper_size = self.aruco_pattern.paper_size();
+
+        let FitPlaneRansac {
+            plane_model,
+            inlier_points: plane_inlier_points,
+            ransac_data: plane_ransac_data,
+        } = match fit_plane_ransac(&self.config, points)? {
+            Some(ret) => ret,
+            None => return Ok(None),
+        };
+
+        let FitBoardIcp {
+            board_pose,
+            icp_losses,
+            icp_data,
+            successful,
+        } = fit_board_icp(
+            &self.config,
+            &self.aruco_pattern,
+            &plane_model,
+            &plane_inlier_points,
+            Some(&mut progress),
+        )?;
+
+        if !successful {
+            return Ok(None);
+        }
+
+        let board_model = BoardModel {
+            pose: board_pose,
+            board_shape: BoardShape {
+                board_width,
+                hole_radius,
+                hole_center_shift,
+            },
+            marker_paper_size,
+        };
+
+        let pose = {
+            let board_normal = board_model.board_z_axis();
+
+            let corners = [
+                board_model.bottom_corner(),
+                board_model.left_corner(),
+                board_model.top_corner(),
+                board_model.right_corner(),
+            ];
+            let (lowest_index, _) = corners
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, point)| r64(point.z))
+                .unwrap();
+
+            let fixup_rotation = {
+                let angle = FRAC_PI_2 * lowest_index as f64;
+                na::UnitQuaternion::from_axis_angle(&board_normal, angle)
+            };
+
+            let fixup_translation = {
+                let lowest_point = &corners[lowest_index];
+                let XYZ { x, y, z } = **lowest_point;
+                na::Translation3::new(x, y, z)
+            };
+
             fixup_translation * fixup_rotation * board_model.pose.rotation
         };
 

@@ -38,6 +38,7 @@ pub struct CalibrationBoardLocatorNode {
     _debug_plane_inliers_publisher: Option<Arc<Publisher<PointCloud2>>>,
     _bbox_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
     _board_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
+    _board_marker_icp_publisher: Option<Arc<Publisher<MarkerArray>>>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -119,6 +120,10 @@ impl CalibrationBoardLocatorNode {
         };
         let board_marker_shared = board_marker_publisher.clone();
 
+        // Per-iteration ICP board marker publisher (always on)
+        let board_marker_icp_publisher = Some(Arc::new(node.create_publisher("debug/board_marker_icp")?));
+        let board_marker_icp_shared = board_marker_icp_publisher.clone();
+
         // Counter for debugging message processing
         let message_counter = Arc::new(AtomicU64::new(0));
         let counter_clone = Arc::clone(&message_counter);
@@ -139,6 +144,7 @@ impl CalibrationBoardLocatorNode {
                     &debug_plane_inliers_shared,
                     &bbox_marker_shared,
                     &board_marker_shared,
+                    &board_marker_icp_shared,
                 );
             })?;
 
@@ -162,6 +168,7 @@ impl CalibrationBoardLocatorNode {
             _debug_plane_inliers_publisher: debug_plane_inliers_publisher,
             _bbox_marker_publisher: bbox_marker_publisher,
             _board_marker_publisher: board_marker_publisher,
+            _board_marker_icp_publisher: board_marker_icp_publisher,
         })
     }
 
@@ -215,6 +222,7 @@ impl CalibrationBoardLocatorNode {
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
+        board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) {
         use std::time::Instant;
 
@@ -252,6 +260,7 @@ impl CalibrationBoardLocatorNode {
             debug_plane_inliers_pub,
             bbox_marker_pub,
             board_marker_pub,
+            board_marker_icp_pub,
         );
 
         let processing_duration = start_time.elapsed();
@@ -283,6 +292,7 @@ impl CalibrationBoardLocatorNode {
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
+        board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
         let points = match Self::convert_pointcloud2_to_points(msg) {
@@ -387,7 +397,13 @@ impl CalibrationBoardLocatorNode {
             "Starting board detection with {} points",
             active_points.len()
         );
-        let detection: Option<BoardDetection> = match detector.detect(&active_points) {
+        let detection: Option<BoardDetection> = match detector.detect_with_progress(&active_points, |bm| {
+            if let Some(pub_icp) = board_marker_icp_pub {
+                if let Ok(arr) = Self::create_board_markers_from_model(bm, &msg.header) {
+                    let _ = pub_icp.publish(arr);
+                }
+            }
+        }) {
             Ok(Some(det)) => {
                 log_warn!(LOGGER_NAME, "Board detection successful");
 
@@ -778,6 +794,83 @@ impl CalibrationBoardLocatorNode {
         let x_arrow = make_axis_arrow(1, rot_x, 1.0, 0.0, 0.0); // Red X
         let y_arrow = make_axis_arrow(2, rot_y, 0.0, 1.0, 0.0); // Green Y
         let z_arrow = make_axis_arrow(3, rot_z, 0.0, 0.0, 1.0); // Blue Z
+
+        let mut arr = MarkerArray::default();
+        arr.markers.push(board_cube);
+        arr.markers.push(x_arrow);
+        arr.markers.push(y_arrow);
+        arr.markers.push(z_arrow);
+        Ok(arr)
+    }
+
+    fn create_board_markers_from_model(board_model: &hollow_board_config::BoardModel, header: &Header) -> Result<MarkerArray> {
+        use nalgebra as na;
+
+        let base_translation = &board_model.pose.translation;
+        let base_rotation = &board_model.pose.rotation;
+
+        let board_cube = {
+            let mut m = Marker::default();
+            m.header = header.clone();
+            m.ns = "board_icp".to_string();
+            m.id = 1000;
+            m.type_ = 1; // CUBE
+            m.action = 0; // ADD
+            m.pose.position.x = base_translation.x;
+            m.pose.position.y = base_translation.y;
+            m.pose.position.z = base_translation.z;
+            let q = base_rotation.quaternion();
+            m.pose.orientation.x = q.i;
+            m.pose.orientation.y = q.j;
+            m.pose.orientation.z = q.k;
+            m.pose.orientation.w = q.w;
+            m.scale.x = board_model.board_shape.board_width.as_meters();
+            m.scale.y = board_model.board_shape.board_width.as_meters();
+            m.scale.z = 0.02;
+            m.color.r = 1.0;
+            m.color.g = 0.5;
+            m.color.b = 0.0;
+            m.color.a = 0.3;
+            m
+        };
+
+        let mut make_axis_arrow = |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
+            let mut m = Marker::default();
+            m.header = header.clone();
+            m.ns = "board_axes_icp".to_string();
+            m.id = id;
+            m.type_ = 0; // ARROW
+            m.action = 0; // ADD
+            m.pose.position.x = base_translation.x;
+            m.pose.position.y = base_translation.y;
+            m.pose.position.z = base_translation.z;
+
+            let rot = base_rotation * rot_after_x;
+            let q = rot.quaternion();
+            m.pose.orientation.x = q.i;
+            m.pose.orientation.y = q.j;
+            m.pose.orientation.z = q.k;
+            m.pose.orientation.w = q.w;
+
+            let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
+            m.scale.x = len;
+            m.scale.y = 0.02;
+            m.scale.z = 0.04;
+
+            m.color.r = r;
+            m.color.g = g;
+            m.color.b = b;
+            m.color.a = 0.9;
+            m
+        };
+
+        let rot_x = na::UnitQuaternion::identity();
+        let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), FRAC_PI_2);
+        let rot_z = na::UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), -FRAC_PI_2);
+
+        let x_arrow = make_axis_arrow(1001, rot_x, 1.0, 0.2, 0.2);
+        let y_arrow = make_axis_arrow(1002, rot_y, 0.2, 1.0, 0.2);
+        let z_arrow = make_axis_arrow(1003, rot_z, 0.2, 0.2, 1.0);
 
         let mut arr = MarkerArray::default();
         arr.markers.push(board_cube);
