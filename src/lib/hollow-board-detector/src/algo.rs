@@ -147,7 +147,31 @@ pub fn fit_board_icp(
                         })
                 };
 
-                planar_rotation * lifting_rotation
+                let rot = planar_rotation * lifting_rotation;
+                // Debug initialization details
+                {
+                    debug!(
+                        "Init pose -> centroid: [{:.6}, {:.6}, {:.6}], plane_normal: [{:.6}, {:.6}, {:.6}]",
+                        inlier_centroid.x,
+                        inlier_centroid.y,
+                        inlier_centroid.z,
+                        plane_normal.x,
+                        plane_normal.y,
+                        plane_normal.z
+                    );
+                    let axis_ang = rot
+                        .axis_angle()
+                        .map(|(axis, ang)| (axis.into_inner(), ang));
+                    if let Some((axis, ang)) = axis_ang {
+                        debug!(
+                            "Init rotation axis: [{:.6}, {:.6}, {:.6}], angle: {:.6}",
+                            axis.x, axis.y, axis.z, ang
+                        );
+                    } else {
+                        debug!("Init rotation is identity (no axis-angle)");
+                    }
+                }
+                rot
             };
 
             Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
@@ -180,7 +204,7 @@ pub fn fit_board_icp(
                     cb(&board_model);
                 }
 
-                // Use the board model's correspondence finding method
+                // Use the board model's correspondence finding method for proper closest point calculation
                 let correspondings = match board_model.find_correspondences(&inlier_points) {
                     Some(corr) => corr,
                     None => {
@@ -189,159 +213,199 @@ pub fn fit_board_icp(
                     }
                 };
 
-                // reject outliers (mirror logic from lib.rs)
-                let (good_inlier_points, good_corresponding_points, avg_loss) = {
-                    let losses: Vec<_> = correspondings
-                        .iter()
-                        .map(|(input_point, corresponding_point)| {
-                            (*input_point - corresponding_point).norm()
-                        })
-                        .collect();
-                    let avg_loss = losses.iter().sum::<f64>() / correspondings.len() as f64;
+                // reject outliers
+                let correspondence_losses: Vec<_> = correspondings
+                    .iter()
+                    .map(|(input_point, corresponding_point)| {
+                        let loss = (*input_point - corresponding_point).norm();
+                        loss
+                    })
+                    .collect();
+                let avg_loss =
+                    correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
 
-                    debug!("ICP step {}: avg_loss = {:.6}, correspondences = {}", step, avg_loss, correspondings.len());
-                    debug!("  -> Loss progression: {:?}", losses);
+                debug!("ICP step {}: avg_loss = {:.6}, correspondences = {}", step, avg_loss, correspondings.len());
+                debug!("  -> Loss progression: {:?}", losses);
 
-                    let good_correspondences: Vec<_> = if avg_loss <= GOOD_FIT_THRESHOLD {
-                        izip!(correspondings.into_iter(), losses.into_iter())
-                            .filter_map(|((inlier_point, corresponding_point), loss)| {
-                                (loss < OUTLIER_THRESHOLD)
-                                    .then(|| (inlier_point, corresponding_point))
-                            })
-                            .collect()
-                    } else {
-                        correspondings
-                    };
+                // Improved outlier filtering with adaptive thresholds
+                // Use a more reasonable threshold that adapts to the current loss
+                let adaptive_threshold = (avg_loss * 2.0).max(0.01).min(1.0);
+                debug!(
+                    "  -> adaptive_threshold={:.6} (from avg_loss={:.6})",
+                    adaptive_threshold, avg_loss
+                );
 
-                    let good_correspondences_len = good_correspondences.len();
-                    let (good_inlier_points, good_corresponding_points): (
-                        Vec<Point3<f64>>,
-                        Vec<Point3<f64>>,
-                    ) = good_correspondences.into_iter().unzip();
+                let good_correspondences: Vec<_> = correspondings
+                    .iter()
+                    .zip(correspondence_losses.iter())
+                    .filter_map(|((input_point, corresponding_point), &loss)| {
+                        if loss <= adaptive_threshold {
+                            Some((*input_point, *corresponding_point))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                    debug!("  -> good_correspondences = {}, good_inlier_points = {}", good_correspondences_len, good_inlier_points.len());
+                let good_correspondences_len = good_correspondences.len();
+                let (good_corresponding_points, good_inlier_points): (
+                    Vec<Point3<f64>>,
+                    Vec<Point3<f64>>,
+                ) = good_correspondences.into_iter().unzip();
 
-                    (good_inlier_points, good_corresponding_points, avg_loss)
-                };
+                debug!("  -> good_correspondences = {}, good_inlier_points = {}", good_correspondences_len, good_inlier_points.len());
+
+                // Centroids diagnostics (selected pairs)
+                if good_inlier_points.len() >= 3 {
+                    if let Some(in_centroid_arr) = centroid_of_points(good_inlier_points.iter().map(|p| {
+                        let a: [f64; 3] = (*p).into();
+                        a
+                    })) {
+                        let in_centroid: Point3<f64> = in_centroid_arr.into();
+                        debug!(
+                            "  -> inlier centroid: [{:.6}, {:.6}, {:.6}]",
+                            in_centroid.x, in_centroid.y, in_centroid.z
+                        );
+                    }
+                    if let Some(mod_centroid_arr) = centroid_of_points(good_corresponding_points.iter().map(|p| {
+                        let a: [f64; 3] = (*p).into();
+                        a
+                    })) {
+                        let mod_centroid: Point3<f64> = mod_centroid_arr.into();
+                        debug!(
+                            "  -> model centroid:  [{:.6}, {:.6}, {:.6}]",
+                            mod_centroid.x, mod_centroid.y, mod_centroid.z
+                        );
+                    }
+                }
 
                 // Safety check: ensure we have at least 3 points for Kabsch
                 if good_inlier_points.len() < 3 {
-                    let align_pose = Isometry3::identity();
-
-                    // check termination criteria
-                    termination_count = {
-                        let pose_weight = {
-                            let translation_weight = align_pose.translation.vector.norm();
-                            let rotation_weight = align_pose
-                                .rotation
-                                .axis_angle()
-                                .map(|(_, angle)| angle)
-                                .unwrap_or(0.0);
-                            translation_weight + rotation_weight
-                        };
-
-                        if pose_weight <= icp_pose_weight_threshold {
-                            termination_count + 1
-                        } else {
-                            0
-                        }
-                    };
-
-                    // update state
-                    losses.push(avg_loss);
-                    // Keep the same points for next iteration
-                    pose = pose * align_pose;
-                    step += 1;
-
-                    if step == max_icp_iterations || termination_count > 100 {
-                        break (inlier_points, good_corresponding_points, losses, pose);
-                    }
-                    continue;
+                    debug!("ICP step {}: Too few inlier points ({}), terminating", step, good_inlier_points.len());
+                    break (inlier_points, good_corresponding_points, losses, pose);
                 }
 
-                // compute transformation (mirror lib.rs approach)
+                // compute transformation
                 let align_pose: Isometry3<_> = {
-                    let align_translation = {
-                        let input_centroid: Point3<f64> =
-                            centroid_of_points(good_inlier_points.iter().map(|point| {
-                                let point: [f64; 3] = (*point).into();
-                                point
-                            }))
-                            .unwrap()
-                            .into();
-                        let model_centroid: Point3<f64> =
-                            centroid_of_points(good_corresponding_points.iter().map(|point| {
-                                let point: [f64; 3] = (*point).into();
-                                point
-                            }))
-                            .unwrap()
-                            .into();
-                        Translation3::from(input_centroid - model_centroid)
-                    };
-
-                    let align_quaternion = {
-                        let input_target_pairs = good_corresponding_points
+                    // Kabsch expects (input, target) pairs.
+                    // Our correspondences are (data_point, model_point).
+                    // To compute a transform that moves the model toward the data
+                    // (so pose = align_pose * pose), we pass (model_point, data_point).
+                    let pairs = izip!(
+                        good_corresponding_points
                             .iter()
-                            .map(|point| align_translation * point)
-                            .zip(good_inlier_points.iter().copied());
+                            .map(|&p| -> [f64; 3] { p.into() }),
+                        good_inlier_points
+                            .iter()
+                            .map(|&p| -> [f64; 3] { p.into() }),
+                    );
 
-                        let pairs = izip!(
-                            input_target_pairs.clone().map(|(_, p)| -> [f64; 3] { p.into() }),
-                            input_target_pairs.map(|(p, _)| -> [f64; 3] { p.into() }),
-                        );
-
-                        match kabsch(pairs) {
-                            Some((XYZ([_x, _y, _z]), IJKW([i, j, k, w]))) => UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
-                            None => {
-                                debug!("ICP step {}: Failed to fit rotation, using identity", step);
-                                UnitQuaternion::identity()
+                    match kabsch(pairs) {
+                        Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => {
+                            let iso = Isometry3 {
+                                rotation: UnitQuaternion::from_quaternion(Quaternion::new(
+                                    w, i, j, k,
+                                )),
+                                translation: Translation3::new(x, y, z),
+                            };
+                            let aa = iso.rotation.axis_angle().map(|(ax, ang)| (ax.into_inner(), ang));
+                            if let Some((ax, ang)) = aa {
+                                debug!(
+                                    "  -> align_pose: t=[{:.6}, {:.6}, {:.6}], axis=[{:.6}, {:.6}, {:.6}], angle={:.6}",
+                                    iso.translation.vector.x,
+                                    iso.translation.vector.y,
+                                    iso.translation.vector.z,
+                                    ax.x, ax.y, ax.z, ang
+                                );
+                            } else {
+                                debug!(
+                                    "  -> align_pose: t=[{:.6}, {:.6}, {:.6}], identity rotation",
+                                    iso.translation.vector.x,
+                                    iso.translation.vector.y,
+                                    iso.translation.vector.z
+                                );
                             }
+                            iso
                         }
-                    };
-
-                    Isometry3::from_parts(align_translation, align_quaternion)
-                };
-
-                // check termination criteria
-                termination_count = {
-                    let pose_weight = {
-                        let translation_weight = align_pose.translation.vector.norm();
-                        let rotation_weight = align_pose
-                            .rotation
-                            .axis_angle()
-                            .map(|(_, angle)| angle)
-                            .unwrap_or(0.0);
-                        translation_weight + rotation_weight
-                    };
-
-                    if pose_weight <= icp_pose_weight_threshold {
-                        termination_count + 1
-                    } else {
-                        0
+                        None => {
+                            debug!("ICP step {}: Failed to fit transformation, terminating", step);
+                            break (inlier_points, good_corresponding_points, losses, pose);
+                        }
                     }
                 };
-                
+
                 // update state
                 losses.push(avg_loss);
+                // Convert back to the expected format for the next iteration
                 inlier_points = good_inlier_points;
 
                 debug!("  -> align_pose translation: {:.6}, rotation angle: {:.6}", 
                        align_pose.translation.vector.norm(),
                        align_pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0));
-                debug!("  -> pose_weight: {:.8}, termination_count: {}", 
-                       align_pose.translation.vector.norm() + align_pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0),
-                       termination_count);
 
-                // Apply pose update (mirror lib.rs: align_pose * pose)
-                pose = align_pose * pose;
+                // Apply damping to prevent overshooting
+                let damping_factor = 0.3; // More reasonable damping factor for faster convergence
+
+                // Apply damping to the pose update (not the transformation itself)
+                // This interpolates between the current pose and the new pose after applying the transformation
+                let new_pose = pose * align_pose;
+
+                // Diagnostics for pose delta before damping
+                let delta_t = (new_pose.translation.vector - pose.translation.vector).norm();
+                let delta_ang = new_pose
+                    .rotation
+                    .rotation_to(&pose.rotation)
+                    .angle();
+                debug!(
+                    "  -> pose delta pre-damp: dT={:.6}, dAng={:.6}, damping_factor={:.3}",
+                    delta_t, delta_ang, damping_factor
+                );
+
+                // Damp the translation component
+                let damped_translation = Translation3::from(
+                    pose.translation.vector +
+                    (new_pose.translation.vector - pose.translation.vector) * damping_factor
+                );
+
+                // Damp the rotation component using spherical linear interpolation
+                let damped_rotation = UnitQuaternion::slerp(
+                    &pose.rotation,
+                    &new_pose.rotation,
+                    damping_factor,
+                );
+
+                // Termination criteria based on the actually applied (damped) update
+                {
+                    let applied_t = (damped_translation.vector - pose.translation.vector).norm();
+                    let applied_ang = damped_rotation
+                        .rotation_to(&pose.rotation)
+                        .angle();
+                    let pose_weight = applied_t + applied_ang;
+                    if pose_weight <= icp_pose_weight_threshold {
+                        termination_count += 1;
+                    } else {
+                        termination_count = 0;
+                    }
+                    debug!(
+                        "  -> applied pose_weight: {:.8}, termination_count: {}",
+                        pose_weight, termination_count
+                    );
+                }
+
+                pose = Isometry3::from_parts(damped_translation, damped_rotation);
                 step += 1;
 
-                debug!("  -> new pose translation: {:.6}, rotation angle: {:.6}", 
-                       pose.translation.vector.norm(),
+                debug!("  -> new pose translation: {:.?}, rotation angle: {:.?}", 
+                       pose.translation.vector,
                        pose.rotation.axis_angle().map(|(_, angle)| angle).unwrap_or(0.0));
                 debug!("  -> Updated loss: {:.8}, inlier_count: {}", avg_loss, inlier_points.len());
                 
-                // Removed premature break on small inlier count; rely on thresholds/iterations
+                // Check if we have enough inlier points to continue
+                if inlier_points.len() < 2000 {
+                    debug!("ICP terminating: too few inlier points: {}", inlier_points.len());
+                    break (inlier_points, good_corresponding_points, losses, pose);
+                }
+                
                 if *losses.last().unwrap() < icp_rejection_threshold {
                     debug!(
                         "🏆 ICP terminating: loss is too small: {:.8}",
@@ -419,6 +483,17 @@ pub fn fit_board_icp(
             });
         }
     }
+
+    // Save ICP results to CSV for 3D visualization
+    let board_model = BoardModel {
+        pose: board_pose,
+        board_shape: BoardShape {
+            board_width,
+            hole_radius,
+            hole_center_shift,
+        },
+        marker_paper_size,
+    };
 
     let _final_loss = icp_losses
         .iter()
