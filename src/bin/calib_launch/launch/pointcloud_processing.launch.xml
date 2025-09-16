@@ -41,13 +41,12 @@
     <node pkg="calibration_board_locator"
           exec="calibration_board_locator"
           name="calibration_board_locator"
-          namespace="$(var namespace)"
+          namespace="$(var namespace)/calibration_board_locator"
           output="screen">
         <param name="board_detector_file" value="$(find-pkg-share calib_launch)/config/board/board_pattern.json5"/>
         <param name="aruco_pattern_file" value="$(var aruco_config_file)"/>
         <param name="bbox_file" value="$(find-pkg-share calib_launch)/config/board/bbox.json5"/>
         <param name="enable_debug" value="$(var debug_mode)"/>
         <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
-        <remap from="board_detections" to="$(var board_detections_topic)"/>
     </node>
 </launch>

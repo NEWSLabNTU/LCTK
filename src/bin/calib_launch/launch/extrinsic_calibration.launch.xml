@@ -48,7 +48,7 @@
     <node pkg="extrinsic_solver"
           exec="extrinsic_solver"
           name="extrinsic_solver"
-          namespace="$(var namespace)"
+          namespace="$(var namespace)/extrinsic_solver"
           output="screen">
         <param name="solver_method" value="$(var solver_method)"/>
         <param name="min_detections_required" value="$(var min_detections_required)"/>
@@ -58,6 +58,5 @@
         <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
         <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
         <remap from="camera_info" to="$(var camera_info_topic)"/>
-        <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
     </node>
 </launch>

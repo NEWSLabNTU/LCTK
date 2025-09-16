@@ -100,7 +100,7 @@
 
     <!-- Extrinsic Calibration -->
     <include file="$(find-pkg-share calib_launch)/launch/extrinsic_calibration.launch.xml">
-        <arg name="board_detections_topic" value="/calibration/calibration_board_detections"/>
+        <arg name="board_detections_topic" value="/calibration/calibration_board_locator/calibration_board_detections"/>
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>

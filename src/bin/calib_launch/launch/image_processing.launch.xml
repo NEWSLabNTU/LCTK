@@ -42,7 +42,7 @@
     <node pkg="aruco_locator_node"
           exec="aruco_locator_node"
           name="aruco_locator"
-          namespace="$(var namespace)"
+          namespace="$(var namespace)/aruco_locator"
           output="screen">
         <param name="aruco_config_file" value="$(var aruco_config_file)"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
