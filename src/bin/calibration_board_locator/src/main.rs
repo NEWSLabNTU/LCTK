@@ -13,7 +13,10 @@ use sensor_msgs::msg::PointCloud2;
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 use std_msgs::msg::{ColorRGBA, Header};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
@@ -105,9 +108,16 @@ impl CalibrationBoardLocatorNode {
         };
         let bbox_marker_shared = bbox_marker_publisher.clone();
 
+        // Counter for debugging message processing
+        let message_counter = Arc::new(AtomicU64::new(0));
+        let counter_clone = Arc::clone(&message_counter);
+
         // Create subscription to PointCloud2
         let pointcloud_subscription =
             node.create_subscription("input_pointcloud", move |msg: PointCloud2| {
+                let count = counter_clone.fetch_add(1, Ordering::Relaxed);
+                log_debug!(LOGGER_NAME, "Processing message #{}", count + 1);
+
                 Self::pointcloud_callback(
                     msg,
                     &detector,
@@ -192,6 +202,29 @@ impl CalibrationBoardLocatorNode {
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) {
+        // Log callback invocation with timestamp and data size
+        log_debug!(
+            LOGGER_NAME,
+            "PointCloud callback triggered at timestamp: {}.{:09}, data size: {} bytes, width: {}, height: {}",
+            msg.header.stamp.sec,
+            msg.header.stamp.nanosec,
+            msg.data.len(),
+            msg.width,
+            msg.height
+        );
+
+        // Check if we have valid data
+        if msg.data.is_empty() || msg.width == 0 || msg.height == 0 {
+            log_warn!(
+                LOGGER_NAME,
+                "Received empty or invalid point cloud (data: {} bytes, {}x{})",
+                msg.data.len(),
+                msg.width,
+                msg.height
+            );
+            // Still try to publish empty debug topics to maintain consistency
+        }
+
         let result = Self::process_pointcloud(
             &msg,
             detector,
@@ -225,7 +258,19 @@ impl CalibrationBoardLocatorNode {
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
-        let points = Self::convert_pointcloud2_to_points(msg)?;
+        let points = match Self::convert_pointcloud2_to_points(msg) {
+            Ok(pts) => pts,
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Failed to convert point cloud: {e}");
+                return Err(e);
+            }
+        };
+
+        log_debug!(
+            LOGGER_NAME,
+            "Converted {} points from PointCloud2",
+            points.len()
+        );
 
         // Publish debug all points if enabled
         if let Some(pub_all) = debug_all_points_pub {
@@ -241,9 +286,15 @@ impl CalibrationBoardLocatorNode {
         }
 
         // Filter points using bbox
-        let bbox_guard = bbox
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock bbox: {e}"))?;
+        log_debug!(LOGGER_NAME, "Attempting to lock bbox mutex...");
+        let bbox_guard = match bbox.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Failed to lock bbox mutex: {e}");
+                return Err(anyhow!("Failed to lock bbox: {e}"));
+            }
+        };
+        log_debug!(LOGGER_NAME, "Successfully locked bbox mutex");
 
         log_debug!(
             LOGGER_NAME,
