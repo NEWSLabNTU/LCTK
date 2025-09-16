@@ -533,6 +533,12 @@ impl ExtrinsicSolverNode {
                 if let Err(e) = quality_publisher.publish(quality_msg) {
                     log_warn!(LOGGER_NAME, "Failed to publish quality metrics: {e}");
                 }
+                // Also print the entire calibration quality message for debugging/inspection
+                log_info!(
+                    LOGGER_NAME,
+                    "Calibration quality message: {}",
+                    quality_report.to_string()
+                );
 
                 // Dynamic parameter adjustment if enabled
                 if state.enable_dynamic_adjustment {
@@ -580,6 +586,17 @@ impl ExtrinsicSolverNode {
                 log_warn!(LOGGER_NAME, "Failed to publish transform: {e}");
             } else {
                 log_info!(LOGGER_NAME, "Extrinsic Solver: Published extrinsic transform");
+                let rotation_matrix = transform.rotation.to_rotation_matrix();
+                let r = rotation_matrix.matrix();
+                let t = &transform.translation;
+                log_info!(
+                    LOGGER_NAME,
+                    "Extrinsic T (4x4):\n[ {:.6} {:.6} {:.6} {:.6} ]\n[ {:.6} {:.6} {:.6} {:.6} ]\n[ {:.6} {:.6} {:.6} {:.6} ]\n[ {:.6} {:.6} {:.6} {:.6} ]",
+                    r[(0, 0)], r[(0, 1)], r[(0, 2)], t.x,
+                    r[(1, 0)], r[(1, 1)], r[(1, 2)], t.y,
+                    r[(2, 0)], r[(2, 1)], r[(2, 2)], t.z,
+                    0.0f64,    0.0f64,    0.0f64,    1.0f64
+                );
             }
         } else {
             log_warn!(LOGGER_NAME, "Extrinsic Solver: PnP solver failed to find solution");
