@@ -111,8 +111,8 @@ impl MultiWaysideNode {
         let calibration_config = CalibrationConfig {
             auto_calibrate: true,
             min_detections_for_calibration: 5,
-            calibration_timeout_seconds: 30,
-            quality_threshold: 0.7,
+            calibration_timeout_seconds: 120,
+            quality_threshold: 0.0,
             same_face_mode: config.same_face_mode,
             apply_bug_fix: config.apply_bug_fix,
             max_queue_size: config.max_queue_size,
