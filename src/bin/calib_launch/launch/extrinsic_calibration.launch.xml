@@ -34,19 +34,23 @@
          description="Namespace for the nodes"/>
 
     <arg name="sync_window_ms"
-         default="50"
+         default="200"
          description="Synchronization window size in milliseconds"/>
+
+    <arg name="buffer_size"
+         default="400"
+         description="Synchronization buffer size"/>
 
     <arg name="solver_method"
          default="SQPNP"
          description="Solver method for extrinsic calibration"/>
 
     <arg name="min_detections_required"
-         default="5"
+         default="1"
          description="Minimum number of detections required for calibration"/>
 
     <arg name="debug_mode"
-         default="false"
+         default="true"
          description="Enable debug logging and visualization"/>
 
     <!-- Detection Synchronizer Node -->
@@ -55,12 +59,12 @@
           name="detection_synchronizer"
           namespace="$(var namespace)"
           output="screen">
-        <param name="window_size_ms" value="500"/>
-        <param name="buffer_size" value="200"/>
-        <param name="quality_threshold" value="50"/>
-        <param name="enable_debug" value="true"/>
-        <param name="aruco_detections_topic" value="$(var aruco_detections_topic)"/>
-        <param name="board_detections_topic" value="$(var board_detections_topic)"/>
+        <param name="window_size_ms" value="$(var sync_window_ms)"/>
+        <param name="buffer_size" value="$(var buffer_size)"/>
+        <param name="quality_threshold" value="0"/>
+        <param name="enable_debug" value="$(var debug_mode)"/>
+        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
+        <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
     </node>
 
     <!-- Extrinsic Solver Node -->

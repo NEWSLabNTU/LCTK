@@ -134,7 +134,7 @@ impl SynchronizerNode {
         // Create publishers for synchronized detections
         let sync_2d_publisher = node.create_publisher("synchronized_aruco_detections")?;
         let sync_3d_publisher = node.create_publisher("synchronized_board_detections")?;
-
+        
         // Start the synchronizer task
         {
             let sync_2d_publisher = sync_2d_publisher.clone();
@@ -152,13 +152,16 @@ impl SynchronizerNode {
             });
         }
 
-        // Create subscribers using full topic names to avoid namespace issues
+        // Create subscribers with topic remapping support
         let aruco_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription(&aruco_topic, move |msg: Detection2DArray| {
-                Self::aruco_callback(msg, &state);
-            })?
+            node.create_subscription(
+                "aruco_detections",
+                move |msg: Detection2DArray| {
+                    Self::aruco_callback(msg, &state);
+                },
+            )?
         };
 
         let board_subscription = {
@@ -224,6 +227,8 @@ impl SynchronizerNode {
                 msg.header.stamp.nanosec
             );
         }
+
+        // Processing detection message
 
         let wrapper = BoardDetectionWrapper { detection: msg };
         let detection_msg = DetectionMessage::Board(wrapper);

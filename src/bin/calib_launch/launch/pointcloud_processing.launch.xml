@@ -26,7 +26,7 @@
          description="Input point cloud topic"/>
 
     <arg name="board_detections_topic"
-         default="/calibration/calibration_board_locator/board_detections"
+         default="/calibration/calibration_board_detections"
          description="Output board detections topic"/>
 
     <arg name="namespace"

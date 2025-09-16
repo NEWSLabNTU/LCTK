@@ -4,6 +4,9 @@ use eyre::Result;
 use rclrs::{log_info, Context, CreateBasicExecutor, InitOptions, RclrsErrorFilter, SpinOptions};
 use std::sync::{Arc, Mutex};
 
+// Add import for hollow_board_detector initialization
+use hollow_board_detector::init_logging;
+
 // Modules
 mod calibration;
 mod config;
@@ -108,8 +111,8 @@ impl MultiWaysideNode {
         let calibration_config = CalibrationConfig {
             auto_calibrate: true,
             min_detections_for_calibration: 5,
-            calibration_timeout_seconds: 30,
-            quality_threshold: 0.7,
+            calibration_timeout_seconds: 120,
+            quality_threshold: 0.0,
             same_face_mode: config.same_face_mode,
             apply_bug_fix: config.apply_bug_fix,
             max_queue_size: config.max_queue_size,
@@ -185,6 +188,9 @@ impl MultiWaysideNode {
 }
 
 fn main() -> Result<()> {
+    // Initialize logging for the hollow-board-detector library
+    init_logging();
+    
     // Initialize ROS 2
     let context = Context::new(std::env::args(), InitOptions::new())?;
     let mut executor = context.create_basic_executor();

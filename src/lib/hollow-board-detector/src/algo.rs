@@ -31,11 +31,6 @@ pub fn fit_plane_ransac<'a>(
         ..
     } = *board_detector;
 
-    debug!("RANSAC: Starting plane fitting");
-    debug!("  Input points: {}", points.len());
-    debug!("  Inlier threshold: {}", plane_ransac_inlier_threshold);
-    debug!("  Max iterations: {}", plane_ransac_max_iterations);
-
     // Check minimum points requirement
     if points.len() < 3 {
         warn!(
@@ -52,44 +47,16 @@ pub fn fit_plane_ransac<'a>(
     let (plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
             Some(ret) => {
-                debug!("RANSAC succeeded!");
-                debug!("  Inliers found: {}", ret.1.len());
-                debug!(
-                    "  Inlier ratio: {:.2}%",
-                    (ret.1.len() as f64 / points.len() as f64) * 100.0
-                );
                 ret
             }
             None => {
                 warn!("RANSAC failed: No valid plane found");
-                debug!("  Possible reasons:");
-                debug!("    - Points are too noisy/scattered");
-                debug!(
-                    "    - Inlier threshold ({}) too strict",
-                    plane_ransac_inlier_threshold
-                );
-                debug!(
-                    "    - Not enough iterations ({})",
-                    plane_ransac_max_iterations
-                );
-                debug!("    - Points don't form a plane");
                 return Ok(None);
             }
         }
     };
 
     let inlier_points: Vec<_> = inlier_indices.into_iter().map(|idx| &points[idx]).collect();
-
-    // Log plane model details
-    debug!("Plane model found:");
-    debug!(
-        "  Normal: ({:.4}, {:.4}, {:.4})",
-        plane_model.normal[0], plane_model.normal[1], plane_model.normal[2]
-    );
-    debug!(
-        "  Center: ({:.4}, {:.4}, {:.4})",
-        plane_model.center.x, plane_model.center.y, plane_model.center.z
-    );
 
     let viz_msg = PlaneRansacData {
         plane_model: plane_model.clone(),
@@ -115,9 +82,6 @@ pub fn fit_board_icp(
                                            // let good_fit_threshold = 0.1; // ouster os-1
     const OUTLIER_THRESHOLD: f64 = 0.1;
 
-    debug!("ICP: Starting board fitting");
-    debug!("  Plane inlier points: {}", plane_inlier_points.len());
-
     let Config {
         board_shape:
             BoardShape {
@@ -130,11 +94,6 @@ pub fn fit_board_icp(
         icp_rejection_threshold,
         ..
     } = *board_detector;
-
-    debug!("ICP Parameters:");
-    debug!("  Max iterations: {}", max_icp_iterations);
-    debug!("  Pose weight threshold: {}", icp_pose_weight_threshold);
-    debug!("  Rejection threshold: {}", icp_rejection_threshold);
     let marker_paper_size = aruco_detector.paper_size();
 
     let (board_pose, icp_losses, viz_msg) = {
@@ -195,20 +154,6 @@ pub fn fit_board_icp(
                     marker_paper_size,
                 };
 
-                if step == 0 || step % 10 == 0 {
-                    // Show details for first step and every 10th step
-                    debug!("ICP Step {}: Board model created", step);
-                    debug!(
-                        "  Board pose translation: ({:.4}, {:.4}, {:.4})",
-                        pose.translation.x, pose.translation.y, pose.translation.z
-                    );
-                    debug!(
-                        "  Board pose rotation: ({:.4}, {:.4}, {:.4}, {:.4})",
-                        pose.rotation.i, pose.rotation.j, pose.rotation.k, pose.rotation.w
-                    );
-                    debug!("  Input inlier points: {}", inlier_points.len());
-                }
-
                 // Proper ICP correspondence finding: find closest points on board model
                 let correspondings: Vec<(Point3<f64>, Point3<f64>)> = inlier_points
                     .iter()
@@ -231,29 +176,6 @@ pub fn fit_board_icp(
                     })
                     .collect();
 
-                if step == 0 || step % 10 == 0 {
-                    // Show details for first step and every 10th step
-                    debug!("Found {} correspondences", correspondings.len());
-                    debug!("Correspondence details (showing first 5):");
-                    for (i, (input_point, corresponding_point)) in
-                        correspondings.iter().take(5).enumerate()
-                    {
-                        let distance = (input_point - corresponding_point).norm();
-                        debug!("  {}: Input({:.4}, {:.4}, {:.4}) -> Corresponding({:.4}, {:.4}, {:.4}) | Distance: {:.6}",
-                            i+1,
-                            input_point.x, input_point.y, input_point.z,
-                            corresponding_point.x, corresponding_point.y, corresponding_point.z,
-                            distance
-                        );
-                    }
-                    if correspondings.len() > 5 {
-                        debug!(
-                            "  ... and {} more correspondences",
-                            correspondings.len() - 5
-                        );
-                    }
-                }
-
                 // reject outliers
                 let correspondence_losses: Vec<_> = correspondings
                     .iter()
@@ -264,24 +186,6 @@ pub fn fit_board_icp(
                     .collect();
                 let avg_loss =
                     correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
-
-                if step == 0 || step % 10 == 0 {
-                    // Show details for first step and every 10th step
-                    let min_loss = correspondence_losses
-                        .iter()
-                        .fold(f64::INFINITY, |a, &b| a.min(b));
-                    let max_loss = correspondence_losses
-                        .iter()
-                        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                    debug!(
-                        "Loss statistics: avg={:.6}, min={:.6}, max={:.6}",
-                        avg_loss, min_loss, max_loss
-                    );
-                    debug!(
-                        "Good fit threshold: {}, Outlier threshold: {}",
-                        GOOD_FIT_THRESHOLD, OUTLIER_THRESHOLD
-                    );
-                }
 
                 // Improved outlier filtering with adaptive thresholds
                 // Use a more reasonable threshold that adapts to the current loss
@@ -299,17 +203,6 @@ pub fn fit_board_icp(
                     })
                     .collect();
 
-                if step == 0 || step % 10 == 0 {
-                    debug!(
-                        "Using adaptive threshold: {:.6} (avg_loss: {:.6})",
-                        adaptive_threshold, avg_loss
-                    );
-                    debug!(
-                        "{} points passed adaptive threshold",
-                        good_correspondences.len()
-                    );
-                }
-
                 let (good_inlier_points, good_corresponding_points): (
                     Vec<Point3<f64>>,
                     Vec<Point3<f64>>,
@@ -317,10 +210,6 @@ pub fn fit_board_icp(
 
                 // Safety check: ensure we have at least 3 points for Kabsch
                 if good_inlier_points.len() < 3 {
-                    warn!(
-                        "Not enough points for Kabsch ({} < 3), using identity transformation",
-                        good_inlier_points.len()
-                    );
                     let align_pose = Isometry3::identity();
 
                     // check termination criteria
@@ -335,48 +224,20 @@ pub fn fit_board_icp(
                             translation_weight + rotation_weight
                         };
 
-                        if step == 0 || step % 10 == 0 {
-                            debug!("ICP Step {}: Pose weight analysis (identity)", step);
-                            debug!(
-                                "  Translation weight: {:.8}",
-                                align_pose.translation.vector.norm()
-                            );
-                            debug!(
-                                "  Rotation weight: {:.8}",
-                                align_pose
-                                    .rotation
-                                    .axis_angle()
-                                    .map(|(_, angle)| angle)
-                                    .unwrap_or(0.0)
-                            );
-                            debug!("  Total pose weight: {:.8}", pose_weight);
-                            debug!("  Threshold: {:.8}", icp_pose_weight_threshold);
-                            debug!("  Avg loss: {:.8}", avg_loss);
-                        }
-
                         if pose_weight <= icp_pose_weight_threshold {
                             termination_count + 1
                         } else {
                             0
                         }
                     };
-
+                    
                     // update state
                     losses.push(avg_loss);
                     // Keep the same points for next iteration
                     pose = pose * align_pose;
                     step += 1;
 
-                    if step == 0 || step % 10 == 0 {
-                        debug!("Termination count: {}/16", termination_count);
-                        debug!("Step: {}/{}", step, max_icp_iterations);
-                    }
-
-                    if step == max_icp_iterations || termination_count > 16 {
-                        debug!(
-                            "ICP terminating: step={}, termination_count={}",
-                            step, termination_count
-                        );
+                    if step == max_icp_iterations || termination_count > 100 {
                         break (inlier_points, good_corresponding_points, losses, pose);
                     }
                     continue;
@@ -384,11 +245,6 @@ pub fn fit_board_icp(
 
                 // compute transformation
                 let align_pose: Isometry3<_> = {
-                    debug!(
-                        "Computing transformation with {} points",
-                        good_inlier_points.len()
-                    );
-
                     let pairs = izip!(
                         good_inlier_points.iter().map(|&p| -> [f64; 3] { p.into() }),
                         good_corresponding_points
@@ -398,7 +254,6 @@ pub fn fit_board_icp(
 
                     match kabsch(pairs) {
                         Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => {
-                            debug!("Kabsch succeeded: translation=({:.6}, {:.6}, {:.6}), rotation=({:.6}, {:.6}, {:.6}, {:.6})", x, y, z, i, j, k, w);
                             Isometry3 {
                                 rotation: UnitQuaternion::from_quaternion(Quaternion::new(
                                     w, i, j, k,
@@ -407,7 +262,6 @@ pub fn fit_board_icp(
                             }
                         }
                         None => {
-                            warn!("Kabsch failed, using identity transformation");
                             Isometry3::identity()
                         }
                     }
@@ -444,26 +298,6 @@ pub fn fit_board_icp(
                         translation_weight + rotation_weight
                     };
 
-                    if step == 0 || step % 10 == 0 {
-                        // Show details for first step and every 10th step
-                        debug!("ICP Step {}: Pose weight analysis", step);
-                        debug!(
-                            "  Translation weight: {:.8}",
-                            align_pose.translation.vector.norm()
-                        );
-                        debug!(
-                            "  Rotation weight: {:.8}",
-                            align_pose
-                                .rotation
-                                .axis_angle()
-                                .map(|(_, angle)| angle)
-                                .unwrap_or(0.0)
-                        );
-                        debug!("  Total pose weight: {:.8}", pose_weight);
-                        debug!("  Threshold: {:.8}", icp_pose_weight_threshold);
-                        debug!("  Avg loss: {:.8}", avg_loss);
-                    }
-
                     if pose_weight <= icp_pose_weight_threshold {
                         termination_count + 1
                     } else {
@@ -477,7 +311,7 @@ pub fn fit_board_icp(
                 inlier_points = good_inlier_points;
 
                 // Apply damping to prevent overshooting
-                let damping_factor = 0.3; // Reduce the step size
+                let damping_factor = 0.05; // Reduce the step size
 
                 // Simple damping: interpolate between current pose and new pose
                 let damped_translation =
@@ -492,17 +326,22 @@ pub fn fit_board_icp(
                 pose = pose * damped_align_pose;
                 step += 1;
 
-                if step == 0 || step % 10 == 0 {
-                    // Show details for first step and every 10th step
-                    debug!("Termination count: {}/16", termination_count);
-                    debug!("Step: {}/{}", step, max_icp_iterations);
+                // // Check if we have enough inlier points to continue
+                if inlier_points.len() < 2000 {
+                    break (inlier_points, good_corresponding_points, losses, pose);
+                }
+                if *losses.last().unwrap() < icp_rejection_threshold {
+                    debug!("🏆 ICP terminating: loss is too small: {:.8}", losses.last().unwrap());
+                    debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
+                    debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
+                    debug!("  Avg loss: {:.8}", *losses.last().unwrap());
+                    debug!("  Inlier points: {}", inlier_points.len());
+                    debug!("  Good corresponding points: {}", good_corresponding_points.len());
+                    debug!("  Pose: {:.8}", pose);
+                    break (inlier_points, good_corresponding_points, losses, pose);
                 }
 
-                if step == max_icp_iterations || termination_count > 16 {
-                    debug!(
-                        "ICP terminating: step={}, termination_count={}",
-                        step, termination_count
-                    );
+                if step == max_icp_iterations || termination_count > 100 {
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
             }

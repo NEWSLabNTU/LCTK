@@ -46,8 +46,12 @@
          description="Enable debug logging and visualization. When enabled, publishes debug point clouds to debug/* topics"/>
 
     <arg name="sync_window_ms"
-         default="50"
+         default="200"
          description="Synchronization window size in milliseconds"/>
+
+    <arg name="buffer_size"
+         default="400"
+         description="Synchronization buffer size"/>
 
     <arg name="enable_visualization"
          default="false"
@@ -108,6 +112,7 @@
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="sync_window_ms" value="$(var sync_window_ms)"/>
+        <arg name="buffer_size" value="$(var buffer_size)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>
 

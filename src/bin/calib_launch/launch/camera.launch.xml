@@ -42,7 +42,8 @@
           exec="gscam_node"
           name="camera_driver"
           namespace="$(var camera_namespace)"
-          output="log">
+          output="log"
+          launch-prefix="bash -c 'exec &quot;$@&quot; 2&gt;/dev/null' --">
         <!-- Parameters -->
         <!-- GStreamer pipeline configuration -->
         <!--

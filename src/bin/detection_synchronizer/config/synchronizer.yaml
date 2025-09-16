@@ -1,10 +1,10 @@
 synchronizer:
   ros__parameters:
     # Time window for synchronization in milliseconds
-    window_size_ms: 50
+    window_size_ms: 200
 
     # Maximum buffer size for each stream
-    buffer_size: 100
+    buffer_size: 400
 
     # Quality threshold (0-255) for publishing synchronized detections
     quality_threshold: 128

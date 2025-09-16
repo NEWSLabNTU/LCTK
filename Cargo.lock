@@ -4118,6 +4118,7 @@ dependencies = [
  "arrsac",
  "aruco-config",
  "clap",
+ "env_logger",
  "hollow-board-config",
  "itertools 0.11.0",
  "json5",

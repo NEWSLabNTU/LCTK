@@ -6,6 +6,7 @@ use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion, Vector3};
 use hollow_board_detector::{
     Config as BoardDetectorConfig, Detection as BoardDetection, Detector as BoardDetector,
+    init_logging,
 };
 use nalgebra as na;
 use rclrs::*;
@@ -373,13 +374,13 @@ impl CalibrationBoardLocatorNode {
         );
         let detection: Option<BoardDetection> = match detector.detect(&active_points) {
             Ok(Some(det)) => {
-                log_debug!(LOGGER_NAME, "Board detection successful");
+                log_warn!(LOGGER_NAME, "Board detection successful");
 
                 // Publish debug plane inliers if enabled
                 if let Some(_pub_inliers) = debug_plane_inliers_pub {
                     // Access the ransac_data if available from the detection
                     // Note: This requires the detection to expose ransac data
-                    log_debug!(LOGGER_NAME, "Debug plane inliers publisher available");
+                    log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
                 }
 
                 Some(det)
@@ -412,7 +413,6 @@ impl CalibrationBoardLocatorNode {
             "Completed processing with {} detections",
             num_detections
         );
-
         Ok(detection_array)
     }
 
@@ -633,6 +633,9 @@ impl CalibrationBoardLocatorNode {
 }
 
 fn main() -> Result<()> {
+    // Initialize logging for the hollow-board-detector library
+    init_logging();
+    
     let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("calibration_board_locator")?;
     let _calibration_board_locator_node = CalibrationBoardLocatorNode::new(node)?;
