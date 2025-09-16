@@ -49,19 +49,18 @@
          default="false"
          description="Enable debug logging and visualization"/>
 
-    <!-- Synchronizer Node -->
-    <node pkg="synchronizer"
-          exec="synchronizer"
-          name="synchronizer"
+    <!-- Detection Synchronizer Node -->
+    <node pkg="detection_synchronizer"
+          exec="detection_synchronizer"
+          name="detection_synchronizer"
           namespace="$(var namespace)"
           output="screen">
-        <param name="window_size_ms" value="$(var sync_window_ms)"/>
-        <param name="buffer_size" value="100"/>
-        <param name="quality_threshold" value="128"/>
-        <param name="enable_debug" value="$(var debug_mode)"/>
-        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
-        <remap from="board_detections" to="$(var board_detections_topic)"/>
-        <remap from="synchronized_detections" to="/$(var namespace)/synchronizer/synchronized_detections"/>
+        <param name="window_size_ms" value="500"/>
+        <param name="buffer_size" value="200"/>
+        <param name="quality_threshold" value="50"/>
+        <param name="enable_debug" value="true"/>
+        <param name="aruco_detections_topic" value="$(var aruco_detections_topic)"/>
+        <param name="board_detections_topic" value="$(var board_detections_topic)"/>
     </node>
 
     <!-- Extrinsic Solver Node -->
@@ -75,7 +74,8 @@
         <param name="max_solver_iterations" value="1000"/>
         <param name="convergence_threshold" value="1e-6"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
-        <remap from="synchronized_detections" to="/$(var namespace)/synchronizer/synchronized_detections"/>
+        <remap from="aruco_detections" to="/$(var namespace)/synchronized_aruco_detections"/>
+        <remap from="calibration_board_detections" to="/$(var namespace)/synchronized_board_detections"/>
         <remap from="camera_info" to="$(var camera_info_topic)"/>
         <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
     </node>
