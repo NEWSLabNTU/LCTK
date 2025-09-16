@@ -76,7 +76,7 @@ pub fn fit_board_icp(
     aruco_detector: &MultiArucoPattern,
     plane_model: &PlaneModel,
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
-) -> Result<Option<FitBoardIcp>> {
+) -> Result<FitBoardIcp> {
     // find board by modified ICP algoirthm
     const GOOD_FIT_THRESHOLD: f64 = 0.015; // velodyne 32-MR
                                            // let good_fit_threshold = 0.1; // ouster os-1
@@ -265,25 +265,6 @@ pub fn fit_board_icp(
                             Isometry3::identity()
                         }
                     }
-
-                    // let align_translation = {
-                    //     let input_centroid: Point3<f64> =
-                    //         geom_algo::centroid_of_points(good_inlier_points.iter().map(|point| **point))
-                    //             .unwrap();
-                    //     let model_centroid: Point3<f64> =
-                    //         geom_algo::centroid_of_points(good_corresponding_points.iter()).unwrap();
-                    //     Translation3::from(input_centroid - model_centroid)
-                    // };
-
-                    // let align_quaternion = {
-                    //     let input_target_pairs = good_corresponding_points
-                    //         .iter()
-                    //         .map(|point| align_translation * point)
-                    //         .zip(good_inlier_points.iter().copied());
-
-                    //     geom_algo::fit_rotation(input_target_pairs).unwrap()
-                    // };
-                    // align_quaternion * align_translation
                 };
 
                 // check termination criteria
@@ -304,7 +285,7 @@ pub fn fit_board_icp(
                         0
                     }
                 };
-
+                
                 // update state
                 losses.push(avg_loss);
                 // Convert back to the expected format for the next iteration
@@ -325,18 +306,18 @@ pub fn fit_board_icp(
 
                 pose = pose * damped_align_pose;
                 step += 1;
-
-                // // Check if we have enough inlier points to continue
-                if inlier_points.len() < 2000 {
-                    break (inlier_points, good_corresponding_points, losses, pose);
-                }
+                
+                // Removed premature break on small inlier count; rely on thresholds/iterations
                 if *losses.last().unwrap() < icp_rejection_threshold {
                     debug!("🏆 ICP terminating: loss is too small: {:.8}", losses.last().unwrap());
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
                     debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
                     debug!("  Avg loss: {:.8}", *losses.last().unwrap());
                     debug!("  Inlier points: {}", inlier_points.len());
-                    debug!("  Good corresponding points: {}", good_corresponding_points.len());
+                    debug!(
+                        "  Good corresponding points: {}",
+                        good_corresponding_points.len()
+                    );
                     debug!("  Pose: {:.8}", pose);
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
@@ -384,24 +365,23 @@ pub fn fit_board_icp(
             .map(|loss| loss.raw());
         let min_icp_loss = match min_icp_loss {
             Some(loss) => loss,
-            None => return Ok(None),
+            None => return Ok(FitBoardIcp {
+                board_pose,
+                icp_losses,
+                icp_data: viz_msg,
+                successful: false,
+            }),
         };
 
         if min_icp_loss > icp_rejection_threshold {
-            return Ok(None);
+            return Ok(FitBoardIcp {
+                board_pose,
+                icp_losses,
+                icp_data: viz_msg,
+                successful: false,
+            });
         }
     }
-
-    // Save ICP results to CSV for 3D visualization
-    let board_model = BoardModel {
-        pose: board_pose,
-        board_shape: BoardShape {
-            board_width,
-            hole_radius,
-            hole_center_shift,
-        },
-        marker_paper_size,
-    };
 
     let _final_loss = icp_losses
         .iter()
@@ -410,9 +390,10 @@ pub fn fit_board_icp(
         .unwrap_or(0.0);
     debug!("ICP completed successfully! Loss: {:.6}", _final_loss);
 
-    Ok(Some(FitBoardIcp {
+    Ok(FitBoardIcp {
         board_pose,
         icp_losses,
         icp_data: viz_msg,
-    }))
+        successful: true,
+    })
 }

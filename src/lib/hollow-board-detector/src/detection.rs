@@ -28,6 +28,7 @@ pub struct FitBoardIcp {
     pub board_pose: na::Isometry3<f64>,
     pub icp_losses: Vec<f64>,
     pub icp_data: IcpData,
+    pub successful: bool,
 }
 
 #[derive(Debug, Clone)]

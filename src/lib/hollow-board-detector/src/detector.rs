@@ -43,32 +43,27 @@ impl Detector {
             plane_model,
             inlier_points: plane_inlier_points,
             ransac_data: plane_ransac_data,
-        } = {
-            let ret = fit_plane_ransac(&self.config, points)?;
-            match ret {
-                Some(ret) => ret,
-                None => return Ok(None),
-            }
+        } = match fit_plane_ransac(&self.config, points)? {
+            Some(ret) => ret,
+            None => return Ok(None),
         };
 
-        // fit board using custom ICP
+        // fit board using custom ICP (now returns FitBoardIcp directly)
         let FitBoardIcp {
             board_pose,
             icp_losses,
             icp_data,
-        } = {
-            let opt = fit_board_icp(
-                &self.config,
-                &self.aruco_pattern,
-                &plane_model,
-                &plane_inlier_points,
-            )?;
+            successful,
+        } = fit_board_icp(
+            &self.config,
+            &self.aruco_pattern,
+            &plane_model,
+            &plane_inlier_points,
+        )?;
 
-            match opt {
-                Some(ret) => ret,
-                None => return Ok(None),
-            }
-        };
+        if !successful {
+            return Ok(None);
+        }
 
         let board_model = BoardModel {
             pose: board_pose,
