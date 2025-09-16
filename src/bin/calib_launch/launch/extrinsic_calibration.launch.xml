@@ -34,7 +34,7 @@
          description="Namespace for the nodes"/>
 
     <arg name="sync_window_ms"
-         default="50"
+         default="150"
          description="Synchronization window size in milliseconds"/>
 
     <arg name="solver_method"
@@ -42,11 +42,11 @@
          description="Solver method for extrinsic calibration"/>
 
     <arg name="min_detections_required"
-         default="5"
+         default="1"
          description="Minimum number of detections required for calibration"/>
 
     <arg name="debug_mode"
-         default="false"
+         default="true"
          description="Enable debug logging and visualization"/>
 
     <!-- Synchronizer Node -->
@@ -57,11 +57,10 @@
           output="screen">
         <param name="window_size_ms" value="$(var sync_window_ms)"/>
         <param name="buffer_size" value="100"/>
-        <param name="quality_threshold" value="128"/>
+        <param name="quality_threshold" value="0"/>
         <param name="enable_debug" value="$(var debug_mode)"/>
         <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
-        <remap from="board_detections" to="$(var board_detections_topic)"/>
-        <remap from="synchronized_detections" to="/$(var namespace)/synchronizer/synchronized_detections"/>
+        <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
     </node>
 
     <!-- Extrinsic Solver Node -->
@@ -75,7 +74,8 @@
         <param name="max_solver_iterations" value="1000"/>
         <param name="convergence_threshold" value="1e-6"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
-        <remap from="synchronized_detections" to="/$(var namespace)/synchronizer/synchronized_detections"/>
+        <remap from="aruco_detections" to="/$(var namespace)/synchronized_aruco_detections"/>
+        <remap from="calibration_board_detections" to="/$(var namespace)/synchronized_board_detections"/>
         <remap from="camera_info" to="$(var camera_info_topic)"/>
         <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
     </node>
