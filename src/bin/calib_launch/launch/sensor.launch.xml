@@ -73,7 +73,7 @@
         <arg name="port" value="$(var port)"/>
         <arg name="read_once" value="false"/>
         <arg name="read_fast" value="$(var read_fast)"/>
-        <arg name="repeat_delay" value="1.0"/>
+        <arg name="repeat_delay" value="0.0"/>
     </include>
 
     <!-- Include Camera launch file -->
@@ -85,6 +85,27 @@
         <arg name="frame_id" value="$(var camera_frame_id)"/>
         <arg name="loop" value="$(var loop)"/>
     </include>
+
+    <!-- Sensor Synchronizer Node -->
+    <node pkg="sensor_synchronizer"
+          exec="sensor_synchronizer"
+          name="sensor_synchronizer_node"
+          output="screen">
+
+        <!-- Remap input topics to actual sensor topics -->
+        <remap from="input_image" to="/sensing/camera/front_center/image_raw"/>
+        <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
+
+        <!-- Remap output topics to synchronized versions -->
+        <remap from="synchronized_image" to="/sensing/camera/front_center/synchronized_image"/>
+        <remap from="synchronized_pointcloud" to="/sensing/lidar/top/synchronized_pointcloud"/>
+
+        <!-- Synchronization parameters -->
+        <param name="sync_window_ms" value="1000"/>
+        <param name="buffer_size" value="100"/>
+        <param name="staleness_timeout_ms" value="2000"/>
+        <param name="enable_debug" value="true"/>
+    </node>
 
     <!-- Optional: Static transform publisher between sensors -->
     <node pkg="tf2_ros"
