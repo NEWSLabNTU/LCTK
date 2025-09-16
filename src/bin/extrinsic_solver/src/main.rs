@@ -19,7 +19,6 @@ use pnp_solver::{PnpMethod, PnpSolver};
 use rclrs::*;
 use sensor_msgs::msg::CameraInfo;
 use std::{
-    collections::HashMap,
     fs,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -44,13 +43,14 @@ struct DetectionPair {
 }
 
 struct ExtrinsicSolverState {
-    pending_detections: Mutex<HashMap<u64, DetectionPair>>,
+    // Cache for most recent non-empty detections
+    latest_aruco_detection: Mutex<Option<Detection2DArray>>,
+    latest_board_detection: Mutex<Option<Detection3DArray>>,
     aruco_pattern: MultiArucoPattern,
     camera_info: Mutex<Option<CameraInfo>>,
     pnp_method: PnpMethod,
     parent_frame: Arc<str>,
     child_frame: Arc<str>,
-    sync_timeout: i64,
     // Quality assessment components
     quality_assessment: Mutex<QualityAssessor>,
     convergence_monitor: Mutex<ConvergenceMonitor>,
@@ -70,6 +70,8 @@ pub struct ExtrinsicSolverNode {
     _camera_info_subscription: Subscription<CameraInfo>,
     _transform_publisher: Publisher<TransformStamped>,
     _quality_publisher: Publisher<std_msgs::msg::String>,
+    _debug_aruco_publisher: Publisher<Detection2DArray>,
+    _debug_board_publisher: Publisher<Detection3DArray>,
 }
 
 impl ExtrinsicSolverNode {
@@ -93,11 +95,6 @@ impl ExtrinsicSolverNode {
         let child_frame_param: Arc<str> = node
             .declare_parameter("child_frame")
             .default(Arc::<str>::from("camera"))
-            .mandatory()?
-            .get();
-        let sync_timeout_ms_param: i64 = node
-            .declare_parameter("sync_timeout_ms")
-            .default(100i64)
             .mandatory()?
             .get();
         let enable_quality_assessment_param: bool = node
@@ -131,13 +128,13 @@ impl ExtrinsicSolverNode {
 
         // Create state
         let state = Arc::new(ExtrinsicSolverState {
-            pending_detections: Mutex::new(HashMap::<u64, DetectionPair>::new()),
+            latest_aruco_detection: Mutex::new(None),
+            latest_board_detection: Mutex::new(None),
             aruco_pattern,
             camera_info: Mutex::new(None),
             pnp_method: method,
             parent_frame: parent_frame_param,
             child_frame: child_frame_param,
-            sync_timeout: sync_timeout_ms_param,
             quality_assessment: Mutex::new(QualityAssessor::new(ValidationConfig::default())),
             convergence_monitor: Mutex::new(ConvergenceMonitor::new()),
             dynamic_controller: Mutex::new(DynamicCalibrationController::with_strategy(
@@ -153,14 +150,25 @@ impl ExtrinsicSolverNode {
         // Create publisher for calibration quality metrics
         let quality_publisher = node.create_publisher("calibration_quality")?;
 
+        // Create debug publishers for most recent detections
+        let debug_aruco_publisher = node.create_publisher("debug/recent_aruco_detections")?;
+        let debug_board_publisher = node.create_publisher("debug/recent_board_detections")?;
+
         // Create subscribers
         let aruco_subscription = {
             let state = Arc::clone(&state);
             let transform_publisher = Arc::clone(&transform_publisher);
             let quality_publisher = Arc::clone(&quality_publisher);
+            let debug_aruco_publisher = Arc::clone(&debug_aruco_publisher);
 
             node.create_subscription("aruco_detections", move |msg: Detection2DArray| {
-                Self::aruco_callback(msg, &state, &transform_publisher, &quality_publisher);
+                Self::aruco_callback(
+                    msg,
+                    &state,
+                    &transform_publisher,
+                    &quality_publisher,
+                    &debug_aruco_publisher,
+                );
             })?
         };
 
@@ -168,11 +176,18 @@ impl ExtrinsicSolverNode {
             let state = Arc::clone(&state);
             let transform_publisher = Arc::clone(&transform_publisher);
             let quality_publisher = Arc::clone(&quality_publisher);
+            let debug_board_publisher = Arc::clone(&debug_board_publisher);
 
             node.create_subscription(
                 "calibration_board_detections",
                 move |msg: Detection3DArray| {
-                    Self::board_callback(msg, &state, &transform_publisher, &quality_publisher);
+                    Self::board_callback(
+                        msg,
+                        &state,
+                        &transform_publisher,
+                        &quality_publisher,
+                        &debug_board_publisher,
+                    );
                 },
             )?
         };
@@ -187,7 +202,7 @@ impl ExtrinsicSolverNode {
 
         log_info!(
             LOGGER_NAME,
-            "Solve extrinsic params node initialized. Subscribing to: aruco_detections, calibration_board_detections, camera_info. Publishing to: extrinsic_transform, calibration_quality"
+            "Solve extrinsic params node initialized. Subscribing to: aruco_detections, calibration_board_detections, camera_info. Publishing to: extrinsic_transform, calibration_quality, debug/recent_aruco_detections, debug/recent_board_detections"
         );
 
         Ok(Self {
@@ -198,14 +213,22 @@ impl ExtrinsicSolverNode {
             _camera_info_subscription: camera_info_subscription,
             _transform_publisher: transform_publisher,
             _quality_publisher: quality_publisher,
+            _debug_aruco_publisher: debug_aruco_publisher,
+            _debug_board_publisher: debug_board_publisher,
         })
     }
 
     fn camera_info_callback(msg: CameraInfo, state: &Arc<ExtrinsicSolverState>) {
         // Store the CameraInfo directly
         if let Ok(mut camera_info_guard) = state.camera_info.lock() {
-            *camera_info_guard = Some(msg);
-            // log_info!(LOGGER_NAME, "Updated camera info from CameraInfo topic");
+            *camera_info_guard = Some(msg.clone());
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Camera info received - {}x{} resolution, distortion model: {}",
+                msg.width,
+                msg.height,
+                msg.distortion_model
+            );
         } else {
             log_warn!(LOGGER_NAME, "Failed to lock camera info mutex");
         }
@@ -235,9 +258,8 @@ impl ExtrinsicSolverNode {
         state: &Arc<ExtrinsicSolverState>,
         publisher: &Publisher<TransformStamped>,
         quality_publisher: &Publisher<std_msgs::msg::String>,
+        _debug_publisher: &Publisher<Detection2DArray>,
     ) {
-        let timestamp = Self::get_timestamp_nanos(&msg.header);
-
         log_info!(
             LOGGER_NAME,
             "Extrinsic Solver: ArUco callback ENTRY - {} detections at timestamp {}.{}",
@@ -246,59 +268,59 @@ impl ExtrinsicSolverNode {
             msg.header.stamp.nanosec
         );
 
-        let mut pending = match state.pending_detections.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Failed to lock pending detections: {e}");
+        // Only cache non-empty detections
+        if !msg.detections.is_empty() {
+            log_info!(
+                LOGGER_NAME,
+                "Extrinsic Solver: ✓ Caching non-empty ArUco detection with {} markers",
+                msg.detections.len()
+            );
+
+            // Log detailed info about detection
+            for (i, detection) in msg.detections.iter().enumerate() {
+                log_debug!(
+                    LOGGER_NAME,
+                    "  Marker {}: bbox center=({:.2}, {:.2}), size=({:.2}, {:.2}), ID: {}",
+                    i,
+                    detection.bbox.center.position.x,
+                    detection.bbox.center.position.y,
+                    detection.bbox.size_x,
+                    detection.bbox.size_y,
+                    detection.id
+                );
+            }
+
+            // Update the cached ArUco detection
+            if let Ok(mut aruco_cache) = state.latest_aruco_detection.lock() {
+                *aruco_cache = Some(msg.clone());
+
+                // Immediately publish to debug topic when caching non-empty detection
+                log_debug!(
+                    LOGGER_NAME,
+                    "Publishing NON-EMPTY ArUco detection to debug topic with {} markers",
+                    msg.detections.len()
+                );
+                if let Err(e) = _debug_publisher.publish(msg.clone()) {
+                    log_warn!(LOGGER_NAME, "Failed to publish debug ArUco detection: {e}");
+                } else {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Successfully published NON-EMPTY ArUco detection to debug topic"
+                    );
+                }
+            } else {
+                log_warn!(LOGGER_NAME, "Failed to lock ArUco detection cache");
                 return;
             }
-        };
-
-        // Clean up old entries
-        let before_cleanup = pending.len();
-        Self::cleanup_old_detections(&mut pending, timestamp, state.sync_timeout);
-        let after_cleanup = pending.len();
-
-        if before_cleanup != after_cleanup {
-            log_debug!(
-                LOGGER_NAME,
-                "Extrinsic Solver: Cleaned up {} old detections, {} remaining",
-                before_cleanup - after_cleanup,
-                after_cleanup
-            );
-        }
-
-        // Look for matching board detection
-        if let Some(mut pair) = pending.remove(&timestamp) {
-            log_debug!(
-                LOGGER_NAME,
-                "Extrinsic Solver: Found matching board detection for timestamp {}.{}",
-                msg.header.stamp.sec,
-                msg.header.stamp.nanosec
-            );
-            pair.aruco_detection = msg;
-            drop(pending); // Release lock before processing
-
-            if let Err(e) = Self::process_detection_pair(pair, publisher, quality_publisher, state)
-            {
-                log_warn!(LOGGER_NAME, "Failed to process detection pair: {e}");
-            }
         } else {
-            // Store ArUco detection for future matching
             log_debug!(
                 LOGGER_NAME,
-                "Extrinsic Solver: Storing ArUco detection for future matching, {} pending",
-                pending.len() + 1
-            );
-            pending.insert(
-                timestamp,
-                DetectionPair {
-                    aruco_detection: msg,
-                    board_detection: Detection3DArray::default(),
-                    _timestamp: timestamp,
-                },
+                "Extrinsic Solver: Ignoring empty ArUco detection"
             );
         }
+
+        // Try to process if we have both cached detections
+        Self::try_process_cached_detections(state, publisher, quality_publisher, None, None);
     }
 
     fn board_callback(
@@ -306,9 +328,8 @@ impl ExtrinsicSolverNode {
         state: &Arc<ExtrinsicSolverState>,
         publisher: &Publisher<TransformStamped>,
         quality_publisher: &Publisher<std_msgs::msg::String>,
+        _debug_publisher: &Publisher<Detection3DArray>,
     ) {
-        let timestamp = Self::get_timestamp_nanos(&msg.header);
-
         log_info!(
             LOGGER_NAME,
             "Extrinsic Solver: Board callback ENTRY - {} detections at timestamp {}.{}",
@@ -317,68 +338,164 @@ impl ExtrinsicSolverNode {
             msg.header.stamp.nanosec
         );
 
-        let mut pending = match state.pending_detections.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Failed to lock pending detections: {e}");
+        // Only cache non-empty detections
+        if !msg.detections.is_empty() {
+            log_info!(
+                LOGGER_NAME,
+                "Extrinsic Solver: ✓ Caching non-empty board detection with {} boards",
+                msg.detections.len()
+            );
+
+            // Log detailed info about board detection
+            for (i, detection) in msg.detections.iter().enumerate() {
+                if !detection.results.is_empty() {
+                    let pose = &detection.results[0].pose.pose;
+                    log_debug!(
+                        LOGGER_NAME,
+                        "  Board {}: position=({:.3}, {:.3}, {:.3}), orientation=({:.3}, {:.3}, {:.3}, {:.3})",
+                        i,
+                        pose.position.x,
+                        pose.position.y,
+                        pose.position.z,
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z,
+                        pose.orientation.w
+                    );
+                }
+            }
+
+            // Update the cached board detection
+            if let Ok(mut board_cache) = state.latest_board_detection.lock() {
+                *board_cache = Some(msg.clone());
+
+                // Immediately publish to debug topic when caching non-empty detection
+                log_debug!(
+                    LOGGER_NAME,
+                    "Publishing NON-EMPTY board detection to debug topic with {} boards",
+                    msg.detections.len()
+                );
+                if let Err(e) = _debug_publisher.publish(msg.clone()) {
+                    log_warn!(LOGGER_NAME, "Failed to publish debug board detection: {e}");
+                } else {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Successfully published NON-EMPTY board detection to debug topic"
+                    );
+                }
+            } else {
+                log_warn!(LOGGER_NAME, "Failed to lock board detection cache");
                 return;
             }
-        };
-
-        // Clean up old entries
-        let before_cleanup = pending.len();
-        Self::cleanup_old_detections(&mut pending, timestamp, state.sync_timeout);
-        let after_cleanup = pending.len();
-
-        if before_cleanup != after_cleanup {
-            log_debug!(
+        } else {
+            log_error!(
                 LOGGER_NAME,
-                "Extrinsic Solver: Cleaned up {} old detections, {} remaining",
-                before_cleanup - after_cleanup,
-                after_cleanup
+                "🔥 DEBUG: Extrinsic Solver received EMPTY board detection - NOT caching, NOT publishing to debug"
             );
         }
 
-        // Look for matching ArUco detection
-        if let Some(mut pair) = pending.remove(&timestamp) {
-            log_debug!(
-                LOGGER_NAME,
-                "Extrinsic Solver: Found matching ArUco detection for timestamp {}.{}",
-                msg.header.stamp.sec,
-                msg.header.stamp.nanosec
-            );
-            pair.board_detection = msg;
-            drop(pending); // Release lock before processing
+        // Try to process if we have both cached detections
+        Self::try_process_cached_detections(state, publisher, quality_publisher, None, None);
+    }
 
-            if let Err(e) = Self::process_detection_pair(pair, publisher, quality_publisher, state)
-            {
-                log_warn!(LOGGER_NAME, "Failed to process detection pair: {e}");
+    fn publish_cached_detections_to_debug(
+        state: &Arc<ExtrinsicSolverState>,
+        debug_aruco_publisher: &Publisher<Detection2DArray>,
+        debug_board_publisher: &Publisher<Detection3DArray>,
+    ) {
+        // Publish cached ArUco detection if available
+        if let Ok(aruco_cache) = state.latest_aruco_detection.lock() {
+            if let Some(ref cached_msg) = *aruco_cache {
+                if let Err(e) = debug_aruco_publisher.publish(cached_msg.clone()) {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Failed to publish cached ArUco detection to debug: {e}"
+                    );
+                }
             }
-        } else {
-            // Store board detection for future matching
-            log_debug!(
-                LOGGER_NAME,
-                "Extrinsic Solver: Storing board detection for future matching, {} pending",
-                pending.len() + 1
-            );
-            pending.insert(
-                timestamp,
-                DetectionPair {
-                    aruco_detection: Detection2DArray::default(),
-                    board_detection: msg,
-                    _timestamp: timestamp,
-                },
-            );
+        }
+
+        // Publish cached board detection if available
+        if let Ok(board_cache) = state.latest_board_detection.lock() {
+            if let Some(ref cached_msg) = *board_cache {
+                if let Err(e) = debug_board_publisher.publish(cached_msg.clone()) {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Failed to publish cached board detection to debug: {e}"
+                    );
+                }
+            }
         }
     }
 
-    fn cleanup_old_detections(
-        pending: &mut HashMap<u64, DetectionPair>,
-        current_timestamp: u64,
-        timeout_ms: i64,
+    fn try_process_cached_detections(
+        state: &Arc<ExtrinsicSolverState>,
+        publisher: &Publisher<TransformStamped>,
+        quality_publisher: &Publisher<std_msgs::msg::String>,
+        _debug_aruco_publisher: Option<&Publisher<Detection2DArray>>,
+        _debug_board_publisher: Option<&Publisher<Detection3DArray>>,
     ) {
-        let timeout_nanos = (timeout_ms * 1_000_000) as u64;
-        pending.retain(|&timestamp, _| current_timestamp.saturating_sub(timestamp) < timeout_nanos);
+        // Try to get both cached detections
+        let aruco_detection = {
+            match state.latest_aruco_detection.lock() {
+                Ok(cache) => cache.clone(),
+                Err(e) => {
+                    log_warn!(LOGGER_NAME, "Failed to lock ArUco detection cache: {e}");
+                    return;
+                }
+            }
+        };
+
+        let board_detection = {
+            match state.latest_board_detection.lock() {
+                Ok(cache) => cache.clone(),
+                Err(e) => {
+                    log_warn!(LOGGER_NAME, "Failed to lock board detection cache: {e}");
+                    return;
+                }
+            }
+        };
+
+        // Debug publishing removed - now done immediately when caching non-empty detections
+
+        // Check if we have both non-empty cached detections
+        match (aruco_detection, board_detection) {
+            (Some(aruco_msg), Some(board_msg)) => {
+                log_info!(
+                    LOGGER_NAME,
+                    "Extrinsic Solver: ✓✓✓ BOTH cached detections available - ArUco: {} markers, Board: {} boards",
+                    aruco_msg.detections.len(),
+                    board_msg.detections.len()
+                );
+
+                // Create detection pair from cached detections
+                let pair = DetectionPair {
+                    aruco_detection: aruco_msg,
+                    board_detection: board_msg,
+                    _timestamp: 0, // Not used in new approach
+                };
+
+                // Process the detection pair
+                if let Err(e) =
+                    Self::process_detection_pair(pair, publisher, quality_publisher, state)
+                {
+                    log_error!(
+                        LOGGER_NAME,
+                        "Extrinsic Solver: ✗ Failed to process cached detection pair: {e}"
+                    );
+                } else {
+                    log_info!(LOGGER_NAME, "Extrinsic Solver: ✓✓✓ Successfully processed cached detection pair - SOLUTION COMPUTED!");
+                }
+            }
+            (aruco_opt, board_opt) => {
+                log_debug!(
+                    LOGGER_NAME,
+                    "Extrinsic Solver: Waiting for both detections - ArUco cached: {}, Board cached: {}",
+                    aruco_opt.is_some(),
+                    board_opt.is_some()
+                );
+            }
+        }
     }
 
     fn process_detection_pair(
@@ -387,9 +504,9 @@ impl ExtrinsicSolverNode {
         quality_publisher: &Publisher<std_msgs::msg::String>,
         state: &ExtrinsicSolverState,
     ) -> Result<()> {
-        log_debug!(
+        log_info!(
             LOGGER_NAME,
-            "Extrinsic Solver: Processing detection pair - ArUco: {} detections, Board: {} detections",
+            "Extrinsic Solver: >>> PROCESSING DETECTION PAIR - ArUco: {} detections, Board: {} detections",
             pair.aruco_detection.detections.len(),
             pair.board_detection.detections.len()
         );
@@ -397,20 +514,44 @@ impl ExtrinsicSolverNode {
         // Check if both detections are present
         if pair.aruco_detection.detections.is_empty() || pair.board_detection.detections.is_empty()
         {
-            log_debug!(
+            log_warn!(
                 LOGGER_NAME,
-                "Extrinsic Solver: Skipping pair - ArUco empty: {}, Board empty: {}",
+                "Extrinsic Solver: ✗ Skipping pair - ArUco empty: {}, Board empty: {}",
                 pair.aruco_detection.detections.is_empty(),
                 pair.board_detection.detections.is_empty()
             );
             return Ok(()); // Skip if either detection is missing
         }
 
+        log_info!(
+            LOGGER_NAME,
+            "Extrinsic Solver: ✓ Both ArUco and Board detections present - proceeding"
+        );
+
         // Convert ROS messages to internal types
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Converting board detection to board model..."
+        );
         let board_model = Self::detection3d_to_board_model(&pair.board_detection.detections[0])?;
+        log_debug!(LOGGER_NAME, "Extrinsic Solver: ✓ Board model created");
+
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Converting ArUco detections to image markers..."
+        );
         let image_markers = Self::detection2d_array_to_image_markers(&pair.aruco_detection)?;
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: ✓ Image markers created: {} markers",
+            image_markers.len()
+        );
 
         // Check if camera info is available
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Checking camera info availability..."
+        );
         let camera_info = {
             let camera_info_guard = state
                 .camera_info
@@ -418,18 +559,19 @@ impl ExtrinsicSolverNode {
                 .map_err(|e| anyhow!("Failed to lock camera info mutex: {}", e))?;
             match camera_info_guard.as_ref() {
                 Some(info) => {
-                    log_debug!(
+                    log_info!(
                         LOGGER_NAME,
-                        "Extrinsic Solver: Camera info available - {}x{} resolution",
+                        "Extrinsic Solver: ✓ Camera info available - {}x{} resolution, distortion: {}",
                         info.width,
-                        info.height
+                        info.height,
+                        info.distortion_model
                     );
                     info.clone()
                 }
                 None => {
-                    log_warn!(
+                    log_error!(
                         LOGGER_NAME,
-                        "Extrinsic Solver: Camera info not available - skipping detection pair processing"
+                        "Extrinsic Solver: ✗ Camera info not available - cannot proceed with calibration"
                     );
                     return Ok(());
                 }
@@ -437,7 +579,13 @@ impl ExtrinsicSolverNode {
         };
 
         // Create PnP solver with current camera info
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Creating PnP solver with method: {:?}",
+            state.pnp_method
+        );
         let pnp_solver = PnpSolver::new(&camera_info, state.pnp_method);
+        log_debug!(LOGGER_NAME, "Extrinsic Solver: ✓ PnP solver created");
 
         // Get dynamic parameters if enabled
         let current_params = if state.enable_dynamic_adjustment {
@@ -451,19 +599,36 @@ impl ExtrinsicSolverNode {
         };
 
         // Solve PnP problem
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Creating point pairs for PnP solving..."
+        );
         let point_pairs =
             Self::create_point_pairs(board_model, image_markers, &state.aruco_pattern)?;
 
-        log_debug!(
+        log_info!(
             LOGGER_NAME,
-            "Extrinsic Solver: Created {} point pairs for PnP solving",
+            "Extrinsic Solver: ✓ Created {} point pairs for PnP solving",
             point_pairs.len()
         );
 
-        if let Some(transform) = pnp_solver.solve(point_pairs.clone()) {
-            log_debug!(
+        if point_pairs.is_empty() {
+            log_error!(
                 LOGGER_NAME,
-                "Extrinsic Solver: PnP solver succeeded - transform: translation=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
+                "Extrinsic Solver: ✗ No point pairs created - cannot solve PnP"
+            );
+            return Ok(());
+        }
+
+        log_info!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Attempting to solve PnP with {} point pairs...",
+            point_pairs.len()
+        );
+        if let Some(transform) = pnp_solver.solve(point_pairs.clone()) {
+            log_info!(
+                LOGGER_NAME,
+                "Extrinsic Solver: ✓✓✓ PnP solver SUCCESS! - transform: translation=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
                 transform.translation.x, transform.translation.y, transform.translation.z,
                 transform.rotation.i, transform.rotation.j, transform.rotation.k, transform.rotation.w
             );
@@ -602,9 +767,9 @@ impl ExtrinsicSolverNode {
                 );
             }
         } else {
-            log_warn!(
+            log_error!(
                 LOGGER_NAME,
-                "Extrinsic Solver: PnP solver failed to find solution"
+                "Extrinsic Solver: ✗✗✗ PnP solver FAILED to find solution - check point correspondences and camera calibration"
             );
         }
 
