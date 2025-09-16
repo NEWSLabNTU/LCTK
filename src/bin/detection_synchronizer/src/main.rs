@@ -105,9 +105,9 @@ impl SynchronizerNode {
             .mandatory()?
             .get();
 
-        // Configure topic names as parameters to avoid namespace issues
-        let aruco_topic: Arc<str> = "/calibration/aruco_locator/aruco_detections".into();
-        let board_topic: Arc<str> = "/calibration/calibration_board_detections".into();
+        // Configure topic names for logging - actual topic names come from ROS2 remapping
+        let aruco_topic_name = "aruco_detections"; // Will be remapped by launch file
+        let board_topic_name = "calibration_board_detections"; // Will be remapped by launch file
 
         // Create synchronizer config with low-frequency staleness detection for detection pipeline
         let staleness_config = StalenessConfig::low_frequency();
@@ -134,7 +134,7 @@ impl SynchronizerNode {
         // Create publishers for synchronized detections
         let sync_2d_publisher = node.create_publisher("synchronized_aruco_detections")?;
         let sync_3d_publisher = node.create_publisher("synchronized_board_detections")?;
-        
+
         // Start the synchronizer task
         {
             let sync_2d_publisher = sync_2d_publisher.clone();
@@ -156,20 +156,20 @@ impl SynchronizerNode {
         let aruco_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription(
-                "aruco_detections",
-                move |msg: Detection2DArray| {
-                    Self::aruco_callback(msg, &state);
-                },
-            )?
+            node.create_subscription("aruco_detections", move |msg: Detection2DArray| {
+                Self::aruco_callback(msg, &state);
+            })?
         };
 
         let board_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription(&board_topic, move |msg: Detection3DArray| {
-                Self::board_callback(msg, &state);
-            })?
+            node.create_subscription(
+                "calibration_board_detections",
+                move |msg: Detection3DArray| {
+                    Self::board_callback(msg, &state);
+                },
+            )?
         };
 
         log_info!(
@@ -179,8 +179,8 @@ impl SynchronizerNode {
         log_info!(
             LOGGER_NAME,
             "Subscribing to: ArUco={}, Board={}",
-            aruco_topic,
-            board_topic
+            aruco_topic_name,
+            board_topic_name
         );
 
         Ok(Self {
