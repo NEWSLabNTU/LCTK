@@ -123,6 +123,41 @@ The LiDAR-to-camera calibration workflow follows these steps:
 
 The main script for this workflow is in `scripts/lidar-to-camera-calibration/lidar_to_camera.sh`.
 
+### Debug Mode
+
+The calibration system supports debug mode for detailed analysis and troubleshooting:
+
+```bash
+# Launch calibration with debug mode enabled
+make launch_lidar_camera_calibration debug_mode:=true
+
+# Or launch manually with ROS2
+ros2 launch calib_launch lidar_camera_calibration.launch.xml debug_mode:=true
+```
+
+When debug mode is enabled:
+- **Debug Topics**: Additional point cloud topics are published:
+  - `/calibration/debug/all_points`: All input points before filtering
+  - `/calibration/debug/filtered_points`: Points within bounding box
+  - `/calibration/debug/plane_inliers`: Points detected as part of the calibration plane
+- **Debug Logging**: Detailed algorithm information logged at debug level:
+  - RANSAC plane fitting progress and statistics
+  - ICP algorithm iteration details and convergence
+  - Point cloud statistics and processing steps
+- **Performance Impact**: Debug mode adds computational overhead and should only be enabled for development/troubleshooting
+
+To view debug topics in RViz or other tools:
+```bash
+# List available debug topics
+ros2 topic list | grep debug
+
+# Echo debug point cloud data
+ros2 topic echo /calibration/debug/all_points
+
+# View in RViz
+rviz2 -d config/debug_visualization.rviz
+```
+
 ## Running Specific Tools
 
 To run a specific tool, use cargo with the proper manifest path:
@@ -271,6 +306,36 @@ ros2 run pcd_tool pcd_tool_ros
 ros2 launch lctk_ros2 lctk_nodes.launch.py
 ```
 
+## DDS Configuration
+
+The project includes a Cyclone DDS configuration file to prevent DDS packets from being sent to external networks:
+
+- **Configuration File**: `config/dds/cyclone_local.xml`
+- **Purpose**: Restricts DDS communication to localhost only
+- **Features**:
+  - Localhost-only network interfaces (127.0.0.1)
+  - Multicast disabled for security
+  - TCP transport for reliable local communication
+  - No packet routing outside local network
+
+### Usage
+
+The DDS configuration is automatically applied by all Makefile launch targets:
+
+```bash
+make launch_lidar_camera_calibration  # Uses local DDS config
+make launch_sensor                    # Uses local DDS config
+make launch_two_lidar_calibration     # Uses local DDS config
+```
+
+For manual usage:
+```bash
+export CYCLONE_DDS_URI=file://$PWD/config/dds/cyclone_local.xml
+ros2 launch your_launch_file.xml
+```
+
+This ensures that ROS 2 DDS traffic remains within the local machine and doesn't leak to external networks.
+
 ## Sample Data
 
 The repository includes sample data for testing calibration workflows:
@@ -305,6 +370,25 @@ make launch_sensor  # Plays LiDAR and camera data in loop
 - **ROS2 Daemon Issues**: If ROS2 daemon becomes unresponsive, kill it with: `pkill -9 -f ros2-daemon`
 - **Workspace Dependencies**: ROS2 Rust dependencies use workspace.dependencies in root Cargo.toml, not patch.crates-io
 - **rclrs API Migration**: Updated from v0.4.x to v0.5.x - executor.spin() now returns Vec<RclrsError> instead of Vec<Result<_, RclrsError>>
+- **Detection Synchronizer Subscription Lifecycle**: Fixed critical issue where subscription objects were being dropped immediately after creation in detection_synchronizer. ROS2 subscriptions must be stored as struct fields to keep them alive:
+  ```rust
+  pub struct SynchronizerNode {
+      _state: Arc<SynchronizerState>,
+      _node: Node,
+      _aruco_subscription: Subscription<Detection2DArray>,  // Store subscriptions
+      _board_subscription: Subscription<Detection3DArray>, // as struct members
+  }
+  ```
+- **Detection Synchronizer Configuration**: Optimized synchronization parameters for calibration workflows:
+  - Window size: 500ms (increased from 50ms) to handle detection processing delays
+  - Buffer size: 200 (increased from 50) for more robust buffering
+  - Quality threshold: 50 (reduced from 128) to be more permissive with timestamp differences
+  - Allow empty detections through for synchronization (calibration targets may not always be visible)
+- **Calibration Pipeline Architecture**: Verified end-to-end detection synchronization flow:
+  - Raw detections → Detection Synchronizer → Synchronized detections → Extrinsic Solver
+  - Extrinsic solver properly remapped to consume synchronized topics instead of raw detection topics
+  - Detection synchronizer shows active subscriptions and publishes to synchronized topics
+- **Board Detector Performance**: Fixed ICP algorithm performance by reducing max_iterations from 20,000 to 100 in board_detector.json5, preventing minutes-long processing delays
 
 ## Coding Style
 
@@ -333,3 +417,4 @@ make launch_sensor  # Plays LiDAR and camera data in loop
       },
   )?;
   ```
+- Whenever you run a command requiring root privilege (such as sudo), stop and show the command to user so that user can run the command in another terminal.
