@@ -74,6 +74,8 @@ struct SynchronizerState {
 pub struct SynchronizerNode {
     _state: Arc<SynchronizerState>,
     _node: Node,
+    _aruco_subscription: Subscription<Detection2DArray>,
+    _board_subscription: Subscription<Detection3DArray>,
 }
 
 impl SynchronizerNode {
@@ -125,7 +127,7 @@ impl SynchronizerNode {
         // Create publishers for synchronized detections
         let sync_2d_publisher = node.create_publisher("synchronized_aruco_detections")?;
         let sync_3d_publisher = node.create_publisher("synchronized_board_detections")?;
-
+        
         // Start the synchronizer task
         {
             let sync_2d_publisher = sync_2d_publisher.clone();
@@ -144,15 +146,18 @@ impl SynchronizerNode {
         }
 
         // Create subscribers
-        let _aruco_subscription = {
+        let aruco_subscription = {
             let state = Arc::clone(&state);
 
-            node.create_subscription("aruco_detections", move |msg: Detection2DArray| {
-                Self::aruco_callback(msg, &state);
-            })?
+            node.create_subscription(
+                "aruco_detections", 
+                move |msg: Detection2DArray| {
+                    Self::aruco_callback(msg, &state);
+                },
+            )?
         };
 
-        let _board_subscription = {
+        let board_subscription = {
             let state = Arc::clone(&state);
 
             node.create_subscription(
@@ -171,13 +176,26 @@ impl SynchronizerNode {
         Ok(Self {
             _state: state,
             _node: node,
+            _aruco_subscription: aruco_subscription,
+            _board_subscription: board_subscription,
         })
     }
 
     fn aruco_callback(msg: Detection2DArray, state: &Arc<SynchronizerState>) {
+        log_info!(LOGGER_NAME, "ArUco callback: ENTRY - Received message with {} detections", msg.detections.len());
+        
         if msg.detections.is_empty() {
+            log_info!(LOGGER_NAME, "ArUco callback: Skipping empty detection");
             return; // Skip empty detections
         }
+
+        log_info!(
+            LOGGER_NAME,
+            "ArUco callback: Processing {} detections at timestamp {}.{}",
+            msg.detections.len(),
+            msg.header.stamp.sec,
+            msg.header.stamp.nanosec
+        );
 
         let wrapper = ArUcoDetectionWrapper { detection: msg };
         let detection_msg = DetectionMessage::ArUco(wrapper);
@@ -186,16 +204,31 @@ impl SynchronizerNode {
             if let Err(e) = sender.send((StreamKey::ArUco, detection_msg)) {
                 log_warn!(
                     LOGGER_NAME,
-                    "Failed to send ArUco detection to synchronizer: {e}"
+                    "ArUco callback: Failed to send ArUco detection to synchronizer: {e}"
                 );
+            } else {
+                log_info!(LOGGER_NAME, "ArUco callback: Successfully sent to synchronizer");
             }
+        } else {
+            log_warn!(LOGGER_NAME, "ArUco callback: Detection sender is None - synchronizer not initialized");
         }
     }
 
     fn board_callback(msg: Detection3DArray, state: &Arc<SynchronizerState>) {
+        log_info!(LOGGER_NAME, "Board callback: ENTRY - Received message with {} detections", msg.detections.len());
+        
         if msg.detections.is_empty() {
+            log_info!(LOGGER_NAME, "Board callback: Skipping empty detection");
             return; // Skip empty detections
         }
+
+        log_info!(
+            LOGGER_NAME,
+            "Board callback: Processing {} detections at timestamp {}.{}",
+            msg.detections.len(),
+            msg.header.stamp.sec,
+            msg.header.stamp.nanosec
+        );
 
         let wrapper = BoardDetectionWrapper { detection: msg };
         let detection_msg = DetectionMessage::Board(wrapper);
@@ -204,9 +237,13 @@ impl SynchronizerNode {
             if let Err(e) = sender.send((StreamKey::Board, detection_msg)) {
                 log_warn!(
                     LOGGER_NAME,
-                    "Failed to send board detection to synchronizer: {e}"
+                    "Board callback: Failed to send board detection to synchronizer: {e}"
                 );
+            } else {
+                log_info!(LOGGER_NAME, "Board callback: Successfully sent to synchronizer");
             }
+        } else {
+            log_warn!(LOGGER_NAME, "Board callback: Detection sender is None - synchronizer not initialized");
         }
     }
 
@@ -235,9 +272,20 @@ impl SynchronizerNode {
 
         // Process synchronized groups
         let mut sync_stream = sync_stream;
+        let mut group_count = 0;
+        log_info!(LOGGER_NAME, "Synchronizer: Starting to process synchronized groups");
+        log_info!(LOGGER_NAME, "Synchronizer: Waiting for detection messages...");
+        
         while let Some(result) = sync_stream.next().await {
             match result {
                 Ok(group) => {
+                    group_count += 1;
+                    log_info!(
+                        LOGGER_NAME,
+                        "Synchronizer: Processing group #{} with {} streams",
+                        group_count,
+                        group.len()
+                    );
                     if let Err(e) = Self::process_synchronized_group(
                         group,
                         &sync_2d_publisher,
@@ -254,6 +302,8 @@ impl SynchronizerNode {
                 }
             }
         }
+        
+        log_warn!(LOGGER_NAME, "Synchronizer: Stream ended - no more groups to process");
     }
 
     async fn process_synchronized_group(
@@ -268,9 +318,21 @@ impl SynchronizerNode {
 
         let (aruco_msg, board_msg) = match (aruco_detection, board_detection) {
             (Some(DetectionMessage::ArUco(aruco)), Some(DetectionMessage::Board(board))) => {
+                log_info!(
+                    LOGGER_NAME,
+                    "Synchronizer: Found complete pair - ArUco: {} detections, Board: {} detections",
+                    aruco.detection.detections.len(),
+                    board.detection.detections.len()
+                );
                 (&aruco.detection, &board.detection)
             }
             _ => {
+                log_info!(
+                    LOGGER_NAME,
+                    "Synchronizer: Incomplete group - ArUco: {}, Board: {}",
+                    aruco_detection.is_some(),
+                    board_detection.is_some()
+                );
                 log_warn!(LOGGER_NAME, "Incomplete detection group received");
                 return Ok(());
             }
@@ -288,14 +350,21 @@ impl SynchronizerNode {
         let sync_quality = calculate_sync_quality(time_diff_ns as u64);
 
         // Check quality threshold
+        log_info!(
+            LOGGER_NAME,
+            "Synchronizer: Time diff: {:.0}ns, Quality: {}/255, Threshold: {}",
+            time_diff_ns,
+            sync_quality,
+            state.quality_threshold
+        );
+        
         if sync_quality < state.quality_threshold {
-            if state.enable_debug {
-                log_warn!(
-                    LOGGER_NAME,
-                    "Sync quality {sync_quality} below threshold {}, skipping",
-                    state.quality_threshold
-                );
-            }
+            log_warn!(
+                LOGGER_NAME,
+                "Synchronizer: Sync quality {}/255 below threshold {}/255, skipping pair",
+                sync_quality,
+                state.quality_threshold
+            );
             return Ok(());
         }
 
@@ -315,12 +384,16 @@ impl SynchronizerNode {
         sync_board.header.stamp = sync_time;
 
         // Publish synchronized detection pair
+        log_info!(LOGGER_NAME, "Synchronizer: Publishing synchronized pair #{}", correlation_id);
+        
         if let Err(e) = sync_2d_publisher.publish(sync_aruco) {
             log_warn!(
                 LOGGER_NAME,
                 "Failed to publish synchronized ArUco detections: {e}"
             );
             return Ok(());
+        } else {
+            log_info!(LOGGER_NAME, "Synchronizer: Successfully published synchronized ArUco detections");
         }
 
         if let Err(e) = sync_3d_publisher.publish(sync_board) {
@@ -329,6 +402,8 @@ impl SynchronizerNode {
                 "Failed to publish synchronized board detections: {e}"
             );
             return Ok(());
+        } else {
+            log_info!(LOGGER_NAME, "Synchronizer: Successfully published synchronized board detections");
         }
 
         if state.enable_debug {

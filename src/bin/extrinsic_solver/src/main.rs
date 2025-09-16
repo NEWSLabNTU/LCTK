@@ -238,6 +238,14 @@ impl ExtrinsicSolverNode {
     ) {
         let timestamp = Self::get_timestamp_nanos(&msg.header);
 
+        log_info!(
+            LOGGER_NAME,
+            "Extrinsic Solver: ArUco callback ENTRY - {} detections at timestamp {}.{}",
+            msg.detections.len(),
+            msg.header.stamp.sec,
+            msg.header.stamp.nanosec
+        );
+
         let mut pending = match state.pending_detections.lock() {
             Ok(guard) => guard,
             Err(e) => {
@@ -247,10 +255,27 @@ impl ExtrinsicSolverNode {
         };
 
         // Clean up old entries
+        let before_cleanup = pending.len();
         Self::cleanup_old_detections(&mut pending, timestamp, state.sync_timeout);
+        let after_cleanup = pending.len();
+        
+        if before_cleanup != after_cleanup {
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Cleaned up {} old detections, {} remaining",
+                before_cleanup - after_cleanup,
+                after_cleanup
+            );
+        }
 
         // Look for matching board detection
         if let Some(mut pair) = pending.remove(&timestamp) {
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Found matching board detection for timestamp {}.{}",
+                msg.header.stamp.sec,
+                msg.header.stamp.nanosec
+            );
             pair.aruco_detection = msg;
             drop(pending); // Release lock before processing
 
@@ -260,6 +285,11 @@ impl ExtrinsicSolverNode {
             }
         } else {
             // Store ArUco detection for future matching
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Storing ArUco detection for future matching, {} pending",
+                pending.len() + 1
+            );
             pending.insert(
                 timestamp,
                 DetectionPair {
@@ -279,6 +309,14 @@ impl ExtrinsicSolverNode {
     ) {
         let timestamp = Self::get_timestamp_nanos(&msg.header);
 
+        log_info!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Board callback ENTRY - {} detections at timestamp {}.{}",
+            msg.detections.len(),
+            msg.header.stamp.sec,
+            msg.header.stamp.nanosec
+        );
+
         let mut pending = match state.pending_detections.lock() {
             Ok(guard) => guard,
             Err(e) => {
@@ -288,10 +326,27 @@ impl ExtrinsicSolverNode {
         };
 
         // Clean up old entries
+        let before_cleanup = pending.len();
         Self::cleanup_old_detections(&mut pending, timestamp, state.sync_timeout);
+        let after_cleanup = pending.len();
+        
+        if before_cleanup != after_cleanup {
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Cleaned up {} old detections, {} remaining",
+                before_cleanup - after_cleanup,
+                after_cleanup
+            );
+        }
 
         // Look for matching ArUco detection
         if let Some(mut pair) = pending.remove(&timestamp) {
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Found matching ArUco detection for timestamp {}.{}",
+                msg.header.stamp.sec,
+                msg.header.stamp.nanosec
+            );
             pair.board_detection = msg;
             drop(pending); // Release lock before processing
 
@@ -301,6 +356,11 @@ impl ExtrinsicSolverNode {
             }
         } else {
             // Store board detection for future matching
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Storing board detection for future matching, {} pending",
+                pending.len() + 1
+            );
             pending.insert(
                 timestamp,
                 DetectionPair {
@@ -327,9 +387,22 @@ impl ExtrinsicSolverNode {
         quality_publisher: &Publisher<std_msgs::msg::String>,
         state: &ExtrinsicSolverState,
     ) -> Result<()> {
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Processing detection pair - ArUco: {} detections, Board: {} detections",
+            pair.aruco_detection.detections.len(),
+            pair.board_detection.detections.len()
+        );
+
         // Check if both detections are present
         if pair.aruco_detection.detections.is_empty() || pair.board_detection.detections.is_empty()
         {
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: Skipping pair - ArUco empty: {}, Board empty: {}",
+                pair.aruco_detection.detections.is_empty(),
+                pair.board_detection.detections.is_empty()
+            );
             return Ok(()); // Skip if either detection is missing
         }
 
@@ -344,11 +417,19 @@ impl ExtrinsicSolverNode {
                 .lock()
                 .map_err(|e| anyhow!("Failed to lock camera info mutex: {}", e))?;
             match camera_info_guard.as_ref() {
-                Some(info) => info.clone(),
+                Some(info) => {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Extrinsic Solver: Camera info available - {}x{} resolution",
+                        info.width,
+                        info.height
+                    );
+                    info.clone()
+                }
                 None => {
                     log_warn!(
                         LOGGER_NAME,
-                        "Camera info not available - skipping detection pair processing"
+                        "Extrinsic Solver: Camera info not available - skipping detection pair processing"
                     );
                     return Ok(());
                 }
@@ -373,7 +454,19 @@ impl ExtrinsicSolverNode {
         let point_pairs =
             Self::create_point_pairs(board_model, image_markers, &state.aruco_pattern)?;
 
+        log_debug!(
+            LOGGER_NAME,
+            "Extrinsic Solver: Created {} point pairs for PnP solving",
+            point_pairs.len()
+        );
+
         if let Some(transform) = pnp_solver.solve(point_pairs.clone()) {
+            log_debug!(
+                LOGGER_NAME,
+                "Extrinsic Solver: PnP solver succeeded - transform: translation=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
+                transform.translation.x, transform.translation.y, transform.translation.z,
+                transform.rotation.i, transform.rotation.j, transform.rotation.k, transform.rotation.w
+            );
             // Quality assessment if enabled
             if state.enable_quality_assessment {
                 let metrics = Self::compute_calibration_metrics(
@@ -486,10 +579,10 @@ impl ExtrinsicSolverNode {
             if let Err(e) = publisher.publish(transform_msg) {
                 log_warn!(LOGGER_NAME, "Failed to publish transform: {e}");
             } else {
-                log_info!(LOGGER_NAME, "Published extrinsic transform");
+                log_info!(LOGGER_NAME, "Extrinsic Solver: Published extrinsic transform");
             }
         } else {
-            log_warn!(LOGGER_NAME, "PnP solver failed to find solution");
+            log_warn!(LOGGER_NAME, "Extrinsic Solver: PnP solver failed to find solution");
         }
 
         Ok(())
@@ -761,6 +854,7 @@ fn main() -> Result<()> {
     let _solve_extrinsic_params_node = ExtrinsicSolverNode::new(node)?;
 
     log_info!(LOGGER_NAME, "Solve extrinsic params node started");
+    log_info!(LOGGER_NAME, "Extrinsic Solver: Waiting for synchronized detection messages...");
 
     // Spin the executor
     executor
