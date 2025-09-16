@@ -182,20 +182,10 @@ impl SynchronizerNode {
     }
 
     fn aruco_callback(msg: Detection2DArray, state: &Arc<SynchronizerState>) {
-        log_info!(LOGGER_NAME, "ArUco callback: ENTRY - Received message with {} detections", msg.detections.len());
-        
         if msg.detections.is_empty() {
             log_info!(LOGGER_NAME, "ArUco callback: Skipping empty detection");
             return; // Skip empty detections
         }
-
-        log_info!(
-            LOGGER_NAME,
-            "ArUco callback: Processing {} detections at timestamp {}.{}",
-            msg.detections.len(),
-            msg.header.stamp.sec,
-            msg.header.stamp.nanosec
-        );
 
         let wrapper = ArUcoDetectionWrapper { detection: msg };
         let detection_msg = DetectionMessage::ArUco(wrapper);
@@ -206,8 +196,6 @@ impl SynchronizerNode {
                     LOGGER_NAME,
                     "ArUco callback: Failed to send ArUco detection to synchronizer: {e}"
                 );
-            } else {
-                log_info!(LOGGER_NAME, "ArUco callback: Successfully sent to synchronizer");
             }
         } else {
             log_warn!(LOGGER_NAME, "ArUco callback: Detection sender is None - synchronizer not initialized");
