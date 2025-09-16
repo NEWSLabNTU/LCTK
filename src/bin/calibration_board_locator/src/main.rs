@@ -271,13 +271,13 @@ impl CalibrationBoardLocatorNode {
         );
         let detection: Option<BoardDetection> = match detector.detect(&active_points) {
             Ok(Some(det)) => {
-                log_debug!(LOGGER_NAME, "Board detection successful");
+                log_warn!(LOGGER_NAME, "Board detection successful");
 
                 // Publish debug plane inliers if enabled
                 if let Some(_pub_inliers) = debug_plane_inliers_pub {
                     // Access the ransac_data if available from the detection
                     // Note: This requires the detection to expose ransac data
-                    log_debug!(LOGGER_NAME, "Debug plane inliers publisher available");
+                    log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
                 }
 
                 Some(det)
@@ -310,7 +310,6 @@ impl CalibrationBoardLocatorNode {
             "Completed processing with {} detections",
             num_detections
         );
-
         Ok(detection_array)
     }
 
