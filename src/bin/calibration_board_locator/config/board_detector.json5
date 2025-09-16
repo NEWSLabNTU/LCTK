@@ -4,7 +4,7 @@
     // the loss threshold that a point is considered an inlier
     "plane_ransac_inlier_threshold": 0.5,
     // max number of ICP iterations
-    "max_icp_iterations": 5000,
+    "max_icp_iterations": 100,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is blow this threshold several times
     "icp_pose_weight_threshold": 1e-5,

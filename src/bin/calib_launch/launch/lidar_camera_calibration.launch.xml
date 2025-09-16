@@ -87,7 +87,7 @@
     <!-- Image Processing Pipeline -->
     <include file="$(find-pkg-share calib_launch)/launch/image_processing.launch.xml">
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <arg name="camera_topic" value="$(var camera_topic)"/>
+        <arg name="camera_topic" value="/sensing/camera/front_center/synchronized_image"/>
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
@@ -100,13 +100,15 @@
     <include file="$(find-pkg-share calib_launch)/launch/pointcloud_processing.launch.xml">
         <arg name="board_config_file" value="$(var board_config_file)"/>
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
+        <arg name="pointcloud_topic" value="/sensing/lidar/top/synchronized_pointcloud"/>
+        <arg name="board_detections_topic" value="/calibration/calibration_board_locator/board_detections"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>
 
     <!-- Extrinsic Calibration -->
     <include file="$(find-pkg-share calib_launch)/launch/extrinsic_calibration.launch.xml">
+        <arg name="board_detections_topic" value="/calibration/calibration_board_locator/board_detections"/>
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="sync_window_ms" value="$(var sync_window_ms)"/>
