@@ -2,19 +2,24 @@ use anyhow::{anyhow, Result};
 use builtin_interfaces::msg::Time;
 use futures::{stream, StreamExt};
 use indexmap::IndexMap;
-use multi_stream_synchronizer::{sync, Config, StalenessConfig, WithTimestamp};
+use multi_stream_synchronizer::{sync, Config, WithTimestamp};
 use rclrs::*;
 use sensor_msgs::msg::{Image, PointCloud2};
 use std::{
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
+
+// Staleness warning thresholds
+const STALENESS_WARNING_THRESHOLD: Duration = Duration::from_secs(5);
+const SYNC_FAILURE_WARNING_THRESHOLD: Duration = Duration::from_secs(10);
+const WARNING_COOLDOWN: Duration = Duration::from_secs(30);
 
 // Stream key types for synchronization
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -69,6 +74,13 @@ struct SyncState {
     enable_debug: bool,
     sequence_counter: AtomicU32,
     sensor_sender: Mutex<Option<mpsc::UnboundedSender<(StreamKey, SensorData)>>>,
+    // Staleness tracking
+    last_image_time: AtomicU64,
+    last_pointcloud_time: AtomicU64,
+    last_sync_time: AtomicU64,
+    total_syncs: AtomicU64,
+    last_staleness_warning: Mutex<Instant>,
+    last_sync_failure_warning: Mutex<Instant>,
 }
 
 pub struct SensorSynchronizer {
@@ -77,6 +89,62 @@ pub struct SensorSynchronizer {
     _pointcloud_subscription: Subscription<PointCloud2>,
     _sync_image_publisher: Publisher<Image>,
     _sync_pointcloud_publisher: Publisher<PointCloud2>,
+}
+
+// Helper function to check staleness and warn if needed
+fn check_staleness(state: &Arc<SyncState>) {
+    let now_millis = Instant::now().elapsed().as_millis() as u64;
+    let last_image = state.last_image_time.load(Ordering::Relaxed);
+    let last_pointcloud = state.last_pointcloud_time.load(Ordering::Relaxed);
+
+    let image_stale = last_image > 0
+        && (now_millis - last_image) > STALENESS_WARNING_THRESHOLD.as_millis() as u64;
+    let pointcloud_stale = last_pointcloud > 0
+        && (now_millis - last_pointcloud) > STALENESS_WARNING_THRESHOLD.as_millis() as u64;
+
+    if image_stale || pointcloud_stale {
+        if let Ok(mut last_warning) = state.last_staleness_warning.try_lock() {
+            if last_warning.elapsed() > WARNING_COOLDOWN {
+                if image_stale {
+                    log_warn!(
+                        LOGGER_NAME,
+                        "Image input appears stale - no new images for {}ms",
+                        now_millis - last_image
+                    );
+                }
+                if pointcloud_stale {
+                    log_warn!(
+                        LOGGER_NAME,
+                        "PointCloud input appears stale - no new pointclouds for {}ms",
+                        now_millis - last_pointcloud
+                    );
+                }
+                *last_warning = Instant::now();
+            }
+        }
+    }
+}
+
+// Helper function to check sync failures and warn if needed
+fn check_sync_failures(state: &Arc<SyncState>) {
+    let now_millis = Instant::now().elapsed().as_millis() as u64;
+    let last_sync = state.last_sync_time.load(Ordering::Relaxed);
+
+    let sync_failing = last_sync > 0
+        && (now_millis - last_sync) > SYNC_FAILURE_WARNING_THRESHOLD.as_millis() as u64;
+
+    if sync_failing {
+        if let Ok(mut last_warning) = state.last_sync_failure_warning.try_lock() {
+            if last_warning.elapsed() > WARNING_COOLDOWN {
+                log_warn!(
+                    LOGGER_NAME,
+                    "Synchronization failing - no successful syncs for {}ms",
+                    now_millis - last_sync
+                );
+                *last_warning = Instant::now();
+            }
+        }
+    }
 }
 
 impl SensorSynchronizer {
@@ -131,6 +199,13 @@ impl SensorSynchronizer {
             enable_debug,
             sequence_counter: AtomicU32::new(0),
             sensor_sender: Mutex::new(Some(sensor_sender)),
+            // Initialize staleness tracking
+            last_image_time: AtomicU64::new(0),
+            last_pointcloud_time: AtomicU64::new(0),
+            last_sync_time: AtomicU64::new(0),
+            total_syncs: AtomicU64::new(0),
+            last_staleness_warning: Mutex::new(Instant::now()),
+            last_sync_failure_warning: Mutex::new(Instant::now()),
         });
 
         // Create publishers for synchronized data
@@ -186,15 +261,25 @@ impl SensorSynchronizer {
     }
 
     fn image_callback(msg: Image, state: &Arc<SyncState>) {
+        // Update timestamp tracking
+        let now_millis = Instant::now().elapsed().as_millis() as u64;
+        state.last_image_time.store(now_millis, Ordering::Relaxed);
+
+        // Only log at debug level and reduce frequency
         if state.enable_debug {
-            log_info!(
-                LOGGER_NAME,
-                "Received image {}x{} at timestamp {}.{:09}",
-                msg.width,
-                msg.height,
-                msg.header.stamp.sec,
-                msg.header.stamp.nanosec
-            );
+            let sequence = state.sequence_counter.load(Ordering::Relaxed);
+            if sequence % 30 == 0 {
+                // Log every 30th frame (~1Hz at 30fps)
+                log_debug!(
+                    LOGGER_NAME,
+                    "Received image {}x{} (frame #{}) at timestamp {}.{:09}",
+                    msg.width,
+                    msg.height,
+                    sequence,
+                    msg.header.stamp.sec,
+                    msg.header.stamp.nanosec
+                );
+            }
         }
 
         let wrapped = ImageWrapper { image: msg };
@@ -208,14 +293,26 @@ impl SensorSynchronizer {
     }
 
     fn pointcloud_callback(msg: PointCloud2, state: &Arc<SyncState>) {
+        // Update timestamp tracking
+        let now_millis = Instant::now().elapsed().as_millis() as u64;
+        state
+            .last_pointcloud_time
+            .store(now_millis, Ordering::Relaxed);
+
+        // Only log at debug level and reduce frequency
         if state.enable_debug {
-            log_info!(
-                LOGGER_NAME,
-                "Received pointcloud {} points at timestamp {}.{:09}",
-                msg.width * msg.height,
-                msg.header.stamp.sec,
-                msg.header.stamp.nanosec
-            );
+            let total_syncs = state.total_syncs.load(Ordering::Relaxed);
+            if total_syncs % 10 == 0 {
+                // Log every 10th pointcloud
+                log_debug!(
+                    LOGGER_NAME,
+                    "Received pointcloud {} points (frame #{}) at timestamp {}.{:09}",
+                    msg.width * msg.height,
+                    total_syncs,
+                    msg.header.stamp.sec,
+                    msg.header.stamp.nanosec
+                );
+            }
         }
 
         let wrapped = PointCloudWrapper { pointcloud: msg };
@@ -253,6 +350,18 @@ impl SensorSynchronizer {
         };
 
         let mut sync_stream = sync_stream;
+
+        // Spawn periodic staleness and sync failure checking
+        let check_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                check_staleness(&check_state);
+                check_sync_failures(&check_state);
+            }
+        });
+
         while let Some(result) = sync_stream.next().await {
             match result {
                 Ok(synchronized_data) => {
@@ -285,9 +394,16 @@ impl SensorSynchronizer {
             (image_data, pointcloud_data)
         {
             let sequence = state.sequence_counter.fetch_add(1, Ordering::Relaxed);
+            let total_syncs = state.total_syncs.fetch_add(1, Ordering::Relaxed) + 1;
 
-            if state.enable_debug {
-                log_info!(
+            // Update successful sync timestamp
+            let now_millis = Instant::now().elapsed().as_millis() as u64;
+            state.last_sync_time.store(now_millis, Ordering::Relaxed);
+
+            // Only log at debug level and reduce frequency
+            if state.enable_debug && total_syncs % 10 == 0 {
+                // Log every 10th sync
+                log_debug!(
                     LOGGER_NAME,
                     "Synchronized pair #{}: image {}x{} with pointcloud {} points (time diff: {:?})",
                     sequence,
