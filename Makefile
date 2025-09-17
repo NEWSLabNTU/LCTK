@@ -10,7 +10,7 @@ help:
 	@echo ""
 	@echo "Setup & Environment:"
 	@echo "  make setup                      - Set up development environment (installs all dependencies)"
-	@echo "  make rosdep                     - Install ROS dependencies with rosdep"
+	@echo "  make prepare                    - Install ROS dependencies with rosdep"
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  make build                      - Build entire project (all 3 passes)"
@@ -47,8 +47,8 @@ setup:
 	@echo ""
 	@./setup-dev-env.sh
 
-.PHONY: rosdep
-rosdep:
+.PHONY: prepare
+prepare:
 	@echo "Installing ROS dependencies with rosdep..."
 	. /opt/ros/humble/setup.sh && \
 	rosdep update && \
