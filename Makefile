@@ -1,5 +1,6 @@
 COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 LOG_DIR := build_logs
+debug_mode := true
 
 .PHONY: default
 default: help
@@ -37,6 +38,7 @@ help:
 	@echo "  make format                     - Format all code (Rust, Python, configs)"
 	@echo "  make lint                       - Run linters and formatters check"
 	@echo "  make clean                      - Clean all build artifacts"
+	@echo "  make launch_simple_extrinsic_solver - Launch simple extrinsic solver"
 	@echo ""
 	@echo "For more information, see README.md and CLAUDE.md"
 
@@ -155,6 +157,12 @@ launch_rviz:
 	@echo "Launching RViz for calibration visualization..."
 	. install/setup.sh && \
 	ros2 launch lctk_launch rviz.launch.xml
+
+.PHONY: launch_simple_extrinsic_solver
+launch_simple_extrinsic_solver:
+	@echo "Launching simple_extrinsic_solver..."
+	. install/setup.sh && \
+	ros2 launch simple_extrinsic_solver simple_extrinsic_solver.launch.py
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:

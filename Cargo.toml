@@ -9,6 +9,8 @@ exclude = [
     # Launch-only package without Cargo.toml
     "src/ros2/lctk_launch",
     "src/ros2/rosbag_deck",
+    # Python package without Cargo.toml
+    "src/ros2/simple_extrinsic_solver",
 ]
 
 [workspace.dependencies]
