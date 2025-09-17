@@ -28,6 +28,7 @@ install(FILES
   launch/lidar_camera_calibration.launch.xml
   launch/two_lidar_calibration.launch.xml
   # Visualization launch files
+  launch/rviz.launch.xml
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
@@ -38,6 +39,7 @@ install(DIRECTORY config/
   PATTERN "*.json5"
   PATTERN "*.yaml"
   PATTERN "*.yml"
+  PATTERN "*.rviz"
   PATTERN "README.md"
 )
 

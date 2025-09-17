@@ -22,7 +22,8 @@ help:
 	@echo "Launch Commands (using ros2systemd for reliable service management):"
 	@echo "  make launch_sensor              - Create and start sensor publishers service"
 	@echo "  make stop_sensor                - Stop sensor publishers service"
-	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration service (add debug_mode=true for debug topics)"
+	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration service (add debug_mode=true for debug topics, rviz=true for RViz)"
+	@echo "  make launch_rviz                    - Launch RViz for calibration visualization"
 	@echo "  make stop_lidar_camera_calibration   - Stop LiDAR-Camera calibration service"
 	@echo "  make launch_two_lidar_calibration    - Create and start two LiDAR calibration service"
 	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
@@ -138,7 +139,8 @@ launch_lidar_camera_calibration:
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true \
-		debug_mode:=$(or $(debug_mode),false) && \
+		debug_mode:=$(or $(debug_mode),false) \
+		enable_rviz:=$(or $(rviz),false) && \
 	ros2 systemd start lctk-calibration
 	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."
 
@@ -147,6 +149,12 @@ stop_lidar_camera_calibration:
 	@echo "Stopping LiDAR-Camera calibration service..."
 	. install/setup.sh && \
 	ros2 systemd stop lctk-calibration 2>/dev/null || echo "Service not running"
+
+.PHONY: launch_rviz
+launch_rviz:
+	@echo "Launching RViz for calibration visualization..."
+	. install/setup.sh && \
+	ros2 launch calib_launch rviz.launch.xml
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:

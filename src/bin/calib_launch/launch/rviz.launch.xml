@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for RViz visualization of calibration process.
+
+    This launch file starts RViz with a pre-configured setup optimized for
+    LiDAR-Camera calibration visualization, including:
+    - Camera image with ArUco marker overlays
+    - Point cloud displays with debug information
+    - Board detection markers and visualization
+    - Proper coordinate frame setup
+
+    Usage:
+    ros2 launch calib_launch rviz.launch.xml
+-->
+<launch>
+    <!-- Launch Arguments -->
+    <arg name="rviz_config"
+         default="$(find-pkg-share calib_launch)/config/rviz/calibration.rviz"
+         description="Path to RViz configuration file"/>
+
+    <arg name="use_namespace"
+         default="false"
+         description="Whether to run RViz in a namespace"/>
+
+    <arg name="namespace"
+         default="visualization"
+         description="Namespace for RViz node"/>
+
+    <!-- RViz Node -->
+    <node pkg="rviz2"
+          exec="rviz2"
+          name="rviz2"
+          namespace="$(var namespace)" if="$(var use_namespace)"
+          output="screen"
+          args="-d $(var rviz_config)"/>
+
+    <node pkg="rviz2"
+          exec="rviz2"
+          name="rviz2"
+          output="screen"
+          unless="$(var use_namespace)"
+          args="-d $(var rviz_config)"/>
+</launch>

@@ -49,6 +49,10 @@
          default="false"
          description="Enable visualization component"/>
 
+    <arg name="enable_rviz"
+         default="false"
+         description="Launch RViz for calibration visualization"/>
+
     <arg name="max_distance"
          default="10.0"
          description="Maximum distance for point cloud filtering (meters)"/>
@@ -113,4 +117,7 @@
         <arg name="max_distance" value="$(var max_distance)"/>
         <arg name="min_distance" value="$(var min_distance)"/>
     </include> -->
+
+    <!-- RViz Visualization (Optional) -->
+    <include file="$(find-pkg-share calib_launch)/launch/rviz.launch.xml" if="$(var enable_rviz)"/>
 </launch>
