@@ -41,10 +41,11 @@ Overlays point clouds onto camera images for visualization.
 - **Purpose**: Visual verification of calibration accuracy
 - **Output**: Colored point clouds projected onto image plane
 
-### aruco_detection_overlay
-Visualizes ArUco detections on camera images.
-- **Purpose**: Real-time monitoring of marker detection
-- **Output**: Annotated images with bounding boxes and marker IDs
+### aruco_locator_node (with integrated overlay)
+Detects ArUco markers in camera images with optional visualization overlay.
+- **Purpose**: Real-time marker detection and visualization
+- **Output**: ArUco detections, optional annotated images with bounding boxes and marker IDs
+- **Debug Mode**: Enable `debug_overlay_enabled` parameter to publish overlay images
 
 ## Data Management
 

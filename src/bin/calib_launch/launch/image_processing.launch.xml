@@ -46,6 +46,7 @@
           output="screen">
         <param name="aruco_config_file" value="$(var aruco_config_file)"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
+        <param name="debug_overlay_enabled" value="$(var debug_mode)"/>
         <param name="camera_namespace" value="/sensing/camera/front_center"/>
         <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
     </node>

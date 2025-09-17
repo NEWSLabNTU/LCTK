@@ -86,7 +86,7 @@
     </include>
 
     <!-- ArUco Detection Visualization Overlay -->
-    <include file="$(find-pkg-share calib_launch)/launch/aruco_visualization.launch.xml"/>
+    <!-- Removed: aruco_visualization.launch.xml - overlay functionality integrated into aruco_locator_node -->
 
     <!-- Point Cloud Processing Pipeline -->
     <include file="$(find-pkg-share calib_launch)/launch/pointcloud_processing.launch.xml">

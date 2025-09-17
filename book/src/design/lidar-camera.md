@@ -99,7 +99,7 @@ rviz2 -d config/aruco_detection.rviz
 
 The pipeline includes visualization nodes for validation:
 - **pointcloud_image_overlay**: Projects calibrated point clouds onto images
-- **aruco_detection_overlay**: Shows ArUco detections with bounding boxes
+- **aruco_locator_node**: Detects ArUco markers with integrated overlay visualization (enabled via debug_overlay_enabled parameter)
 
 Quality metrics include:
 - Reprojection error statistics

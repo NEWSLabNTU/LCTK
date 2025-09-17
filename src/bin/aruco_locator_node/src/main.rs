@@ -3,13 +3,14 @@ use aruco_detector::multi_aruco::ImageMarker;
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use opencv::{
-    core::{CV_8UC1, CV_8UC3, CV_8UC4},
-    imgproc,
+    core::{Scalar, CV_8UC1, CV_8UC3, CV_8UC4},
+    imgproc::{self, FONT_HERSHEY_SIMPLEX, LINE_8},
     prelude::*,
 };
 use rclrs::*;
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::{
+    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -155,9 +156,12 @@ pub struct ArucoLocatorNode {
     _camera_info_subscription: Subscription<CameraInfo>,
     image_subscription: Option<Subscription<ImageMsg>>,
     detection_publisher: Publisher<Detection2DArray>,
+    overlay_publisher: Option<Publisher<ImageMsg>>,
     _camera_namespace: String,
     detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
+    detection_cache: Arc<Mutex<VecDeque<Detection2DArray>>>,
     _aruco_config_file: String,
+    debug_overlay_enabled: bool,
 }
 
 impl ArucoLocatorNode {
@@ -165,6 +169,9 @@ impl ArucoLocatorNode {
     pub fn new(node: &Node) -> Result<Self> {
         // Create the detector state
         let detector_state = Arc::new(Mutex::new(None));
+
+        // Create detection cache for overlay functionality
+        let detection_cache = Arc::new(Mutex::new(VecDeque::new()));
 
         // Get the aruco_config_file parameter (mandatory - must be set by user)
         let aruco_config_file = node
@@ -185,6 +192,18 @@ impl ArucoLocatorNode {
 
         log_info!(LOGGER_NAME, "Using camera namespace: {camera_namespace}");
 
+        // Get debug overlay parameter (default: false)
+        let debug_overlay_enabled = node
+            .declare_parameter("debug_overlay_enabled")
+            .default(false)
+            .mandatory()?
+            .get();
+
+        log_info!(
+            LOGGER_NAME,
+            "Debug overlay enabled: {debug_overlay_enabled}"
+        );
+
         // Form the camera_info topic name with namespace
         let camera_info_topic = format!("{camera_namespace}/camera_info");
 
@@ -196,6 +215,13 @@ impl ArucoLocatorNode {
 
         // Create detection publisher
         let detection_publisher = node.create_publisher("aruco_detections")?;
+
+        // Create overlay publisher if debug is enabled
+        let overlay_publisher = if debug_overlay_enabled {
+            Some(node.create_publisher("image_with_detections")?)
+        } else {
+            None
+        };
 
         // Subscribe to camera_info
         let detector_state_camera_info = Arc::clone(&detector_state);
@@ -222,8 +248,11 @@ impl ArucoLocatorNode {
             image_subscription: None,
             _camera_namespace: camera_namespace,
             detection_publisher,
+            overlay_publisher,
             detector_state,
+            detection_cache,
             _aruco_config_file: aruco_config_file,
+            debug_overlay_enabled,
         };
 
         // Try to find an available image topic and subscribe to it with image processing callback
@@ -454,10 +483,20 @@ impl ArucoLocatorNode {
         for topic in potential_topics {
             log_info!(LOGGER_NAME, "Trying to subscribe to topic: {topic}");
             let detector_state = Arc::clone(&self.detector_state);
-            let publisher = self.detection_publisher.clone();
+            let detection_cache = Arc::clone(&self.detection_cache);
+            let detection_publisher = self.detection_publisher.clone();
+            let overlay_publisher = self.overlay_publisher.clone();
+            let debug_enabled = self.debug_overlay_enabled;
 
             match node.create_subscription::<ImageMsg, _>(topic, move |msg: ImageMsg| {
-                Self::image_callback(msg, Arc::clone(&detector_state), &publisher);
+                Self::image_callback(
+                    msg,
+                    Arc::clone(&detector_state),
+                    Arc::clone(&detection_cache),
+                    &detection_publisher,
+                    &overlay_publisher,
+                    debug_enabled,
+                );
             }) {
                 Ok(sub) => {
                     log_info!(
@@ -480,7 +519,10 @@ impl ArucoLocatorNode {
     fn image_callback(
         msg: ImageMsg,
         detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
-        publisher: &Publisher<Detection2DArray>,
+        detection_cache: Arc<Mutex<VecDeque<Detection2DArray>>>,
+        detection_publisher: &Publisher<Detection2DArray>,
+        overlay_publisher: &Option<Publisher<ImageMsg>>,
+        debug_overlay_enabled: bool,
     ) {
         // Get detector
         let detector = {
@@ -548,14 +590,278 @@ impl ArucoLocatorNode {
                 }
 
                 // Publish the detection result
-                if let Err(e) = publisher.publish(&detection_msg) {
+                if let Err(e) = detection_publisher.publish(&detection_msg) {
                     log_error!(LOGGER_NAME, "Failed to publish detection result: {e}");
+                }
+
+                // Cache detection for overlay
+                if debug_overlay_enabled {
+                    if let Ok(mut cache) = detection_cache.lock() {
+                        cache.push_back(detection_msg.clone());
+                        // Keep cache size reasonable (max 10 messages)
+                        while cache.len() > 10 {
+                            cache.pop_front();
+                        }
+                    }
+                }
+
+                // Create and publish overlay image if debug is enabled
+                if debug_overlay_enabled {
+                    if let Some(overlay_pub) = overlay_publisher {
+                        match Self::create_overlay_image(&msg, &detection_msg) {
+                            Ok(overlay_image) => {
+                                if let Err(e) = overlay_pub.publish(&overlay_image) {
+                                    log_error!(LOGGER_NAME, "Failed to publish overlay image: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                log_error!(LOGGER_NAME, "Failed to create overlay image: {e}");
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => {
                 log_error!(LOGGER_NAME, "ArUco detection failed: {e}");
             }
         }
+    }
+
+    /// Create an overlay image with ArUco detection visualizations
+    fn create_overlay_image(
+        original_image: &ImageMsg,
+        detections: &Detection2DArray,
+    ) -> Result<ImageMsg> {
+        // Convert ROS image to OpenCV Mat
+        let mut cv_image = Self::ros_image_to_opencv_mat(original_image)?;
+
+        // Color map for different marker IDs (based on the Python implementation)
+        let colors = [
+            ("696", Scalar::new(0.0, 0.0, 255.0, 0.0)), // Red for ID 696
+            ("64", Scalar::new(0.0, 255.0, 0.0, 0.0)),  // Green for ID 64
+            ("306", Scalar::new(255.0, 0.0, 0.0, 0.0)), // Blue for ID 306
+            ("195", Scalar::new(0.0, 255.0, 255.0, 0.0)), // Cyan for ID 195
+        ];
+        let default_color = Scalar::new(255.0, 0.0, 255.0, 0.0); // Magenta for unknown IDs
+
+        if !detections.detections.is_empty() {
+            // Draw detections
+            for detection in &detections.detections {
+                // Get bounding box
+                let bbox = &detection.bbox;
+                let center_x = bbox.center.position.x as i32;
+                let center_y = bbox.center.position.y as i32;
+                let width = bbox.size_x as i32;
+                let height = bbox.size_y as i32;
+
+                // Calculate corners
+                let x1 = center_x - width / 2;
+                let y1 = center_y - height / 2;
+                let x2 = center_x + width / 2;
+                let y2 = center_y + height / 2;
+
+                // Get marker ID if available
+                let marker_id = if !detection.results.is_empty() {
+                    &detection.results[0].hypothesis.class_id
+                } else {
+                    "Unknown"
+                };
+
+                // Choose color based on marker ID
+                let color = colors
+                    .iter()
+                    .find(|(id, _)| *id == marker_id)
+                    .map(|(_, color)| *color)
+                    .unwrap_or(default_color);
+
+                // Draw bounding box
+                opencv::imgproc::rectangle(
+                    &mut cv_image,
+                    opencv::core::Rect::new(x1, y1, width, height),
+                    color,
+                    3,
+                    LINE_8,
+                    0,
+                )?;
+
+                // Draw marker ID label with background
+                let label = format!("ArUco {}", marker_id);
+                let font_face = FONT_HERSHEY_SIMPLEX;
+                let font_scale = 0.8;
+                let thickness = 2;
+
+                let mut baseline = 0;
+                let text_size = opencv::imgproc::get_text_size(
+                    &label,
+                    font_face,
+                    font_scale,
+                    thickness,
+                    &mut baseline,
+                )?;
+
+                // Position label above the box if possible
+                let label_y = if y1 - 10 > text_size.height {
+                    y1 - 10
+                } else {
+                    y2 + text_size.height + 10
+                };
+
+                // Draw label background
+                opencv::imgproc::rectangle(
+                    &mut cv_image,
+                    opencv::core::Rect::new(
+                        x1,
+                        label_y - text_size.height - 5,
+                        text_size.width + 10,
+                        text_size.height + 10,
+                    ),
+                    color,
+                    -1,
+                    LINE_8,
+                    0,
+                )?;
+
+                // Draw label text
+                opencv::imgproc::put_text(
+                    &mut cv_image,
+                    &label,
+                    opencv::core::Point::new(x1 + 5, label_y),
+                    font_face,
+                    font_scale,
+                    Scalar::new(255.0, 255.0, 255.0, 0.0), // White text
+                    thickness,
+                    LINE_8,
+                    false,
+                )?;
+
+                // Draw corner points
+                let corner_radius = 6;
+                opencv::imgproc::circle(
+                    &mut cv_image,
+                    opencv::core::Point::new(x1, y1),
+                    corner_radius,
+                    color,
+                    -1,
+                    LINE_8,
+                    0,
+                )?;
+                opencv::imgproc::circle(
+                    &mut cv_image,
+                    opencv::core::Point::new(x2, y1),
+                    corner_radius,
+                    color,
+                    -1,
+                    LINE_8,
+                    0,
+                )?;
+                opencv::imgproc::circle(
+                    &mut cv_image,
+                    opencv::core::Point::new(x1, y2),
+                    corner_radius,
+                    color,
+                    -1,
+                    LINE_8,
+                    0,
+                )?;
+                opencv::imgproc::circle(
+                    &mut cv_image,
+                    opencv::core::Point::new(x2, y2),
+                    corner_radius,
+                    color,
+                    -1,
+                    LINE_8,
+                    0,
+                )?;
+
+                // Draw center point
+                opencv::imgproc::circle(
+                    &mut cv_image,
+                    opencv::core::Point::new(center_x, center_y),
+                    4,
+                    Scalar::new(255.0, 255.0, 255.0, 0.0), // White center
+                    -1,
+                    LINE_8,
+                    0,
+                )?;
+                opencv::imgproc::circle(
+                    &mut cv_image,
+                    opencv::core::Point::new(center_x, center_y),
+                    6,
+                    color,
+                    2,
+                    LINE_8,
+                    0,
+                )?;
+            }
+
+            // Add detection count overlay
+            let detection_text = format!("ArUco Markers: {}", detections.detections.len());
+            opencv::imgproc::put_text(
+                &mut cv_image,
+                &detection_text,
+                opencv::core::Point::new(10, 40),
+                FONT_HERSHEY_SIMPLEX,
+                1.2,
+                Scalar::new(0.0, 255.0, 0.0, 0.0), // Green text
+                3,
+                LINE_8,
+                false,
+            )?;
+        } else {
+            // No detections overlay
+            opencv::imgproc::put_text(
+                &mut cv_image,
+                "No ArUco markers detected",
+                opencv::core::Point::new(10, 40),
+                FONT_HERSHEY_SIMPLEX,
+                1.2,
+                Scalar::new(0.0, 0.0, 255.0, 0.0), // Red text
+                3,
+                LINE_8,
+                false,
+            )?;
+        }
+
+        // Convert OpenCV Mat back to ROS image
+        Self::opencv_mat_to_ros_image(&cv_image, original_image)
+    }
+
+    /// Convert OpenCV Mat to ROS Image message
+    fn opencv_mat_to_ros_image(mat: &Mat, original_image: &ImageMsg) -> Result<ImageMsg> {
+        // Ensure the image is in BGR format
+        let bgr_mat = if mat.channels() == 3 {
+            mat.clone()
+        } else if mat.channels() == 1 {
+            let mut bgr_mat = Mat::default();
+            imgproc::cvt_color(mat, &mut bgr_mat, imgproc::COLOR_GRAY2BGR, 0)?;
+            bgr_mat
+        } else {
+            bail!("Unsupported number of channels: {}", mat.channels());
+        };
+
+        // Get image data
+        let height = bgr_mat.rows() as u32;
+        let width = bgr_mat.cols() as u32;
+        let step = (width * 3) as u32; // 3 bytes per pixel for BGR
+
+        // Copy data from OpenCV Mat
+        let data_size = (height * step) as usize;
+        let mut data = vec![0u8; data_size];
+
+        unsafe {
+            let mat_data = bgr_mat.ptr(0)? as *const u8;
+            std::ptr::copy_nonoverlapping(mat_data, data.as_mut_ptr(), data_size);
+        }
+
+        Ok(ImageMsg {
+            header: original_image.header.clone(),
+            height,
+            width,
+            encoding: "bgr8".to_string(),
+            is_bigendian: 0,
+            step,
+            data,
+        })
     }
 }
 
