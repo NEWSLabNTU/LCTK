@@ -321,24 +321,24 @@ pub fn fit_board_icp(
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
 
-                if *losses.last().unwrap() < icp_rejection_threshold {
-                    // debug!(
-                    //     "🏆 ICP terminating: loss is too small: {:.8}",
-                    //     losses.last().unwrap()
-                    // );
-                    // debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
-                    // debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
-                    // debug!("  Avg loss: {:.8}", *losses.last().unwrap());
-                    // debug!("  Inlier points: {}", inlier_points.len());
-                    // debug!(
-                    //     "  Good corresponding points: {}",
-                    //     good_corresponding_points.len()
-                    // );
-                    // debug!("  Pose: {:.8}", pose);
+                if *losses.last().unwrap() < icp_rejection_threshold || termination_count > 10 {
+                    debug!(
+                        "🏆 ICP terminating: loss is too small: {:.8}",
+                        losses.last().unwrap()
+                    );
+                    debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
+                    debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
+                    debug!("  Avg loss: {:.8}", *losses.last().unwrap());
+                    debug!("  Inlier points: {}", inlier_points.len());
+                    debug!(
+                        "  Good corresponding points: {}",
+                        good_corresponding_points.len()
+                    );
+                    debug!("  Pose: {:.8}", pose);
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
 
-                if step == max_icp_iterations || termination_count > 100 {
+                if step == max_icp_iterations || termination_count > 10 {
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
             }
