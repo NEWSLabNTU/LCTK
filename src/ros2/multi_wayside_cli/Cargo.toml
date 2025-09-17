@@ -1,0 +1,38 @@
+[package]
+name = "multi_wayside"
+version = "0.1.1"
+authors = ["yahoo55025502 <yahoo55025502@gmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde-loader = { workspace = true }
+pcap = "1.1.0"
+serde = { workspace = true }
+kiss3d = { workspace = true }
+rand = { workspace = true, features = ["getrandom"] }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+json5 = { workspace = true }
+serde_json = { workspace = true }
+unzip-n = { workspace = true }
+itertools = { workspace = true }
+velodyne-lidar = { version = "0.2.0", features = ["pcap"] }
+aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
+hollow-board-detector = { version = "0.1.0", path = "../../rust/hollow-board-detector" }
+hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config", features = ["kiss3d"] }
+clap = { workspace = true }
+
+[dependencies.nalgebra]
+workspace = true
+
+[dependencies.nalgebra30]
+package = "nalgebra"
+version = "0.30.1"
+features = ["serde-serialize"]
+
+[dependencies.generic-point-filter]
+git = "https://github.com/NEWSLabNTU/point-cloud-filter.git"
+tag = "v0.3.1"
+features = ["with-kiss3d"]

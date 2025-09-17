@@ -1,0 +1,121 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for publishing both LiDAR and camera data from files.
+
+    This launch file includes both lidar.launch.xml and camera.launch.xml
+    to publish synchronized sensor data for calibration or analysis.
+
+    Usage:
+    ros2 launch lctk_launch sensor.launch.xml pcap_file:=/path/to/file.pcap video_file:=/path/to/file.avi
+-->
+<launch>
+    <!-- LiDAR Arguments -->
+    <arg name="pcap_file"
+         description="Path to the PCAP file containing Velodyne VLP-32C data"/>
+
+    <arg name="pointcloud_topic"
+         default="/sensing/lidar/top/pointcloud_raw"
+         description="Output PointCloud2 topic name"/>
+
+    <arg name="velodyne_packets_topic"
+         default="/sensing/lidar/top/velodyne_packets"
+         description="Output VelodyneScan packets topic name"/>
+
+    <arg name="lidar_frame_id"
+         default="velodyne_top"
+         description="Frame ID for the point cloud messages"/>
+
+    <arg name="rpm"
+         default="600.0"
+         description="Device rotation rate (RPM)"/>
+
+    <arg name="port"
+         default="2368"
+         description="UDP port number for Velodyne data"/>
+
+    <arg name="read_fast"
+         default="false"
+         description="Read PCAP file as fast as possible (true) or preserve timing (false)"/>
+
+    <!-- Camera Arguments -->
+    <arg name="video_file"
+         description="Path to the video file (mp4, avi, etc.)"/>
+
+    <arg name="camera_name"
+         default="front_center"
+         description="Camera name"/>
+
+    <arg name="camera_namespace"
+         default="/sensing/camera/front_center"
+         description="Camera namespace for topics"/>
+
+    <arg name="camera_info_url"
+         default="file://$(find-pkg-share lctk_launch)/config/camera/front_center_camera_info.yaml"
+         description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
+
+    <arg name="camera_frame_id"
+         default="camera_front_center"
+         description="Frame ID for the image messages"/>
+
+    <!-- Common Arguments -->
+    <arg name="loop"
+         default="false"
+         description="Loop playback when reaching end of files"/>
+
+
+    <!-- Include LiDAR launch file -->
+    <include file="$(find-pkg-share lctk_launch)/launch/lidar.launch.xml">
+        <arg name="pcap_file" value="$(var pcap_file)"/>
+        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
+        <arg name="velodyne_packets_topic" value="$(var velodyne_packets_topic)"/>
+        <arg name="frame_id" value="$(var lidar_frame_id)"/>
+        <arg name="rpm" value="$(var rpm)"/>
+        <arg name="port" value="$(var port)"/>
+        <arg name="read_once" value="false"/>
+        <arg name="read_fast" value="$(var read_fast)"/>
+        <arg name="repeat_delay" value="0.0"/>
+    </include>
+
+    <!-- Include Camera launch file -->
+    <include file="$(find-pkg-share lctk_launch)/launch/camera.launch.xml">
+        <arg name="video_file" value="$(var video_file)"/>
+        <arg name="camera_name" value="$(var camera_name)"/>
+        <arg name="camera_namespace" value="$(var camera_namespace)"/>
+        <arg name="camera_info_url" value="$(var camera_info_url)"/>
+        <arg name="frame_id" value="$(var camera_frame_id)"/>
+        <arg name="loop" value="$(var loop)"/>
+    </include>
+
+    <!-- Sensor Synchronizer Node -->
+    <node pkg="sensor_synchronizer"
+          exec="sensor_synchronizer"
+          name="sensor_synchronizer_node"
+          output="screen">
+
+        <!-- Remap input topics to actual sensor topics -->
+        <remap from="input_image" to="/sensing/camera/front_center/image_raw"/>
+        <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
+
+        <!-- Remap output topics to synchronized versions -->
+        <remap from="synchronized_image" to="/sensing/camera/front_center/synchronized_image"/>
+        <remap from="synchronized_pointcloud" to="/sensing/lidar/top/synchronized_pointcloud"/>
+
+        <!-- Synchronization parameters -->
+        <param name="sync_window_ms" value="1000"/>
+        <param name="buffer_size" value="100"/>
+        <param name="staleness_timeout_ms" value="2000"/>
+        <param name="enable_debug" value="true"/>
+    </node>
+
+    <!-- Optional: Static transform publisher between sensors -->
+    <node pkg="tf2_ros"
+          exec="static_transform_publisher"
+          name="lidar_to_camera_tf"
+          args="0 0 0 0 0 0 $(var lidar_frame_id) $(var camera_frame_id)"
+          if="false"/>
+
+    <!-- Optional: rosbag record node -->
+    <executable cmd="ros2 bag record -o sensor_data $(var pointcloud_topic) /sensing/camera/front_center/image_raw /sensing/camera/front_center/camera_info /tf /tf_static"
+                shell="true"
+                if="false"/>
+</launch>

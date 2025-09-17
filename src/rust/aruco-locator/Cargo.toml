@@ -1,0 +1,19 @@
+[package]
+name = "aruco-locator"
+version = "0.1.1"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
+aruco-detector = { version = "0.1.0", path = "../../rust/aruco-detector" }
+clap = { workspace = true }
+cv-convert = { workspace = true, features = ["nalgebra"] }
+json5 = { workspace = true }
+nalgebra = { workspace = true }
+opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sensor_msgs.workspace = true
+slice-of-array = "0.3.2"

@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>lctk_launch</name>
+  <version>0.1.0</version>
+  <description>Launch file package for LCTK (LiDAR and Camera Toolkit) nodes and pipelines</description>
+  <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- GStreamer dependencies for video playback -->
+  <exec_depend>gstreamer1.0-plugins-base</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-good</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-bad</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-ugly</exec_depend>
+  <exec_depend>gstreamer1.0-libav</exec_depend>
+
+  <exec_depend>gscam</exec_depend>
+  <exec_depend>aruco_locator_node</exec_depend>
+  <exec_depend>calibration_board_locator_node</exec_depend>
+  <exec_depend>sensor_synchronizer_node</exec_depend>
+  <exec_depend>extrinsic_solver_node</exec_depend>
+  <exec_depend>pointcloud_image_overlay_node</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

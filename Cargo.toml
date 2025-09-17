@@ -2,13 +2,13 @@
 resolver = "2"
 rust-version = "1.70.0"  # Minimum supported Rust version (MSRV)
 members = [
-    "src/bin/*",
-    "src/lib/*",
+    "src/ros2/*",
+    "src/rust/*",
 ]
 exclude = [
     # Launch-only package without Cargo.toml
-    "src/bin/calib_launch",
-    "src/bin/rosbag_deck",
+    "src/ros2/lctk_launch",
+    "src/ros2/rosbag_deck",
 ]
 
 [workspace.dependencies]

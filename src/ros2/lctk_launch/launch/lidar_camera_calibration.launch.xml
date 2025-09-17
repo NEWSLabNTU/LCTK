@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for LiDAR-Camera calibration using modular components.
+
+    This launch file combines the modular processing pipelines to perform
+    complete LiDAR-Camera extrinsic calibration.
+
+    Components:
+    - Image processing (ArUco detection)
+    - Point cloud processing (board detection)
+    - Extrinsic calibration (direct solving without synchronization)
+    - Visualization (optional)
+-->
+<launch>
+    <!-- Common Arguments -->
+    <arg name="aruco_config_file"
+         default="$(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5"
+         description="Path to ArUco pattern configuration JSON5 file"/>
+
+    <arg name="board_config_file"
+         default="$(find-pkg-share lctk_launch)/config/board/board_pattern.json5"
+         description="Path to calibration board configuration JSON5 file"/>
+
+    <arg name="camera_topic"
+         default="/sensing/camera/front_center/image_raw"
+         description="Input camera image topic"/>
+
+    <arg name="camera_info_topic"
+         default="/sensing/camera/front_center/camera_info"
+         description="Input camera info topic"/>
+
+     <arg name="loop"
+         default="false"
+         description="Loop video playback"/>
+
+    <arg name="pointcloud_topic"
+         default="/sensing/lidar/top/pointcloud_raw"
+         description="Input point cloud topic"/>
+
+    <arg name="namespace"
+         default="calibration"
+         description="Namespace for all calibration nodes"/>
+
+    <arg name="debug_mode"
+         default="false"
+         description="Enable debug logging and visualization. When enabled, publishes debug point clouds to debug/* topics"/>
+
+    <arg name="enable_visualization"
+         default="false"
+         description="Enable visualization component"/>
+
+    <arg name="enable_rviz"
+         default="false"
+         description="Launch RViz for calibration visualization"/>
+
+    <arg name="max_distance"
+         default="10.0"
+         description="Maximum distance for point cloud filtering (meters)"/>
+
+    <arg name="min_distance"
+         default="1.0"
+         description="Minimum distance for point cloud filtering (meters)"/>
+
+    <!-- Sensor Data Arguments (for sensor.launch.xml) -->
+    <arg name="pcap_file"
+         default=""
+         description="Path to the PCAP file containing Velodyne data"/>
+
+    <arg name="video_file"
+         default=""
+         description="Path to the video file"/>
+
+    <!-- Include Sensor Launch (Always) -->
+    <include file="$(find-pkg-share lctk_launch)/launch/sensor.launch.xml">
+        <arg name="pcap_file" value="$(var pcap_file)"/>
+        <arg name="video_file" value="$(var video_file)"/>
+        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
+        <arg name="camera_name" value="front_center"/>
+        <arg name="camera_namespace" value="/sensing/camera/front_center"/>
+        <arg name="loop" value="$(var loop)"/>
+    </include>
+
+    <!-- Image Processing Pipeline -->
+    <include file="$(find-pkg-share lctk_launch)/launch/image_processing.launch.xml">
+        <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
+        <arg name="camera_topic" value="/sensing/camera/front_center/synchronized_image"/>
+        <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+        <arg name="namespace" value="$(var namespace)"/>
+        <arg name="debug_mode" value="$(var debug_mode)"/>
+    </include>
+
+    <!-- ArUco Detection Visualization Overlay -->
+    <!-- Removed: aruco_visualization.launch.xml - overlay functionality integrated into aruco_locator_node -->
+
+    <!-- Point Cloud Processing Pipeline -->
+    <include file="$(find-pkg-share lctk_launch)/launch/pointcloud_processing.launch.xml">
+        <arg name="board_config_file" value="$(var board_config_file)"/>
+        <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
+        <arg name="pointcloud_topic" value="/sensing/lidar/top/synchronized_pointcloud"/>
+        <arg name="board_detections_topic" value="/calibration/calibration_board_locator/board_detections"/>
+        <arg name="namespace" value="$(var namespace)"/>
+        <arg name="debug_mode" value="$(var debug_mode)"/>
+    </include>
+
+    <!-- Extrinsic Calibration -->
+    <include file="$(find-pkg-share lctk_launch)/launch/extrinsic_calibration.launch.xml">
+        <arg name="board_detections_topic" value="/calibration/calibration_board_locator/calibration_board_detections"/>
+        <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+        <arg name="namespace" value="$(var namespace)"/>
+        <arg name="debug_mode" value="$(var debug_mode)"/>
+    </include>
+
+    <!-- Visualization (Optional) -->
+    <!-- <include file="$(find-pkg-share lctk_launch)/launch/calibration_visualization.launch.xml" if="$(var enable_visualization)">
+        <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
+        <arg name="namespace" value="$(var namespace)"/>
+        <arg name="max_distance" value="$(var max_distance)"/>
+        <arg name="min_distance" value="$(var min_distance)"/>
+    </include> -->
+
+    <!-- RViz Visualization (Optional) -->
+    <include file="$(find-pkg-share lctk_launch)/launch/rviz.launch.xml" if="$(var enable_rviz)"/>
+</launch>

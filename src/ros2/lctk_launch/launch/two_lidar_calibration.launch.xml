@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for two LiDAR calibration using modular components.
+
+    This launch file calibrates two LiDARs by detecting the same calibration
+    board in both point clouds and computing the transform between them.
+
+    Components:
+    - Two point cloud processing pipelines (board detection)
+    - Multi-wayside node for transform computation
+-->
+<launch>
+    <!-- Common Arguments -->
+    <arg name="board_config_file"
+         default="$(find-pkg-share lctk_launch)/config/board/board_pattern.json5"
+         description="Path to calibration board configuration JSON5 file"/>
+
+    <arg name="lidar1_pointcloud_topic"
+         default="/sensing/lidar/top/pointcloud_raw"
+         description="Input point cloud topic for the first LiDAR"/>
+
+    <arg name="lidar2_pointcloud_topic"
+         default="/sensing/lidar/front/pointcloud_raw"
+         description="Input point cloud topic for the second LiDAR"/>
+
+    <arg name="namespace"
+         default="calibration"
+         description="Namespace for all calibration nodes"/>
+
+    <arg name="debug_mode"
+         default="false"
+         description="Enable debug logging"/>
+
+    <!-- Sensor Data Arguments (for lidar.launch.xml) -->
+    <arg name="lidar1_pcap_file"
+         default=""
+         description="Path to the PCAP file for LiDAR 1"/>
+
+    <arg name="lidar2_pcap_file"
+         default=""
+         description="Path to the PCAP file for LiDAR 2"/>
+
+    <!-- Include LiDAR 1 Launch (Always) -->
+    <include file="$(find-pkg-share lctk_launch)/launch/lidar.launch.xml">
+        <arg name="pcap_file" value="$(var lidar1_pcap_file)"/>
+        <arg name="pointcloud_topic" value="$(var lidar1_pointcloud_topic)"/>
+        <arg name="velodyne_packets_topic" value="/sensing/lidar/top/velodyne_packets"/>
+        <arg name="frame_id" value="velodyne_top"/>
+        <arg name="loop" value="false"/>
+    </include>
+
+    <!-- Include LiDAR 2 Launch (Always) -->
+    <include file="$(find-pkg-share lctk_launch)/launch/lidar.launch.xml">
+        <arg name="pcap_file" value="$(var lidar2_pcap_file)"/>
+        <arg name="pointcloud_topic" value="$(var lidar2_pointcloud_topic)"/>
+        <arg name="velodyne_packets_topic" value="/sensing/lidar/front/velodyne_packets"/>
+        <arg name="frame_id" value="velodyne_front"/>
+        <arg name="port" value="2369"/>
+        <arg name="loop" value="false"/>
+    </include>
+
+    <!-- Point Cloud Processing Pipeline for LiDAR 1 -->
+    <include file="$(find-pkg-share lctk_launch)/launch/pointcloud_processing.launch.xml">
+        <arg name="board_config_file" value="$(var board_config_file)"/>
+        <arg name="pointcloud_topic" value="$(var lidar1_pointcloud_topic)"/>
+        <arg name="board_detections_topic" value="/sensing/lidar/top/board_detections"/>
+        <arg name="namespace" value="$(var namespace)/lidar1"/>
+        <arg name="debug_mode" value="$(var debug_mode)"/>
+    </include>
+
+    <!-- Point Cloud Processing Pipeline for LiDAR 2 -->
+    <include file="$(find-pkg-share lctk_launch)/launch/pointcloud_processing.launch.xml">
+        <arg name="board_config_file" value="$(var board_config_file)"/>
+        <arg name="pointcloud_topic" value="$(var lidar2_pointcloud_topic)"/>
+        <arg name="board_detections_topic" value="/sensing/lidar/front/board_detections"/>
+        <arg name="namespace" value="$(var namespace)/lidar2"/>
+        <arg name="debug_mode" value="$(var debug_mode)"/>
+    </include>
+
+    <!-- Multi-Wayside Node for Transform Computation -->
+    <node pkg="multi_wayside_node"
+          exec="multi_wayside_node"
+          name="multi_wayside_node"
+          namespace="$(var namespace)"
+          output="screen">
+        <param name="debug_mode" value="$(var debug_mode)"/>
+        <remap from="lidar1_board_detections" to="/sensing/lidar/top/board_detections"/>
+        <remap from="lidar2_board_detections" to="/sensing/lidar/front/board_detections"/>
+        <remap from="lidar1_to_lidar2_transform" to="/lidar1_to_lidar2_transform"/>
+    </node>
+</launch>

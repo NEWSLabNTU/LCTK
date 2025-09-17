@@ -79,7 +79,7 @@ build_packages:
 # Fix applied directly to colcon-cargo source to handle JSON parsing issues
 	. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
-	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/bin 2>&1 | tee $(LOG_DIR)/packages.log
+	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/packages.log
 
 .PHONY: build_cargo
 build_cargo:
@@ -114,7 +114,7 @@ launch_sensor:
 	@echo "Creating and starting sensor publishers service with ros2systemd..."
 	. install/setup.sh && \
 	ros2 systemd remove lctk-sensor 2>/dev/null || true && \
-	ros2 systemd create lctk-sensor launch calib_launch sensor.launch.xml \
+	ros2 systemd create lctk-sensor launch lctk_launch sensor.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true && \
@@ -135,7 +135,7 @@ launch_lidar_camera_calibration:
 	fi
 	. install/setup.sh && \
 	ros2 systemd remove lctk-calibration 2>/dev/null || true && \
-	ros2 systemd create --copy-env CYCLONEDDS_URI lctk-calibration launch calib_launch lidar_camera_calibration.launch.xml \
+	ros2 systemd create --copy-env CYCLONEDDS_URI lctk-calibration launch lctk_launch lidar_camera_calibration.launch.xml \
 		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		video_file:=$(PWD)/data/sampledata/3/video.avi \
 		loop:=true \
@@ -154,14 +154,14 @@ stop_lidar_camera_calibration:
 launch_rviz:
 	@echo "Launching RViz for calibration visualization..."
 	. install/setup.sh && \
-	ros2 launch calib_launch rviz.launch.xml
+	ros2 launch lctk_launch rviz.launch.xml
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:
 	@echo "Creating and starting two LiDAR calibration service with ros2systemd..."
 	. install/setup.sh && \
 	ros2 systemd remove lctk-two-lidar 2>/dev/null || true && \
-	ros2 systemd create lctk-two-lidar launch calib_launch two_lidar_calibration.launch.xml \
+	ros2 systemd create lctk-two-lidar launch lctk_launch two_lidar_calibration.launch.xml \
 		lidar1_pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
 		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap && \
 	ros2 systemd start lctk-two-lidar

@@ -1,0 +1,40 @@
+[package]
+name = "multi_wayside_node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# ROS 2 dependencies
+rclrs.workspace = true
+builtin_interfaces.workspace = true
+std_msgs.workspace = true
+sensor_msgs.workspace = true
+geometry_msgs.workspace = true
+vision_msgs.workspace = true
+visualization_msgs.workspace = true
+
+# Core dependencies
+eyre = { workspace = true }
+serde = { workspace = true }
+json5 = { workspace = true }
+itertools = { workspace = true }
+once_cell = { workspace = true }
+
+# Library dependencies
+aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
+hollow-board-detector = { version = "0.1.0", path = "../../rust/hollow-board-detector" }
+hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config" }
+pcd-rs = { workspace = true }
+
+# Linear algebra
+nalgebra = { workspace = true }
+measurements = { workspace = true }
+noisy_float = { workspace = true }
+
+# Point cloud filtering (without kiss3d)
+[dependencies.generic-point-filter]
+git = "https://github.com/NEWSLabNTU/point-cloud-filter.git"
+tag = "v0.3.1"
+
+[dev-dependencies]
+tempfile = "3.8"
