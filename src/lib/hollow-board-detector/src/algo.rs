@@ -223,16 +223,20 @@ pub fn fit_board_icp(
 
                 // Centroids diagnostics (selected pairs)
                 if good_inlier_points.len() >= 3 {
-                    if let Some(in_centroid_arr) = centroid_of_points(good_inlier_points.iter().map(|p| {
-                        let a: [f64; 3] = (*p).into();
-                        a
-                    })) {
+                    if let Some(in_centroid_arr) =
+                        centroid_of_points(good_inlier_points.iter().map(|p| {
+                            let a: [f64; 3] = (*p).into();
+                            a
+                        }))
+                    {
                         let in_centroid: Point3<f64> = in_centroid_arr.into();
                     }
-                    if let Some(mod_centroid_arr) = centroid_of_points(good_corresponding_points.iter().map(|p| {
-                        let a: [f64; 3] = (*p).into();
-                        a
-                    })) {
+                    if let Some(mod_centroid_arr) =
+                        centroid_of_points(good_corresponding_points.iter().map(|p| {
+                            let a: [f64; 3] = (*p).into();
+                            a
+                        }))
+                    {
                         let mod_centroid: Point3<f64> = mod_centroid_arr.into();
                     }
                 }
@@ -252,9 +256,7 @@ pub fn fit_board_icp(
                         good_corresponding_points
                             .iter()
                             .map(|&p| -> [f64; 3] { p.into() }),
-                        good_inlier_points
-                            .iter()
-                            .map(|&p| -> [f64; 3] { p.into() }),
+                        good_inlier_points.iter().map(|&p| -> [f64; 3] { p.into() }),
                     );
 
                     match kabsch(pairs) {
@@ -287,30 +289,22 @@ pub fn fit_board_icp(
 
                 // Diagnostics for pose delta before damping
                 let delta_t = (new_pose.translation.vector - pose.translation.vector).norm();
-                let delta_ang = new_pose
-                    .rotation
-                    .rotation_to(&pose.rotation)
-                    .angle();
+                let delta_ang = new_pose.rotation.rotation_to(&pose.rotation).angle();
 
                 // Damp the translation component
                 let damped_translation = Translation3::from(
-                    pose.translation.vector +
-                    (new_pose.translation.vector - pose.translation.vector) * damping_factor
+                    pose.translation.vector
+                        + (new_pose.translation.vector - pose.translation.vector) * damping_factor,
                 );
 
                 // Damp the rotation component using spherical linear interpolation
-                let damped_rotation = UnitQuaternion::slerp(
-                    &pose.rotation,
-                    &new_pose.rotation,
-                    damping_factor,
-                );
+                let damped_rotation =
+                    UnitQuaternion::slerp(&pose.rotation, &new_pose.rotation, damping_factor);
 
                 // Termination criteria based on the actually applied (damped) update
                 {
                     let applied_t = (damped_translation.vector - pose.translation.vector).norm();
-                    let applied_ang = damped_rotation
-                        .rotation_to(&pose.rotation)
-                        .angle();
+                    let applied_ang = damped_rotation.rotation_to(&pose.rotation).angle();
                     let pose_weight = applied_t + applied_ang;
                     if pose_weight <= icp_pose_weight_threshold {
                         termination_count += 1;
@@ -326,7 +320,7 @@ pub fn fit_board_icp(
                 if inlier_points.len() < 2000 {
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
-                
+
                 if *losses.last().unwrap() < icp_rejection_threshold {
                     // debug!(
                     //     "🏆 ICP terminating: loss is too small: {:.8}",
@@ -387,12 +381,14 @@ pub fn fit_board_icp(
             .map(|loss| loss.raw());
         let min_icp_loss = match min_icp_loss {
             Some(loss) => loss,
-            None => return Ok(FitBoardIcp {
-                board_pose,
-                icp_losses,
-                icp_data: viz_msg,
-                successful: false,
-            }),
+            None => {
+                return Ok(FitBoardIcp {
+                    board_pose,
+                    icp_losses,
+                    icp_data: viz_msg,
+                    successful: false,
+                })
+            }
         };
 
         if min_icp_loss > icp_rejection_threshold {

@@ -12,6 +12,7 @@ use nalgebra as na;
 use rclrs::*;
 use sensor_msgs::msg::PointCloud2;
 use std::{
+    f64::consts::FRAC_PI_2,
     fs,
     path::PathBuf,
     sync::{
@@ -22,7 +23,6 @@ use std::{
 use std_msgs::msg::{ColorRGBA, Header};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
 use visualization_msgs::msg::{Marker, MarkerArray};
-use std::f64::consts::FRAC_PI_2;
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
@@ -121,7 +121,8 @@ impl CalibrationBoardLocatorNode {
         let board_marker_shared = board_marker_publisher.clone();
 
         // Per-iteration ICP board marker publisher (always on)
-        let board_marker_icp_publisher = Some(Arc::new(node.create_publisher("debug/board_marker_icp")?));
+        let board_marker_icp_publisher =
+            Some(Arc::new(node.create_publisher("debug/board_marker_icp")?));
         let board_marker_icp_shared = board_marker_icp_publisher.clone();
 
         // Counter for debugging message processing
@@ -397,34 +398,35 @@ impl CalibrationBoardLocatorNode {
             "Starting board detection with {} points",
             active_points.len()
         );
-        let detection: Option<BoardDetection> = match detector.detect_with_progress(&active_points, |bm| {
-            if let Some(pub_icp) = board_marker_icp_pub {
-                if let Ok(arr) = Self::create_board_markers_from_model(bm, &msg.header) {
-                    let _ = pub_icp.publish(arr);
+        let detection: Option<BoardDetection> =
+            match detector.detect_with_progress(&active_points, |bm| {
+                if let Some(pub_icp) = board_marker_icp_pub {
+                    if let Ok(arr) = Self::create_board_markers_from_model(bm, &msg.header) {
+                        let _ = pub_icp.publish(arr);
+                    }
                 }
-            }
-        }) {
-            Ok(Some(det)) => {
-                log_warn!(LOGGER_NAME, "Board detection successful");
+            }) {
+                Ok(Some(det)) => {
+                    log_warn!(LOGGER_NAME, "Board detection successful");
 
-                // Publish debug plane inliers if enabled
-                if let Some(_pub_inliers) = debug_plane_inliers_pub {
-                    // Access the ransac_data if available from the detection
-                    // Note: This requires the detection to expose ransac data
-                    log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
+                    // Publish debug plane inliers if enabled
+                    if let Some(_pub_inliers) = debug_plane_inliers_pub {
+                        // Access the ransac_data if available from the detection
+                        // Note: This requires the detection to expose ransac data
+                        log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
+                    }
+
+                    Some(det)
                 }
-
-                Some(det)
-            }
-            Ok(None) => {
-                log_warn!(LOGGER_NAME, "Detection returned None - board not found");
-                None
-            }
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Detection failed with error: {}", e);
-                return Err(e.into());
-            }
-        };
+                Ok(None) => {
+                    log_warn!(LOGGER_NAME, "Detection returned None - board not found");
+                    None
+                }
+                Err(e) => {
+                    log_warn!(LOGGER_NAME, "Detection failed with error: {}", e);
+                    return Err(e.into());
+                }
+            };
 
         let mut detections = Vec::new();
         if let Some(board_detection) = detection {
@@ -444,7 +446,10 @@ impl CalibrationBoardLocatorNode {
             if let Some(pub_board) = board_marker_pub {
                 let marker_array = MarkerArray::default();
                 if let Err(e) = pub_board.publish(marker_array) {
-                    log_warn!(LOGGER_NAME, "Failed to publish empty board marker array: {e}");
+                    log_warn!(
+                        LOGGER_NAME,
+                        "Failed to publish empty board marker array: {e}"
+                    );
                 }
             }
         }
@@ -720,7 +725,10 @@ impl CalibrationBoardLocatorNode {
         Ok(marker)
     }
 
-    fn create_board_markers(board_detection: &BoardDetection, header: &Header) -> Result<MarkerArray> {
+    fn create_board_markers(
+        board_detection: &BoardDetection,
+        header: &Header,
+    ) -> Result<MarkerArray> {
         use nalgebra as na;
         let board_model = &board_detection.board_model;
 
@@ -755,36 +763,37 @@ impl CalibrationBoardLocatorNode {
         };
 
         // Helper to build an arrow marker oriented along the board frame's X axis, then rotated
-        let mut make_axis_arrow = |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
-            let mut m = Marker::default();
-            m.header = header.clone();
-            m.ns = "board_axes".to_string();
-            m.id = id;
-            m.type_ = 0; // ARROW
-            m.action = 0; // ADD
-            m.pose.position.x = base_translation.x;
-            m.pose.position.y = base_translation.y;
-            m.pose.position.z = base_translation.z;
+        let mut make_axis_arrow =
+            |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
+                let mut m = Marker::default();
+                m.header = header.clone();
+                m.ns = "board_axes".to_string();
+                m.id = id;
+                m.type_ = 0; // ARROW
+                m.action = 0; // ADD
+                m.pose.position.x = base_translation.x;
+                m.pose.position.y = base_translation.y;
+                m.pose.position.z = base_translation.z;
 
-            let rot = base_rotation * rot_after_x; // orientation in world
-            let q = rot.quaternion();
-            m.pose.orientation.x = q.i;
-            m.pose.orientation.y = q.j;
-            m.pose.orientation.z = q.k;
-            m.pose.orientation.w = q.w;
+                let rot = base_rotation * rot_after_x; // orientation in world
+                let q = rot.quaternion();
+                m.pose.orientation.x = q.i;
+                m.pose.orientation.y = q.j;
+                m.pose.orientation.z = q.k;
+                m.pose.orientation.w = q.w;
 
-            // Shaft length = 0.5 * board width, diameters small
-            let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
-            m.scale.x = len;     // shaft length
-            m.scale.y = 0.02;    // shaft diameter
-            m.scale.z = 0.04;    // head diameter
+                // Shaft length = 0.5 * board width, diameters small
+                let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
+                m.scale.x = len; // shaft length
+                m.scale.y = 0.02; // shaft diameter
+                m.scale.z = 0.04; // head diameter
 
-            m.color.r = r;
-            m.color.g = g;
-            m.color.b = b;
-            m.color.a = 1.0;
-            m
-        };
+                m.color.r = r;
+                m.color.g = g;
+                m.color.b = b;
+                m.color.a = 1.0;
+                m
+            };
 
         // Rotations to map X axis to Y/Z in the board frame
         let rot_x = na::UnitQuaternion::identity();
@@ -803,7 +812,10 @@ impl CalibrationBoardLocatorNode {
         Ok(arr)
     }
 
-    fn create_board_markers_from_model(board_model: &hollow_board_config::BoardModel, header: &Header) -> Result<MarkerArray> {
+    fn create_board_markers_from_model(
+        board_model: &hollow_board_config::BoardModel,
+        header: &Header,
+    ) -> Result<MarkerArray> {
         use nalgebra as na;
 
         let base_translation = &board_model.pose.translation;
@@ -834,35 +846,36 @@ impl CalibrationBoardLocatorNode {
             m
         };
 
-        let mut make_axis_arrow = |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
-            let mut m = Marker::default();
-            m.header = header.clone();
-            m.ns = "board_axes_icp".to_string();
-            m.id = id;
-            m.type_ = 0; // ARROW
-            m.action = 0; // ADD
-            m.pose.position.x = base_translation.x;
-            m.pose.position.y = base_translation.y;
-            m.pose.position.z = base_translation.z;
+        let mut make_axis_arrow =
+            |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
+                let mut m = Marker::default();
+                m.header = header.clone();
+                m.ns = "board_axes_icp".to_string();
+                m.id = id;
+                m.type_ = 0; // ARROW
+                m.action = 0; // ADD
+                m.pose.position.x = base_translation.x;
+                m.pose.position.y = base_translation.y;
+                m.pose.position.z = base_translation.z;
 
-            let rot = base_rotation * rot_after_x;
-            let q = rot.quaternion();
-            m.pose.orientation.x = q.i;
-            m.pose.orientation.y = q.j;
-            m.pose.orientation.z = q.k;
-            m.pose.orientation.w = q.w;
+                let rot = base_rotation * rot_after_x;
+                let q = rot.quaternion();
+                m.pose.orientation.x = q.i;
+                m.pose.orientation.y = q.j;
+                m.pose.orientation.z = q.k;
+                m.pose.orientation.w = q.w;
 
-            let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
-            m.scale.x = len;
-            m.scale.y = 0.02;
-            m.scale.z = 0.04;
+                let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
+                m.scale.x = len;
+                m.scale.y = 0.02;
+                m.scale.z = 0.04;
 
-            m.color.r = r;
-            m.color.g = g;
-            m.color.b = b;
-            m.color.a = 0.9;
-            m
-        };
+                m.color.r = r;
+                m.color.g = g;
+                m.color.b = b;
+                m.color.a = 0.9;
+                m
+            };
 
         let rot_x = na::UnitQuaternion::identity();
         let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), FRAC_PI_2);

@@ -122,7 +122,11 @@ impl Detector {
         Ok(Some(detection))
     }
 
-    pub fn detect_with_progress<F>(&self, points: &[na::Point3<f64>], mut progress: F) -> Result<Option<Detection>>
+    pub fn detect_with_progress<F>(
+        &self,
+        points: &[na::Point3<f64>],
+        mut progress: F,
+    ) -> Result<Option<Detection>>
     where
         F: FnMut(&BoardModel),
     {
