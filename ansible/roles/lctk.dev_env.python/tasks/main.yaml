@@ -20,6 +20,7 @@
   failed_when: false  # Don't fail if not installed
 
 - name: Install Python libraries for scientific computing
+  become: true
   ansible.builtin.apt:
     name:
       - python3-numpy
