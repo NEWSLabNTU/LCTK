@@ -1,56 +1,125 @@
-# extrinsic_solver
+# Simple Extrinsic Solver Python Package
 
-A ROS 2 node for solving extrinsic calibration parameters between LiDAR and camera sensors.
+A simplified Python ROS2 node for demonstrating solvePnP with ArUco and board detections. This package provides a basic implementation of extrinsic calibration between LiDAR and camera sensors.
 
-## Overview
+## Features
 
-This node combines ArUco marker detections from camera images with calibration board detections from LiDAR point clouds to compute the transformation between the two sensor coordinate frames. It uses Perspective-n-Point (PnP) algorithms to solve for the extrinsic parameters.
+- **ArUco Detection Processing**: Subscribes to ArUco marker detections and processes them for calibration
+- **Board Detection Processing**: Handles calibration board detections from LiDAR data
+- **PnP Solving**: Uses OpenCV's solvePnP to compute extrinsic transformations
+- **Quality Assessment**: Provides basic calibration quality metrics
+- **Debug Publishing**: Publishes debug information for visualization
 
-## Requirements
+## Dependencies
 
-- ROS 2 Humble or later
-- Rust 1.56 or later
-- OpenCV 4.6.0
-- rclrs (ROS 2 Rust client library)
+- ROS2 Humble
+- Python 3.10+
+- OpenCV (python3-opencv)
+- NumPy (python3-numpy)
+- rclpy
 
-## Quick Start
+## Topics
+
+### Subscribed Topics
+- `/aruco_detections` (vision_msgs/Detection2DArray): ArUco marker detections
+- `/calibration_board_detections` (vision_msgs/Detection3DArray): Calibration board detections
+- `/camera_info` (sensor_msgs/CameraInfo): Camera intrinsic parameters
+
+### Published Topics
+- `/extrinsic_transform` (geometry_msgs/TransformStamped): Computed extrinsic transformation
+- `/calibration_quality` (std_msgs/String): Calibration quality metrics (JSON format)
+- `/debug/recent_aruco_detections` (vision_msgs/Detection2DArray): Debug ArUco detections
+- `/debug/recent_board_detections` (vision_msgs/Detection3DArray): Debug board detections
+
+## Parameters
+
+- `parent_frame` (string, default: "lidar"): Parent frame for the extrinsic transform
+- `child_frame` (string, default: "camera"): Child frame for the extrinsic transform
+- `aruco_pattern_file` (string, default: ""): Path to ArUco pattern configuration file
+- `enable_quality_assessment` (bool, default: true): Enable calibration quality assessment
+
+## Usage
+
+### Running the Node
 
 ```bash
-# Build the node
-source /opt/ros/humble/setup.bash
-make build_interface
-source install/setup.bash
-cargo build --release --manifest-path src/bin/extrinsic_solver/Cargo.toml
+# Source the workspace
+source install/setup.sh
 
-# Run the node
-ros2 run extrinsic_solver extrinsic_solver --intrinsics-file config/camera_intrinsics.yaml
+# Run the node directly
+ros2 run extrinsic_solver_node_py extrinsic_solver_node
 
-# Run with specific PnP method
-ros2 run extrinsic_solver extrinsic_solver \
-    --intrinsics-file config/camera_intrinsics.yaml \
-    --method SQPNP
+# Or run with launch file
+ros2 launch extrinsic_solver_node_py extrinsic_solver_node.launch.py
 ```
 
-## ROS Topics
+### Example Launch with Parameters
 
-### Subscriptions
-- `/aruco_detections` (vision_msgs/Detection2DArray): 2D ArUco marker detections from camera
-- `/calibration_board_detections` (vision_msgs/Detection3DArray): 3D calibration board detections from LiDAR
-- `/camera_info` (sensor_msgs/CameraInfo): Camera calibration information
-
-### Publications
-- `/extrinsic_transform` (geometry_msgs/TransformStamped): Computed transformation from LiDAR to camera
-
-## Command Line Options
-
-- `--intrinsics-file`: Path to camera intrinsics YAML file
-- `--method`: PnP solving method (P3P, ITERATIVE, EPNP, SQPNP, etc.)
-- `--output-file`: Path to save calibration results
+```bash
+ros2 launch extrinsic_solver_node_py extrinsic_solver_node.launch.py \
+    parent_frame:=lidar \
+    child_frame:=camera \
+    enable_quality_assessment:=true
+```
 
 ## Configuration
 
-The node uses ArUco pattern configuration from `config/aruco_pattern.json5` which defines the marker layout on calibration boards.
+The package includes a default ArUco pattern configuration in `config/aruco_pattern.yaml`:
 
-## License
+```yaml
+markers:
+  - id: 0
+    size: 0.1  # 10cm markers
+  - id: 1
+    size: 0.1
+  - id: 2
+    size: 0.1
+  - id: 3
+    size: 0.1
 
-MIT License
+board_size: [1.0, 1.0]  # 1m x 1m board
+marker_spacing: 0.2  # 20cm spacing between markers
+```
+
+## Implementation Details
+
+This is a simplified version of the Rust `extrinsic_solver_node` with the following key differences:
+
+1. **Simplified Point Correspondence**: Uses basic bounding box corners for ArUco markers
+2. **Basic PnP Solving**: Uses OpenCV's SOLVEPNP_ITERATIVE method
+3. **Simple Quality Metrics**: Provides basic reprojection error and inlier ratio
+4. **Python Implementation**: Easier to understand and modify for educational purposes
+
+## Limitations
+
+- Simplified ArUco corner detection (uses bounding box instead of actual corners)
+- Basic board pose transformation (simplified coordinate system handling)
+- Limited quality assessment compared to the full Rust implementation
+- No dynamic parameter adjustment
+
+## Building
+
+The package is built as part of the main LCTK workspace:
+
+```bash
+make build
+```
+
+Or build individually:
+
+```bash
+cd src/ros2
+colcon build --packages-select extrinsic_solver_node_py --symlink-install
+```
+
+## Testing
+
+The node can be tested by running it and checking that it initializes correctly:
+
+```bash
+source install/setup.sh
+timeout 5s ros2 run extrinsic_solver_node_py extrinsic_solver_node
+```
+
+You should see initialization messages indicating the node is ready to receive detections.
+

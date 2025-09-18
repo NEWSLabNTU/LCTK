@@ -1,0 +1,84 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for extrinsic solver node.
+
+    This node demonstrates solvePnP with ArUco and board detections
+    to compute extrinsic calibration between LiDAR and camera.
+-->
+<launch>
+    <!-- Frame Arguments -->
+    <arg name="parent_frame"
+         default="lidar"
+         description="Parent frame for the extrinsic transform"/>
+
+    <arg name="child_frame"
+         default="camera"
+         description="Child frame for the extrinsic transform"/>
+
+    <!-- Configuration File Arguments -->
+    <arg name="aruco_pattern_file"
+         default=""
+         description="Path to ArUco pattern configuration file"/>
+
+    <arg name="aruco_config_file"
+         default="config/aruco_pattern.json5"
+         description="Path to ArUco pattern configuration JSON/JSON5 file (relative to workspace root)"/>
+
+    <arg name="board_detector_file"
+         default="config/board_detector.json5"
+         description="Path to board detector JSON5 file (relative to workspace root)"/>
+
+    <arg name="intrinsics_file"
+         default="config/intrinsics.yaml"
+         description="Path to camera intrinsics YAML file (relative to workspace root)"/>
+
+    <!-- Feature Flags -->
+    <arg name="enable_quality_assessment"
+         default="true"
+         description="Enable calibration quality assessment"/>
+
+    <!-- Topic Arguments -->
+    <arg name="aruco_detections"
+         default="/calibration/aruco_locator/aruco_detections"
+         description="Input ArUco detections topic"/>
+
+    <arg name="board_detections"
+         default="/calibration/calibration_board_locator/calibration_board_detections"
+         description="Input calibration board detections topic"/>
+
+    <arg name="image_with_detections"
+         default="/calibration/aruco_locator/image_with_detections"
+         description="Input debug overlay image topic"/>
+
+    <arg name="camera_info"
+         default="/camera_info"
+         description="Camera info topic"/>
+
+    <arg name="extrinsic_transform"
+         default="/calibration/extrinsic_solver/extrinsic_transform"
+         description="Output extrinsic transform topic"/>
+
+    <arg name="calibration_quality"
+         default="/calibration/extrinsic_solver/calibration_quality"
+         description="Output calibration quality topic"/>
+
+    <!-- Extrinsic Solver Node -->
+    <node pkg="extrinsic_solver_node"
+          exec="extrinsic_solver_node"
+          name="extrinsic_solver_node"
+          output="screen">
+        <param name="parent_frame" value="$(var parent_frame)"/>
+        <param name="child_frame" value="$(var child_frame)"/>
+        <param name="aruco_pattern_file" value="$(var aruco_pattern_file)"/>
+        <param name="aruco_config_file" value="$(var aruco_config_file)"/>
+        <param name="board_detector_file" value="$(var board_detector_file)"/>
+        <param name="intrinsics_file" value="$(var intrinsics_file)"/>
+        <param name="enable_quality_assessment" value="$(var enable_quality_assessment)"/>
+        <remap from="aruco_detections" to="$(var aruco_detections)"/>
+        <remap from="calibration_board_detections" to="$(var board_detections)"/>
+        <remap from="image_with_detections" to="$(var image_with_detections)"/>
+        <remap from="camera_info" to="$(var camera_info)"/>
+        <remap from="extrinsic_transform" to="$(var extrinsic_transform)"/>
+        <remap from="calibration_quality" to="$(var calibration_quality)"/>
+    </node>
+</launch>

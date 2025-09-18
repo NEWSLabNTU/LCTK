@@ -42,7 +42,7 @@ class SimpleExtrinsicSolver(Node):
     """
     
     def __init__(self):
-        super().__init__('simple_extrinsic_solver')
+        super().__init__('extrinsic_solver_node')
         
         # Declare parameters
         self.declare_parameter('parent_frame', 'lidar')

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 import os
 from glob import glob
 
-package_name = 'simple_extrinsic_solver'
+package_name = 'extrinsic_solver_node'
 
 setup(
     name=package_name,
@@ -14,7 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         # (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),  # No local config files
-        (os.path.join('lib', package_name), ['scripts/simple_extrinsic_solver']),
+        (os.path.join('lib', package_name), ['scripts/extrinsic_solver_node']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,7 +25,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'simple_extrinsic_solver = simple_extrinsic_solver_py.main:main',
+            'extrinsic_solver_node = extrinsic_solver_node_py.main:main',
         ],
     },
 )

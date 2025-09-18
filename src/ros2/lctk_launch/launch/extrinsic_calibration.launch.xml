@@ -45,9 +45,9 @@
          description="Enable debug logging and visualization"/>
 
     <!-- Extrinsic Solver Node -->
-    <node pkg="extrinsic_solver"
-          exec="extrinsic_solver"
-          name="extrinsic_solver"
+    <node pkg="extrinsic_solver_node"
+          exec="extrinsic_solver_node"
+          name="extrinsic_solver_node"
           namespace="$(var namespace)/extrinsic_solver"
           output="screen">
         <param name="solver_method" value="$(var solver_method)"/>
