@@ -1,0 +1,187 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for publishing both LiDAR and camera data from sample files.
+
+    This launch file combines LiDAR PCAP playback and camera video playback
+    to provide sample sensor data for calibration or analysis.
+
+    Requirements:
+    - ros-humble-velodyne (install with: sudo apt install ros-humble-velodyne)
+    - ros-humble-gscam (install with: sudo apt install ros-humble-gscam)
+    - GStreamer plugins for video decoding
+
+    Usage:
+    ros2 launch lctk_launch sample_data_player.launch.xml pcap_file:=/path/to/file.pcap video_file:=/path/to/file.avi
+-->
+<launch>
+    <!-- LiDAR Arguments -->
+    <arg name="pcap_file"
+         description="Path to the PCAP file containing Velodyne VLP-32C data"/>
+
+    <arg name="pointcloud_topic"
+         default="/sensing/lidar/top/pointcloud_raw"
+         description="Output PointCloud2 topic name"/>
+
+    <arg name="velodyne_packets_topic"
+         default="/sensing/lidar/top/velodyne_packets"
+         description="Output VelodyneScan packets topic name"/>
+
+    <arg name="lidar_frame_id"
+         default="velodyne_top"
+         description="Frame ID for the point cloud messages"/>
+
+    <arg name="rpm"
+         default="600.0"
+         description="Device rotation rate (RPM)"/>
+
+    <arg name="port"
+         default="2368"
+         description="UDP port number for Velodyne data"/>
+
+    <arg name="read_fast"
+         default="false"
+         description="Read PCAP file as fast as possible (true) or preserve timing (false)"/>
+
+    <arg name="model"
+         default="32C"
+         description="Velodyne model (32C, VLP16, etc.)"/>
+
+    <arg name="cut_angle"
+         default="-0.01"
+         description="Angle at which to cut the scan for organized clouds (-pi to pi, negative disables)"/>
+
+    <arg name="timestamp_first_packet"
+         default="false"
+         description="Use first packet timestamp for entire scan"/>
+
+    <!-- Camera Arguments -->
+    <arg name="video_file"
+         description="Path to the video file (mp4, avi, etc.)"/>
+
+    <arg name="camera_name"
+         default="front_center"
+         description="Camera name"/>
+
+    <arg name="camera_namespace"
+         default="/sensing/camera/front_center"
+         description="Camera namespace for topics"/>
+
+    <arg name="camera_info_url"
+         default="file://$(find-pkg-share lctk_launch)/config/camera/front_center_camera_info.yaml"
+         description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
+
+    <arg name="camera_frame_id"
+         default="camera_front_center"
+         description="Frame ID for the image messages"/>
+
+    <!-- Common Arguments -->
+    <arg name="loop"
+         default="false"
+         description="Loop playback when reaching end of files"/>
+
+    <!-- Velodyne driver node for PCAP playback -->
+    <node pkg="velodyne_driver"
+          exec="velodyne_driver_node"
+          name="velodyne_driver_node"
+          output="log">
+        <!-- Parameters -->
+        <param name="model" value="$(var model)"/>
+        <param name="rpm" value="$(var rpm)"/>
+        <param name="frame_id" value="$(var lidar_frame_id)"/>
+        <param name="port" value="$(var port)"/>
+        <param name="pcap" value="$(var pcap_file)"/>
+        <param name="read_once" value="false"/>
+        <param name="read_fast" value="$(var read_fast)"/>
+        <param name="repeat_delay" value="0.0"/>
+        <param name="cut_angle" value="$(var cut_angle)"/>
+        <param name="timestamp_first_packet" value="$(var timestamp_first_packet)"/>
+        <!-- Topic remapping -->
+        <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>
+    </node>
+
+    <!-- Velodyne pointcloud transform node -->
+    <node pkg="velodyne_pointcloud"
+          exec="velodyne_transform_node"
+          name="velodyne_transform_node"
+          output="log">
+        <!-- Parameters -->
+        <param name="model" value="$(var model)"/>
+        <param name="calibration" value="$(find-pkg-share velodyne_pointcloud)/params/VeloView-VLP-32C.yaml"/>
+        <param name="min_range" value="0.9"/>
+        <param name="max_range" value="130.0"/>
+        <param name="view_direction" value="0.0"/>
+        <param name="organize_cloud" value="false"/>
+
+        <!-- Topic remapping -->
+        <remap from="velodyne_points" to="$(var pointcloud_topic)"/>
+        <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>
+    </node>
+
+    <!-- GSCam node for video file playback -->
+    <node pkg="gscam"
+          exec="gscam_node"
+          name="camera_driver"
+          namespace="$(var camera_namespace)"
+          output="screen">
+        <!-- Parameters -->
+        <!-- GStreamer pipeline configuration -->
+        <!--
+            Try different decoders based on availability:
+            1. For MPEG4/AVI: filesrc ! avidemux ! mpeg4videoparse ! nvmpeg4videodec ! videoconvert (if NVIDIA available)
+            2. Generic: filesrc ! decodebin ! videoconvert (requires working gstreamer1.0-libav)
+            3. If libav fails with symbol errors, try reinstalling:
+               sudo apt-get install -reinstall gstreamer1.0-libav libavutil56 libavfilter7
+        -->
+        <!-- Using avidemux with explicit pad connection for MPEG-4 AVI files -->
+        <param name="gscam_config" value="filesrc location=$(var video_file) ! avidemux name=demux demux.video_0 ! queue ! avdec_mpeg4 ! videoconvert ! video/x-raw,format=RGB"/>
+        <param name="camera_name" value="camera"/>
+        <param name="camera_info_url" value="$(var camera_info_url)"/>
+        <param name="frame_id" value="$(var camera_frame_id)"/>
+        <param name="sync_sink" value="true"/>
+        <param name="reopen_on_eof" value="$(var loop)"/>
+        <param name="use_gst_timestamps" value="true"/>
+        <param name="image_encoding" value="rgb8"/>
+        <param name="fps" value="30"/>
+        <param name="width" value="0"/>
+        <param name="height" value="0"/>
+        <!-- Remap topics to remove extra 'camera' level -->
+        <remap from="camera/image_raw" to="image_raw"/>
+        <remap from="camera/camera_info" to="camera_info"/>
+        <remap from="camera/image_raw/compressed" to="image_raw/compressed"/>
+        <remap from="camera/image_raw/compressedDepth" to="image_raw/compressedDepth"/>
+        <remap from="camera/image_raw/theora" to="image_raw/theora"/>
+    </node>
+
+    <!-- Sensor Synchronizer Node -->
+    <node pkg="sensor_synchronizer"
+          exec="sensor_synchronizer"
+          name="sensor_synchronizer_node"
+          output="screen">
+
+        <!-- Remap input topics to actual sensor topics -->
+        <remap from="input_image" to="/sensing/camera/front_center/image_raw"/>
+        <remap from="input_pointcloud" to="$(var pointcloud_topic)"/>
+
+        <!-- Remap output topics to synchronized versions -->
+        <remap from="synchronized_image" to="/sensing/camera/front_center/synchronized_image"/>
+        <remap from="synchronized_pointcloud" to="/sensing/lidar/top/synchronized_pointcloud"/>
+
+        <!-- Synchronization parameters -->
+        <param name="sync_window_ms" value="1000"/>
+        <param name="buffer_size" value="100"/>
+        <param name="staleness_timeout_ms" value="2000"/>
+        <param name="enable_debug" value="true"/>
+    </node>
+
+    <!-- Optional: Static transform publisher between sensors -->
+    <node pkg="tf2_ros"
+          exec="static_transform_publisher"
+          name="lidar_to_camera_tf"
+          args="0 0 0 0 0 0 $(var lidar_frame_id) $(var camera_frame_id)"
+          if="false"/>
+
+    <!-- Optional: rosbag record node -->
+    <executable cmd="ros2 bag record -o sensor_data $(var pointcloud_topic) /sensing/camera/front_center/image_raw /sensing/camera/front_center/camera_info /tf /tf_static"
+                shell="true"
+                if="false"/>
+</launch>

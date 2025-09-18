@@ -15,10 +15,8 @@ find_package(ament_cmake REQUIRED)
 
 # Install launch files
 install(FILES
-  # Sensor launch files
-  launch/lidar.launch.xml
-  launch/camera.launch.xml
-  launch/sensor.launch.xml
+  # Sample data launch files
+  launch/sample_data_player.launch.xml
   # Modular component launch files
   launch/image_processing.launch.xml
   launch/pointcloud_processing.launch.xml
