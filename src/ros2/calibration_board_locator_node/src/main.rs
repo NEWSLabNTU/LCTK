@@ -1,6 +1,6 @@
 mod bbox;
 
-use crate::bbox::BBox;
+use crate::bbox::{BBox, BBoxConfig};
 use anyhow::{anyhow, Result};
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion, Vector3};
@@ -20,7 +20,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use std_msgs::msg::{ColorRGBA, Header};
+use std_msgs::msg::Header;
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
 use visualization_msgs::msg::{Marker, MarkerArray};
 
@@ -36,9 +36,11 @@ pub struct CalibrationBoardLocatorNode {
     _debug_all_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
     _debug_filtered_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
     _debug_plane_inliers_publisher: Option<Arc<Publisher<PointCloud2>>>,
+    _debug_bbox_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
     _bbox_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
     _board_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
     _board_marker_icp_publisher: Option<Arc<Publisher<MarkerArray>>>,
+    _bbox_config_file: String,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -78,12 +80,16 @@ impl CalibrationBoardLocatorNode {
             }
         );
 
+        // TODO: Bbox parameters will be updated via config file reload
+        // This avoids complex parameter service issues with rclrs
+
         // Load configurations
         let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
         let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
 
         let bbox = Self::load_bbox_config(&bbox_file_param)?;
         let bbox = Arc::new(Mutex::new(bbox));
+        let bbox_file_path = Arc::new(bbox_file_param.to_string());
 
         // Create detector
         let detector = Arc::new(BoardDetector::new(
@@ -120,6 +126,13 @@ impl CalibrationBoardLocatorNode {
             None
         };
         let debug_plane_inliers_shared = debug_plane_inliers_publisher.clone();
+
+        let debug_bbox_points_publisher = if enable_debug {
+            Some(Arc::new(node.create_publisher("debug/bbox_points")?))
+        } else {
+            None
+        };
+        let debug_bbox_points_shared = debug_bbox_points_publisher.clone();
 
         // Create bbox marker publisher for visualization
         let bbox_marker_publisher = if enable_debug {
@@ -166,9 +179,11 @@ impl CalibrationBoardLocatorNode {
                     &detector,
                     &detection_publisher_shared,
                     &bbox,
+                    &bbox_file_path,
                     &debug_all_points_shared,
                     &debug_filtered_points_shared,
                     &debug_plane_inliers_shared,
+                    &debug_bbox_points_shared,
                     &bbox_marker_shared,
                     &board_marker_shared,
                     &board_marker_icp_shared,
@@ -182,7 +197,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/bbox_marker, debug/board_marker"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/bbox_points, debug/bbox_marker, debug/board_marker"
             );
         }
 
@@ -193,9 +208,11 @@ impl CalibrationBoardLocatorNode {
             _debug_all_points_publisher: debug_all_points_publisher,
             _debug_filtered_points_publisher: debug_filtered_points_publisher,
             _debug_plane_inliers_publisher: debug_plane_inliers_publisher,
+            _debug_bbox_points_publisher: debug_bbox_points_publisher,
             _bbox_marker_publisher: bbox_marker_publisher,
             _board_marker_publisher: board_marker_publisher,
             _board_marker_icp_publisher: board_marker_icp_publisher,
+            _bbox_config_file: bbox_file_param.to_string(),
         })
     }
 
@@ -227,7 +244,8 @@ impl CalibrationBoardLocatorNode {
         }
 
         let path = PathBuf::from(file_path);
-        Self::load_json5_file(&path)
+        let config: BBoxConfig = Self::load_json5_file(&path)?;
+        Ok(config.into())
     }
 
     fn load_json5_file<T>(path: &PathBuf) -> Result<T>
@@ -239,14 +257,53 @@ impl CalibrationBoardLocatorNode {
         Ok(value)
     }
 
+    // TODO: Implement parameter change callback when rclrs supports it
+
+    fn save_bbox_config(config: &BBoxConfig, file_path: &str) -> Result<()> {
+        let content = format!(
+            r#"{{
+    // Bounding box configuration for filtering point cloud data
+    // The pose defines the position and orientation of the box center
+    "pose": {{
+        // Translation from origin (x, y, z in meters)
+        "translation": [{}, {}, {}],
+        // Rotation as quaternion (w, x, y, z)
+        "rotation": [{}, {}, {}, {}],
+        // Euler angles (roll, pitch, yaw in radians)
+        "euler_angles": [{}, {}, {}]
+    }},
+    // Size of the bounding box in meters (x, y, z)
+    "size_xyz": [{}, {}, {}]
+}}"#,
+            config.pose.translation[0],
+            config.pose.translation[1],
+            config.pose.translation[2],
+            config.pose.rotation[0],
+            config.pose.rotation[1],
+            config.pose.rotation[2],
+            config.pose.rotation[3],
+            config.pose.euler_angles.unwrap_or([0.0, 0.0, 0.0])[0],
+            config.pose.euler_angles.unwrap_or([0.0, 0.0, 0.0])[1],
+            config.pose.euler_angles.unwrap_or([0.0, 0.0, 0.0])[2],
+            config.size_xyz[0],
+            config.size_xyz[1],
+            config.size_xyz[2]
+        );
+
+        fs::write(file_path, content)?;
+        Ok(())
+    }
+
     fn pointcloud_callback(
         msg: PointCloud2,
         detector: &Arc<BoardDetector>,
         publisher: &Publisher<Detection3DArray>,
         bbox: &Arc<Mutex<BBox>>,
+        bbox_file_path: &Arc<String>,
         debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        debug_bbox_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
@@ -278,6 +335,19 @@ impl CalibrationBoardLocatorNode {
             // Still try to publish empty debug topics to maintain consistency
         }
 
+        // Periodically reload bbox config (every 10th message)
+        use std::sync::atomic::AtomicU64;
+        static MESSAGE_COUNT: AtomicU64 = AtomicU64::new(0);
+        let count = MESSAGE_COUNT.fetch_add(1, Ordering::Relaxed);
+        if count % 10 == 0 {
+            if let Ok(new_bbox) = Self::load_bbox_config(bbox_file_path) {
+                if let Ok(mut bbox_guard) = bbox.lock() {
+                    *bbox_guard = new_bbox;
+                    log_debug!(LOGGER_NAME, "Reloaded bbox config from file");
+                }
+            }
+        }
+
         let result = Self::process_pointcloud(
             &msg,
             detector,
@@ -285,6 +355,7 @@ impl CalibrationBoardLocatorNode {
             debug_all_points_pub,
             debug_filtered_points_pub,
             debug_plane_inliers_pub,
+            debug_bbox_points_pub,
             bbox_marker_pub,
             board_marker_pub,
             board_marker_icp_pub,
@@ -317,6 +388,7 @@ impl CalibrationBoardLocatorNode {
         debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
+        debug_bbox_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
@@ -393,6 +465,19 @@ impl CalibrationBoardLocatorNode {
             "Filtered {} points within bounding box",
             active_points.len()
         );
+
+        // Publish debug bbox points if enabled
+        if let Some(pub_bbox_points) = debug_bbox_points_pub {
+            log_debug!(
+                LOGGER_NAME,
+                "Publishing {} bbox points to debug/bbox_points",
+                active_points.len()
+            );
+            let debug_cloud = Self::create_debug_pointcloud(&active_points, &msg.header)?;
+            if let Err(e) = pub_bbox_points.publish(debug_cloud) {
+                log_warn!(LOGGER_NAME, "Failed to publish debug bbox points: {e}");
+            }
+        }
 
         // Publish debug filtered points if enabled (always publish, even if empty)
         if let Some(pub_filtered) = debug_filtered_points_pub {
