@@ -432,11 +432,18 @@ impl ArucoLocatorNode {
             )?
         };
 
-        // Convert RGB to BGR if necessary (OpenCV expects BGR)
+        // Convert all formats to BGR for ArUco detection compatibility
+        // ArUco detector expects CV_8UC1 or CV_8UC3 (grayscale or BGR)
         let processed_mat = match msg.encoding.as_str() {
+            "bgr8" => mat, // Already in correct format
             "rgb8" => {
                 let mut bgr_mat = Mat::default();
                 imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_RGB2BGR, 0)?;
+                bgr_mat
+            }
+            "bgra8" => {
+                let mut bgr_mat = Mat::default();
+                imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_BGRA2BGR, 0)?;
                 bgr_mat
             }
             "rgba8" => {
@@ -444,14 +451,8 @@ impl ArucoLocatorNode {
                 imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_RGBA2BGR, 0)?;
                 bgr_mat
             }
-            "mono8" => {
-                // Convert grayscale to BGR for ArUco detection
-                let mut bgr_mat = Mat::default();
-                imgproc::cvt_color(&mat, &mut bgr_mat, imgproc::COLOR_GRAY2BGR, 0)?;
-                bgr_mat
-            }
-            "bgr8" | "bgra8" => mat, // Already in correct format
-            _ => mat,                // Should not reach here due to earlier validation
+            "mono8" => mat, // Grayscale is already compatible with ArUco detector
+            _ => mat,       // Should not reach here due to earlier validation
         };
 
         Ok(processed_mat)
