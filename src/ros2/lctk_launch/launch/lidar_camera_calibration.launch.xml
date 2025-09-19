@@ -18,7 +18,7 @@
          description="Path to ArUco pattern configuration JSON5 file"/>
 
     <arg name="board_config_file"
-         default="$(find-pkg-share lctk_launch)/config/board/board_pattern.json5"
+         default="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"
          description="Path to calibration board configuration JSON5 file"/>
 
     <arg name="camera_topic"
@@ -29,7 +29,7 @@
          default="/sensing/camera/front_center/camera_info"
          description="Input camera info topic"/>
 
-     <arg name="loop"
+    <arg name="loop"
          default="false"
          description="Loop video playback"/>
 

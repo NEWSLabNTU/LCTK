@@ -40,9 +40,9 @@
   <arg name="roi_update_rate" default="10.0" description="ROI marker update frequency (Hz)"/>
 
   <!-- Core Configuration Parameters -->
-  <arg name="board_config_file" default="$(find-pkg-share multi_wayside_node)/config/hollow_board.yaml" description="Hollow board configuration file"/>
-  <arg name="detector_config_file" default="$(find-pkg-share multi_wayside_node)/config/detector.yaml" description="Detector configuration file"/>
-  <arg name="aruco_pattern_file" default="$(find-pkg-share multi_wayside_node)/config/aruco_pattern.json5" description="ArUco pattern configuration file"/>
+  <arg name="board_config_file" default="$(find-pkg-share lctk_launch)/config/multi_wayside/hollow_board.yaml" description="Hollow board configuration file"/>
+  <arg name="detector_config_file" default="$(find-pkg-share lctk_launch)/config/multi_wayside/detector.yaml" description="Detector configuration file"/>
+  <arg name="aruco_pattern_file" default="$(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5" description="ArUco pattern configuration file"/>
   <arg name="max_queue_size" default="100" description="Maximum detection queue size"/>
   <arg name="sync_tolerance_ms" default="100" description="Detection synchronization tolerance (milliseconds)"/>
   <arg name="same_face_mode" default="true" description="Whether both LiDARs see the same face of the board"/>

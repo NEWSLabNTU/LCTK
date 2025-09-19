@@ -21,12 +21,12 @@
          description="Path to ArUco pattern configuration file"/>
 
     <arg name="aruco_config_file"
-         default="config/aruco_pattern.json5"
-         description="Path to ArUco pattern configuration JSON/JSON5 file (relative to workspace root)"/>
+         default="$(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5"
+         description="Path to ArUco pattern configuration JSON/JSON5 file"/>
 
     <arg name="board_detector_file"
-         default="config/board_detector.json5"
-         description="Path to board detector JSON5 file (relative to workspace root)"/>
+         default="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"
+         description="Path to board detector JSON5 file"/>
 
     <arg name="intrinsics_file"
          default="config/intrinsics.yaml"

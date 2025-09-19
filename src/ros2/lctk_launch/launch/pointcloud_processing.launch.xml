@@ -43,7 +43,7 @@
           name="calibration_board_locator"
           namespace="$(var namespace)/calibration_board_locator"
           output="screen">
-        <param name="board_detector_file" value="$(find-pkg-share lctk_launch)/config/board/board_pattern.json5"/>
+        <param name="board_detector_file" value="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"/>
         <param name="aruco_pattern_file" value="$(var aruco_config_file)"/>
         <param name="bbox_file" value="$(find-pkg-share lctk_launch)/config/board/bbox.json5"/>
         <param name="enable_debug" value="$(var debug_mode)"/>

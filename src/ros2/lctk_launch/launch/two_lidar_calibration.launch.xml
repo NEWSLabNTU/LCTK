@@ -12,7 +12,7 @@
 <launch>
     <!-- Common Arguments -->
     <arg name="board_config_file"
-         default="$(find-pkg-share lctk_launch)/config/board/board_pattern.json5"
+         default="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"
          description="Path to calibration board configuration JSON5 file"/>
 
     <arg name="lidar1_pointcloud_topic"
