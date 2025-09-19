@@ -41,7 +41,7 @@
 
 - name: Install ros2systemd for ROS2 service management
   ansible.builtin.pip:
-    name: https://github.com/jerry73204/ros2systemd/releases/download/v0.4.0/ros2systemd-0.4.0-py3-none-any.whl
+    name: https://github.com/jerry73204/ros2systemd/releases/download/v0.4.1/ros2systemd-0.4.1-py3-none-any.whl
     extra_args: --user
     executable: /usr/bin/pip3
     state: present
