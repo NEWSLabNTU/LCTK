@@ -141,9 +141,9 @@ class TopicMonitor:
 
                     if sec is not None and nanosec is not None:
                         self.latest_timestamps[topic_key] = (sec, nanosec)
-                        self.latest_datetimes[topic_key] = (
-                            self.ros_timestamp_to_datetime(sec, nanosec)
-                        )
+                        self.latest_datetimes[
+                            topic_key
+                        ] = self.ros_timestamp_to_datetime(sec, nanosec)
                     else:
                         # Store debug info for troubleshooting
                         self.debug_output = {topic_key: lines[:15]}

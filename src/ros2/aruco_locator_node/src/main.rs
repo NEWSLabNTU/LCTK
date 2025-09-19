@@ -199,7 +199,10 @@ impl ArucoLocatorNode {
         let image_topic = "image";
         let camera_info_topic = "camera_info";
 
-        log_info!(LOGGER_NAME, "Subscribing to base topics (will be remapped by launch file):");
+        log_info!(
+            LOGGER_NAME,
+            "Subscribing to base topics (will be remapped by launch file):"
+        );
         log_info!(LOGGER_NAME, "  Image topic: {image_topic}");
         log_info!(LOGGER_NAME, "  Camera info topic: {camera_info_topic}");
 
@@ -232,9 +235,8 @@ impl ArucoLocatorNode {
         let detection_publisher_image = detection_publisher.clone();
         let overlay_publisher_image = overlay_publisher.clone();
 
-        let image_subscription = node.create_subscription::<ImageMsg, _>(
-            image_topic,
-            move |msg: ImageMsg| {
+        let image_subscription =
+            node.create_subscription::<ImageMsg, _>(image_topic, move |msg: ImageMsg| {
                 Self::image_callback(
                     msg,
                     Arc::clone(&detector_state_image),
@@ -243,11 +245,16 @@ impl ArucoLocatorNode {
                     &overlay_publisher_image,
                     debug_overlay_enabled,
                 );
-            },
-        )?;
+            })?;
 
-        log_info!(LOGGER_NAME, "Successfully subscribed to image and camera_info topics");
-        log_info!(LOGGER_NAME, "Will publish ArUco detections to /aruco_detections");
+        log_info!(
+            LOGGER_NAME,
+            "Successfully subscribed to image and camera_info topics"
+        );
+        log_info!(
+            LOGGER_NAME,
+            "Will publish ArUco detections to /aruco_detections"
+        );
 
         // Create the simplified node instance
         let node_instance = Self {
@@ -463,7 +470,6 @@ impl ArucoLocatorNode {
 
         Ok(())
     }
-
 
     /// Process incoming image messages and publish detection results
     fn image_callback(

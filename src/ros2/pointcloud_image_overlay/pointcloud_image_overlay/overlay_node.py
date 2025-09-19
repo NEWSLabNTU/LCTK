@@ -11,9 +11,9 @@ from cv_bridge import CvBridge
 
 
 def read_extrinsic_4x4(path: str) -> np.ndarray:
-    with open(path, 'r') as f:
+    with open(path, "r") as f:
         data = json5.load(f)
-    mat = np.asarray(data['matrix'], dtype=np.float64)
+    mat = np.asarray(data["matrix"], dtype=np.float64)
     if mat.shape == (4, 4):
         return mat
     raise ValueError('extrinsic JSON5 must contain key "matrix" as 4x4 array')
@@ -21,15 +21,16 @@ def read_extrinsic_4x4(path: str) -> np.ndarray:
 
 def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
     import struct
+
     if pc2.point_step == 0 or len(pc2.data) == 0:
         return np.zeros((0, 3), dtype=np.float32)
     offset = {f.name: f.offset for f in pc2.fields}
     step = pc2.point_step
     xyz = []
     for i in range(0, len(pc2.data), step):
-        x = struct.unpack_from('f', pc2.data, i + offset['x'])[0]
-        y = struct.unpack_from('f', pc2.data, i + offset['y'])[0]
-        z = struct.unpack_from('f', pc2.data, i + offset['z'])[0]
+        x = struct.unpack_from("f", pc2.data, i + offset["x"])[0]
+        y = struct.unpack_from("f", pc2.data, i + offset["y"])[0]
+        z = struct.unpack_from("f", pc2.data, i + offset["z"])[0]
         if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
             xyz.append((x, y, z))
     if not xyz:
@@ -39,20 +40,22 @@ def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
 
 class OverlayNode(Node):
     def __init__(self):
-        super().__init__('pointcloud_image_overlay')
+        super().__init__("pointcloud_image_overlay")
         self.bridge = CvBridge()
 
         # Parameters
-        self.declare_parameter('extrinsic_json5', '')
+        self.declare_parameter("extrinsic_json5", "")
         # ROS 2 Best Practice: Use base topic names that will be remapped by launch files
 
-        extr_path = self.get_parameter('extrinsic_json5').get_parameter_value().string_value
+        extr_path = (
+            self.get_parameter("extrinsic_json5").get_parameter_value().string_value
+        )
         try:
             self.T_lidar_cam = read_extrinsic_4x4(extr_path) if extr_path else None
             if self.T_lidar_cam is not None:
-                self.get_logger().info(f'Loaded extrinsic from {extr_path}')
+                self.get_logger().info(f"Loaded extrinsic from {extr_path}")
         except Exception as e:
-            self.get_logger().error(f'Failed to read extrinsic: {e}')
+            self.get_logger().error(f"Failed to read extrinsic: {e}")
             self.T_lidar_cam = None
 
         # State
@@ -62,10 +65,14 @@ class OverlayNode(Node):
         self.last_pc: Optional[PointCloud2] = None
 
         # IO - Subscribe to base topics that will be remapped by launch files
-        self.sub_img = self.create_subscription(Image, 'image', self.on_image, 10)
-        self.sub_pc = self.create_subscription(PointCloud2, 'pointcloud', self.on_pointcloud, 10)
-        self.sub_info = self.create_subscription(CameraInfo, 'camera_info', self.on_caminfo, 10)
-        self.pub = self.create_publisher(Image, '/calibration/pointcloud_overlay', 10)
+        self.sub_img = self.create_subscription(Image, "image", self.on_image, 10)
+        self.sub_pc = self.create_subscription(
+            PointCloud2, "pointcloud", self.on_pointcloud, 10
+        )
+        self.sub_info = self.create_subscription(
+            CameraInfo, "camera_info", self.on_caminfo, 10
+        )
+        self.pub = self.create_publisher(Image, "/calibration/pointcloud_overlay", 10)
 
     def on_caminfo(self, msg: CameraInfo):
         self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
@@ -74,7 +81,7 @@ class OverlayNode(Node):
             self.dist = np.array(msg.d, dtype=np.float64).reshape(-1)
         else:
             self.dist = np.zeros((5,), dtype=np.float64)
-        self.get_logger().info('Camera intrinsics/distortion loaded')
+        self.get_logger().info("Camera intrinsics/distortion loaded")
 
     def on_image(self, msg: Image):
         self.last_image = msg
@@ -85,13 +92,18 @@ class OverlayNode(Node):
         self.try_publish()
 
     def try_publish(self):
-        if self.last_image is None or self.last_pc is None or self.K is None or self.T_lidar_cam is None:
+        if (
+            self.last_image is None
+            or self.last_pc is None
+            or self.K is None
+            or self.T_lidar_cam is None
+        ):
             return
-        cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding='bgr8')
+        cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding="bgr8")
         h, w = cv_img.shape[:2]
         xyz = pointcloud2_to_xyz(self.last_pc)
         if xyz.shape[0] == 0:
-            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8'))
+            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8"))
             return
 
         # Use OpenCV projectPoints with extrinsic from LiDAR to camera
@@ -104,12 +116,16 @@ class OverlayNode(Node):
         X_cam = (R @ xyz.astype(np.float64).T).T + t.reshape(1, 3)
         positive_z_mask = X_cam[:, 2] > 1e-6
         if not np.any(positive_z_mask):
-            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8'))
+            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8"))
             return
         xyz = xyz[positive_z_mask]
 
         image_points, _ = cv2.projectPoints(
-            xyz.astype(np.float64), rvec, tvec, self.K, self.dist if self.dist is not None else None
+            xyz.astype(np.float64),
+            rvec,
+            tvec,
+            self.K,
+            self.dist if self.dist is not None else None,
         )
         image_points = image_points.reshape(-1, 2)
 
@@ -118,7 +134,7 @@ class OverlayNode(Node):
             if 0 <= ui < w and 0 <= vi < h:
                 cv2.circle(cv_img, (int(ui), int(vi)), 1, (0, 0, 255), -1)
 
-        out = self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
+        out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
         out.header = self.last_image.header
         self.pub.publish(out)
 
@@ -131,6 +147,7 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 import json5
 import math
@@ -145,9 +162,9 @@ from cv_bridge import CvBridge
 
 
 def read_extrinsic_4x4(path: str) -> np.ndarray:
-    with open(path, 'r') as f:
+    with open(path, "r") as f:
         data = json5.load(f)
-    mat = np.asarray(data['matrix'], dtype=np.float64)
+    mat = np.asarray(data["matrix"], dtype=np.float64)
     if mat.shape == (4, 4):
         return mat
     raise ValueError('extrinsic JSON5 must contain key "matrix" as 4x4 array')
@@ -155,15 +172,16 @@ def read_extrinsic_4x4(path: str) -> np.ndarray:
 
 def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
     import struct
+
     if pc2.point_step == 0 or len(pc2.data) == 0:
         return np.zeros((0, 3), dtype=np.float32)
     offset = {f.name: f.offset for f in pc2.fields}
     step = pc2.point_step
     xyz = []
     for i in range(0, len(pc2.data), step):
-        x = struct.unpack_from('f', pc2.data, i + offset['x'])[0]
-        y = struct.unpack_from('f', pc2.data, i + offset['y'])[0]
-        z = struct.unpack_from('f', pc2.data, i + offset['z'])[0]
+        x = struct.unpack_from("f", pc2.data, i + offset["x"])[0]
+        y = struct.unpack_from("f", pc2.data, i + offset["y"])[0]
+        z = struct.unpack_from("f", pc2.data, i + offset["z"])[0]
         if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
             xyz.append((x, y, z))
     if not xyz:
@@ -173,20 +191,22 @@ def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
 
 class OverlayNode(Node):
     def __init__(self):
-        super().__init__('pointcloud_image_overlay')
+        super().__init__("pointcloud_image_overlay")
         self.bridge = CvBridge()
 
         # Parameters
-        self.declare_parameter('extrinsic_json5', '')
+        self.declare_parameter("extrinsic_json5", "")
         # ROS 2 Best Practice: Use base topic names that will be remapped by launch files
 
-        extr_path = self.get_parameter('extrinsic_json5').get_parameter_value().string_value
+        extr_path = (
+            self.get_parameter("extrinsic_json5").get_parameter_value().string_value
+        )
         try:
             self.T_lidar_cam = read_extrinsic_4x4(extr_path) if extr_path else None
             if self.T_lidar_cam is not None:
-                self.get_logger().info(f'Loaded extrinsic from {extr_path}')
+                self.get_logger().info(f"Loaded extrinsic from {extr_path}")
         except Exception as e:
-            self.get_logger().error(f'Failed to read extrinsic: {e}')
+            self.get_logger().error(f"Failed to read extrinsic: {e}")
             self.T_lidar_cam = None
 
         # State
@@ -196,10 +216,14 @@ class OverlayNode(Node):
         self.last_pc: Optional[PointCloud2] = None
 
         # IO - Subscribe to base topics that will be remapped by launch files
-        self.sub_img = self.create_subscription(Image, 'image', self.on_image, 10)
-        self.sub_pc = self.create_subscription(PointCloud2, 'pointcloud', self.on_pointcloud, 10)
-        self.sub_info = self.create_subscription(CameraInfo, 'camera_info', self.on_caminfo, 10)
-        self.pub = self.create_publisher(Image, '/calibration/pointcloud_overlay', 10)
+        self.sub_img = self.create_subscription(Image, "image", self.on_image, 10)
+        self.sub_pc = self.create_subscription(
+            PointCloud2, "pointcloud", self.on_pointcloud, 10
+        )
+        self.sub_info = self.create_subscription(
+            CameraInfo, "camera_info", self.on_caminfo, 10
+        )
+        self.pub = self.create_publisher(Image, "/calibration/pointcloud_overlay", 10)
 
     def on_caminfo(self, msg: CameraInfo):
         self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
@@ -208,7 +232,7 @@ class OverlayNode(Node):
             self.dist = np.array(msg.d, dtype=np.float64).reshape(-1)
         else:
             self.dist = np.zeros((5,), dtype=np.float64)
-        self.get_logger().info('Camera intrinsics/distortion loaded')
+        self.get_logger().info("Camera intrinsics/distortion loaded")
 
     def on_image(self, msg: Image):
         self.last_image = msg
@@ -219,13 +243,18 @@ class OverlayNode(Node):
         self.try_publish()
 
     def try_publish(self):
-        if self.last_image is None or self.last_pc is None or self.K is None or self.T_lidar_cam is None:
+        if (
+            self.last_image is None
+            or self.last_pc is None
+            or self.K is None
+            or self.T_lidar_cam is None
+        ):
             return
-        cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding='bgr8')
+        cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding="bgr8")
         h, w = cv_img.shape[:2]
         xyz = pointcloud2_to_xyz(self.last_pc)
         if xyz.shape[0] == 0:
-            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8'))
+            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8"))
             return
 
         # Transform LiDAR to camera frame: X_cam = T * X_lidar
@@ -236,7 +265,7 @@ class OverlayNode(Node):
         valid = z > 1e-6
         X_cam = X_cam[valid]
         if X_cam.shape[0] == 0:
-            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8'))
+            self.pub.publish(self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8"))
             return
         uvw = (self.K @ X_cam.T).T
         u = uvw[:, 0] / uvw[:, 2]
@@ -247,7 +276,7 @@ class OverlayNode(Node):
             if 0 <= ui < w and 0 <= vi < h:
                 cv2.circle(cv_img, (int(ui), int(vi)), 1, (0, 0, 255), -1)
 
-        out = self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
+        out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
         out.header = self.last_image.header
         self.pub.publish(out)
 
@@ -260,5 +289,3 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
-

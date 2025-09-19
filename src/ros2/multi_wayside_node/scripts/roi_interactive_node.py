@@ -29,10 +29,13 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rosbag_deck_interface.srv import SetROIBounds
 from std_msgs.msg import ColorRGBA, Header
-from visualization_msgs.msg import (InteractiveMarker,
-                                    InteractiveMarkerControl,
-                                    InteractiveMarkerFeedback, Marker,
-                                    MarkerArray)
+from visualization_msgs.msg import (
+    InteractiveMarker,
+    InteractiveMarkerControl,
+    InteractiveMarkerFeedback,
+    Marker,
+    MarkerArray,
+)
 
 
 class ROIInteractiveNode(Node):

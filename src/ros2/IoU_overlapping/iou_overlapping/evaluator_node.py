@@ -11,16 +11,16 @@ from cv_bridge import CvBridge
 
 
 def read_extrinsic_json(path: str) -> Tuple[np.ndarray, np.ndarray]:
-    with open(path, 'r') as f:
+    with open(path, "r") as f:
         data = json.load(f)
     # Expect either 4x4 matrix or {R: [[..]], t: [..]}
-    if 'matrix' in data:
-        T = np.asarray(data['matrix'], dtype=np.float64)
+    if "matrix" in data:
+        T = np.asarray(data["matrix"], dtype=np.float64)
         R = T[:3, :3]
         t = T[:3, 3]
     else:
-        R = np.asarray(data['R'], dtype=np.float64)
-        t = np.asarray(data['t'], dtype=np.float64)
+        R = np.asarray(data["R"], dtype=np.float64)
+        t = np.asarray(data["t"], dtype=np.float64)
     return R, t
 
 
@@ -57,13 +57,13 @@ def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
 
     xyz = []
     step = pc2.point_step
-    offset_x = next(f.offset for f in pc2.fields if f.name == 'x')
-    offset_y = next(f.offset for f in pc2.fields if f.name == 'y')
-    offset_z = next(f.offset for f in pc2.fields if f.name == 'z')
+    offset_x = next(f.offset for f in pc2.fields if f.name == "x")
+    offset_y = next(f.offset for f in pc2.fields if f.name == "y")
+    offset_z = next(f.offset for f in pc2.fields if f.name == "z")
     for i in range(0, len(pc2.data), step):
-        x = struct.unpack_from('f', pc2.data, i + offset_x)[0]
-        y = struct.unpack_from('f', pc2.data, i + offset_y)[0]
-        z = struct.unpack_from('f', pc2.data, i + offset_z)[0]
+        x = struct.unpack_from("f", pc2.data, i + offset_x)[0]
+        y = struct.unpack_from("f", pc2.data, i + offset_y)[0]
+        z = struct.unpack_from("f", pc2.data, i + offset_z)[0]
         if np.isfinite(x) and np.isfinite(y) and np.isfinite(z):
             xyz.append((x, y, z))
     if not xyz:
@@ -81,30 +81,41 @@ class CachedCalibration:
 
 class IoUEvaluatorNode(Node):
     def __init__(self):
-        super().__init__('iou_evaluator')
+        super().__init__("iou_evaluator")
         self.bridge = CvBridge()
         self.cache = CachedCalibration()
 
         # Parameters
-        self.declare_parameter('extrinsic_json', '')
-        self.declare_parameter('board_config', 'config/board_detector.json5')
+        self.declare_parameter("extrinsic_json", "")
+        self.declare_parameter("board_config", "config/board_detector.json5")
 
-        extrinsic_json = self.get_parameter('extrinsic_json').get_parameter_value().string_value
+        extrinsic_json = (
+            self.get_parameter("extrinsic_json").get_parameter_value().string_value
+        )
         if extrinsic_json:
             try:
                 R, t = read_extrinsic_json(extrinsic_json)
                 self.cache.R, self.cache.t = R, t.reshape(3)
-                self.get_logger().info(f'Loaded extrinsic from {extrinsic_json}')
+                self.get_logger().info(f"Loaded extrinsic from {extrinsic_json}")
             except Exception as e:
-                self.get_logger().error(f'Failed to load extrinsic: {e}')
+                self.get_logger().error(f"Failed to load extrinsic: {e}")
 
         # Subscriptions
-        self.sub_img = self.create_subscription(Image, '/sensing/camera/front_center/synchronized_image', self.on_image, 10)
-        self.sub_pc = self.create_subscription(PointCloud2, '/sensing/lidar/top/synchronized_pointcloud', self.on_pointcloud, 10)
-        self.sub_info = self.create_subscription(CameraInfo, '/sensing/camera/front_center/camera_info', self.on_caminfo, 10)
+        self.sub_img = self.create_subscription(
+            Image, "/sensing/camera/front_center/synchronized_image", self.on_image, 10
+        )
+        self.sub_pc = self.create_subscription(
+            PointCloud2,
+            "/sensing/lidar/top/synchronized_pointcloud",
+            self.on_pointcloud,
+            10,
+        )
+        self.sub_info = self.create_subscription(
+            CameraInfo, "/sensing/camera/front_center/camera_info", self.on_caminfo, 10
+        )
 
         # Publisher
-        self.pub_overlay = self.create_publisher(Image, '/calibration/iou_overlay', 10)
+        self.pub_overlay = self.create_publisher(Image, "/calibration/iou_overlay", 10)
 
         # State
         self.last_image = None
@@ -134,7 +145,9 @@ class IoUEvaluatorNode(Node):
         # Preprocess to emphasize edges of the big board
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blur, 60, 150)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         if not contours:
             self.get_logger().debug("No contours found for board")
             return None
@@ -172,15 +185,19 @@ class IoUEvaluatorNode(Node):
     def try_process(self):
         self.get_logger().info("=== TRY_PROCESS START ===")
         if self.last_image is None or self.last_pc is None:
-            self.get_logger().info(f"Missing data: image={self.last_image is not None}, pc={self.last_pc is not None}")
+            self.get_logger().info(
+                f"Missing data: image={self.last_image is not None}, pc={self.last_pc is not None}"
+            )
             return
         if self.cache.K is None or self.cache.R is None or self.cache.t is None:
-            self.get_logger().info(f"Missing calibration: K={self.cache.K is not None}, R={self.cache.R is not None}, t={self.cache.t is not None}")
+            self.get_logger().info(
+                f"Missing calibration: K={self.cache.K is not None}, R={self.cache.R is not None}, t={self.cache.t is not None}"
+            )
             return
-        
+
         self.get_logger().info("All data available, starting processing...")
 
-        cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding='bgr8')
+        cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding="bgr8")
         h, w = cv_img.shape[:2]
         self.get_logger().info(f"Converted image to OpenCV: {h}x{w}")
         gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
@@ -190,7 +207,7 @@ class IoUEvaluatorNode(Node):
         if truth_poly is None:
             # Publish raw image with note so viewer always sees something
             self.get_logger().info("No board detected in image — publishing raw frame")
-            out_msg = self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
+            out_msg = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
             out_msg.header = self.last_image.header
             self.pub_overlay.publish(out_msg)
             return
@@ -200,15 +217,33 @@ class IoUEvaluatorNode(Node):
         # Project point cloud
         self.get_logger().info("Starting point cloud processing...")
         xyz_lidar = pointcloud2_to_xyz(self.last_pc)
-        self.get_logger().info(f"Extracted {xyz_lidar.shape[0]} points from point cloud")
+        self.get_logger().info(
+            f"Extracted {xyz_lidar.shape[0]} points from point cloud"
+        )
         if xyz_lidar.shape[0] == 0:
-            self.get_logger().info("No valid points in point cloud — publishing truth-only overlay")
+            self.get_logger().info(
+                "No valid points in point cloud — publishing truth-only overlay"
+            )
             overlay = cv_img.copy()
-            green = np.zeros_like(overlay); green[:, :] = (0, 255, 0)
+            green = np.zeros_like(overlay)
+            green[:, :] = (0, 255, 0)
             alpha = 0.5
-            overlay = np.where(truth_mask[..., None] > 0, (alpha * green + (1 - alpha) * overlay).astype(np.uint8), overlay)
-            cv2.putText(overlay, 'IoU: 0.000 (no points)', (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
-            out_msg = self.bridge.cv2_to_imgmsg(overlay, encoding='bgr8')
+            overlay = np.where(
+                truth_mask[..., None] > 0,
+                (alpha * green + (1 - alpha) * overlay).astype(np.uint8),
+                overlay,
+            )
+            cv2.putText(
+                overlay,
+                "IoU: 0.000 (no points)",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            out_msg = self.bridge.cv2_to_imgmsg(overlay, encoding="bgr8")
             out_msg.header = self.last_image.header
             self.pub_overlay.publish(out_msg)
             return
@@ -222,13 +257,29 @@ class IoUEvaluatorNode(Node):
         uv_in = uv[in_img]
         self.get_logger().info(f"Found {uv_in.shape[0]} points within image bounds")
         if uv_in.shape[0] < 3:
-            self.get_logger().info(f"Not enough projected points in image: {uv_in.shape[0]} — publishing truth-only overlay")
+            self.get_logger().info(
+                f"Not enough projected points in image: {uv_in.shape[0]} — publishing truth-only overlay"
+            )
             overlay = cv_img.copy()
-            green = np.zeros_like(overlay); green[:, :] = (0, 255, 0)
+            green = np.zeros_like(overlay)
+            green[:, :] = (0, 255, 0)
             alpha = 0.5
-            overlay = np.where(truth_mask[..., None] > 0, (alpha * green + (1 - alpha) * overlay).astype(np.uint8), overlay)
-            cv2.putText(overlay, 'IoU: 0.000 (no projected pts)', (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
-            out_msg = self.bridge.cv2_to_imgmsg(overlay, encoding='bgr8')
+            overlay = np.where(
+                truth_mask[..., None] > 0,
+                (alpha * green + (1 - alpha) * overlay).astype(np.uint8),
+                overlay,
+            )
+            cv2.putText(
+                overlay,
+                "IoU: 0.000 (no projected pts)",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            out_msg = self.bridge.cv2_to_imgmsg(overlay, encoding="bgr8")
             out_msg.header = self.last_image.header
             self.pub_overlay.publish(out_msg)
             return
@@ -249,12 +300,29 @@ class IoUEvaluatorNode(Node):
         red = np.zeros_like(overlay)
         red[:, :] = (0, 0, 255)
         alpha = 0.5
-        overlay = np.where(truth_mask[..., None] > 0, (alpha * green + (1 - alpha) * overlay).astype(np.uint8), overlay)
-        overlay = np.where(detected_mask[..., None] > 0, (alpha * red + (1 - alpha) * overlay).astype(np.uint8), overlay)
-        cv2.putText(overlay, f'IoU: {iou:.3f}', (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
+        overlay = np.where(
+            truth_mask[..., None] > 0,
+            (alpha * green + (1 - alpha) * overlay).astype(np.uint8),
+            overlay,
+        )
+        overlay = np.where(
+            detected_mask[..., None] > 0,
+            (alpha * red + (1 - alpha) * overlay).astype(np.uint8),
+            overlay,
+        )
+        cv2.putText(
+            overlay,
+            f"IoU: {iou:.3f}",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
         self.get_logger().info("Publishing overlay image...")
-        out_msg = self.bridge.cv2_to_imgmsg(overlay, encoding='bgr8')
+        out_msg = self.bridge.cv2_to_imgmsg(overlay, encoding="bgr8")
         out_msg.header = self.last_image.header
         self.pub_overlay.publish(out_msg)
         self.get_logger().info(f"SUCCESS: Published IoU overlay with IoU={iou:.3f}")
@@ -269,5 +337,3 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
-

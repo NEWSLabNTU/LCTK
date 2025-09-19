@@ -99,7 +99,7 @@
         <remap from="velodyne_points" to="$(var pointcloud_topic)"/>
         <remap from="velodyne_packets" to="$(var velodyne_packets_topic)"/>
     </node>
-    
+
     <!-- GSCam node for video file playback -->
     <node pkg="gscam"
           exec="gscam_node"
