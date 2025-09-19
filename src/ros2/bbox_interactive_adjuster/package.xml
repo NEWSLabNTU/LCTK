@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypeset="xml"?>
+<package format="3">
+  <name>bbox_interactive_adjuster</name>
+  <version>0.0.0</version>
+  <description>Interactive bounding box parameter adjustment tool for calibration_board_locator</description>
+  <maintainer email="claude@anthropic.com">Claude</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

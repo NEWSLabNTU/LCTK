@@ -13,6 +13,7 @@ exclude = [
     "src/ros2/extrinsic_solver_node",
     "src/ros2/iou_overlapping",
     "src/ros2/pointcloud_image_overlay",
+    "src/ros2/bbox_interactive_adjuster",
 ]
 
 [workspace.dependencies]

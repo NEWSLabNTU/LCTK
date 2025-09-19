@@ -38,6 +38,7 @@ help:
 	@echo "  make lint                       - Run linters and formatters check"
 	@echo "  make clean                      - Clean all build artifacts"
 	@echo "  make launch_iou_overlapping        - Launch IoU overlapping evaluator (use extrinsic_json=/path/to/file.json to specify config)"
+	@echo "  make run_bbox_adjuster          - Run interactive bbox parameter adjuster (use screen/tmux for best results)"
 	@echo ""
 	@echo "For more information, see README.md and CLAUDE.md"
 
@@ -159,6 +160,14 @@ launch_iou_overlapping:
 		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
 		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
+
+.PHONY: run_bbox_adjuster
+run_bbox_adjuster:
+	@. install/setup.sh && \
+	./install/bbox_interactive_adjuster/bin/bbox_adjuster \
+		--ros-args \
+		-p target_node:=/calibration/calibration_board_locator/calibration_board_locator \
+		-p bbox_config_file:="$(PWD)/install/lctk_launch/share/lctk_launch/config/board/bbox.json5"
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:
