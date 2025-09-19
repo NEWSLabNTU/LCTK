@@ -54,7 +54,7 @@
                sudo apt-get install -reinstall gstreamer1.0-libav libavutil56 libavfilter7
         -->
         <!-- Using decodebin for automatic format detection -->
-        <param name="gscam_config" value="filesrc location=$(var video_file) ! decodebin ! videoconvert"/>
+        <param name="gscam_config" value="filesrc location=$(var video_file) ! avidemux name=demux demux.video_0 ! queue ! avdec_mpeg4 ! videoconvert ! video/x-raw,format=RGB"/>
         <param name="camera_name" value="camera"/>
         <param name="camera_info_url" value="$(var camera_info_url)"/>
         <param name="frame_id" value="$(var frame_id)"/>
