@@ -87,21 +87,16 @@
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>
 
-    <!-- Pointcloud Image Overlay Visualization -->
+    <!-- Pointcloud Image Overlay Visualization (Python) -->
     <node pkg="pointcloud_image_overlay"
-          exec="pointcloud_image_overlay"
+          exec="overlay"
           name="pointcloud_image_overlay"
           namespace="$(var namespace)"
           output="screen">
-        <param name="max_distance" value="$(var max_distance)"/>
-        <param name="min_distance" value="$(var min_distance)"/>
-        <param name="camera_depth_thresh" value="0.0"/>
-        <param name="keep_back_points" value="false"/>
-        <param name="message_timeout_seconds" value="5"/>
-        <remap from="input_pointcloud" to="/sensing/lidar/top/synchronized_pointcloud"/>
-        <remap from="input_image" to="/sensing/camera/front_center/synchronized_image"/>
-        <remap from="camera_info" to="$(var camera_info_topic)"/>
-        <remap from="extrinsic_transform" to="/calibration/extrinsic_solver/extrinsic_transform"/>
+        <param name="extrinsic_json5" value="$(find-pkg-share lctk_launch)/config/extrinsic.json5"/>
+        <param name="image_topic" value="/sensing/camera/front_center/synchronized_image"/>
+        <param name="pointcloud_topic" value="/sensing/lidar/top/synchronized_pointcloud"/>
+        <param name="camera_info_topic" value="$(var camera_info_topic)"/>
     </node>
 
     <!-- RViz Visualization (Optional) -->

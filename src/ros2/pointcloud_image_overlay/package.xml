@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pointcloud_image_overlay</name>
+  <version>0.1.0</version>
+  <description>Overlay LiDAR point cloud on camera image using extrinsic 4x4 matrix.</description>
+
+  <maintainer email="dev@lctk.local">LCTK</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+
+  <exec_depend>python3-json5</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+

@@ -12,6 +12,7 @@ exclude = [
     # Python package without Cargo.toml
     "src/ros2/extrinsic_solver_node",
     "src/ros2/IoU_overlapping",
+    "src/ros2/pointcloud_image_overlay",
 ]
 
 [workspace.dependencies]

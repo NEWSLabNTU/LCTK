@@ -1,0 +1,11 @@
+{
+  // 4x4 transformation from LiDAR to Camera
+  matrix: [
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1]
+  ]
+}
+
+
