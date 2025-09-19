@@ -1,3 +1,5 @@
+import os
+from glob import glob
 from setuptools import setup
 
 package_name = "pointcloud_image_overlay"
@@ -9,6 +11,7 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        (f"lib/{package_name}", glob("scripts/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -18,7 +21,7 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            "overlay = pointcloud_image_overlay.overlay_node:main",
+            "overlay_node = pointcloud_image_overlay.overlay_node:main",
         ],
     },
 )

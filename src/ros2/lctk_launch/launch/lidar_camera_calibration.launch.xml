@@ -86,11 +86,12 @@
 
     <!-- Pointcloud Image Overlay Visualization (Python) -->
     <node pkg="pointcloud_image_overlay"
-          exec="pointcloud_image_overlay"
+          exec="overlay_node"
           name="pointcloud_image_overlay"
           namespace="$(var namespace)"
           output="screen">
         <param name="extrinsic_json5" value="$(find-pkg-share lctk_launch)/config/extrinsic.json5"/>
+        <param name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
         <!-- Simple topic remapping: base topics to actual camera/lidar topics -->
         <remap from="image" to="$(var camera_topic)"/>
         <remap from="pointcloud" to="$(var pointcloud_topic)"/>
