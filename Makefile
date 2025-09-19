@@ -37,7 +37,7 @@ help:
 	@echo "  make format                     - Format all code (Rust, Python, configs)"
 	@echo "  make lint                       - Run linters and formatters check"
 	@echo "  make clean                      - Clean all build artifacts"
-	@echo "  make launch_iou_overlapping        - Launch IoU overlapping evaluator"
+	@echo "  make launch_iou_overlapping        - Launch IoU overlapping evaluator (use extrinsic_json=/path/to/file.json to specify config)"
 	@echo ""
 	@echo "For more information, see README.md and CLAUDE.md"
 
@@ -160,7 +160,11 @@ launch_iou_overlapping:
 	@echo "Launching IoU overlapping evaluator..."
 	@echo "This will evaluate extrinsic matrix quality using IoU between board detection and LiDAR projection."
 	. install/setup.sh && \
-	install/iou_overlapping/bin/evaluator --ros-args -p extrinsic_json:=/home/newslab/LCTK/install/iou_overlapping/share/iou_overlapping/config/extrinsic.json
+	ros2 launch iou_overlapping iou_evaluator.launch.xml \
+		extrinsic_json:=$(or $(extrinsic_json),$(PWD)/install/iou_overlapping/share/iou_overlapping/config/extrinsic.json) \
+		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
+		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
+		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:
