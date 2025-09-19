@@ -22,7 +22,7 @@ help:
 	@echo "Launch Commands (using ros2systemd for reliable service management):"
 	@echo "  make launch_lidar_camera_sample_data - Create and start LiDAR-camera sample data service"
 	@echo "  make stop_lidar_camera_sample_data   - Stop LiDAR-camera sample data service"
-	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, rviz=true for RViz)"
+	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, rviz=true for RViz, use_best_effort_qos=false for rosbag)"
 	@echo "  make stop_lidar_camera_calibration   - Stop LiDAR-Camera calibration service"
 	@echo "  make launch_two_lidar_calibration    - Create and start two LiDAR calibration service"
 	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
@@ -130,6 +130,7 @@ launch_lidar_camera_calibration:
 		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(or $(debug_mode),false) \
 		enable_rviz:=$(or $(rviz),false) \
+		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
 		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
 	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."

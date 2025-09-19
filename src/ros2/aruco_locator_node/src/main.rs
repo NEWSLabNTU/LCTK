@@ -7,7 +7,7 @@ use opencv::{
     imgproc::{self, FONT_HERSHEY_SIMPLEX, LINE_8},
     prelude::*,
 };
-use rclrs::*;
+use rclrs::{SubscriptionOptions, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::{
     collections::VecDeque,
@@ -193,6 +193,23 @@ impl ArucoLocatorNode {
             "Debug overlay enabled: {debug_overlay_enabled}"
         );
 
+        // Get QoS parameter for sensor input topics
+        let use_best_effort_qos = node
+            .declare_parameter("use_best_effort_qos")
+            .default(true)
+            .mandatory()?
+            .get();
+
+        log_info!(
+            LOGGER_NAME,
+            "Using {} QoS for sensor input topics",
+            if use_best_effort_qos {
+                "best effort"
+            } else {
+                "reliable"
+            }
+        );
+
         // ROS 2 Best Practice: Subscribe to base topics and let launch files handle remapping
         // The node subscribes to generic "image" and "camera_info" topics
         // Launch files remap these to actual camera topics (e.g., /sensing/camera/front/image_raw)
@@ -216,27 +233,36 @@ impl ArucoLocatorNode {
             None
         };
 
+        // Configure QoS for sensor input topics
+        let qos_profile = if use_best_effort_qos {
+            QoSProfile::sensor_data_default() // Best effort for live sensors
+        } else {
+            QoSProfile::default() // Reliable for rosbag playback
+        };
+
         // Subscribe to camera_info
         let detector_state_camera_info = Arc::clone(&detector_state);
         let config_file_for_callback = aruco_config_file.clone();
-        let camera_info_subscription = node.create_subscription::<CameraInfo, _>(
-            camera_info_topic,
-            move |msg: CameraInfo| {
+        let mut camera_info_options = SubscriptionOptions::new(camera_info_topic);
+        camera_info_options.qos = qos_profile.clone();
+        let camera_info_subscription =
+            node.create_subscription(camera_info_options, move |msg: CameraInfo| {
                 Self::camera_info_callback(
                     msg,
                     Arc::clone(&detector_state_camera_info),
                     &config_file_for_callback,
                 );
-            },
-        )?;
+            })?;
         // Subscribe to image topic directly (will be remapped by launch file)
         let detector_state_image = Arc::clone(&detector_state);
         let detection_cache_image = Arc::clone(&detection_cache);
         let detection_publisher_image = detection_publisher.clone();
         let overlay_publisher_image = overlay_publisher.clone();
 
+        let mut image_options = SubscriptionOptions::new(image_topic);
+        image_options.qos = qos_profile.clone();
         let image_subscription =
-            node.create_subscription::<ImageMsg, _>(image_topic, move |msg: ImageMsg| {
+            node.create_subscription(image_options, move |msg: ImageMsg| {
                 Self::image_callback(
                     msg,
                     Arc::clone(&detector_state_image),

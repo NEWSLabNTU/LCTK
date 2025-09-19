@@ -42,6 +42,10 @@
          default="false"
          description="Launch RViz for calibration visualization"/>
 
+    <arg name="use_best_effort_qos"
+         default="true"
+         description="Use best effort QoS for sensor input topics (true for live sensors, false for rosbag)"/>
+
     <arg name="max_distance"
          default="10.0"
          description="Maximum distance for point cloud filtering (meters)"/>
@@ -56,6 +60,7 @@
         <arg name="camera_topic" value="$(var camera_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
+        <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
     </include>
 
     <!-- ArUco Detection Visualization Overlay -->
@@ -69,6 +74,7 @@
         <arg name="board_detections_topic" value="/calibration/calibration_board_locator/board_detections"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
+        <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
     </include>
 
     <!-- Extrinsic Calibration -->

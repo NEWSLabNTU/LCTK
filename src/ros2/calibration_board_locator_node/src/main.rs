@@ -9,7 +9,7 @@ use hollow_board_detector::{
     Detector as BoardDetector,
 };
 use nalgebra as na;
-use rclrs::*;
+use rclrs::{SubscriptionOptions, *};
 use sensor_msgs::msg::PointCloud2;
 use std::{
     f64::consts::FRAC_PI_2,
@@ -60,6 +60,23 @@ impl CalibrationBoardLocatorNode {
             .default(false)
             .optional()?;
         let enable_debug = debug_param.get().unwrap_or(false);
+
+        // QoS parameter for sensor input topics
+        let use_best_effort_qos = node
+            .declare_parameter("use_best_effort_qos")
+            .default(true)
+            .mandatory()?
+            .get();
+
+        log_info!(
+            LOGGER_NAME,
+            "Using {} QoS for sensor input topics",
+            if use_best_effort_qos {
+                "best effort"
+            } else {
+                "reliable"
+            }
+        );
 
         // Load configurations
         let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
@@ -125,13 +142,22 @@ impl CalibrationBoardLocatorNode {
             Some(Arc::new(node.create_publisher("debug/board_marker_icp")?));
         let board_marker_icp_shared = board_marker_icp_publisher.clone();
 
+        // Configure QoS for sensor input topics
+        let qos_profile = if use_best_effort_qos {
+            QoSProfile::sensor_data_default() // Best effort for live sensors
+        } else {
+            QoSProfile::default() // Reliable for rosbag playback
+        };
+
         // Counter for debugging message processing
         let message_counter = Arc::new(AtomicU64::new(0));
         let counter_clone = Arc::clone(&message_counter);
 
-        // Create subscription to PointCloud2
+        // Create subscription to PointCloud2 with configurable QoS
+        let mut pointcloud_options = SubscriptionOptions::new("input_pointcloud");
+        pointcloud_options.qos = qos_profile;
         let pointcloud_subscription =
-            node.create_subscription("input_pointcloud", move |msg: PointCloud2| {
+            node.create_subscription(pointcloud_options, move |msg: PointCloud2| {
                 let count = counter_clone.fetch_add(1, Ordering::Relaxed);
                 log_debug!(LOGGER_NAME, "Processing message #{}", count + 1);
 

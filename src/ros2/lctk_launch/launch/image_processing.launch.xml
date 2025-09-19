@@ -35,6 +35,10 @@
          default="false"
          description="Enable debug logging and visualization"/>
 
+    <arg name="use_best_effort_qos"
+         default="true"
+         description="Use best effort QoS for sensor input topics"/>
+
     <!-- ArUco Locator Node -->
     <node pkg="aruco_locator_node"
           exec="aruco_locator_node"
@@ -44,6 +48,7 @@
         <param name="aruco_config_file" value="$(var aruco_config_file)"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
         <param name="debug_overlay_enabled" value="$(var debug_mode)"/>
+        <param name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
         <!-- Simple topic remapping: base topics to actual camera topics -->
         <remap from="image" to="$(var camera_topic)"/>
         <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
