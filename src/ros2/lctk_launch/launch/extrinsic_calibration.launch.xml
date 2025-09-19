@@ -24,9 +24,6 @@
          default="/calibration/calibration_board_locator/board_detections"
          description="Input board detections topic"/>
 
-    <arg name="camera_info_topic"
-         default="/sensing/camera/front_center/camera_info"
-         description="Input camera info topic"/>
 
     <arg name="namespace"
          default="calibration"
@@ -57,6 +54,5 @@
         <param name="debug_mode" value="$(var debug_mode)"/>
         <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
         <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
-        <remap from="camera_info" to="$(var camera_info_topic)"/>
     </node>
 </launch>

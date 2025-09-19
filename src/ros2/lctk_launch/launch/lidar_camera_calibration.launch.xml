@@ -25,9 +25,6 @@
          default="/sensing/camera/front_center/image_raw"
          description="Input camera image topic"/>
 
-    <arg name="camera_info_topic"
-         default="/sensing/camera/front_center/camera_info"
-         description="Input camera info topic"/>
 
     <arg name="pointcloud_topic"
          default="/sensing/lidar/top/pointcloud_raw"
@@ -57,7 +54,6 @@
     <include file="$(find-pkg-share lctk_launch)/launch/image_processing.launch.xml">
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
         <arg name="camera_topic" value="$(var camera_topic)"/>
-        <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>
@@ -78,7 +74,6 @@
     <!-- Extrinsic Calibration -->
     <include file="$(find-pkg-share lctk_launch)/launch/extrinsic_calibration.launch.xml">
         <arg name="board_detections_topic" value="/calibration/calibration_board_locator/calibration_board_detections"/>
-        <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>
@@ -93,7 +88,6 @@
         <!-- Simple topic remapping: base topics to actual camera/lidar topics -->
         <remap from="image" to="$(var camera_topic)"/>
         <remap from="pointcloud" to="$(var pointcloud_topic)"/>
-        <remap from="camera_info" to="$(var camera_info_topic)"/>
     </node>
 
     <!-- RViz Visualization (Optional) -->

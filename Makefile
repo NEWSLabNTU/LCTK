@@ -131,7 +131,6 @@ launch_lidar_camera_calibration:
 		debug_mode:=$(or $(debug_mode),false) \
 		enable_rviz:=$(or $(rviz),false) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
-		camera_info_topic:=$(or $(camera_info_topic),/sensing/camera/front_center/camera_info) \
 		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
 	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."
 	@echo ""

@@ -3,7 +3,7 @@ use builtin_interfaces::msg::Time;
 use futures::{stream, StreamExt};
 use indexmap::IndexMap;
 use multi_stream_synchronizer::{sync, Config, WithTimestamp};
-use rclrs::*;
+use rclrs::{SubscriptionOptions, *};
 use sensor_msgs::msg::{Image, PointCloud2};
 use std::{
     sync::{
@@ -174,12 +174,19 @@ impl SensorSynchronizer {
             .mandatory()?
             .get();
 
+        let use_best_effort_qos: bool = node
+            .declare_parameter("use_best_effort_qos")
+            .default(true) // Default to best effort for live sensors
+            .mandatory()?
+            .get();
+
         log_info!(
             LOGGER_NAME,
-            "Real-time sensor synchronizer started with {}ms sync window, buffer size {}, staleness timeout {}ms",
+            "Real-time sensor synchronizer started with {}ms sync window, buffer size {}, staleness timeout {}ms, QoS: {}",
             sync_window_ms,
             buffer_size,
-            staleness_timeout_ms
+            staleness_timeout_ms,
+            if use_best_effort_qos { "best_effort" } else { "reliable" }
         );
 
         // Create synchronizer config without staleness detection for debugging
@@ -229,17 +236,27 @@ impl SensorSynchronizer {
             });
         }
 
-        // Create subscribers
+        // Create subscribers with configurable QoS
+        let qos_profile = if use_best_effort_qos {
+            QoSProfile::sensor_data_default() // Best effort for live sensors
+        } else {
+            QoSProfile::default() // Reliable for rosbag playback
+        };
+
         let image_subscription = {
             let state = Arc::clone(&state);
-            node.create_subscription("input_image", move |msg: Image| {
+            let mut options = SubscriptionOptions::new("input_image");
+            options.qos = qos_profile.clone();
+            node.create_subscription(options, move |msg: Image| {
                 Self::image_callback(msg, &state);
             })?
         };
 
         let pointcloud_subscription = {
             let state = Arc::clone(&state);
-            node.create_subscription("input_pointcloud", move |msg: PointCloud2| {
+            let mut options = SubscriptionOptions::new("input_pointcloud");
+            options.qos = qos_profile.clone();
+            node.create_subscription(options, move |msg: PointCloud2| {
                 Self::pointcloud_callback(msg, &state);
             })?
         };
