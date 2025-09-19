@@ -109,9 +109,8 @@ clean:
 launch_lidar_camera_sample_data:
 	@echo "Creating and starting LiDAR-camera sample data service with ros2systemd..."
 	. install/setup.sh && \
-	ros2 systemd remove lctk-lidar-camera-data 2>/dev/null || true && \
-	ros2 systemd create lctk-lidar-camera-data launch lctk_sample_data lidar_camera.launch.xml && \
-	ros2 systemd start lctk-lidar-camera-data
+	ros2 systemd launch --name lctk-lidar-camera-data --replace \
+		lctk_sample_data lidar_camera.launch.xml
 	@echo "LiDAR-camera sample data service started. Use 'make service_status' to check status or 'make stop_lidar_camera_sample_data' to stop."
 
 .PHONY: stop_lidar_camera_sample_data
@@ -127,14 +126,13 @@ launch_lidar_camera_calibration:
 		echo "Debug mode enabled - additional debug topics will be published"; \
 	fi
 	. install/setup.sh && \
-	ros2 systemd remove lctk-calibration 2>/dev/null || true && \
-	ros2 systemd create --copy-env CYCLONEDDS_URI lctk-calibration launch lctk_launch lidar_camera_calibration.launch.xml \
+	ros2 systemd launch --name lctk-calibration --replace \
+		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(or $(debug_mode),false) \
 		enable_rviz:=$(or $(rviz),false) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
 		camera_info_topic:=$(or $(camera_info_topic),/sensing/camera/front_center/camera_info) \
-		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw) && \
-	ros2 systemd start lctk-calibration
+		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
 	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."
 	@echo ""
 	@echo "Note: This only starts the calibration pipeline. To publish sample data, run 'make launch_lidar_camera_sample_data' separately."
@@ -168,9 +166,8 @@ launch_iou_overlapping:
 launch_two_lidar_calibration:
 	@echo "Creating and starting two LiDAR calibration service with ros2systemd..."
 	. install/setup.sh && \
-	ros2 systemd remove lctk-two-lidar 2>/dev/null || true && \
-	ros2 systemd create lctk-two-lidar launch lctk_launch two_lidar_calibration.launch.xml && \
-	ros2 systemd start lctk-two-lidar
+	ros2 systemd launch --name lctk-two-lidar --replace \
+		lctk_launch two_lidar_calibration.launch.xml
 	@echo "Two LiDAR calibration service started. Use 'make service_status' to check status or 'make stop_two_lidar_calibration' to stop."
 	@echo ""
 	@echo "Note: You need to publish two LiDAR data streams separately for calibration to work."
