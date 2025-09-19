@@ -25,7 +25,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'extrinsic_solver_node = extrinsic_solver_node_py.main:main',
+            'extrinsic_solver_node = extrinsic_solver_node.main:main',
         ],
     },
 )
