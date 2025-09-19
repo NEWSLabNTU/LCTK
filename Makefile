@@ -18,16 +18,15 @@ help:
 	@echo "  make build_ros2_rust            - Build ROS2 Rust base packages"
 	@echo "  make build_interface            - Build interface types"
 	@echo "  make build_packages             - Build ROS nodes"
-	@echo "  make build_cargo                - Build with cargo directly (non-ROS)"
 	@echo ""
 	@echo "Launch Commands (using ros2systemd for reliable service management):"
-	@echo "  make launch_sensor              - Create and start sensor publishers service"
-	@echo "  make stop_sensor                - Stop sensor publishers service"
-	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration service (add debug_mode=true for debug topics, rviz=true for RViz)"
-	@echo "  make launch_rviz                    - Launch RViz for calibration visualization"
+	@echo "  make launch_lidar_camera_sample_data - Create and start LiDAR-camera sample data service"
+	@echo "  make stop_lidar_camera_sample_data   - Stop LiDAR-camera sample data service"
+	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, rviz=true for RViz)"
 	@echo "  make stop_lidar_camera_calibration   - Stop LiDAR-Camera calibration service"
 	@echo "  make launch_two_lidar_calibration    - Create and start two LiDAR calibration service"
 	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
+	@echo "  make launch_rviz                     - Launch RViz for calibration visualization"
 	@echo ""
 	@echo "Service Management:"
 	@echo "  make service_status             - Show status of all LCTK services"
@@ -38,7 +37,6 @@ help:
 	@echo "  make format                     - Format all code (Rust, Python, configs)"
 	@echo "  make lint                       - Run linters and formatters check"
 	@echo "  make clean                      - Clean all build artifacts"
-	@echo "  make launch_simple_extrinsic_solver - Launch simple extrinsic solver"
 	@echo ""
 	@echo "For more information, see README.md and CLAUDE.md"
 
@@ -83,11 +81,6 @@ build_packages:
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/packages.log
 
-.PHONY: build_cargo
-build_cargo:
-	export OPENCV_PKGCONFIG_NAME=opencv4 && \
-	cargo build --all-targets
-
 .PHONY: format
 format:
 	@echo "Formatting Rust code..."
@@ -111,21 +104,20 @@ clean:
 	rm -rf build install log target .cargo $(LOG_DIR)
 	$(MAKE) -C src/ros2_rust_ws clean
 
-.PHONY: launch_sensor
-launch_sensor:
-	@echo "Creating and starting sensor publishers service with ros2systemd..."
+.PHONY: launch_lidar_camera_sample_data
+launch_lidar_camera_sample_data:
+	@echo "Creating and starting LiDAR-camera sample data service with ros2systemd..."
 	. install/setup.sh && \
-	ros2 systemd remove lctk-sensor 2>/dev/null || true && \
-	ros2 systemd create lctk-sensor launch lctk_sample_data lidar_camera.launch.xml \
-		loop:=true && \
-	ros2 systemd start lctk-sensor
-	@echo "Sensor service started. Use 'make service_status' to check status or 'make stop_sensor' to stop."
+	ros2 systemd remove lctk-lidar-camera-data 2>/dev/null || true && \
+	ros2 systemd create lctk-lidar-camera-data launch lctk_sample_data lidar_camera.launch.xml && \
+	ros2 systemd start lctk-lidar-camera-data
+	@echo "LiDAR-camera sample data service started. Use 'make service_status' to check status or 'make stop_lidar_camera_sample_data' to stop."
 
-.PHONY: stop_sensor
-stop_sensor:
-	@echo "Stopping sensor service..."
+.PHONY: stop_lidar_camera_sample_data
+stop_lidar_camera_sample_data:
+	@echo "Stopping LiDAR-camera sample data service..."
 	. install/setup.sh && \
-	ros2 systemd stop lctk-sensor 2>/dev/null || echo "Service not running"
+	ros2 systemd stop lctk-lidar-camera-data 2>/dev/null || echo "Service not running"
 
 .PHONY: launch_lidar_camera_calibration
 launch_lidar_camera_calibration:
@@ -136,13 +128,12 @@ launch_lidar_camera_calibration:
 	. install/setup.sh && \
 	ros2 systemd remove lctk-calibration 2>/dev/null || true && \
 	ros2 systemd create --copy-env CYCLONEDDS_URI lctk-calibration launch lctk_launch lidar_camera_calibration.launch.xml \
-		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
-		video_file:=$(PWD)/data/sampledata/3/video.avi \
-		loop:=true \
 		debug_mode:=$(or $(debug_mode),false) \
 		enable_rviz:=$(or $(rviz),false) && \
 	ros2 systemd start lctk-calibration
 	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."
+	@echo ""
+	@echo "Note: This only starts the calibration pipeline. To publish sample data, run 'make launch_lidar_camera_sample_data' separately."
 
 .PHONY: stop_lidar_camera_calibration
 stop_lidar_camera_calibration:
