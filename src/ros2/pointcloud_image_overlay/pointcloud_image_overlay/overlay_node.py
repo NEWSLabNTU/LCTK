@@ -44,9 +44,7 @@ class OverlayNode(Node):
 
         # Parameters
         self.declare_parameter('extrinsic_json5', '')
-        self.declare_parameter('image_topic', '/sensing/camera/front_center/synchronized_image')
-        self.declare_parameter('pointcloud_topic', '/sensing/lidar/top/synchronized_pointcloud')
-        self.declare_parameter('camera_info_topic', '/sensing/camera/front_center/camera_info')
+        # ROS 2 Best Practice: Use base topic names that will be remapped by launch files
 
         extr_path = self.get_parameter('extrinsic_json5').get_parameter_value().string_value
         try:
@@ -63,14 +61,10 @@ class OverlayNode(Node):
         self.last_image: Optional[Image] = None
         self.last_pc: Optional[PointCloud2] = None
 
-        # IO
-        img_topic = self.get_parameter('image_topic').get_parameter_value().string_value
-        pc_topic = self.get_parameter('pointcloud_topic').get_parameter_value().string_value
-        info_topic = self.get_parameter('camera_info_topic').get_parameter_value().string_value
-
-        self.sub_img = self.create_subscription(Image, img_topic, self.on_image, 10)
-        self.sub_pc = self.create_subscription(PointCloud2, pc_topic, self.on_pointcloud, 10)
-        self.sub_info = self.create_subscription(CameraInfo, info_topic, self.on_caminfo, 10)
+        # IO - Subscribe to base topics that will be remapped by launch files
+        self.sub_img = self.create_subscription(Image, 'image', self.on_image, 10)
+        self.sub_pc = self.create_subscription(PointCloud2, 'pointcloud', self.on_pointcloud, 10)
+        self.sub_info = self.create_subscription(CameraInfo, 'camera_info', self.on_caminfo, 10)
         self.pub = self.create_publisher(Image, '/calibration/pointcloud_overlay', 10)
 
     def on_caminfo(self, msg: CameraInfo):
@@ -184,9 +178,7 @@ class OverlayNode(Node):
 
         # Parameters
         self.declare_parameter('extrinsic_json5', '')
-        self.declare_parameter('image_topic', '/sensing/camera/front_center/synchronized_image')
-        self.declare_parameter('pointcloud_topic', '/sensing/lidar/top/synchronized_pointcloud')
-        self.declare_parameter('camera_info_topic', '/sensing/camera/front_center/camera_info')
+        # ROS 2 Best Practice: Use base topic names that will be remapped by launch files
 
         extr_path = self.get_parameter('extrinsic_json5').get_parameter_value().string_value
         try:
@@ -199,22 +191,24 @@ class OverlayNode(Node):
 
         # State
         self.K: Optional[np.ndarray] = None
+        self.dist: Optional[np.ndarray] = None
         self.last_image: Optional[Image] = None
         self.last_pc: Optional[PointCloud2] = None
 
-        # IO
-        img_topic = self.get_parameter('image_topic').get_parameter_value().string_value
-        pc_topic = self.get_parameter('pointcloud_topic').get_parameter_value().string_value
-        info_topic = self.get_parameter('camera_info_topic').get_parameter_value().string_value
-
-        self.sub_img = self.create_subscription(Image, img_topic, self.on_image, 10)
-        self.sub_pc = self.create_subscription(PointCloud2, pc_topic, self.on_pointcloud, 10)
-        self.sub_info = self.create_subscription(CameraInfo, info_topic, self.on_caminfo, 10)
+        # IO - Subscribe to base topics that will be remapped by launch files
+        self.sub_img = self.create_subscription(Image, 'image', self.on_image, 10)
+        self.sub_pc = self.create_subscription(PointCloud2, 'pointcloud', self.on_pointcloud, 10)
+        self.sub_info = self.create_subscription(CameraInfo, 'camera_info', self.on_caminfo, 10)
         self.pub = self.create_publisher(Image, '/calibration/pointcloud_overlay', 10)
 
     def on_caminfo(self, msg: CameraInfo):
         self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
-        self.get_logger().info('Camera intrinsics loaded')
+        # Distortion may be empty; if so use zeros
+        if msg.d:
+            self.dist = np.array(msg.d, dtype=np.float64).reshape(-1)
+        else:
+            self.dist = np.zeros((5,), dtype=np.float64)
+        self.get_logger().info('Camera intrinsics/distortion loaded')
 
     def on_image(self, msg: Image):
         self.last_image = msg

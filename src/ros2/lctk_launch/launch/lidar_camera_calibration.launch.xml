@@ -29,10 +29,6 @@
          default="/sensing/camera/front_center/camera_info"
          description="Input camera info topic"/>
 
-    <arg name="loop"
-         default="false"
-         description="Loop video playback"/>
-
     <arg name="pointcloud_topic"
          default="/sensing/lidar/top/pointcloud_raw"
          description="Input point cloud topic"/>
@@ -60,7 +56,7 @@
     <!-- Image Processing Pipeline -->
     <include file="$(find-pkg-share lctk_launch)/launch/image_processing.launch.xml">
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <arg name="camera_topic" value="/sensing/camera/front_center/synchronized_image"/>
+        <arg name="camera_topic" value="$(var camera_topic)"/>
         <arg name="camera_info_topic" value="$(var camera_info_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
@@ -73,7 +69,7 @@
     <include file="$(find-pkg-share lctk_launch)/launch/pointcloud_processing.launch.xml">
         <arg name="board_config_file" value="$(var board_config_file)"/>
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <arg name="pointcloud_topic" value="/sensing/lidar/top/synchronized_pointcloud"/>
+        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
         <arg name="board_detections_topic" value="/calibration/calibration_board_locator/board_detections"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
@@ -89,14 +85,15 @@
 
     <!-- Pointcloud Image Overlay Visualization (Python) -->
     <node pkg="pointcloud_image_overlay"
-          exec="overlay"
+          exec="pointcloud_image_overlay"
           name="pointcloud_image_overlay"
           namespace="$(var namespace)"
           output="screen">
         <param name="extrinsic_json5" value="$(find-pkg-share lctk_launch)/config/extrinsic.json5"/>
-        <param name="image_topic" value="/sensing/camera/front_center/synchronized_image"/>
-        <param name="pointcloud_topic" value="/sensing/lidar/top/synchronized_pointcloud"/>
-        <param name="camera_info_topic" value="$(var camera_info_topic)"/>
+        <!-- Simple topic remapping: base topics to actual camera/lidar topics -->
+        <remap from="image" to="$(var camera_topic)"/>
+        <remap from="pointcloud" to="$(var pointcloud_topic)"/>
+        <remap from="camera_info" to="$(var camera_info_topic)"/>
     </node>
 
     <!-- RViz Visualization (Optional) -->

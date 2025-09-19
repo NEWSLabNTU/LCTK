@@ -154,10 +154,9 @@ fn calculate_bounding_box(corners: &[Point2D]) -> BoundingBox2D {
 /// ArUco detection ROS 2 node
 pub struct ArucoLocatorNode {
     _camera_info_subscription: Subscription<CameraInfo>,
-    image_subscription: Option<Subscription<ImageMsg>>,
+    _image_subscription: Subscription<ImageMsg>,
     detection_publisher: Publisher<Detection2DArray>,
     overlay_publisher: Option<Publisher<ImageMsg>>,
-    _camera_namespace: String,
     detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
     detection_cache: Arc<Mutex<VecDeque<Detection2DArray>>>,
     _aruco_config_file: String,
@@ -182,16 +181,6 @@ impl ArucoLocatorNode {
 
         log_info!(LOGGER_NAME, "Using ArUco config file: {aruco_config_file}");
 
-        // Try to declare the parameter with default value
-        let camera_namespace = node
-            .declare_parameter::<Arc<str>>("camera_namespace")
-            .default("/camera/camera".into())
-            .mandatory()?
-            .get()
-            .to_string();
-
-        log_info!(LOGGER_NAME, "Using camera namespace: {camera_namespace}");
-
         // Get debug overlay parameter (default: false)
         let debug_overlay_enabled = node
             .declare_parameter("debug_overlay_enabled")
@@ -204,14 +193,15 @@ impl ArucoLocatorNode {
             "Debug overlay enabled: {debug_overlay_enabled}"
         );
 
-        // Form the camera_info topic name with namespace
-        let camera_info_topic = format!("{camera_namespace}/camera_info");
+        // ROS 2 Best Practice: Subscribe to base topics and let launch files handle remapping
+        // The node subscribes to generic "image" and "camera_info" topics
+        // Launch files remap these to actual camera topics (e.g., /sensing/camera/front/image_raw)
+        let image_topic = "image";
+        let camera_info_topic = "camera_info";
 
-        // Define potential image topics in priority order
-        let potential_image_topics = vec![
-            format!("{camera_namespace}/image_raw"),
-            format!("{camera_namespace}/image"),
-        ];
+        log_info!(LOGGER_NAME, "Subscribing to base topics (will be remapped by launch file):");
+        log_info!(LOGGER_NAME, "  Image topic: {image_topic}");
+        log_info!(LOGGER_NAME, "  Camera info topic: {camera_info_topic}");
 
         // Create detection publisher
         let detection_publisher = node.create_publisher("aruco_detections")?;
@@ -227,7 +217,7 @@ impl ArucoLocatorNode {
         let detector_state_camera_info = Arc::clone(&detector_state);
         let config_file_for_callback = aruco_config_file.clone();
         let camera_info_subscription = node.create_subscription::<CameraInfo, _>(
-            &camera_info_topic,
+            camera_info_topic,
             move |msg: CameraInfo| {
                 Self::camera_info_callback(
                     msg,
@@ -236,17 +226,33 @@ impl ArucoLocatorNode {
                 );
             },
         )?;
-        log_info!(LOGGER_NAME, "Camera namespace: {camera_namespace}");
-        log_info!(
-            LOGGER_NAME,
-            "Waiting for camera_info on topic: {camera_info_topic}"
-        );
+        // Subscribe to image topic directly (will be remapped by launch file)
+        let detector_state_image = Arc::clone(&detector_state);
+        let detection_cache_image = Arc::clone(&detection_cache);
+        let detection_publisher_image = detection_publisher.clone();
+        let overlay_publisher_image = overlay_publisher.clone();
 
-        // Create the node instance
-        let mut node_instance = Self {
+        let image_subscription = node.create_subscription::<ImageMsg, _>(
+            image_topic,
+            move |msg: ImageMsg| {
+                Self::image_callback(
+                    msg,
+                    Arc::clone(&detector_state_image),
+                    Arc::clone(&detection_cache_image),
+                    &detection_publisher_image,
+                    &overlay_publisher_image,
+                    debug_overlay_enabled,
+                );
+            },
+        )?;
+
+        log_info!(LOGGER_NAME, "Successfully subscribed to image and camera_info topics");
+        log_info!(LOGGER_NAME, "Will publish ArUco detections to /aruco_detections");
+
+        // Create the simplified node instance
+        let node_instance = Self {
             _camera_info_subscription: camera_info_subscription,
-            image_subscription: None,
-            _camera_namespace: camera_namespace,
+            _image_subscription: image_subscription,
             detection_publisher,
             overlay_publisher,
             detector_state,
@@ -254,20 +260,6 @@ impl ArucoLocatorNode {
             _aruco_config_file: aruco_config_file,
             debug_overlay_enabled,
         };
-
-        // Try to find an available image topic and subscribe to it with image processing callback
-        let image_subscription =
-            node_instance.subscribe_to_image_topic(node, &potential_image_topics);
-        node_instance.image_subscription = image_subscription;
-
-        if node_instance.image_subscription.is_some() {
-            log_info!(
-                LOGGER_NAME,
-                "Subscribed to image topic and will publish detections to /aruco_detections"
-            );
-        } else {
-            log_warn!(LOGGER_NAME, "No available image topics found. The node will wait for cameras to become available.");
-        }
 
         Ok(node_instance)
     }
@@ -472,48 +464,6 @@ impl ArucoLocatorNode {
         Ok(())
     }
 
-    fn subscribe_to_image_topic(
-        &self,
-        node: &Node,
-        potential_topics: &[String],
-    ) -> Option<Subscription<ImageMsg>> {
-        log_info!(LOGGER_NAME, "Attempting to subscribe to image topics...");
-
-        // Subscribe to image topic directly
-        for topic in potential_topics {
-            log_info!(LOGGER_NAME, "Trying to subscribe to topic: {topic}");
-            let detector_state = Arc::clone(&self.detector_state);
-            let detection_cache = Arc::clone(&self.detection_cache);
-            let detection_publisher = self.detection_publisher.clone();
-            let overlay_publisher = self.overlay_publisher.clone();
-            let debug_enabled = self.debug_overlay_enabled;
-
-            match node.create_subscription::<ImageMsg, _>(topic, move |msg: ImageMsg| {
-                Self::image_callback(
-                    msg,
-                    Arc::clone(&detector_state),
-                    Arc::clone(&detection_cache),
-                    &detection_publisher,
-                    &overlay_publisher,
-                    debug_enabled,
-                );
-            }) {
-                Ok(sub) => {
-                    log_info!(
-                        LOGGER_NAME,
-                        "Successfully subscribed to image topic: {topic}"
-                    );
-                    return Some(sub);
-                }
-                Err(e) => {
-                    log_warn!(LOGGER_NAME, "Failed to subscribe to {topic}: {e}");
-                    continue;
-                }
-            }
-        }
-        log_error!(LOGGER_NAME, "Failed to subscribe to any image topic");
-        None
-    }
 
     /// Process incoming image messages and publish detection results
     fn image_callback(
