@@ -1,0 +1,23 @@
+# Detector configuration for hollow board detection
+detector:
+  # RANSAC plane fitting parameters
+  plane_ransac:
+    max_iterations: 500
+    inlier_threshold: 0.05  # meters
+
+  # ICP algorithm parameters
+  icp:
+    max_iterations: 20000
+    pose_weight_threshold: 5.0e-13
+    rejection_threshold: 1.0
+
+  # Board geometry parameters (must match hollow_board.yaml)
+  board:
+    width: 1.0      # meters (1000mm)
+    height: 1.0     # meters (1000mm)
+    thickness: 0.02 # meters (20mm)
+
+  # Hole geometry parameters
+  holes:
+    radius: 0.15           # meters (150mm)
+    center_shift: 0.2      # meters (200mm) - distance from center to hole centers

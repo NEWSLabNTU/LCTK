@@ -12,7 +12,7 @@
 <launch>
     <!-- Common Arguments -->
     <arg name="board_config_file"
-         default="$(find-pkg-share lctk_launch)/config/board/board_pattern.json5"
+         default="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"
          description="Path to calibration board configuration JSON5 file"/>
 
     <arg name="lidar1_pointcloud_topic"
@@ -31,33 +31,8 @@
          default="false"
          description="Enable debug logging"/>
 
-    <!-- Sensor Data Arguments (for lidar.launch.xml) -->
-    <arg name="lidar1_pcap_file"
-         default=""
-         description="Path to the PCAP file for LiDAR 1"/>
-
-    <arg name="lidar2_pcap_file"
-         default=""
-         description="Path to the PCAP file for LiDAR 2"/>
-
-    <!-- Include LiDAR 1 Launch (Always) -->
-    <include file="$(find-pkg-share lctk_launch)/launch/lidar.launch.xml">
-        <arg name="pcap_file" value="$(var lidar1_pcap_file)"/>
-        <arg name="pointcloud_topic" value="$(var lidar1_pointcloud_topic)"/>
-        <arg name="velodyne_packets_topic" value="/sensing/lidar/top/velodyne_packets"/>
-        <arg name="frame_id" value="velodyne_top"/>
-        <arg name="loop" value="false"/>
-    </include>
-
-    <!-- Include LiDAR 2 Launch (Always) -->
-    <include file="$(find-pkg-share lctk_launch)/launch/lidar.launch.xml">
-        <arg name="pcap_file" value="$(var lidar2_pcap_file)"/>
-        <arg name="pointcloud_topic" value="$(var lidar2_pointcloud_topic)"/>
-        <arg name="velodyne_packets_topic" value="/sensing/lidar/front/velodyne_packets"/>
-        <arg name="frame_id" value="velodyne_front"/>
-        <arg name="port" value="2369"/>
-        <arg name="loop" value="false"/>
-    </include>
+    <!-- Note: LiDAR data should be published using two_lidar_sample_data.launch.xml separately -->
+    <!-- Usage: ros2 launch lctk_launch two_lidar_sample_data.launch.xml lidar1_pcap:=/path/to/lidar1.pcap lidar2_pcap:=/path/to/lidar2.pcap -->
 
     <!-- Point Cloud Processing Pipeline for LiDAR 1 -->
     <include file="$(find-pkg-share lctk_launch)/launch/pointcloud_processing.launch.xml">

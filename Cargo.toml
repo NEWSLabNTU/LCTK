@@ -8,6 +8,7 @@ members = [
 exclude = [
     # Launch-only package without Cargo.toml
     "src/ros2/lctk_launch",
+    "src/ros2/lctk_sample_data",
     # Python package without Cargo.toml
     "src/ros2/extrinsic_solver_node",
     "src/ros2/IoU_overlapping",
