@@ -211,17 +211,43 @@ impl ArucoLocatorNode {
         );
 
         // ROS 2 Best Practice: Subscribe to base topics and let launch files handle remapping
-        // The node subscribes to generic "image" and "camera_info" topics
-        // Launch files remap these to actual camera topics (e.g., /sensing/camera/front/image_raw)
+        // The node subscribes to generic "image" topic (remapped by launch file)
+        // and derives the camera_info topic from the image topic namespace
         let image_topic = "image";
-        let camera_info_topic = "camera_info";
+
+        // Configure QoS for sensor input topics
+        let qos_profile = if use_best_effort_qos {
+            QoSProfile::sensor_data_default() // Best effort for live sensors
+        } else {
+            QoSProfile::default() // Reliable for rosbag playback
+        };
+
+        // First create image subscription to get the resolved topic name
+        let mut image_options = SubscriptionOptions::new(image_topic);
+        image_options.qos = qos_profile.clone();
+
+        // Create a temporary subscription to get resolved topic name
+        let temp_image_subscription = node.create_subscription(image_options, |_: ImageMsg| {})?;
+        let resolved_image_topic = temp_image_subscription.topic_name().clone();
+
+        // Derive camera_info topic from resolved image topic
+        let camera_info_topic = if let Some(last_slash) = resolved_image_topic.rfind('/') {
+            let base_path = &resolved_image_topic[..last_slash];
+            format!("{}/camera_info", base_path)
+        } else {
+            "camera_info".to_string()
+        };
 
         log_info!(
             LOGGER_NAME,
-            "Subscribing to base topics (will be remapped by launch file):"
+            "Resolved image topic: {}",
+            resolved_image_topic
         );
-        log_info!(LOGGER_NAME, "  Image topic: {image_topic}");
-        log_info!(LOGGER_NAME, "  Camera info topic: {camera_info_topic}");
+        log_info!(
+            LOGGER_NAME,
+            "Derived camera_info topic: {}",
+            camera_info_topic
+        );
 
         // Create detection publisher
         let detection_publisher = node.create_publisher("aruco_detections")?;
@@ -233,17 +259,10 @@ impl ArucoLocatorNode {
             None
         };
 
-        // Configure QoS for sensor input topics
-        let qos_profile = if use_best_effort_qos {
-            QoSProfile::sensor_data_default() // Best effort for live sensors
-        } else {
-            QoSProfile::default() // Reliable for rosbag playback
-        };
-
-        // Subscribe to camera_info
+        // Subscribe to camera_info using derived topic name
         let detector_state_camera_info = Arc::clone(&detector_state);
         let config_file_for_callback = aruco_config_file.clone();
-        let mut camera_info_options = SubscriptionOptions::new(camera_info_topic);
+        let mut camera_info_options = SubscriptionOptions::new(&camera_info_topic);
         camera_info_options.qos = qos_profile.clone();
         let camera_info_subscription =
             node.create_subscription(camera_info_options, move |msg: CameraInfo| {
@@ -253,7 +272,9 @@ impl ArucoLocatorNode {
                     &config_file_for_callback,
                 );
             })?;
-        // Subscribe to image topic directly (will be remapped by launch file)
+        // Replace temporary subscription with actual image subscription
+        std::mem::drop(temp_image_subscription); // Drop the temporary subscription
+
         let detector_state_image = Arc::clone(&detector_state);
         let detection_cache_image = Arc::clone(&detection_cache);
         let detection_publisher_image = detection_publisher.clone();
