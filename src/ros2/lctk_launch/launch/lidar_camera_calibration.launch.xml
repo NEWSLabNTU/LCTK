@@ -61,25 +61,6 @@
          default="1.0"
          description="Minimum distance for point cloud filtering (meters)"/>
 
-    <!-- Sensor Data Arguments (for sensor.launch.xml) -->
-    <arg name="pcap_file"
-         default=""
-         description="Path to the PCAP file containing Velodyne data"/>
-
-    <arg name="video_file"
-         default=""
-         description="Path to the video file"/>
-
-    <!-- Include Sensor Launch (Always) -->
-    <include file="$(find-pkg-share lctk_launch)/launch/sensor.launch.xml">
-        <arg name="pcap_file" value="$(var pcap_file)"/>
-        <arg name="video_file" value="$(var video_file)"/>
-        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
-        <arg name="camera_name" value="front_center"/>
-        <arg name="camera_namespace" value="/sensing/camera/front_center"/>
-        <arg name="loop" value="$(var loop)"/>
-    </include>
-
     <!-- Image Processing Pipeline -->
     <include file="$(find-pkg-share lctk_launch)/launch/image_processing.launch.xml">
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>

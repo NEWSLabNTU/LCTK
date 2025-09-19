@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for publishing two LiDAR data streams for two-LiDAR calibration.
+
+    This launch file publishes data from two LiDAR sensors from PCAP files
+    for two-LiDAR extrinsic calibration.
+
+    Usage:
+    ros2 launch lctk_sample_data two_lidar.launch.xml
+    ros2 launch lctk_sample_data two_lidar.launch.xml lidar1_pcap:=/path/to/lidar1.pcap lidar2_pcap:=/path/to/lidar2.pcap
+-->
+<launch>
+    <!-- LiDAR 1 Arguments -->
+    <arg name="lidar1_pcap"
+         default="$(find-pkg-share lctk_sample_data)/data/3/lidar.pcap"
+         description="Path to the PCAP file for LiDAR 1"/>
+
+    <arg name="lidar1_pointcloud_topic"
+         default="/sensing/lidar/top/pointcloud_raw"
+         description="Output PointCloud2 topic name for LiDAR 1"/>
+
+    <arg name="lidar1_packets_topic"
+         default="/sensing/lidar/top/velodyne_packets"
+         description="Output VelodyneScan packets topic for LiDAR 1"/>
+
+    <arg name="lidar1_frame_id"
+         default="velodyne_top"
+         description="Frame ID for LiDAR 1 point cloud messages"/>
+
+    <arg name="lidar1_port"
+         default="2368"
+         description="UDP port for LiDAR 1 data"/>
+
+    <!-- LiDAR 2 Arguments -->
+    <arg name="lidar2_pcap"
+         default="$(find-pkg-share lctk_sample_data)/data/4/lidar.pcap"
+         description="Path to the PCAP file for LiDAR 2"/>
+
+    <arg name="lidar2_pointcloud_topic"
+         default="/sensing/lidar/front/pointcloud_raw"
+         description="Output PointCloud2 topic name for LiDAR 2"/>
+
+    <arg name="lidar2_packets_topic"
+         default="/sensing/lidar/front/velodyne_packets"
+         description="Output VelodyneScan packets topic for LiDAR 2"/>
+
+    <arg name="lidar2_frame_id"
+         default="velodyne_front"
+         description="Frame ID for LiDAR 2 point cloud messages"/>
+
+    <arg name="lidar2_port"
+         default="2369"
+         description="UDP port for LiDAR 2 data"/>
+
+    <!-- Common Arguments -->
+    <arg name="model"
+         default="32C"
+         description="Velodyne model (32C, VLP16, etc.)"/>
+
+    <arg name="rpm"
+         default="600.0"
+         description="Device rotation rate (RPM)"/>
+
+    <arg name="loop"
+         default="false"
+         description="Loop PCAP file playback"/>
+
+    <arg name="read_fast"
+         default="false"
+         description="Read PCAP file as fast as possible (true) or preserve timing (false)"/>
+
+    <!-- LiDAR 1: Velodyne driver node -->
+    <node pkg="velodyne_driver"
+          exec="velodyne_driver_node"
+          name="velodyne_driver_node_lidar1"
+          output="log">
+        <param name="model" value="$(var model)"/>
+        <param name="rpm" value="$(var rpm)"/>
+        <param name="frame_id" value="$(var lidar1_frame_id)"/>
+        <param name="port" value="$(var lidar1_port)"/>
+        <param name="pcap" value="$(var lidar1_pcap)"/>
+        <param name="read_once" value="$(eval not loop)"/>
+        <param name="read_fast" value="$(var read_fast)"/>
+        <param name="repeat_delay" value="0.0"/>
+        <param name="cut_angle" value="-0.01"/>
+        <param name="timestamp_first_packet" value="false"/>
+        <remap from="velodyne_packets" to="$(var lidar1_packets_topic)"/>
+    </node>
+
+    <!-- LiDAR 1: Velodyne pointcloud transform node -->
+    <node pkg="velodyne_pointcloud"
+          exec="velodyne_transform_node"
+          name="velodyne_transform_node_lidar1"
+          output="log">
+        <param name="model" value="$(var model)"/>
+        <param name="calibration" value="$(find-pkg-share velodyne_pointcloud)/params/VeloView-VLP-32C.yaml"/>
+        <param name="min_range" value="0.9"/>
+        <param name="max_range" value="130.0"/>
+        <param name="view_direction" value="0.0"/>
+        <param name="organize_cloud" value="false"/>
+        <remap from="velodyne_points" to="$(var lidar1_pointcloud_topic)"/>
+        <remap from="velodyne_packets" to="$(var lidar1_packets_topic)"/>
+    </node>
+
+    <!-- LiDAR 2: Velodyne driver node -->
+    <node pkg="velodyne_driver"
+          exec="velodyne_driver_node"
+          name="velodyne_driver_node_lidar2"
+          output="log">
+        <param name="model" value="$(var model)"/>
+        <param name="rpm" value="$(var rpm)"/>
+        <param name="frame_id" value="$(var lidar2_frame_id)"/>
+        <param name="port" value="$(var lidar2_port)"/>
+        <param name="pcap" value="$(var lidar2_pcap)"/>
+        <param name="read_once" value="$(eval not loop)"/>
+        <param name="read_fast" value="$(var read_fast)"/>
+        <param name="repeat_delay" value="0.0"/>
+        <param name="cut_angle" value="-0.01"/>
+        <param name="timestamp_first_packet" value="false"/>
+        <remap from="velodyne_packets" to="$(var lidar2_packets_topic)"/>
+    </node>
+
+    <!-- LiDAR 2: Velodyne pointcloud transform node -->
+    <node pkg="velodyne_pointcloud"
+          exec="velodyne_transform_node"
+          name="velodyne_transform_node_lidar2"
+          output="log">
+        <param name="model" value="$(var model)"/>
+        <param name="calibration" value="$(find-pkg-share velodyne_pointcloud)/params/VeloView-VLP-32C.yaml"/>
+        <param name="min_range" value="0.9"/>
+        <param name="max_range" value="130.0"/>
+        <param name="view_direction" value="0.0"/>
+        <param name="organize_cloud" value="false"/>
+        <remap from="velodyne_points" to="$(var lidar2_pointcloud_topic)"/>
+        <remap from="velodyne_packets" to="$(var lidar2_packets_topic)"/>
+    </node>
+</launch>

@@ -116,9 +116,7 @@ launch_sensor:
 	@echo "Creating and starting sensor publishers service with ros2systemd..."
 	. install/setup.sh && \
 	ros2 systemd remove lctk-sensor 2>/dev/null || true && \
-	ros2 systemd create lctk-sensor launch lctk_launch sensor.launch.xml \
-		pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
-		video_file:=$(PWD)/data/sampledata/3/video.avi \
+	ros2 systemd create lctk-sensor launch lctk_sample_data lidar_camera.launch.xml \
 		loop:=true && \
 	ros2 systemd start lctk-sensor
 	@echo "Sensor service started. Use 'make service_status' to check status or 'make stop_sensor' to stop."
@@ -169,11 +167,11 @@ launch_two_lidar_calibration:
 	@echo "Creating and starting two LiDAR calibration service with ros2systemd..."
 	. install/setup.sh && \
 	ros2 systemd remove lctk-two-lidar 2>/dev/null || true && \
-	ros2 systemd create lctk-two-lidar launch lctk_launch two_lidar_calibration.launch.xml \
-		lidar1_pcap_file:=$(PWD)/data/sampledata/3/lidar.pcap \
-		lidar2_pcap_file:=$(PWD)/data/sampledata/4/lidar.pcap && \
+	ros2 systemd create lctk-two-lidar launch lctk_launch two_lidar_calibration.launch.xml && \
 	ros2 systemd start lctk-two-lidar
 	@echo "Two LiDAR calibration service started. Use 'make service_status' to check status or 'make stop_two_lidar_calibration' to stop."
+	@echo ""
+	@echo "Note: You need to publish two LiDAR data streams separately for calibration to work."
 
 .PHONY: stop_two_lidar_calibration
 stop_two_lidar_calibration:

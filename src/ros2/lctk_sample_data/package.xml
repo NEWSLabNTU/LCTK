@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lctk_sample_data</name>
+  <version>0.0.1</version>
+  <description>Sample data and launch files for LCTK calibration demonstrations</description>
+  <maintainer email="lctk@example.com">LCTK Team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Launch file dependencies -->
+  <exec_depend>ros2launch</exec_depend>
+
+  <!-- Sensor driver dependencies -->
+  <exec_depend>velodyne_driver</exec_depend>
+  <exec_depend>velodyne_pointcloud</exec_depend>
+  <exec_depend>gscam</exec_depend>
+
+  <!-- LCTK dependencies -->
+  <exec_depend>sensor_synchronizer</exec_depend>
+  <exec_depend>lctk_launch</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
