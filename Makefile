@@ -39,6 +39,7 @@ help:
 	@echo "  make lint                       - Run linters and formatters check"
 	@echo "  make clean                      - Clean all build artifacts"
 	@echo "  make launch_simple_extrinsic_solver - Launch simple extrinsic solver"
+	@echo "  make launch_iou_overlapping        - Launch IoU overlapping evaluator"
 	@echo ""
 	@echo "For more information, see README.md and CLAUDE.md"
 
@@ -163,6 +164,13 @@ launch_simple_extrinsic_solver:
 	@echo "Launching simple_extrinsic_solver..."
 	. install/setup.sh && \
 	ros2 launch simple_extrinsic_solver simple_extrinsic_solver.launch.py
+
+.PHONY: launch_iou_overlapping
+launch_iou_overlapping:
+	@echo "Launching IoU overlapping evaluator..."
+	@echo "This will evaluate extrinsic matrix quality using IoU between board detection and LiDAR projection."
+	. install/setup.sh && \
+	install/iou_overlapping/bin/evaluator --ros-args -p extrinsic_json:=/home/newslab/LCTK/install/iou_overlapping/share/iou_overlapping/config/extrinsic.json
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:

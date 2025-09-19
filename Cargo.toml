@@ -10,6 +10,7 @@ exclude = [
     "src/ros2/lctk_launch",
     # Python package without Cargo.toml
     "src/ros2/extrinsic_solver_node",
+    "src/ros2/IoU_overlapping",
 ]
 
 [workspace.dependencies]
