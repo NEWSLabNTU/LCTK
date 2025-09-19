@@ -149,12 +149,6 @@ launch_rviz:
 	. install/setup.sh && \
 	ros2 launch lctk_launch rviz.launch.xml
 
-.PHONY: launch_simple_extrinsic_solver
-launch_simple_extrinsic_solver:
-	@echo "Launching simple_extrinsic_solver..."
-	. install/setup.sh && \
-	ros2 launch simple_extrinsic_solver simple_extrinsic_solver.launch.py
-
 .PHONY: launch_iou_overlapping
 launch_iou_overlapping:
 	@echo "Launching IoU overlapping evaluator..."
