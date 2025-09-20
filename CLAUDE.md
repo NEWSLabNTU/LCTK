@@ -99,6 +99,7 @@ The project is organized into:
    - `pointcloud_image_overlay`: Overlay point clouds on camera images
    - `synchronizer`: Synchronize multiple data streams
    - `rosbag_deck`: ROS bag playback and recording tools
+   - `bbox_interactive_adjuster`: Interactive tool for adjusting calibration bounding box parameters
 
 3. **Scripts** (`scripts/`): Automation scripts for calibration workflows
    - `lidar-to-camera-calibration/`: Scripts for LiDAR to camera calibration
@@ -157,6 +158,42 @@ ros2 topic echo /calibration/debug/all_points
 # View in RViz
 rviz2 -d config/debug_visualization.rviz
 ```
+
+### BBox Interactive Adjuster
+
+The calibration_board_locator node uses a bounding box to filter input point cloud data. The bbox parameters can be adjusted in real-time using the interactive bbox adjuster tool:
+
+```bash
+# Start calibration pipeline first
+make launch_lidar_camera_calibration debug_mode:=true
+
+# In a separate screen/tmux session, run the bbox adjuster
+make run_bbox_adjuster
+```
+
+**Keyboard Controls:**
+- **Position**: `w/s` (X), `a/d` (Y), `q/e` (Z)
+- **Size**: `t/g` (X), `y/h` (Y), `u/j` (Z)
+- **Rotation**: `i/k` (Roll), `o/l` (Pitch), `p/;` (Yaw)
+- **Step Size**: `+/-` (Increase/decrease adjustment step)
+- **Actions**: `ENTER` (update parameters), `c` (save to config file), `q` (quit), `?` (help)
+
+**Technical Implementation:**
+- Uses file-based config reloading (not ROS parameters due to rclrs limitations)
+- Bbox adjuster saves changes to `/install/lctk_launch/share/lctk_launch/config/board/bbox.json5`
+- Calibration node automatically reloads config every 10th message
+- Changes are reflected in real-time via debug bbox marker topic: `/calibration/calibration_board_locator/debug/bbox_marker`
+
+**Visualization:**
+The updated bbox is visualized in RViz as a semi-transparent green cube. When debug mode is enabled, additional debug topics show:
+- `/calibration/debug/bbox_marker`: Bounding box visualization
+- `/calibration/debug/filtered_points`: Points inside the current bbox
+- `/calibration/debug/all_points`: All input points before filtering
+
+**Usage Notes:**
+- Requires an interactive terminal (use screen/tmux for best results)
+- Config changes persist between sessions
+- bbox.json5 supports both quaternions and Euler angles for rotation
 
 ## Running Specific Tools
 
@@ -418,3 +455,11 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   )?;
   ```
 - Whenever you run a command requiring root privilege (such as sudo), stop and show the command to user so that user can run the command in another terminal.
+- If you use --symlink-install in colcon build, there is no need to rebuild the package if the file is yaml, json and py format and was installed before.
+- **BBox Interactive Adjuster**: Implemented complete interactive bounding box adjustment system for calibration_board_locator:
+  - Enhanced BBox struct to support Euler angles alongside quaternions
+  - Created Python ROS2 package `bbox_interactive_adjuster` with full keyboard controls
+  - Implemented file-based config reloading in calibration_board_locator (periodic reload every 10th message)
+  - Added debug bbox marker visualization topic for real-time feedback
+  - Uses file-based approach instead of ROS parameters due to rclrs limitations with parameter callbacks
+  - Makefile target: `make run_bbox_adjuster` (requires interactive terminal/screen/tmux)
