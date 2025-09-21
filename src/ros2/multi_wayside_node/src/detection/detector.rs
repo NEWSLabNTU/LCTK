@@ -33,6 +33,16 @@ impl HollowBoardDetectionProcessor {
             icp_rejection_threshold: 0.01,
             plane_ransac_max_iterations: 1000,
             plane_ransac_inlier_threshold: 0.5,
+
+            // ICP algorithm tuning parameters
+            icp_good_fit_threshold: 0.015,
+            icp_outlier_threshold: 0.1,
+            icp_adaptive_threshold_multiplier: 2.0,
+            icp_adaptive_threshold_min: 0.01,
+            icp_adaptive_threshold_max: 1.0,
+            icp_damping_factor: 0.3,
+            icp_min_inlier_points: 200,
+
             board_shape: BoardShape {
                 board_width: Length::from_inches(12.0),
                 hole_radius: Length::from_inches(0.5),

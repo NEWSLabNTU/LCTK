@@ -96,7 +96,10 @@ The project is organized into:
    - `extrinsic_solver`: Solve extrinsic parameters between LiDAR and camera (requires SFCGAL)
    - `multi_wayside`: Handle multi-wayside calibration (requires SFCGAL)
    - `multi_wayside_node`: Multi-wayside calibration ROS node (requires SFCGAL)
-   - `pointcloud_image_overlay`: Overlay point clouds on camera images
+   - `pointcloud_image_overlay`: Overlay point clouds on camera images (Python)
+     - Automatically derives camera_info topic from image topic following image_pipeline convention
+     - Always publishes overlay images when input images are available
+     - Displays error messages on output images when extrinsic calibration is missing
    - `synchronizer`: Synchronize multiple data streams
    - `rosbag_deck`: ROS bag playback and recording tools
 
@@ -249,6 +252,18 @@ The environment setup script is in `setup/setup-env.sh`.
 
 ## ROS 2 Integration
 
+### Topic Naming Conventions
+
+**Camera Info Topic Derivation (image_pipeline convention):**
+- ROS 2 nodes automatically derive the `camera_info` topic from the image topic
+- Convention: Replace the last component of the image topic with `camera_info`
+- Examples:
+  - `/sensing/camera/front_center/image_raw` → `/sensing/camera/front_center/camera_info`
+  - `/my/camera/image` → `/my/camera/camera_info`
+  - `/camera/compressed` → `/camera/camera_info`
+- Nodes implementing this: `aruco_locator_node`, `pointcloud_image_overlay`
+- No manual remapping needed for camera_info in launch files
+
 Several LCTK tools have been converted to ROS 2 nodes:
 
 1. **aruco_locator_node**: Detects ArUco markers in camera images
@@ -389,6 +404,7 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   - Extrinsic solver properly remapped to consume synchronized topics instead of raw detection topics
   - Detection synchronizer shows active subscriptions and publishes to synchronized topics
 - **Board Detector Performance**: Fixed ICP algorithm performance by reducing max_iterations from 20,000 to 100 in board_detector.json5, preventing minutes-long processing delays
+- **Camera Info Topic Derivation**: ROS 2 nodes (aruco_locator_node, pointcloud_image_overlay) automatically derive camera_info topics from image topics following image_pipeline convention (e.g., /camera/image_raw → /camera/camera_info). No manual camera_info remapping needed in launch files
 
 ## Coding Style
 

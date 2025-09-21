@@ -86,10 +86,7 @@ pub fn fit_board_icp(
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
     mut progress_cb: Option<&mut dyn FnMut(&BoardModel)>,
 ) -> Result<FitBoardIcp> {
-    // find board by modified ICP algoirthm
-    const GOOD_FIT_THRESHOLD: f64 = 0.015; // velodyne 32-MR
-                                           // let good_fit_threshold = 0.1; // ouster os-1
-    const OUTLIER_THRESHOLD: f64 = 0.1;
+    // find board by modified ICP algorithm
 
     let Config {
         board_shape:
@@ -101,6 +98,13 @@ pub fn fit_board_icp(
         max_icp_iterations,
         icp_pose_weight_threshold,
         icp_rejection_threshold,
+        icp_good_fit_threshold,
+        icp_outlier_threshold,
+        icp_adaptive_threshold_multiplier,
+        icp_adaptive_threshold_min,
+        icp_adaptive_threshold_max,
+        icp_damping_factor,
+        icp_min_inlier_points,
         ..
     } = *board_detector;
     let marker_paper_size = aruco_detector.paper_size();
@@ -201,8 +205,13 @@ pub fn fit_board_icp(
                     correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
 
                 // Improved outlier filtering with adaptive thresholds
-                // Use a more reasonable threshold that adapts to the current loss
-                let adaptive_threshold = (avg_loss * 2.0).max(0.01).min(1.0);
+                // Use a configurable threshold that adapts to the current loss
+                let adaptive_threshold = (avg_loss * icp_adaptive_threshold_multiplier)
+                    .max(icp_adaptive_threshold_min)
+                    .min(icp_adaptive_threshold_max);
+
+                // Alternative: use fixed outlier threshold for more stable filtering
+                // let adaptive_threshold = icp_outlier_threshold;
                 let good_correspondences: Vec<_> = correspondings
                     .iter()
                     .zip(correspondence_losses.iter())
@@ -281,7 +290,7 @@ pub fn fit_board_icp(
                 inlier_points = good_inlier_points;
 
                 // Apply damping to prevent overshooting
-                let damping_factor = 0.3; // More reasonable damping factor for faster convergence
+                let damping_factor = icp_damping_factor;
 
                 // Apply damping to the pose update (not the transformation itself)
                 // This interpolates between the current pose and the new pose after applying the transformation
@@ -317,16 +326,17 @@ pub fn fit_board_icp(
                 step += 1;
 
                 // Check if we have enough inlier points to continue
-                if inlier_points.len() < 2000 {
+                if inlier_points.len() < icp_min_inlier_points {
                     break (inlier_points, good_corresponding_points, losses, pose);
                 }
 
-                if *losses.last().unwrap() < icp_rejection_threshold || termination_count > 10 {
+                if *losses.last().unwrap() < icp_good_fit_threshold || termination_count > 10 {
                     debug!(
                         "🏆 ICP terminating: loss is too small: {:.8}",
                         losses.last().unwrap()
                     );
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
+                    debug!("  Good fit threshold: {:.8}", icp_good_fit_threshold);
                     debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
                     debug!("  Avg loss: {:.8}", *losses.last().unwrap());
                     debug!("  Inlier points: {}", inlier_points.len());

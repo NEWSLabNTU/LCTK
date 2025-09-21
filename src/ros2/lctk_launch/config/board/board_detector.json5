@@ -1,16 +1,40 @@
 {
+    // ========================================
+    // RANSAC Plane Fitting Parameters
+    // ========================================
     // max number of RANSAC steps
     "plane_ransac_max_iterations": 500,
     // the loss threshold that a point is considered an inlier
     "plane_ransac_inlier_threshold": 0.5,
-    // max number of ICP iterations
-    "max_icp_iterations": 100,
-    // pose weight is amount of pose change per iteration
-    // the ICP terminates if pose weight is blow this threshold several times
-    "icp_pose_weight_threshold": 1e-5,
 
-    // the maximum accepted ICP loss
-    "icp_rejection_threshold": 1e-3,
+    // ========================================
+    // ICP Algorithm Parameters
+    // ========================================
+    // max number of ICP iterations (increased for better results)
+    "max_icp_iterations": 1000,
+    // pose weight is amount of pose change per iteration
+    // the ICP terminates if pose weight is below this threshold several times
+    "icp_pose_weight_threshold": 5e-4,
+    // the maximum accepted ICP loss (tuned for better convergence)
+    "icp_rejection_threshold": 0.03,
+    // good fit threshold for convergence detection (tightened for better precision)
+    "icp_good_fit_threshold": 0.05,
+    // outlier rejection threshold for correspondence filtering (tightened)
+    "icp_outlier_threshold": 0.15,
+    // adaptive threshold multiplier for outlier rejection
+    "icp_adaptive_threshold_multiplier": 1.2,
+    // minimum adaptive threshold value
+    "icp_adaptive_threshold_min": 0.01,
+    // maximum adaptive threshold value
+    "icp_adaptive_threshold_max": 0.3,
+    // damping factor for pose updates to prevent overshooting (reduced for finer adjustments)
+    "icp_damping_factor": 0.3,
+    // minimum number of inlier points required to continue ICP iterations
+    "icp_min_inlier_points": 150,
+
+    // ========================================
+    // Board Geometry Parameters
+    // ========================================
     // the length of border margin
     "board_width": "1000mm",    // mm
     // the radius of circle holes
