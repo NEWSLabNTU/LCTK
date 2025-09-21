@@ -257,104 +257,121 @@ class OverlayNode(Node):
         # Default filter configuration
         self.filter_config = {
             "filtering_enabled": True,
-            "z_filter": {
-                "enabled": True,
-                "min_distance": 0.1,
-                "max_distance": 50.0
-            },
-            "x_filter": {
-                "enabled": True,
-                "max_range": 20.0
-            },
-            "y_filter": {
-                "enabled": True,
-                "max_range": 20.0
-            },
+            "z_filter": {"enabled": True, "min_distance": 0.1, "max_distance": 50.0},
+            "x_filter": {"enabled": True, "max_range": 20.0},
+            "y_filter": {"enabled": True, "max_range": 20.0},
             "logging": {
                 "log_stats_every_n_frames": 30,
-                "enable_filter_breakdown": True
-            }
+                "enable_filter_breakdown": True,
+            },
         }
 
         if not config_path:
-            self.get_logger().info("No filter config file provided, using default filtering parameters")
+            self.get_logger().info(
+                "No filter config file provided, using default filtering parameters"
+            )
             return
 
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, "r") as f:
                 loaded_config = json5.load(f)
                 self.filter_config.update(loaded_config)
 
             self.get_logger().info(f"Loaded filter config from {config_path}")
-            self.get_logger().info(f"Filtering enabled: {self.filter_config['filtering_enabled']}")
+            self.get_logger().info(
+                f"Filtering enabled: {self.filter_config['filtering_enabled']}"
+            )
 
-            if self.filter_config['filtering_enabled']:
-                z_cfg = self.filter_config['z_filter']
-                x_cfg = self.filter_config['x_filter']
-                y_cfg = self.filter_config['y_filter']
+            if self.filter_config["filtering_enabled"]:
+                z_cfg = self.filter_config["z_filter"]
+                x_cfg = self.filter_config["x_filter"]
+                y_cfg = self.filter_config["y_filter"]
 
                 self.get_logger().info(f"Filter ranges:")
-                self.get_logger().info(f"  - Z (depth): {z_cfg['min_distance']}m to {z_cfg['max_distance']}m (enabled: {z_cfg['enabled']})")
-                self.get_logger().info(f"  - X (horizontal): ±{x_cfg['max_range']}m (enabled: {x_cfg['enabled']})")
-                self.get_logger().info(f"  - Y (vertical): ±{y_cfg['max_range']}m (enabled: {y_cfg['enabled']})")
+                self.get_logger().info(
+                    f"  - Z (depth): {z_cfg['min_distance']}m to {z_cfg['max_distance']}m (enabled: {z_cfg['enabled']})"
+                )
+                self.get_logger().info(
+                    f"  - X (horizontal): ±{x_cfg['max_range']}m (enabled: {x_cfg['enabled']})"
+                )
+                self.get_logger().info(
+                    f"  - Y (vertical): ±{y_cfg['max_range']}m (enabled: {y_cfg['enabled']})"
+                )
             else:
                 self.get_logger().info("Pointcloud filtering is DISABLED")
 
         except FileNotFoundError:
-            self.get_logger().warn(f"Filter config file not found: {config_path}, using defaults")
+            self.get_logger().warn(
+                f"Filter config file not found: {config_path}, using defaults"
+            )
         except Exception as e:
-            self.get_logger().error(f"Failed to load filter config: {e}, using defaults")
+            self.get_logger().error(
+                f"Failed to load filter config: {e}, using defaults"
+            )
 
-    def _apply_pointcloud_filters(self, X_cam: np.ndarray, total_points: int) -> np.ndarray:
+    def _apply_pointcloud_filters(
+        self, X_cam: np.ndarray, total_points: int
+    ) -> np.ndarray:
         """Apply configurable pointcloud filtering."""
-        if not self.filter_config['filtering_enabled']:
+        if not self.filter_config["filtering_enabled"]:
             # Return all points as valid
             return np.ones(X_cam.shape[0], dtype=bool)
 
         # Initialize mask with all points valid
         valid_mask = np.ones(X_cam.shape[0], dtype=bool)
 
-        z_cfg = self.filter_config['z_filter']
-        x_cfg = self.filter_config['x_filter']
-        y_cfg = self.filter_config['y_filter']
-        log_cfg = self.filter_config['logging']
+        z_cfg = self.filter_config["z_filter"]
+        x_cfg = self.filter_config["x_filter"]
+        y_cfg = self.filter_config["y_filter"]
+        log_cfg = self.filter_config["logging"]
 
         # Z-axis filtering (depth)
-        if z_cfg['enabled']:
-            z_mask = (X_cam[:, 2] > z_cfg['min_distance']) & (X_cam[:, 2] < z_cfg['max_distance'])
+        if z_cfg["enabled"]:
+            z_mask = (X_cam[:, 2] > z_cfg["min_distance"]) & (
+                X_cam[:, 2] < z_cfg["max_distance"]
+            )
             valid_mask = valid_mask & z_mask
         else:
             z_mask = np.ones(X_cam.shape[0], dtype=bool)
 
         # X-axis filtering (horizontal)
-        if x_cfg['enabled']:
-            x_mask = np.abs(X_cam[:, 0]) < x_cfg['max_range']
+        if x_cfg["enabled"]:
+            x_mask = np.abs(X_cam[:, 0]) < x_cfg["max_range"]
             valid_mask = valid_mask & x_mask
         else:
             x_mask = np.ones(X_cam.shape[0], dtype=bool)
 
         # Y-axis filtering (vertical)
-        if y_cfg['enabled']:
-            y_mask = np.abs(X_cam[:, 1]) < y_cfg['max_range']
+        if y_cfg["enabled"]:
+            y_mask = np.abs(X_cam[:, 1]) < y_cfg["max_range"]
             valid_mask = valid_mask & y_mask
         else:
             y_mask = np.ones(X_cam.shape[0], dtype=bool)
 
         # Logging
         points_valid = np.sum(valid_mask)
-        if self.publish_count % log_cfg['log_stats_every_n_frames'] == 0:
+        if self.publish_count % log_cfg["log_stats_every_n_frames"] == 0:
             self.get_logger().info(
                 f"Points in valid range: {points_valid}/{total_points} ({points_valid/total_points*100:.1f}%)"
             )
 
-            if log_cfg['enable_filter_breakdown'] and self.filter_config['filtering_enabled']:
+            if (
+                log_cfg["enable_filter_breakdown"]
+                and self.filter_config["filtering_enabled"]
+            ):
                 self.get_logger().info(f"Filter breakdown:")
-                if z_cfg['enabled']:
-                    self.get_logger().info(f"  - Z filter ({z_cfg['min_distance']}-{z_cfg['max_distance']}m): {np.sum(z_mask)} points")
-                if x_cfg['enabled']:
-                    self.get_logger().info(f"  - X filter (±{x_cfg['max_range']}m): {np.sum(x_mask)} points")
-                if y_cfg['enabled']:
-                    self.get_logger().info(f"  - Y filter (±{y_cfg['max_range']}m): {np.sum(y_mask)} points")
+                if z_cfg["enabled"]:
+                    self.get_logger().info(
+                        f"  - Z filter ({z_cfg['min_distance']}-{z_cfg['max_distance']}m): {np.sum(z_mask)} points"
+                    )
+                if x_cfg["enabled"]:
+                    self.get_logger().info(
+                        f"  - X filter (±{x_cfg['max_range']}m): {np.sum(x_mask)} points"
+                    )
+                if y_cfg["enabled"]:
+                    self.get_logger().info(
+                        f"  - Y filter (±{y_cfg['max_range']}m): {np.sum(y_mask)} points"
+                    )
                 self.get_logger().info(f"  - Combined: {points_valid} points")
 
         return valid_mask
