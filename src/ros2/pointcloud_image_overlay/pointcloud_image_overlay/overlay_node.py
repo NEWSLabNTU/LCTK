@@ -16,6 +16,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import Image, PointCloud2, CameraInfo
 from cv_bridge import CvBridge
+from dataclasses import dataclass
 
 
 def read_extrinsic_4x4(path: str) -> np.ndarray:
@@ -54,6 +55,52 @@ def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
     return np.asarray(xyz, dtype=np.float32)
 
 
+@dataclass
+class BBox:
+    """Bounding box for filtering pointcloud points."""
+    # Position and orientation (translation and rotation)
+    position: np.ndarray  # [x, y, z] in meters
+    rotation: np.ndarray  # [rx, ry, rz] in radians (Euler angles)
+    # Size of the bounding box
+    size_xyz: np.ndarray  # [width, height, depth] in meters
+    
+    def __post_init__(self):
+        """Convert to numpy arrays if needed."""
+        self.position = np.array(self.position, dtype=np.float64)
+        self.rotation = np.array(self.rotation, dtype=np.float64)
+        self.size_xyz = np.array(self.size_xyz, dtype=np.float64)
+    
+    @classmethod
+    def default(cls) -> 'BBox':
+        """Create default bounding box similar to bbox.rs."""
+        return cls(
+            position=[2.5, 0.0, 0.0],  # 2.5m in front of LiDAR
+            rotation=[0.0, 0.0, 0.0],  # No rotation
+            size_xyz=[1.0, 3.0, 2.0]  # x_range: 2~3 (1), y_range: -1.5~1.5 (3), z_range: -1~1 (2)
+        )
+    
+    def contains_point(self, point: np.ndarray) -> bool:
+        """Check if a point is inside the bounding box."""
+        # Transform point to bounding box local coordinate system
+        # For simplicity, we'll use a basic translation (no rotation for now)
+        local_point = point - self.position
+        
+        # Check if point is within bounds
+        half_sizes = self.size_xyz / 2.0
+        return (np.abs(local_point[0]) <= half_sizes[0] and
+                np.abs(local_point[1]) <= half_sizes[1] and
+                np.abs(local_point[2]) <= half_sizes[2])
+    
+    def filter_points(self, points: np.ndarray) -> np.ndarray:
+        """Filter points to only include those inside the bounding box."""
+        if points.shape[0] == 0:
+            return points
+        
+        # Create mask for points inside bounding box
+        mask = np.array([self.contains_point(point) for point in points])
+        return points[mask]
+
+
 class OverlayNode(Node):
     def __init__(self):
         super().__init__("pointcloud_image_overlay")
@@ -68,6 +115,10 @@ class OverlayNode(Node):
         # Parameters
         self.declare_parameter("extrinsic_json5", "")
         self.declare_parameter("use_best_effort_qos", True)
+        self.declare_parameter("use_bbox_filter", True)
+        self.declare_parameter("bbox_position", [2.5, 0.0, 0.0])  # [x, y, z] in meters
+        self.declare_parameter("bbox_rotation", [0.0, 0.0, 0.0])  # [rx, ry, rz] in radians
+        self.declare_parameter("bbox_size", [1.0, 3.0, 2.0])     # [width, height, depth] in meters
 
         # Load extrinsic calibration
         extr_path = (
@@ -91,6 +142,26 @@ class OverlayNode(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to read extrinsic: {e}")
             self.T_lidar_cam = None
+
+        # Initialize bounding box for pointcloud filtering
+        use_bbox_filter = self.get_parameter("use_bbox_filter").get_parameter_value().bool_value
+        if use_bbox_filter:
+            bbox_position = self.get_parameter("bbox_position").get_parameter_value().double_array_value
+            bbox_rotation = self.get_parameter("bbox_rotation").get_parameter_value().double_array_value
+            bbox_size = self.get_parameter("bbox_size").get_parameter_value().double_array_value
+            
+            self.bbox = BBox(
+                position=bbox_position,
+                rotation=bbox_rotation,
+                size_xyz=bbox_size
+            )
+            self.get_logger().info(f"Bounding box filter enabled:")
+            self.get_logger().info(f"  Position: {self.bbox.position}")
+            self.get_logger().info(f"  Rotation: {self.bbox.rotation}")
+            self.get_logger().info(f"  Size: {self.bbox.size_xyz}")
+        else:
+            self.bbox = None
+            self.get_logger().info("Bounding box filter disabled")
 
         # State
         self.K: Optional[np.ndarray] = None
@@ -325,6 +396,29 @@ class OverlayNode(Node):
                 self.get_logger().info(f"  - X: {np.mean(xyz[:, 0]):.2f}±{np.std(xyz[:, 0]):.2f}m (range: {np.min(xyz[:, 0]):.2f} to {np.max(xyz[:, 0]):.2f})")
                 self.get_logger().info(f"  - Y: {np.mean(xyz[:, 1]):.2f}±{np.std(xyz[:, 1]):.2f}m (range: {np.min(xyz[:, 1]):.2f} to {np.max(xyz[:, 1]):.2f})")
                 self.get_logger().info(f"  - Z: {np.mean(xyz[:, 2]):.2f}±{np.std(xyz[:, 2]):.2f}m (range: {np.min(xyz[:, 2]):.2f} to {np.max(xyz[:, 2]):.2f})")
+
+            # Apply bounding box filtering if enabled
+            if self.bbox is not None:
+                original_count = xyz.shape[0]
+                xyz = self.bbox.filter_points(xyz)
+                filtered_count = xyz.shape[0]
+                
+                if self.publish_count % 30 == 0:
+                    self.get_logger().info(f"Bounding box filtering: {filtered_count}/{original_count} points ({filtered_count/original_count*100:.1f}%)")
+                    if filtered_count > 0:
+                        self.get_logger().info(f"Filtered LiDAR point distribution:")
+                        self.get_logger().info(f"  - X: {np.mean(xyz[:, 0]):.2f}±{np.std(xyz[:, 0]):.2f}m (range: {np.min(xyz[:, 0]):.2f} to {np.max(xyz[:, 0]):.2f})")
+                        self.get_logger().info(f"  - Y: {np.mean(xyz[:, 1]):.2f}±{np.std(xyz[:, 1]):.2f}m (range: {np.min(xyz[:, 1]):.2f} to {np.max(xyz[:, 1]):.2f})")
+                        self.get_logger().info(f"  - Z: {np.mean(xyz[:, 2]):.2f}±{np.std(xyz[:, 2]):.2f}m (range: {np.min(xyz[:, 2]):.2f} to {np.max(xyz[:, 2]):.2f})")
+                
+                if xyz.shape[0] == 0:
+                    # No points after filtering, publish original image
+                    if self.publish_count % 30 == 0:
+                        self.get_logger().warn("No points remaining after bounding box filtering - publishing original image")
+                    out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
+                    out.header = self.last_image.header
+                    self.pub.publish(out)
+                    return
 
             # Use OpenCV projectPoints with extrinsic from LiDAR to camera
             R = self.T_lidar_cam[:3, :3]
