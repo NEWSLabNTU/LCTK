@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    detection::{FitBoardIcp, FitPlaneRansac, IcpData, PlaneRansacData},
+    detection::{FitBoardIcp, FitPlaneRansac, IcpData, IcpStatistics, PlaneRansacData},
 };
 use anyhow::Result;
 use arrsac::Arrsac;
@@ -109,6 +109,17 @@ pub fn fit_board_icp(
     } = *board_detector;
     let marker_paper_size = aruco_detector.paper_size();
 
+    // Declare variables for ICP outputs at function scope
+    let mut final_corresponding_points: Vec<Point3<f64>> = vec![];
+    let mut final_icp_stats = IcpStatistics {
+        iterations: 0,
+        final_loss: 0.0,
+        min_loss: f64::INFINITY,
+        successful: false,
+        initial_loss: 0.0,
+        convergence_reason: "Not started".to_string(),
+    };
+
     let (board_pose, icp_losses, viz_msg) = {
         let init_pose = {
             let inlier_centroid: Point3<f64> =
@@ -119,56 +130,101 @@ pub fn fit_board_icp(
                 .unwrap()
                 .into();
 
-            // obtain the plane normal vector that points towards the origin (like lib.rs)
+            // Improved plane normal determination
             let plane_normal = {
                 let normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
-                if (Point3::origin() - inlier_centroid).dot(&normal) < 0.0 {
-                    -normal
+
+                // The RANSAC plane normal from fit_plane_ransac is already forced to point toward +X (front)
+                // We should use this directly as it represents the board facing direction
+                let board_facing_normal = normal;
+
+                debug!("INIT POSE: inlier_centroid={:.6}", inlier_centroid);
+                debug!("INIT POSE: board_facing_normal={:.6}", board_facing_normal);
+                debug!(
+                    "INIT POSE: normal_magnitude={:.6}",
+                    board_facing_normal.norm()
+                );
+
+                board_facing_normal
+            };
+
+            // Improved rotation calculation using direct normal alignment
+            let rotation = {
+                // The board's local +Z axis should align with the plane normal
+                let board_z_axis = Vector3::z_axis();
+
+                // Create rotation that aligns board +Z with plane normal
+                let primary_rotation =
+                    UnitQuaternion::rotation_between(&board_z_axis, &plane_normal).unwrap_or_else(
+                        || {
+                            debug!("INIT POSE: primary rotation failed, using identity");
+                            UnitQuaternion::identity()
+                        },
+                    );
+
+                // After primary rotation, determine board orientation in the plane
+                // The board should be oriented so its local +X points roughly toward the sensor origin
+                let rotated_board_x = primary_rotation * Vector3::x_axis();
+
+                // Project the vector from centroid to origin onto the plane
+                let centroid_to_origin = Point3::origin() - inlier_centroid;
+                let projected_to_origin =
+                    centroid_to_origin - plane_normal * centroid_to_origin.dot(&plane_normal);
+
+                if projected_to_origin.norm() > 1e-6 {
+                    let target_direction = projected_to_origin.normalize();
+
+                    // Calculate rotation around plane normal to align board +X with target direction
+                    let secondary_rotation =
+                        UnitQuaternion::rotation_between(&rotated_board_x, &target_direction)
+                            .unwrap_or_else(|| UnitQuaternion::identity());
+
+                    let final_rotation = secondary_rotation * primary_rotation;
+
+                    debug!("INIT POSE: primary_rotation={:.6}", primary_rotation);
+                    debug!("INIT POSE: rotated_board_x={:.6}", rotated_board_x.as_ref());
+                    debug!("INIT POSE: projected_to_origin={:.6}", projected_to_origin);
+                    debug!("INIT POSE: target_direction={:.6}", target_direction);
+                    debug!("INIT POSE: secondary_rotation={:.6}", secondary_rotation);
+                    debug!("INIT POSE: final_rotation={:.6}", final_rotation);
+
+                    final_rotation
                 } else {
-                    normal
+                    debug!("INIT POSE: no clear direction to origin, using primary rotation only");
+                    primary_rotation
                 }
             };
 
-            // Let the XY-plane projections of board normal and plane normal overlap
-            // (follow the rotation initialization logic from lib.rs)
-            let rotation = {
-                // Lift the board's +Z to point toward +X after two fixed rotations
-                let lifting_rotation =
-                    UnitQuaternion::from_euler_angles(0.0, -f64::consts::FRAC_PI_2, 0.0)
-                        * UnitQuaternion::from_euler_angles(0.0, 0.0, -f64::consts::FRAC_PI_4);
-                let lifted_normal = lifting_rotation * Vector3::z_axis();
+            let init_pose =
+                Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation);
+            debug!("INIT POSE: final_init_pose={:.6}", init_pose);
 
-                // Align the lifted normal to the plane normal projected on XY plane
-                let planar_rotation = {
-                    let planar_plane_normal = Vector3::new(plane_normal.x, plane_normal.y, 0.0);
-                    UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
-                        .unwrap_or_else(|| {
-                            if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
-                                UnitQuaternion::identity()
-                            } else {
-                                UnitQuaternion::from_euler_angles(0.0, 0.0, f64::consts::PI)
-                            }
-                        })
-                };
+            // Validate the initialization
+            let board_normal_after_rotation = rotation * Vector3::z_axis();
+            let normal_alignment = board_normal_after_rotation.dot(&plane_normal);
+            debug!("INIT POSE: normal_alignment_check={:.6}", normal_alignment);
 
-                let rot = planar_rotation * lifting_rotation;
-                rot
-            };
+            if normal_alignment < 0.9 {
+                debug!("INIT POSE: WARNING - poor normal alignment, may need adjustment");
+            }
 
-            Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
+            init_pose
         };
         let init_inlier_points: Vec<&Point3<_>> = plane_inlier_points
             .iter()
             .map(|point| point.borrow())
             .collect();
 
-        let (inlier_points, corresponding_points, icp_losses, pose) = {
+        let (inlier_points, icp_losses, pose) = {
             let mut inlier_points: Vec<Point3<f64>> =
                 init_inlier_points.iter().map(|&p| *p).collect();
             let mut losses: Vec<f64> = vec![];
             let mut termination_count = 0;
             let mut pose = init_pose;
             let mut step = 0;
+            let mut convergence_reason = String::new();
+            let mut initial_loss_captured = false;
+            let mut initial_loss = 0.0;
 
             loop {
                 let board_model = BoardModel {
@@ -189,7 +245,8 @@ pub fn fit_board_icp(
                 let correspondings = match board_model.find_correspondences(&inlier_points) {
                     Some(corr) => corr,
                     None => {
-                        break (inlier_points, vec![], losses, pose);
+                        convergence_reason = "No correspondences found".to_string();
+                        break;
                     }
                 };
 
@@ -252,7 +309,26 @@ pub fn fit_board_icp(
 
                 // Safety check: ensure we have at least 3 points for Kabsch
                 if good_inlier_points.len() < 3 {
-                    break (inlier_points, good_corresponding_points, losses, pose);
+                    convergence_reason = format!(
+                        "Insufficient points for Kabsch: {}",
+                        good_inlier_points.len()
+                    );
+                    let stats = IcpStatistics {
+                        iterations: step,
+                        final_loss: losses.last().copied().unwrap_or(0.0),
+                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
+                        successful: false,
+                        initial_loss: if initial_loss_captured {
+                            initial_loss
+                        } else {
+                            0.0
+                        },
+                        convergence_reason: convergence_reason.clone(),
+                    };
+                    // Store final values in outer scope variables
+                    final_corresponding_points = good_corresponding_points;
+                    final_icp_stats = stats;
+                    break;
                 }
 
                 // compute transformation
@@ -279,10 +355,32 @@ pub fn fit_board_icp(
                             iso
                         }
                         None => {
-                            break (inlier_points, good_corresponding_points, losses, pose);
+                            convergence_reason = "Kabsch algorithm failed".to_string();
+                            let stats = IcpStatistics {
+                                iterations: step,
+                                final_loss: losses.last().copied().unwrap_or(0.0),
+                                min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
+                                successful: false,
+                                initial_loss: if initial_loss_captured {
+                                    initial_loss
+                                } else {
+                                    0.0
+                                },
+                                convergence_reason: convergence_reason.clone(),
+                            };
+                            // Store final values in outer scope variables
+                            final_corresponding_points = good_corresponding_points;
+                            final_icp_stats = stats;
+                            break;
                         }
                     }
                 };
+
+                // Capture initial loss for statistics
+                if !initial_loss_captured {
+                    initial_loss = avg_loss;
+                    initial_loss_captured = true;
+                }
 
                 // update state
                 losses.push(avg_loss);
@@ -299,6 +397,12 @@ pub fn fit_board_icp(
                 // Diagnostics for pose delta before damping
                 let delta_t = (new_pose.translation.vector - pose.translation.vector).norm();
                 let delta_ang = new_pose.rotation.rotation_to(&pose.rotation).angle();
+
+                // Debug step-by-step ICP progress
+                debug!(
+                    "ICP Step {}: loss={:.6}, inliers={}, correspondences={}, delta_t={:.6}, delta_ang={:.6}",
+                    step, avg_loss, inlier_points.len(), good_correspondences_len, delta_t, delta_ang
+                );
 
                 // Damp the translation component
                 let damped_translation = Translation3::from(
@@ -327,12 +431,32 @@ pub fn fit_board_icp(
 
                 // Check if we have enough inlier points to continue
                 if inlier_points.len() < icp_min_inlier_points {
-                    break (inlier_points, good_corresponding_points, losses, pose);
+                    convergence_reason = format!(
+                        "Insufficient inlier points: {} < {}",
+                        inlier_points.len(),
+                        icp_min_inlier_points
+                    );
+                    let stats = IcpStatistics {
+                        iterations: step,
+                        final_loss: losses.last().copied().unwrap_or(0.0),
+                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
+                        successful: false,
+                        initial_loss: if initial_loss_captured {
+                            initial_loss
+                        } else {
+                            0.0
+                        },
+                        convergence_reason: convergence_reason.clone(),
+                    };
+                    // Store final values in outer scope variables
+                    final_corresponding_points = good_corresponding_points;
+                    final_icp_stats = stats;
+                    break;
                 }
 
                 if *losses.last().unwrap() < icp_good_fit_threshold || termination_count > 10 {
                     debug!(
-                        "🏆 ICP terminating: loss is too small: {:.8}",
+                        "ICP terminating: loss is too small: {:.8}",
                         losses.last().unwrap()
                     );
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
@@ -345,13 +469,64 @@ pub fn fit_board_icp(
                         good_corresponding_points.len()
                     );
                     debug!("  Pose: {:.8}", pose);
-                    break (inlier_points, good_corresponding_points, losses, pose);
+                    convergence_reason = if termination_count > 10 {
+                        "Converged (stable pose)".to_string()
+                    } else {
+                        "Converged (good fit)".to_string()
+                    };
+                    let stats = IcpStatistics {
+                        iterations: step,
+                        final_loss: losses.last().copied().unwrap_or(0.0),
+                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
+                        successful: false,
+                        initial_loss: if initial_loss_captured {
+                            initial_loss
+                        } else {
+                            0.0
+                        },
+                        convergence_reason: convergence_reason.clone(),
+                    };
+                    // Store final values in outer scope variables
+                    final_corresponding_points = good_corresponding_points;
+                    final_icp_stats = stats;
+                    break;
                 }
 
-                if step == max_icp_iterations || termination_count > 10 {
-                    break (inlier_points, good_corresponding_points, losses, pose);
+                if step == max_icp_iterations {
+                    convergence_reason = format!("Max iterations reached: {}", max_icp_iterations);
+                    let stats = IcpStatistics {
+                        iterations: step,
+                        final_loss: losses.last().copied().unwrap_or(0.0),
+                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
+                        successful: false,
+                        initial_loss: if initial_loss_captured {
+                            initial_loss
+                        } else {
+                            0.0
+                        },
+                        convergence_reason: convergence_reason.clone(),
+                    };
+                    // Store final values in outer scope variables
+                    final_corresponding_points = good_corresponding_points;
+                    final_icp_stats = stats;
+                    break;
                 }
             }
+
+            // Create ICP statistics
+            let final_loss = losses.last().copied().unwrap_or(initial_loss);
+            let min_loss = losses.iter().copied().fold(f64::INFINITY, f64::min);
+            final_icp_stats = IcpStatistics {
+                iterations: step,
+                final_loss,
+                min_loss,
+                successful: !convergence_reason.contains("failed")
+                    && !convergence_reason.contains("Insufficient"),
+                initial_loss,
+                convergence_reason,
+            };
+
+            (inlier_points, losses, pose)
         };
 
         // send to visualizer
@@ -366,11 +541,12 @@ pub fn fit_board_icp(
                 marker_paper_size,
             };
 
-            let correspondences: Vec<_> = izip!(
-                inlier_points.iter().map(|point| (*point).to_owned()),
-                corresponding_points.iter().map(|point| point.to_owned())
-            )
-            .collect();
+            // Use the final corresponding points from ICP
+            let correspondences: Vec<_> = inlier_points
+                .iter()
+                .zip(final_corresponding_points.iter())
+                .map(|(data_point, model_point)| (*data_point, *model_point))
+                .collect();
 
             IcpData {
                 correspondences,
@@ -379,6 +555,31 @@ pub fn fit_board_icp(
         };
 
         (pose, icp_losses, viz_msg)
+    };
+
+    // Extract init_pose and create icp_stats for the return values
+    let final_init_pose = {
+        let inlier_centroid: Point3<f64> =
+            centroid_of_points(plane_inlier_points.iter().map(|point| {
+                let point: [f64; 3] = (*point.borrow()).into();
+                point
+            }))
+            .unwrap()
+            .into();
+
+        let plane_normal = {
+            let normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
+            normal
+        };
+
+        let rotation = {
+            let board_z_axis = Vector3::z_axis();
+            let primary_rotation = UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
+                .unwrap_or_else(|| UnitQuaternion::identity());
+            primary_rotation
+        };
+
+        Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
     };
 
     // reject result if loss is too large
@@ -397,6 +598,8 @@ pub fn fit_board_icp(
                     icp_losses,
                     icp_data: viz_msg,
                     successful: false,
+                    initial_pose: final_init_pose,
+                    icp_stats: final_icp_stats.clone(),
                 })
             }
         };
@@ -407,6 +610,8 @@ pub fn fit_board_icp(
                 icp_losses,
                 icp_data: viz_msg,
                 successful: false,
+                initial_pose: final_init_pose,
+                icp_stats: final_icp_stats.clone(),
             });
         }
     }
@@ -427,12 +632,17 @@ pub fn fit_board_icp(
         .copied()
         .min_by(|a, b| a.partial_cmp(b).unwrap())
         .unwrap_or(0.0);
-    debug!("ICP completed successfully! Loss: {:.6}", _final_loss);
+    debug!(
+        "FINAL ICP RESULT: pose={:.6}, loss={:.6}",
+        board_pose, _final_loss
+    );
 
     Ok(FitBoardIcp {
         board_pose,
         icp_losses,
         icp_data: viz_msg,
         successful: true,
+        initial_pose: final_init_pose,
+        icp_stats: final_icp_stats.clone(),
     })
 }

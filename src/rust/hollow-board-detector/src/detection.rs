@@ -9,6 +9,8 @@ pub struct Detection {
     pub plane_ransac_data: PlaneRansacData,
     pub icp_data: IcpData,
     pub icp_losses: Vec<f64>,
+    pub initial_pose: na::Isometry3<f64>,
+    pub icp_stats: IcpStatistics,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,8 @@ pub struct FitBoardIcp {
     pub icp_losses: Vec<f64>,
     pub icp_data: IcpData,
     pub successful: bool,
+    pub initial_pose: na::Isometry3<f64>,
+    pub icp_stats: IcpStatistics,
 }
 
 #[derive(Debug, Clone)]
@@ -36,4 +40,14 @@ pub struct FitPlaneRansac<'a> {
     pub plane_model: PlaneModel,
     pub inlier_points: Vec<&'a na::Point3<f64>>,
     pub ransac_data: PlaneRansacData,
+}
+
+#[derive(Debug, Clone)]
+pub struct IcpStatistics {
+    pub iterations: usize,
+    pub final_loss: f64,
+    pub min_loss: f64,
+    pub successful: bool,
+    pub initial_loss: f64,
+    pub convergence_reason: String,
 }

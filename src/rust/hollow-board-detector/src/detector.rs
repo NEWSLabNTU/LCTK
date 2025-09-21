@@ -54,6 +54,8 @@ impl Detector {
             icp_losses,
             icp_data,
             successful,
+            initial_pose,
+            icp_stats,
         } = fit_board_icp(
             &self.config,
             &self.aruco_pattern,
@@ -117,6 +119,8 @@ impl Detector {
             plane_ransac_data,
             icp_data,
             icp_losses,
+            initial_pose,
+            icp_stats,
         };
 
         Ok(Some(detection))
@@ -155,6 +159,8 @@ impl Detector {
             icp_losses,
             icp_data,
             successful,
+            initial_pose,
+            icp_stats,
         } = fit_board_icp(
             &self.config,
             &self.aruco_pattern,
@@ -214,6 +220,8 @@ impl Detector {
             plane_ransac_data,
             icp_data,
             icp_losses,
+            initial_pose,
+            icp_stats,
         };
 
         Ok(Some(detection))

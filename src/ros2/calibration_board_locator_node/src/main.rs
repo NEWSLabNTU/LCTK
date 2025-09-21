@@ -20,7 +20,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use std_msgs::msg::{ColorRGBA, Header};
+use std_msgs::msg::{ColorRGBA, Header, String as StringMsg};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
 use visualization_msgs::msg::{Marker, MarkerArray};
 
@@ -39,6 +39,8 @@ pub struct CalibrationBoardLocatorNode {
     _bbox_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
     _board_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
     _board_marker_icp_publisher: Option<Arc<Publisher<MarkerArray>>>,
+    _initial_board_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
+    _icp_stats_publisher: Option<Arc<Publisher<StringMsg>>>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -129,18 +131,36 @@ impl CalibrationBoardLocatorNode {
         };
         let bbox_marker_shared = bbox_marker_publisher.clone();
 
-        // Create board model marker publisher for visualization
+        // Create final board pose marker publisher for visualization
         let board_marker_publisher = if enable_debug {
-            Some(Arc::new(node.create_publisher("debug/board_marker")?))
+            Some(Arc::new(node.create_publisher("debug/final_board_pose")?))
         } else {
             None
         };
         let board_marker_shared = board_marker_publisher.clone();
 
-        // Per-iteration ICP board marker publisher (always on)
+        // ICP iteration progress marker publisher (always on)
         let board_marker_icp_publisher =
-            Some(Arc::new(node.create_publisher("debug/board_marker_icp")?));
+            Some(Arc::new(node.create_publisher("debug/icp_iterations")?));
         let board_marker_icp_shared = board_marker_icp_publisher.clone();
+
+        // Initial board pose marker publisher for debug
+        let initial_board_marker_publisher = if enable_debug {
+            Some(Arc::new(
+                node.create_publisher("debug/initial_board_marker")?,
+            ))
+        } else {
+            None
+        };
+        let initial_board_marker_shared = initial_board_marker_publisher.clone();
+
+        // ICP statistics publisher for debug
+        let icp_stats_publisher = if enable_debug {
+            Some(Arc::new(node.create_publisher("debug/icp_stats")?))
+        } else {
+            None
+        };
+        let icp_stats_shared = icp_stats_publisher.clone();
 
         // Configure QoS for sensor input topics
         let qos_profile = if use_best_effort_qos {
@@ -172,6 +192,8 @@ impl CalibrationBoardLocatorNode {
                     &bbox_marker_shared,
                     &board_marker_shared,
                     &board_marker_icp_shared,
+                    &initial_board_marker_shared,
+                    &icp_stats_shared,
                 );
             })?;
 
@@ -182,7 +204,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/bbox_marker, debug/board_marker"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats"
             );
         }
 
@@ -196,6 +218,8 @@ impl CalibrationBoardLocatorNode {
             _bbox_marker_publisher: bbox_marker_publisher,
             _board_marker_publisher: board_marker_publisher,
             _board_marker_icp_publisher: board_marker_icp_publisher,
+            _initial_board_marker_publisher: initial_board_marker_publisher,
+            _icp_stats_publisher: icp_stats_publisher,
         })
     }
 
@@ -250,6 +274,8 @@ impl CalibrationBoardLocatorNode {
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
+        initial_board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
+        icp_stats_pub: &Option<Arc<Publisher<StringMsg>>>,
     ) {
         use std::time::Instant;
 
@@ -288,6 +314,8 @@ impl CalibrationBoardLocatorNode {
             bbox_marker_pub,
             board_marker_pub,
             board_marker_icp_pub,
+            initial_board_marker_pub,
+            icp_stats_pub,
         );
 
         let processing_duration = start_time.elapsed();
@@ -320,6 +348,8 @@ impl CalibrationBoardLocatorNode {
         bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
         board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
+        initial_board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
+        icp_stats_pub: &Option<Arc<Publisher<StringMsg>>>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
         let points = match Self::convert_pointcloud2_to_points(msg) {
@@ -424,35 +454,75 @@ impl CalibrationBoardLocatorNode {
             "Starting board detection with {} points",
             active_points.len()
         );
-        let detection: Option<BoardDetection> =
-            match detector.detect_with_progress(&active_points, |bm| {
+        let detection: Option<BoardDetection> = match detector.detect_with_progress(
+            &active_points,
+            |bm| {
                 if let Some(pub_icp) = board_marker_icp_pub {
                     if let Ok(arr) = Self::create_board_markers_from_model(bm, &msg.header) {
                         let _ = pub_icp.publish(arr);
                     }
                 }
-            }) {
-                Ok(Some(det)) => {
-                    log_warn!(LOGGER_NAME, "Board detection successful");
+            },
+        ) {
+            Ok(Some(det)) => {
+                log_warn!(LOGGER_NAME, "Board detection successful");
 
-                    // Publish debug plane inliers if enabled
-                    if let Some(_pub_inliers) = debug_plane_inliers_pub {
-                        // Access the ransac_data if available from the detection
-                        // Note: This requires the detection to expose ransac data
-                        log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
+                // Publish debug plane inliers if enabled
+                if let Some(_pub_inliers) = debug_plane_inliers_pub {
+                    // Access the ransac_data if available from the detection
+                    // Note: This requires the detection to expose ransac data
+                    log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
+                }
+
+                // Publish initial board pose markers if enabled
+                if let Some(pub_initial) = initial_board_marker_pub {
+                    // Create board markers using the initial pose before ICP refinement
+                    let initial_board_model = hollow_board_config::BoardModel {
+                        pose: det.initial_pose,
+                        board_shape: det.board_model.board_shape.clone(),
+                        marker_paper_size: det.board_model.marker_paper_size,
+                    };
+                    if let Ok(initial_markers) =
+                        Self::create_board_markers_from_model(&initial_board_model, &msg.header)
+                    {
+                        let _ = pub_initial.publish(initial_markers);
+                        log_debug!(LOGGER_NAME, "Published initial board pose markers");
                     }
+                }
 
-                    Some(det)
+                // Publish ICP statistics if enabled
+                if let Some(pub_stats) = icp_stats_pub {
+                    let stats_msg = StringMsg {
+                            data: format!(
+                                "ICP Stats - Iterations: {}, Initial Loss: {:.6}, Final Loss: {:.6}, Min Loss: {:.6}, Successful: {}, Convergence: {}",
+                                det.icp_stats.iterations,
+                                det.icp_stats.initial_loss,
+                                det.icp_stats.final_loss,
+                                det.icp_stats.min_loss,
+                                det.icp_stats.successful,
+                                det.icp_stats.convergence_reason
+                            ),
+                        };
+                    let _ = pub_stats.publish(stats_msg);
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Published ICP statistics: {} iterations, final loss: {:.6}",
+                        det.icp_stats.iterations,
+                        det.icp_stats.final_loss
+                    );
                 }
-                Ok(None) => {
-                    log_warn!(LOGGER_NAME, "Detection returned None - board not found");
-                    None
-                }
-                Err(e) => {
-                    log_warn!(LOGGER_NAME, "Detection failed with error: {}", e);
-                    return Err(e.into());
-                }
-            };
+
+                Some(det)
+            }
+            Ok(None) => {
+                log_warn!(LOGGER_NAME, "Detection returned None - board not found");
+                None
+            }
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Detection failed with error: {}", e);
+                return Err(e.into());
+            }
+        };
 
         let mut detections = Vec::new();
         if let Some(board_detection) = detection {
