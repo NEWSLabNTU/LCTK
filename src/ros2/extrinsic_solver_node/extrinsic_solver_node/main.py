@@ -290,21 +290,21 @@ class SimpleExtrinsicSolver(Node):
         """Handle camera info messages"""
         with self.lock:
             self.camera_info = msg
-            self.get_logger().info(
+            self.get_logger().debug(
                 f"Camera info received - {msg.width}x{msg.height} resolution, "
                 f"distortion model: {msg.distortion_model}"
             )
 
     def aruco_callback(self, msg: Detection2DArray):
         """Handle ArUco detection messages"""
-        self.get_logger().info(
+        self.get_logger().debug(
             f"ArUco callback - {len(msg.detections)} detections at timestamp "
             f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec}"
         )
 
         # Only cache non-empty detections
         if msg.detections:
-            self.get_logger().info(
+            self.get_logger().debug(
                 f"Caching non-empty ArUco detection with {len(msg.detections)} markers"
             )
 
@@ -342,14 +342,14 @@ class SimpleExtrinsicSolver(Node):
 
     def board_callback(self, msg: Detection3DArray):
         """Handle board detection messages"""
-        self.get_logger().info(
+        self.get_logger().debug(
             f"Board callback - {len(msg.detections)} detections at timestamp "
             f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec}"
         )
 
         # Only cache non-empty detections
         if msg.detections:
-            self.get_logger().info(
+            self.get_logger().debug(
                 f"Caching non-empty board detection with {len(msg.detections)} boards"
             )
 
@@ -386,7 +386,7 @@ class SimpleExtrinsicSolver(Node):
 
         # Check if we have both non-empty cached detections
         if aruco_detection and board_detection:
-            self.get_logger().info(
+            self.get_logger().debug(
                 f"BOTH cached detections available - ArUco: {len(aruco_detection.detections)} markers, "
                 f"Board: {len(board_detection.detections)} boards"
             )
@@ -446,7 +446,7 @@ class SimpleExtrinsicSolver(Node):
             )
             return
 
-        self.get_logger().info(
+        self.get_logger().debug(
             f"Created {len(object_points)} point correspondences for PnP solving"
         )
 
@@ -673,7 +673,7 @@ class SimpleExtrinsicSolver(Node):
         transform_matrix[:3, :3] = rotation_matrix
         transform_matrix[:3, 3] = tvec.flatten()
 
-        self.get_logger().info(
+        self.get_logger().debug(
             f"Extrinsic T (4x4):\n"
             f"[ {transform_matrix[0,0]:.6f} {transform_matrix[0,1]:.6f} {transform_matrix[0,2]:.6f} {transform_matrix[0,3]:.6f} ]\n"
             f"[ {transform_matrix[1,0]:.6f} {transform_matrix[1,1]:.6f} {transform_matrix[1,2]:.6f} {transform_matrix[1,3]:.6f} ]\n"
