@@ -95,6 +95,7 @@
         <!-- Simple topic remapping: base topics to actual camera/lidar topics -->
         <remap from="image" to="$(var camera_topic)"/>
         <remap from="pointcloud" to="$(var pointcloud_topic)"/>
+        <remap from="camera_info" to="/sensing/camera/front_center/camera_info"/>
     </node>
 
     <!-- RViz Visualization (Optional) -->
