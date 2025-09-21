@@ -80,6 +80,7 @@
     <!-- Extrinsic Calibration -->
     <include file="$(find-pkg-share lctk_launch)/launch/extrinsic_calibration.launch.xml">
         <arg name="board_detections_topic" value="/calibration/calibration_board_locator/calibration_board_detections"/>
+        <arg name="camera_topic" value="$(var camera_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
     </include>

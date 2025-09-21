@@ -48,6 +48,7 @@ class SimpleExtrinsicSolver(Node):
 
         # Declare parameters
         self.declare_parameter("parent_frame", "lidar")
+        self.declare_parameter("camera_topic", "")
         self.declare_parameter("child_frame", "camera")
         self.declare_parameter("aruco_pattern_file", "")
         self.declare_parameter("enable_quality_assessment", True)
@@ -175,8 +176,29 @@ class SimpleExtrinsicSolver(Node):
             qos_profile,
         )
 
+        # Derive camera_info topic from camera_topic parameter (following image_pipeline convention)
+        camera_topic = (
+            self.get_parameter("camera_topic").get_parameter_value().string_value
+        )
+        if camera_topic:
+            # Derive camera_info topic from image topic following image_pipeline convention
+            if "/" in camera_topic:
+                base_path = camera_topic.rsplit("/", 1)[0]
+                camera_info_topic = f"{base_path}/camera_info"
+            else:
+                camera_info_topic = "camera_info"
+            self.get_logger().info(
+                f"Deriving camera_info topic from camera topic '{camera_topic}' -> '{camera_info_topic}'"
+            )
+        else:
+            # Fallback to default camera_info topic if no camera_topic specified
+            camera_info_topic = "camera_info"
+            self.get_logger().warn(
+                "No camera_topic parameter provided, using default 'camera_info' topic"
+            )
+
         self.camera_info_subscription = self.create_subscription(
-            CameraInfo, "camera_info", self.camera_info_callback, qos_profile
+            CameraInfo, camera_info_topic, self.camera_info_callback, qos_profile
         )
 
         # Optional debug overlay image (for timestamp alignment/monitoring)
