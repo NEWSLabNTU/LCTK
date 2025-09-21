@@ -1,0 +1,33 @@
+{
+    // ========================================
+    // Pointcloud Overlay Filter Configuration
+    // ========================================
+
+    // Enable/disable filtering
+    "filtering_enabled": true,
+
+    // Z-axis filtering (depth - forward/backward from camera)
+    "z_filter": {
+        "enabled": true,
+        "min_distance": 0.1,    // meters - minimum distance in front of camera
+        "max_distance": 50.0    // meters - maximum distance in front of camera
+    },
+
+    // X-axis filtering (horizontal - left/right from camera)
+    "x_filter": {
+        "enabled": true,
+        "max_range": 20.0       // meters - maximum absolute distance left/right
+    },
+
+    // Y-axis filtering (vertical - up/down from camera)
+    "y_filter": {
+        "enabled": true,
+        "max_range": 20.0       // meters - maximum absolute distance up/down
+    },
+
+    // Logging configuration
+    "logging": {
+        "log_stats_every_n_frames": 30,    // Log filtering statistics every N frames
+        "enable_filter_breakdown": true    // Show detailed breakdown of filter results
+    }
+}
