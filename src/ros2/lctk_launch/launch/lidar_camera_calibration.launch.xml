@@ -93,6 +93,7 @@
         <param name="extrinsic_json5" value="$(find-pkg-share lctk_launch)/config/extrinsic.json5"/>
         <param name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
         <!-- Simple topic remapping: base topics to actual camera/lidar topics -->
+        <!-- camera_info topic is automatically derived from image topic by the node -->
         <remap from="image" to="$(var camera_topic)"/>
         <remap from="pointcloud" to="$(var pointcloud_topic)"/>
     </node>

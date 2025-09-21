@@ -67,13 +67,22 @@ class OverlayNode(Node):
         extr_path = (
             self.get_parameter("extrinsic_json5").get_parameter_value().string_value
         )
+        self.extrinsic_error = None
         try:
-            self.T_lidar_cam = read_extrinsic_4x4(extr_path) if extr_path else None
-            if self.T_lidar_cam is not None:
+            if not extr_path:
+                self.T_lidar_cam = None
+                self.extrinsic_error = "No extrinsic file path provided"
+            else:
+                self.T_lidar_cam = read_extrinsic_4x4(extr_path)
                 self.get_logger().info(f"Loaded extrinsic from {extr_path}")
+        except FileNotFoundError:
+            self.get_logger().error(f"Extrinsic file not found: {extr_path}")
+            self.T_lidar_cam = None
+            self.extrinsic_error = f"Extrinsic file not found: {extr_path}"
         except Exception as e:
             self.get_logger().error(f"Failed to read extrinsic: {e}")
             self.T_lidar_cam = None
+            self.extrinsic_error = f"Failed to parse extrinsic file: {str(e)}"
 
         # State
         self.K: Optional[np.ndarray] = None
@@ -102,9 +111,20 @@ class OverlayNode(Node):
             PointCloud2, "pointcloud", self.on_pointcloud, qos
         )
 
-        # Camera info topic - derive from image topic namespace
+        # Derive camera_info topic from resolved image topic (following image_pipeline convention)
+        resolved_image_topic = self.sub_img.topic_name
+        if "/" in resolved_image_topic:
+            # Find the last slash and replace the last component with "camera_info"
+            base_path = resolved_image_topic.rsplit("/", 1)[0]
+            camera_info_topic = f"{base_path}/camera_info"
+        else:
+            camera_info_topic = "camera_info"
+
+        self.get_logger().info(f"Derived camera_info topic: {camera_info_topic}")
+
+        # Subscribe to derived camera_info topic
         self.sub_info = self.create_subscription(
-            CameraInfo, "camera_info", self.on_caminfo, qos
+            CameraInfo, camera_info_topic, self.on_caminfo, qos
         )
 
         # Publisher
@@ -128,21 +148,58 @@ class OverlayNode(Node):
     def on_image(self, msg: Image):
         """Handle image message."""
         self.last_image = msg
-        self.try_publish()
+        # Always try to publish when we get an image
+        self.publish_overlay()
 
     def on_pointcloud(self, msg: PointCloud2):
         """Handle pointcloud message."""
         self.last_pc = msg
-        self.try_publish()
+        # Only publish if we have a recent image
+        if self.last_image is not None:
+            self.publish_overlay()
 
-    def try_publish(self):
-        """Try to publish overlay if all data is available."""
-        if (
-            self.last_image is None
-            or self.last_pc is None
-            or self.K is None
-            or self.T_lidar_cam is None
-        ):
+    def draw_error_on_image(self, cv_img: np.ndarray, error_text: str):
+        """Draw error text on the image."""
+        h, w = cv_img.shape[:2]
+
+        # Choose font and scale based on image size
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = min(w, h) / 800.0  # Scale font based on image size
+        thickness = max(1, int(font_scale * 2))
+
+        # Split long text into multiple lines
+        max_chars_per_line = max(20, w // 25)
+        lines = []
+        words = error_text.split()
+        current_line = ""
+
+        for word in words:
+            if len(current_line + " " + word) <= max_chars_per_line:
+                current_line = current_line + " " + word if current_line else word
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+
+        # Draw semi-transparent background
+        overlay = cv_img.copy()
+        line_height = int(30 * font_scale)
+        text_height = len(lines) * line_height + 20
+        cv2.rectangle(overlay, (10, 10), (w - 10, 10 + text_height), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, cv_img, 0.3, 0, cv_img)
+
+        # Draw text lines
+        for i, line in enumerate(lines):
+            y_pos = 30 + i * line_height
+            cv2.putText(
+                cv_img, line, (20, y_pos), font, font_scale, (0, 0, 255), thickness
+            )
+
+    def publish_overlay(self):
+        """Always publish an overlay image when image data is available."""
+        if self.last_image is None:
             return
 
         try:
@@ -150,56 +207,95 @@ class OverlayNode(Node):
             cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding="bgr8")
             h, w = cv_img.shape[:2]
 
-            # Extract points from pointcloud
-            xyz = pointcloud2_to_xyz(self.last_pc)
-            if xyz.shape[0] == 0:
-                # No points, publish original image
-                out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
-                out.header = self.last_image.header
-                self.pub.publish(out)
-                return
+            # Check for extrinsic parameter errors
+            if self.extrinsic_error is not None:
+                self.draw_error_on_image(cv_img, f"ERROR: {self.extrinsic_error}")
+            elif self.T_lidar_cam is None:
+                self.draw_error_on_image(
+                    cv_img, "ERROR: No extrinsic calibration loaded"
+                )
+            elif self.K is None:
+                self.draw_error_on_image(
+                    cv_img, "ERROR: No camera intrinsics available"
+                )
+            elif self.last_pc is None:
+                self.draw_error_on_image(
+                    cv_img, "WARNING: No point cloud data available"
+                )
+            else:
+                # All data available, try to create overlay
+                try:
+                    # Extract points from pointcloud
+                    xyz = pointcloud2_to_xyz(self.last_pc)
+                    if xyz.shape[0] == 0:
+                        self.draw_error_on_image(
+                            cv_img, "WARNING: Point cloud is empty"
+                        )
+                    else:
+                        # Use OpenCV projectPoints with extrinsic from LiDAR to camera
+                        R = self.T_lidar_cam[:3, :3]
+                        t = self.T_lidar_cam[:3, 3]
+                        rvec, _ = cv2.Rodrigues(R)
+                        tvec = t.reshape(3, 1)
 
-            # Use OpenCV projectPoints with extrinsic from LiDAR to camera
-            R = self.T_lidar_cam[:3, :3]
-            t = self.T_lidar_cam[:3, 3]
-            rvec, _ = cv2.Rodrigues(R)
-            tvec = t.reshape(3, 1)
+                        # Filter points behind camera
+                        X_cam = (R @ xyz.astype(np.float64).T).T + t.reshape(1, 3)
+                        positive_z_mask = (
+                            X_cam[:, 2] > 0.1
+                        )  # Keep points at least 10cm in front
+                        if not np.any(positive_z_mask):
+                            self.draw_error_on_image(
+                                cv_img, "WARNING: All LiDAR points behind camera"
+                            )
+                        else:
+                            xyz_filtered = xyz[positive_z_mask]
 
-            # Filter points behind camera
-            X_cam = (R @ xyz.astype(np.float64).T).T + t.reshape(1, 3)
-            positive_z_mask = X_cam[:, 2] > 0.1  # Keep points at least 10cm in front
-            if not np.any(positive_z_mask):
-                # All points behind camera
-                out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
-                out.header = self.last_image.header
-                self.pub.publish(out)
-                return
+                            # Project points to image
+                            image_points, _ = cv2.projectPoints(
+                                xyz_filtered.astype(np.float64),
+                                rvec,
+                                tvec,
+                                self.K,
+                                self.dist if self.dist is not None else None,
+                            )
+                            image_points = image_points.reshape(-1, 2)
 
-            xyz_filtered = xyz[positive_z_mask]
+                            # Draw projected points on image
+                            points_drawn = 0
+                            for ui, vi in image_points:
+                                if 0 <= ui < w and 0 <= vi < h:
+                                    cv2.circle(
+                                        cv_img, (int(ui), int(vi)), 1, (0, 255, 0), -1
+                                    )
+                                    points_drawn += 1
 
-            # Project points to image
-            image_points, _ = cv2.projectPoints(
-                xyz_filtered.astype(np.float64),
-                rvec,
-                tvec,
-                self.K,
-                self.dist if self.dist is not None else None,
-            )
-            image_points = image_points.reshape(-1, 2)
+                            # Show status overlay
+                            status_text = (
+                                f"Points: {points_drawn}/{len(image_points)} visible"
+                            )
+                            cv2.putText(
+                                cv_img,
+                                status_text,
+                                (10, h - 20),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.5,
+                                (0, 255, 0),
+                                1,
+                            )
 
-            # Draw projected points on image
-            for ui, vi in image_points:
-                if 0 <= ui < w and 0 <= vi < h:
-                    cv2.circle(cv_img, (int(ui), int(vi)), 1, (0, 0, 255), -1)
+                except Exception as overlay_error:
+                    self.draw_error_on_image(
+                        cv_img, f"ERROR in overlay: {str(overlay_error)}"
+                    )
 
-            # Publish overlay image
+            # Always publish the image (with or without overlay)
             out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
             out.header = self.last_image.header
             self.pub.publish(out)
 
         except Exception as e:
             self.get_logger().error(
-                f"Error creating overlay: {e}", throttle_duration_sec=1.0
+                f"Error publishing overlay: {e}", throttle_duration_sec=1.0
             )
 
 
