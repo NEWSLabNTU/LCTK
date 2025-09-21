@@ -573,10 +573,74 @@ pub fn fit_board_icp(
         };
 
         let rotation = {
-            let board_z_axis = Vector3::z_axis();
-            let primary_rotation = UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
-                .unwrap_or_else(|| UnitQuaternion::identity());
-            primary_rotation
+            // Use PCA to determine the correct in-plane orientation for diamond board
+            if plane_inlier_points.len() >= 3 {
+                // Compute PCA on plane inlier points to find principal directions
+                let mean = inlier_centroid;
+
+                // Compute covariance matrix of inlier points relative to centroid
+                let mut covariance = nalgebra::Matrix3::<f64>::zeros();
+                for point in plane_inlier_points.iter() {
+                    let p: Point3<f64> = (*point.borrow()).into();
+                    let diff = p - mean;
+                    covariance += diff * diff.transpose();
+                }
+                covariance /= plane_inlier_points.len() as f64;
+
+                // Compute eigendecomposition to get principal components
+                let eigen = covariance.symmetric_eigen();
+                let eigenvalues = eigen.eigenvalues;
+                let eigenvectors = eigen.eigenvectors;
+
+                // Sort eigenvalues and corresponding eigenvectors in descending order
+                let mut eigen_pairs: Vec<(f64, Vector3<f64>)> = (0..3)
+                    .map(|i| (eigenvalues[i], eigenvectors.column(i).into()))
+                    .collect();
+                eigen_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+
+                // The two largest principal components should align with diamond edges
+                // The smallest should align with the plane normal
+                let pc1 = eigen_pairs[0].1.normalize(); // First principal component (largest variance)
+                let pc2 = eigen_pairs[1].1.normalize(); // Second principal component
+                let pc3 = eigen_pairs[2].1.normalize(); // Third principal component (should be normal)
+
+                // Ensure the normal points in the correct direction
+                let computed_normal = if pc3.dot(&plane_normal) > 0.0 {
+                    pc3
+                } else {
+                    -pc3
+                };
+
+                // Ensure right-handed coordinate system: pc1 x pc2 should align with normal
+                let cross_product = pc1.cross(&pc2);
+                let (x_axis, y_axis) = if cross_product.dot(&computed_normal) > 0.0 {
+                    (pc1, pc2)
+                } else {
+                    (pc1, -pc2) // Flip y-axis to maintain right-handed system
+                };
+
+                // Create rotation matrix from the orthonormal basis
+                let rotation_matrix =
+                    nalgebra::Matrix3::from_columns(&[x_axis, y_axis, computed_normal]);
+
+                // Convert to unit quaternion
+                // Note: from_matrix doesn't return Option, it directly returns UnitQuaternion
+                let pca_rotation = nalgebra::UnitQuaternion::from_matrix(&rotation_matrix);
+
+                // Apply additional -135° rotation around z-axis (board normal) to align coordinate system
+                let adjustment_angle = -135.0_f64.to_radians();
+                let normal_axis = nalgebra::Unit::new_normalize(computed_normal);
+                let z_axis_rotation =
+                    nalgebra::UnitQuaternion::from_axis_angle(&normal_axis, adjustment_angle);
+
+                // Combine PCA rotation with the adjustment
+                z_axis_rotation * pca_rotation
+            } else {
+                // Fallback for insufficient points
+                let board_z_axis = Vector3::z_axis();
+                UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
+                    .unwrap_or_else(|| UnitQuaternion::identity())
+            }
         };
 
         Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
