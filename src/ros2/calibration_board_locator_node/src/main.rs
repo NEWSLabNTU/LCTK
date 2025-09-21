@@ -468,10 +468,22 @@ impl CalibrationBoardLocatorNode {
                 log_warn!(LOGGER_NAME, "Board detection successful");
 
                 // Publish debug plane inliers if enabled
-                if let Some(_pub_inliers) = debug_plane_inliers_pub {
-                    // Access the ransac_data if available from the detection
-                    // Note: This requires the detection to expose ransac data
-                    log_warn!(LOGGER_NAME, "Debug plane inliers publisher available");
+                if let Some(pub_inliers) = debug_plane_inliers_pub {
+                    // Convert plane inlier points to PointCloud2 message
+                    let plane_inlier_points = &det.plane_ransac_data.inlier_points;
+                    match Self::create_debug_pointcloud(plane_inlier_points, &msg.header) {
+                        Ok(plane_inliers_msg) => {
+                            let _ = pub_inliers.publish(plane_inliers_msg);
+                            log_debug!(
+                                LOGGER_NAME,
+                                "Published {} plane inlier points to debug/plane_inliers",
+                                plane_inlier_points.len()
+                            );
+                        }
+                        Err(e) => {
+                            log_warn!(LOGGER_NAME, "Failed to create plane inliers message: {e}");
+                        }
+                    }
                 }
 
                 // Publish initial board pose markers if enabled
