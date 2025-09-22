@@ -128,7 +128,7 @@ launch_lidar_camera_calibration:
 	. install/setup.sh && \
 	ros2 systemd launch --name lctk-calibration --replace \
 		lctk_launch lidar_camera_calibration.launch.xml \
-		debug_mode:=$(or $(debug_mode),false) \
+		debug_mode:=$(or $(debug_mode),true) \
 		enable_rviz:=$(or $(rviz),false) \
 		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
