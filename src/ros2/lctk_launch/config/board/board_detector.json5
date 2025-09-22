@@ -14,21 +14,21 @@
     "max_icp_iterations": 3000,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is below this threshold several times
-    "icp_pose_weight_threshold": 5e-4,
+    "icp_pose_weight_threshold": 1e-5,  // Tightened for better convergence
     // the maximum accepted ICP loss (balanced for stability)
     "icp_rejection_threshold": 0.03,
-    // good fit threshold for convergence detection (stable termination)
-    "icp_good_fit_threshold": 0.03,
-    // outlier rejection threshold for correspondence filtering (stable)
-    "icp_outlier_threshold": 0.12,
+    // good fit threshold for convergence detection (tightened for accuracy)
+    "icp_good_fit_threshold": 0.01,  // Tightened from 0.03 to 0.01
+    // outlier rejection threshold for correspondence filtering (tightened)
+    "icp_outlier_threshold": 0.08,  // Tightened from 0.12 to 0.08
     // adaptive threshold multiplier for outlier rejection
     "icp_adaptive_threshold_multiplier": 1.2,
     // minimum adaptive threshold value
-    "icp_adaptive_threshold_min": 0.015,
+    "icp_adaptive_threshold_min": 0.01,  // Tightened from 0.015 to 0.01
     // maximum adaptive threshold value
-    "icp_adaptive_threshold_max": 0.3,
-    // damping factor for pose updates (conservative for stability)
-    "icp_damping_factor": 0.35,
+    "icp_adaptive_threshold_max": 0.15,  // Tightened from 0.3 to 0.15
+    // damping factor for pose updates (increased for better convergence)
+    "icp_damping_factor": 0.6,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations
     "icp_min_inlier_points": 130,
 
