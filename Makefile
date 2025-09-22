@@ -63,6 +63,7 @@ build_ros2_rust:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS2 Rust packages... (log: $(LOG_DIR)/ros2_rust.log)"
 	. /opt/ros/humble/setup.sh && \
+	export RUST_LOG=debug && \
 	$(MAKE) -C src/ros2_rust_ws 2>&1 | tee $(LOG_DIR)/ros2_rust.log
 
 .PHONY: build_interface
@@ -71,6 +72,7 @@ build_interface:
 	@echo "Building interface packages... (log: $(LOG_DIR)/interface.log)"
 	. ./src/ros2_rust_ws/install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
+	export RUST_LOG=debug && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/interface 2>&1 | tee $(LOG_DIR)/interface.log
 
 .PHONY: build_packages
@@ -80,6 +82,7 @@ build_packages:
 # Fix applied directly to colcon-cargo source to handle JSON parsing issues
 	. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
+	export RUST_LOG=debug && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/packages.log
 
 .PHONY: format
@@ -109,6 +112,7 @@ clean:
 launch_lidar_camera_sample_data:
 	@echo "Creating and starting LiDAR-camera sample data service with ros2systemd..."
 	. install/setup.sh && \
+	export RUST_LOG=debug && \
 	ros2 systemd launch --name lctk-lidar-camera-data --replace \
 		lctk_sample_data lidar_camera.launch.xml
 	@echo "LiDAR-camera sample data service started. Use 'make service_status' to check status or 'make stop_lidar_camera_sample_data' to stop."
@@ -126,7 +130,7 @@ launch_lidar_camera_calibration:
 		echo "Debug mode enabled - additional debug topics will be published"; \
 	fi
 	. install/setup.sh && \
-	ros2 systemd launch --name lctk-calibration --replace \
+	RUST_LOG=debug ros2 systemd launch --name lctk-calibration --replace \
 		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(or $(debug_mode),true) \
 		enable_rviz:=$(or $(rviz),false) \
@@ -147,6 +151,7 @@ stop_lidar_camera_calibration:
 launch_rviz:
 	@echo "Launching RViz for calibration visualization..."
 	. install/setup.sh && \
+	export RUST_LOG=debug && \
 	ros2 launch lctk_launch rviz.launch.xml
 
 .PHONY: launch_iou_overlapping
@@ -154,6 +159,7 @@ launch_iou_overlapping:
 	@echo "Launching IoU overlapping evaluator..."
 	@echo "This will evaluate extrinsic matrix quality using IoU between board detection and LiDAR projection."
 	. install/setup.sh && \
+	export RUST_LOG=debug && \
 	ros2 launch iou_overlapping iou_evaluator.launch.xml \
 		extrinsic_json:=$(or $(extrinsic_json),$(PWD)/install/iou_overlapping/share/iou_overlapping/config/extrinsic.json) \
 		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
@@ -164,7 +170,7 @@ launch_iou_overlapping:
 launch_two_lidar_calibration:
 	@echo "Creating and starting two LiDAR calibration service with ros2systemd..."
 	. install/setup.sh && \
-	ros2 systemd launch --name lctk-two-lidar --replace \
+	RUST_LOG=debug ros2 systemd launch --name lctk-two-lidar --replace \
 		lctk_launch two_lidar_calibration.launch.xml
 	@echo "Two LiDAR calibration service started. Use 'make service_status' to check status or 'make stop_two_lidar_calibration' to stop."
 	@echo ""

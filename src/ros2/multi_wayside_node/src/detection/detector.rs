@@ -2,6 +2,7 @@ use crate::types::BoardDetection;
 use eyre::Result;
 use hollow_board_detector::Detector;
 use nalgebra::Point3;
+use rclrs::log_info;
 
 /// Trait for board detection
 pub trait DetectionProcessor: Send + Sync {
@@ -69,6 +70,25 @@ impl DetectionProcessor for HollowBoardDetectionProcessor {
     fn process(&self, points: &[Point3<f64>]) -> Result<Option<BoardDetection>> {
         match self.detector.detect(points) {
             Ok(Some(detection)) => {
+                // Log ICP result to service logs
+                let final_loss = detection.icp_losses
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap_or(0.0);
+                
+                log_info!(
+                    "hollow_board_detector",
+                    "FINAL ICP RESULT: pose=({:.6}, {:.6}, {:.6}, {:.6}, {:.6}, {:.6}), loss={:.6}",
+                    detection.board_model.pose.translation.x,
+                    detection.board_model.pose.translation.y,
+                    detection.board_model.pose.translation.z,
+                    detection.board_model.pose.rotation.i,
+                    detection.board_model.pose.rotation.j,
+                    detection.board_model.pose.rotation.k,
+                    final_loss
+                );
+
                 // Convert hollow_board_detector::Detection to our BoardDetection
                 let board_detection = BoardDetection {
                     pose: detection.board_model.pose,

@@ -466,6 +466,25 @@ impl CalibrationBoardLocatorNode {
         ) {
             Ok(Some(det)) => {
                 log_warn!(LOGGER_NAME, "Board detection successful");
+                
+                // Log ICP result to service logs
+                let final_loss = det.icp_losses
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap_or(0.0);
+                
+                log_info!(
+                    LOGGER_NAME,
+                    "FINAL ICP RESULT: pose=({:.6}, {:.6}, {:.6}, {:.6}, {:.6}, {:.6}), loss={:.6}",
+                    det.board_model.pose.translation.x,
+                    det.board_model.pose.translation.y,
+                    det.board_model.pose.translation.z,
+                    det.board_model.pose.rotation.i,
+                    det.board_model.pose.rotation.j,
+                    det.board_model.pose.rotation.k,
+                    final_loss
+                );
 
                 // Publish debug plane inliers if enabled
                 if let Some(pub_inliers) = debug_plane_inliers_pub {
