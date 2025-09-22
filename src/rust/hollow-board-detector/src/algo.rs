@@ -478,7 +478,7 @@ pub fn fit_board_icp(
                         iterations: step,
                         final_loss: losses.last().copied().unwrap_or(0.0),
                         min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                        successful: false,
+                        successful: true, // Fixed: This should be true for normal convergence
                         initial_loss: if initial_loss_captured {
                             initial_loss
                         } else {
