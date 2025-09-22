@@ -37,56 +37,58 @@ The calibration pipeline consists of sensor processing, detection, and calibrati
 ```mermaid
 graph TB
     %% Input Sources
-    subgraph "Input Sources"
+    subgraph InputSources[Input Sources]
         PCAP[PCAP File<br/>LiDAR Data]
         VIDEO[Video File<br/>Camera Data]
     end
 
     %% Point Cloud Processing Pipeline
-    subgraph "Point Cloud Processing"
+    subgraph PointCloudProcessing[Point Cloud Processing]
         VD[velodyne_driver_node]
         VT[velodyne_transform_node]
         CBL[calibration_board_locator]
-
-        PCAP --> VD
-        VD -->|"/sensing/lidar/top/velodyne_packets"| VT
-        VT -->|"/sensing/lidar/top/pointcloud_raw"| CBL
-        CBL -->|"/calibration/.../calibration_board_detections"| SOLVER
     end
 
     %% Image Processing Pipeline
-    subgraph "Image Processing"
-        CAM[camera_driver<br/>(gscam)]
+    subgraph ImageProcessing[Image Processing]
+        CAM[camera_driver<br/>gscam]
         AL[aruco_locator]
-
-        VIDEO --> CAM
-        CAM -->|"/sensing/camera/.../image_raw"| AL
-        CAM -->|"/sensing/camera/.../camera_info"| AL
-        AL -->|"/calibration/.../aruco_detections"| SOLVER
-        CAM -->|"/sensing/camera/.../camera_info"| SOLVER
     end
 
     %% Calibration & Visualization
-    subgraph "Calibration & Visualization"
+    subgraph CalibrationViz[Calibration & Visualization]
         SOLVER[extrinsic_solver_node]
         OVERLAY[pointcloud_image_overlay]
-
-        SOLVER -->|"/calibration/.../extrinsic_transform"| OVERLAY
-        CAM -->|"/sensing/camera/.../image_raw"| OVERLAY
-        VT -->|"/sensing/lidar/top/pointcloud_raw"| OVERLAY
-        OVERLAY -->|"/calibration/pointcloud_overlay"| VIZ[Visualization<br/>Tools]
+        VIZ[Visualization<br/>Tools]
     end
 
     %% Debug Topics (when debug_mode=true)
-    subgraph "Debug Topics"
-        DBG1["/debug/plane_inliers"]
-        DBG2["/debug/initial_board_marker"]
-        DBG3["/debug/icp_stats"]
-
-        CBL -.->|debug_mode=true| DBG1
-        CBL -.->|debug_mode=true| DBG2
-        CBL -.->|debug_mode=true| DBG3
+    subgraph DebugTopics[Debug Topics - debug_mode=true]
+        DBG1[/debug/plane_inliers]
+        DBG2[/debug/initial_board_marker]
+        DBG3[/debug/icp_stats]
     end
+
+    %% Connections
+    PCAP --> VD
+    VD -->|/sensing/lidar/top/velodyne_packets| VT
+    VT -->|/sensing/lidar/top/pointcloud_raw| CBL
+    CBL -->|/calibration/.../calibration_board_detections| SOLVER
+
+    VIDEO --> CAM
+    CAM -->|/sensing/camera/.../image_raw| AL
+    CAM -->|/sensing/camera/.../camera_info| AL
+    AL -->|/calibration/.../aruco_detections| SOLVER
+    CAM -->|/sensing/camera/.../camera_info| SOLVER
+
+    SOLVER -->|/calibration/.../extrinsic_transform| OVERLAY
+    CAM -->|/sensing/camera/.../image_raw| OVERLAY
+    VT -->|/sensing/lidar/top/pointcloud_raw| OVERLAY
+    OVERLAY -->|/calibration/pointcloud_overlay| VIZ
+
+    CBL -.->|debug_mode=true| DBG1
+    CBL -.->|debug_mode=true| DBG2
+    CBL -.->|debug_mode=true| DBG3
 
     %% Styling
     classDef input fill:#1976d2,stroke:#0d47a1,stroke-width:2px,color:#fff
@@ -141,6 +143,10 @@ make build_packages      # Build LCTK nodes and tools
 
 ## Usage
 
+LCTK supports two data input methods:
+1. **Sample Data**: Pre-recorded test data included in the repository
+2. **ROS Bag Playback**: Your own sensor recordings in ROS bag format
+
 ### Using Sample Data
 
 Test the calibration pipeline with included sample data:
@@ -161,22 +167,6 @@ make stop_lidar_camera_sample_data
 ```
 
 ### Using Your Own Data
-
-#### Method 1: Sample Data Files
-
-LCTK provides sample data for testing the calibration pipeline:
-
-```bash
-# Launch sample data playback
-make launch_lidar_camera_sample_data
-
-# In another terminal, launch calibration
-make launch_lidar_camera_calibration
-```
-
-Sample data includes pre-recorded LiDAR (PCAP) and camera (video) files from `data/sampledata/`.
-
-#### Method 2: ROS Bag Playback
 
 For custom sensor data recorded in ROS bags:
 
@@ -261,15 +251,11 @@ To customize calibration parameters:
 
 ### Rebuilding After Code Changes
 
-**Important**: If you modify any Rust source code, you must rebuild the project:
+**Important**: If you modify any Rust or C/C++ source code, you must rebuild the project:
 
 ```bash
 # After modifying Rust code in src/
 make build
-
-# Or for faster iteration on a specific package
-source install/setup.bash
-cargo build --release --manifest-path src/bin/your_node/Cargo.toml
 ```
 
 Configuration file changes (JSON5/YAML) do **not** require rebuilding - just restart the nodes.
