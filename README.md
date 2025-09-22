@@ -64,9 +64,9 @@ graph TB
 
     %% Debug Topics (when debug_mode=true)
     subgraph DebugTopics[Debug Topics - debug_mode=true]
-        DBG1[/debug/plane_inliers]
-        DBG2[/debug/initial_board_marker]
-        DBG3[/debug/icp_stats]
+        DBG1[plane_inliers]
+        DBG2[initial_board_marker]
+        DBG3[icp_stats]
     end
 
     %% Connections
