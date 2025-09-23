@@ -392,7 +392,8 @@ pub fn fit_board_icp(
 
                 // Apply damping to the pose update (not the transformation itself)
                 // This interpolates between the current pose and the new pose after applying the transformation
-                let new_pose = pose * align_pose;
+                // CRITICAL FIX: Use correct multiplication order like original wayside-portal
+                let new_pose = align_pose * pose;
 
                 // Diagnostics for pose delta before damping
                 let delta_t = (new_pose.translation.vector - pose.translation.vector).norm();
