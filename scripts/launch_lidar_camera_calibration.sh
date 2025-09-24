@@ -116,7 +116,7 @@ cd "$PROJECT_ROOT"
 
 # Source the setup script and launch
 source install/setup.sh && \
-ros2 launch lctk_launch lidar_camera_calibration.launch.xml \
+RUST_LOG=debug ros2 launch lctk_launch lidar_camera_calibration.launch.xml \
     debug_mode:="$DEBUG_MODE" \
     enable_rviz:="$ENABLE_RVIZ" \
     use_best_effort_qos:="$USE_BEST_EFFORT_QOS" \
