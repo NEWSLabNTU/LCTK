@@ -71,12 +71,13 @@ impl DetectionProcessor for HollowBoardDetectionProcessor {
         match self.detector.detect(points) {
             Ok(Some(detection)) => {
                 // Log ICP result to service logs
-                let final_loss = detection.icp_losses
+                let final_loss = detection
+                    .icp_losses
                     .iter()
                     .copied()
                     .min_by(|a, b| a.partial_cmp(b).unwrap())
                     .unwrap_or(0.0);
-                
+
                 log_info!(
                     "hollow_board_detector",
                     "FINAL ICP RESULT: pose=({:.6}, {:.6}, {:.6}, {:.6}, {:.6}, {:.6}), loss={:.6}",
