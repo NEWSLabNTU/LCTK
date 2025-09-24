@@ -36,6 +36,7 @@ help:
 	@echo "Development Tools:"
 	@echo "  make format                     - Format all code (Rust, Python, configs)"
 	@echo "  make lint                       - Run linters and formatters check"
+	@echo "  make test                       - Run all tests including ICP comparison tests"
 	@echo "  make clean                      - Clean all build artifacts"
 	@echo "  make launch_iou_overlapping        - Launch IoU overlapping evaluator (use extrinsic_json=/path/to/file.json to specify config)"
 	@echo ""
@@ -102,6 +103,21 @@ lint:
 	@echo "Checking Rust code formatting and linting..."
 	cargo +nightly fmt --check
 	cargo clippy --all-targets --all-features -- -D warnings
+
+.PHONY: test
+test:
+	@echo "Running all tests including ICP comparison tests..."
+	@mkdir -p $(LOG_DIR)
+	@echo "Running Rust library tests..."
+	. install/setup.sh && \
+	export OPENCV_PKGCONFIG_NAME=opencv4 && \
+	export RUST_LOG=debug && \
+	cargo nextest run --no-fail-fast 2>&1 | tee $(LOG_DIR)/rust_tests.log
+	@echo "Running ROS2 node tests with colcon..."
+	. install/setup.sh && \
+	export OPENCV_PKGCONFIG_NAME=opencv4 && \
+	colcon test --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/colcon_tests.log && \
+	colcon test-result --all --verbose
 
 .PHONY: clean
 clean:
