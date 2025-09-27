@@ -1,5 +1,5 @@
 <package format="3">
-  <name>aruco_generator</name>
+  <name>aruco_generator_node</name>
   <version>0.1.0</version>
   <description>ROS 2 node for generating ArUco marker patterns</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
