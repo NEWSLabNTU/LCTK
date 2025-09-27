@@ -73,3 +73,7 @@ vision_msgs = { path = "src/ros2_rust_ws/install/vision_msgs/share/vision_msgs/r
 visualization_msgs = { path = "src/ros2_rust_ws/install/visualization_msgs/share/visualization_msgs/rust" }
 builtin_interfaces = { path = "src/ros2_rust_ws/install/builtin_interfaces/share/builtin_interfaces/rust" }
 tf2_msgs = { path = "src/ros2_rust_ws/install/tf2_msgs/share/tf2_msgs/rust" }
+
+[profile.test-release]
+inherits = "release"
+debug = true

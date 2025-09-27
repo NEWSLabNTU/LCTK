@@ -1,4 +1,5 @@
-COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo --cargo-args --profile=test-release
+COLCON_TEST_FLAGS := --ctest-args -C RelWithDebInfo --cargo-args --profile=test-release
 LOG_DIR := build_logs
 debug_mode := true
 
@@ -110,15 +111,19 @@ lint:
 test:
 	@echo "Running all tests including ICP comparison tests..."
 	@mkdir -p $(LOG_DIR)
+
 	@echo "Running Rust library tests..."
 	. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
 	cargo nextest run --no-fail-fast 2>&1 | tee $(LOG_DIR)/rust_tests.log
+	cargo nextest run --cargo-profile test-release --no-fail-fast 2>&1 | tee $(LOG_DIR)/rust_tests.log
+
 	@echo "Running ROS2 node tests with colcon..."
 	. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon test --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/colcon_tests.log && \
+	colcon test $(COLCON_TEST_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/colcon_tests.log && \
 	colcon test-result --all --verbose
 
 .PHONY: clean
