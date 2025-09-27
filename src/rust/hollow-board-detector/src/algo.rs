@@ -1,6 +1,9 @@
 use crate::{
     config::Config,
-    detection::{FitBoardIcp, FitPlaneRansac, IcpData, IcpStatistics, PlaneRansacData},
+    detection::{
+        BoardIcpState, BoardModelParams, FitBoardIcp, FitPlaneRansac, IcpData, IcpStatistics,
+        PlaneRansacData,
+    },
 };
 use anyhow::Result;
 use arrsac::Arrsac;
@@ -710,4 +713,458 @@ pub fn fit_board_icp(
         initial_pose: final_init_pose,
         icp_stats: final_icp_stats.clone(),
     })
+}
+
+/// Estimates the board pose using the iterator API (new implementation)
+///
+/// This is the new implementation that uses BoardIcpIterator internally.
+/// For step-by-step debugging, use BoardIcpIterator directly.
+pub fn fit_board_icp_with_iterator<'a>(
+    board_detector: &'a Config,
+    aruco_detector: &MultiArucoPattern,
+    plane_model: &PlaneModel,
+    plane_inlier_points: &[impl Borrow<Point3<f64>>],
+    mut progress_cb: Option<&'a mut dyn FnMut(&BoardModel)>,
+) -> Result<FitBoardIcp> {
+    // Compute initial pose (extracted from original implementation)
+    let init_pose = {
+        let inlier_centroid: Point3<f64> =
+            centroid_of_points(plane_inlier_points.iter().map(|point| {
+                let point: [f64; 3] = (*point.borrow()).into();
+                point
+            }))
+            .unwrap()
+            .into();
+
+        let plane_normal = {
+            let normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
+            normal
+        };
+
+        let rotation = {
+            if plane_inlier_points.len() >= 3 {
+                // Compute PCA on plane inlier points
+                let mean = inlier_centroid;
+                let mut covariance = nalgebra::Matrix3::<f64>::zeros();
+                for point in plane_inlier_points.iter() {
+                    let p: Point3<f64> = (*point.borrow()).into();
+                    let diff = p - mean;
+                    covariance += diff * diff.transpose();
+                }
+                covariance /= plane_inlier_points.len() as f64;
+
+                let eigen = covariance.symmetric_eigen();
+                let eigenvalues = eigen.eigenvalues;
+                let eigenvectors = eigen.eigenvectors;
+
+                let mut eigen_pairs: Vec<(f64, Vector3<f64>)> = (0..3)
+                    .map(|i| (eigenvalues[i], eigenvectors.column(i).into()))
+                    .collect();
+                eigen_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+
+                let pc1 = eigen_pairs[0].1.normalize();
+                let pc2 = eigen_pairs[1].1.normalize();
+                let pc3 = eigen_pairs[2].1.normalize();
+
+                let computed_normal = if pc3.dot(&plane_normal) > 0.0 {
+                    pc3
+                } else {
+                    -pc3
+                };
+
+                let cross_product = pc1.cross(&pc2);
+                let (x_axis, y_axis) = if cross_product.dot(&computed_normal) > 0.0 {
+                    (pc1, pc2)
+                } else {
+                    (pc1, -pc2)
+                };
+
+                let rotation_matrix =
+                    nalgebra::Matrix3::from_columns(&[x_axis, y_axis, computed_normal]);
+                let pca_rotation = nalgebra::UnitQuaternion::from_matrix(&rotation_matrix);
+
+                let adjustment_angle = -135.0_f64.to_radians();
+                let normal_axis = nalgebra::Unit::new_normalize(computed_normal);
+                let z_axis_rotation =
+                    nalgebra::UnitQuaternion::from_axis_angle(&normal_axis, adjustment_angle);
+
+                z_axis_rotation * pca_rotation
+            } else {
+                let board_z_axis = Vector3::z_axis();
+                UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
+                    .unwrap_or_else(|| UnitQuaternion::identity())
+            }
+        };
+
+        Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
+    };
+
+    // Create iterator
+    let board_model_params = BoardModelParams {
+        board_shape: board_detector.board_shape.clone(),
+        marker_paper_size: aruco_detector.paper_size(),
+    };
+
+    let mut iterator =
+        BoardIcpIterator::new(board_detector, board_model_params.clone(), progress_cb);
+
+    let init_inlier_points: Vec<Point3<f64>> =
+        plane_inlier_points.iter().map(|p| *p.borrow()).collect();
+
+    let mut state = iterator.initial_state(init_pose, init_inlier_points);
+    let mut losses = vec![];
+    let initial_loss = state.avg_loss;
+
+    // Run to completion
+    while !iterator.should_terminate(&state) {
+        state = iterator.step(&state);
+        losses.push(state.avg_loss);
+    }
+
+    // Build result
+    let successful = !iterator.termination_reason(&state).contains("failed")
+        && !iterator.termination_reason(&state).contains("Insufficient");
+
+    let icp_stats = IcpStatistics {
+        iterations: state.iteration,
+        final_loss: state.avg_loss,
+        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
+        successful,
+        initial_loss,
+        convergence_reason: iterator.termination_reason(&state),
+    };
+
+    // Build visualization message
+    let viz_msg = {
+        let board_model = BoardModel {
+            pose: state.board_pose,
+            board_shape: board_model_params.board_shape.clone(),
+            marker_paper_size: board_model_params.marker_paper_size,
+        };
+
+        IcpData {
+            correspondences: state.correspondences.clone(),
+            board_model,
+        }
+    };
+
+    // Check rejection threshold
+    let min_icp_loss = losses.iter().copied().map(r64).min().map(|loss| loss.raw());
+
+    if let Some(min_loss) = min_icp_loss {
+        if min_loss > board_detector.icp_rejection_threshold {
+            return Ok(FitBoardIcp {
+                board_pose: state.board_pose,
+                icp_losses: losses,
+                icp_data: viz_msg,
+                successful: false,
+                initial_pose: init_pose,
+                icp_stats,
+            });
+        }
+    }
+
+    Ok(FitBoardIcp {
+        board_pose: state.board_pose,
+        icp_losses: losses,
+        icp_data: viz_msg,
+        successful: true,
+        initial_pose: init_pose,
+        icp_stats,
+    })
+}
+
+/// Board ICP iterator for step-by-step execution
+pub struct BoardIcpIterator<'a> {
+    board_detector_config: &'a Config,
+    board_model_params: BoardModelParams,
+    progress_callback: Option<&'a mut dyn FnMut(&BoardModel)>,
+}
+
+impl<'a> BoardIcpIterator<'a> {
+    /// Create a new board ICP iterator
+    pub fn new(
+        board_detector_config: &'a Config,
+        board_model_params: BoardModelParams,
+        progress_callback: Option<&'a mut dyn FnMut(&BoardModel)>,
+    ) -> Self {
+        Self {
+            board_detector_config,
+            board_model_params,
+            progress_callback,
+        }
+    }
+
+    /// Create initial state from plane inlier points and initial pose
+    pub fn initial_state(
+        &self,
+        initial_pose: Isometry3<f64>,
+        initial_inlier_points: Vec<Point3<f64>>,
+    ) -> BoardIcpState {
+        BoardIcpState {
+            iteration: 0,
+            board_pose: initial_pose,
+            inlier_points: initial_inlier_points,
+            correspondences: Vec::new(),
+            avg_loss: f64::INFINITY,
+            previous_loss: None,
+            adaptive_threshold: self.board_detector_config.icp_outlier_threshold,
+            total_correspondences: 0,
+            good_correspondences: 0,
+            termination_count: 0,
+        }
+    }
+
+    /// Execute one ICP iteration step
+    pub fn step(&mut self, current_state: &BoardIcpState) -> BoardIcpState {
+        // 1. Create board model with current pose
+        let board_model = BoardModel {
+            pose: current_state.board_pose,
+            board_shape: self.board_model_params.board_shape.clone(),
+            marker_paper_size: self.board_model_params.marker_paper_size,
+        };
+
+        // Trigger progress callback if provided
+        if let Some(cb) = self.progress_callback.as_mut() {
+            cb(&board_model);
+        }
+
+        // 2. Find correspondences using board model
+        let correspondences = match board_model.find_correspondences(&current_state.inlier_points) {
+            Some(corr) => corr,
+            None => {
+                // No correspondences - return terminated state
+                return BoardIcpState {
+                    iteration: current_state.iteration + 1,
+                    correspondences: Vec::new(),
+                    avg_loss: f64::INFINITY,
+                    previous_loss: Some(current_state.avg_loss),
+                    total_correspondences: 0,
+                    good_correspondences: 0,
+                    ..current_state.clone()
+                };
+            }
+        };
+
+        let total_correspondences = correspondences.len();
+
+        // 3. Compute losses for each correspondence
+        let correspondence_losses: Vec<_> = correspondences
+            .iter()
+            .map(|(input_point, corresponding_point)| (*input_point - corresponding_point).norm())
+            .collect();
+
+        let avg_loss = correspondence_losses.iter().sum::<f64>() / correspondences.len() as f64;
+
+        // 4. Filter outliers with adaptive threshold
+        let adaptive_threshold = (avg_loss
+            * self.board_detector_config.icp_adaptive_threshold_multiplier)
+            .max(self.board_detector_config.icp_adaptive_threshold_min)
+            .min(self.board_detector_config.icp_adaptive_threshold_max);
+
+        let good_correspondences: Vec<_> = correspondences
+            .iter()
+            .zip(correspondence_losses.iter())
+            .filter_map(|((input_point, corresponding_point), &loss)| {
+                if loss <= adaptive_threshold {
+                    Some((**input_point, *corresponding_point))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let good_correspondences_len = good_correspondences.len();
+
+        // 5. Check if we have enough points for Kabsch
+        if good_correspondences_len < 3 {
+            return BoardIcpState {
+                iteration: current_state.iteration + 1,
+                correspondences: good_correspondences,
+                avg_loss,
+                previous_loss: Some(current_state.avg_loss),
+                adaptive_threshold,
+                total_correspondences,
+                good_correspondences: good_correspondences_len,
+                ..current_state.clone()
+            };
+        }
+
+        // Clone good_correspondences before consuming
+        let good_correspondences_for_state: Vec<(Point3<f64>, Point3<f64>)> =
+            good_correspondences.clone();
+        let (good_corresponding_points, good_inlier_points): (Vec<Point3<f64>>, Vec<Point3<f64>>) =
+            good_correspondences.into_iter().unzip();
+
+        // 6. Compute transformation using Kabsch
+        let align_pose: Isometry3<f64> =
+            match Self::compute_kabsch_transform(&good_corresponding_points, &good_inlier_points) {
+                Some(iso) => iso,
+                None => {
+                    // Kabsch failed
+                    return BoardIcpState {
+                        iteration: current_state.iteration + 1,
+                        correspondences: good_correspondences_for_state,
+                        avg_loss,
+                        previous_loss: Some(current_state.avg_loss),
+                        adaptive_threshold,
+                        total_correspondences,
+                        good_correspondences: good_correspondences_len,
+                        ..current_state.clone()
+                    };
+                }
+            };
+
+        // 7. Apply damping and update pose
+        let new_pose = align_pose * current_state.board_pose;
+        let damping_factor = self.board_detector_config.icp_damping_factor;
+
+        // Debug logging
+        let delta_t =
+            (new_pose.translation.vector - current_state.board_pose.translation.vector).norm();
+        let delta_ang = new_pose
+            .rotation
+            .rotation_to(&current_state.board_pose.rotation)
+            .angle();
+        debug!(
+            "ICP Step {}: loss={:.6}, inliers={}, correspondences={}/{}, delta_t={:.6}, delta_ang={:.6}",
+            current_state.iteration,
+            avg_loss,
+            good_inlier_points.len(),
+            good_correspondences_len,
+            total_correspondences,
+            delta_t,
+            delta_ang
+        );
+
+        let damped_translation = Translation3::from(
+            current_state.board_pose.translation.vector
+                + (new_pose.translation.vector - current_state.board_pose.translation.vector)
+                    * damping_factor,
+        );
+
+        let damped_rotation = UnitQuaternion::slerp(
+            &current_state.board_pose.rotation,
+            &new_pose.rotation,
+            damping_factor,
+        );
+
+        // 8. Check termination criteria for pose convergence
+        let applied_t =
+            (damped_translation.vector - current_state.board_pose.translation.vector).norm();
+        let applied_ang = damped_rotation
+            .rotation_to(&current_state.board_pose.rotation)
+            .angle();
+        let pose_weight = applied_t + applied_ang;
+
+        let termination_count =
+            if pose_weight <= self.board_detector_config.icp_pose_weight_threshold {
+                current_state.termination_count + 1
+            } else {
+                0
+            };
+
+        let damped_pose = Isometry3::from_parts(damped_translation, damped_rotation);
+
+        // 9. Return new state
+        BoardIcpState {
+            iteration: current_state.iteration + 1,
+            board_pose: damped_pose,
+            inlier_points: good_inlier_points,
+            correspondences: good_correspondences_for_state,
+            avg_loss,
+            previous_loss: Some(current_state.avg_loss),
+            adaptive_threshold,
+            total_correspondences,
+            good_correspondences: good_correspondences_len,
+            termination_count,
+        }
+    }
+
+    /// Check if algorithm should terminate
+    pub fn should_terminate(&self, state: &BoardIcpState) -> bool {
+        let config = self.board_detector_config;
+
+        // Max iterations reached
+        if state.iteration >= config.max_icp_iterations {
+            return true;
+        }
+
+        // Good fit achieved
+        if state.avg_loss < config.icp_good_fit_threshold {
+            return true;
+        }
+
+        // Pose converged (stable for multiple iterations)
+        if state.termination_count > 10 {
+            return true;
+        }
+
+        // Insufficient inlier points
+        if state.inlier_points.len() < config.icp_min_inlier_points {
+            return true;
+        }
+
+        // Insufficient correspondences for Kabsch
+        if state.good_correspondences < 3 {
+            return true;
+        }
+
+        // No correspondences found
+        if state.correspondences.is_empty() {
+            return true;
+        }
+
+        false
+    }
+
+    /// Get termination reason
+    pub fn termination_reason(&self, state: &BoardIcpState) -> String {
+        let config = self.board_detector_config;
+
+        if state.iteration >= config.max_icp_iterations {
+            format!("Max iterations reached: {}", config.max_icp_iterations)
+        } else if state.termination_count > 10 {
+            "Converged (stable pose)".to_string()
+        } else if state.avg_loss < config.icp_good_fit_threshold {
+            "Converged (good fit)".to_string()
+        } else if state.inlier_points.len() < config.icp_min_inlier_points {
+            format!(
+                "Insufficient inlier points: {} < {}",
+                state.inlier_points.len(),
+                config.icp_min_inlier_points
+            )
+        } else if state.good_correspondences < 3 {
+            format!(
+                "Insufficient points for Kabsch: {}",
+                state.good_correspondences
+            )
+        } else if state.correspondences.is_empty() {
+            "No correspondences found".to_string()
+        } else {
+            "Unknown".to_string()
+        }
+    }
+
+    /// Helper to compute Kabsch transformation
+    fn compute_kabsch_transform(
+        model_points: &[Point3<f64>],
+        data_points: &[Point3<f64>],
+    ) -> Option<Isometry3<f64>> {
+        let pairs = izip!(
+            model_points.iter().map(|&p| -> [f64; 3] { p.into() }),
+            data_points.iter().map(|&p| -> [f64; 3] { p.into() }),
+        );
+
+        match kabsch(pairs) {
+            Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => {
+                let iso = Isometry3 {
+                    rotation: UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
+                    translation: Translation3::new(x, y, z),
+                };
+                Some(iso)
+            }
+            None => None,
+        }
+    }
 }

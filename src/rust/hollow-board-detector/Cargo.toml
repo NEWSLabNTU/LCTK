@@ -21,6 +21,7 @@ aruco-config = { version = "0.1.0", path = "../aruco-config" }
 plane-estimator = { version = "0.1.0", path = "../plane-estimator" }
 log = { workspace = true }
 env_logger = "0.11"
+measurements = { workspace = true, features = ["serde"] }
 
 [dependencies.newslab-geom-algo]
 git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"

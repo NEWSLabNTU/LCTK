@@ -1,5 +1,6 @@
-use hollow_board_config::BoardModel;
-use nalgebra as na;
+use hollow_board_config::{BoardModel, BoardShape};
+use measurements::Length;
+use nalgebra::{self as na, Isometry3, Point3};
 use plane_estimator::PlaneModel;
 use std::f64;
 
@@ -50,4 +51,45 @@ pub struct IcpStatistics {
     pub successful: bool,
     pub initial_loss: f64,
     pub convergence_reason: String,
+}
+
+/// Represents the complete state of board ICP at a given iteration
+#[derive(Clone, Debug)]
+pub struct BoardIcpState {
+    /// Current iteration number (starts at 0)
+    pub iteration: usize,
+
+    /// Current board pose estimate
+    pub board_pose: Isometry3<f64>,
+
+    /// Current inlier points from point cloud
+    pub inlier_points: Vec<Point3<f64>>,
+
+    /// Correspondences: (point_cloud_point, board_model_point)
+    pub correspondences: Vec<(Point3<f64>, Point3<f64>)>,
+
+    /// Average loss for this iteration
+    pub avg_loss: f64,
+
+    /// Previous iteration's loss (None for iteration 0)
+    pub previous_loss: Option<f64>,
+
+    /// Adaptive threshold used for outlier filtering
+    pub adaptive_threshold: f64,
+
+    /// Number of correspondences before outlier filtering
+    pub total_correspondences: usize,
+
+    /// Number of good correspondences after filtering
+    pub good_correspondences: usize,
+
+    /// Convergence metadata
+    pub termination_count: usize,
+}
+
+/// Parameters for board model construction
+#[derive(Clone, Debug)]
+pub struct BoardModelParams {
+    pub board_shape: BoardShape,
+    pub marker_paper_size: Length,
 }

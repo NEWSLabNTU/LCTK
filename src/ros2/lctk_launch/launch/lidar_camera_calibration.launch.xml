@@ -38,6 +38,10 @@
          default="false"
          description="Enable debug logging and visualization. When enabled, publishes debug point clouds to debug/* topics"/>
 
+    <arg name="enable_icp_iteration_debug"
+         default="$(var debug_mode)"
+         description="Enable ICP iteration-level debugging. When enabled, publishes per-iteration ICP state to debug/icp/* topics. Defaults to same value as debug_mode."/>
+
     <arg name="enable_rviz"
          default="false"
          description="Launch RViz for calibration visualization"/>
@@ -74,6 +78,7 @@
         <arg name="board_detections_topic" value="/calibration/calibration_board_locator/board_detections"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
+        <arg name="enable_icp_iteration_debug" value="$(var enable_icp_iteration_debug)"/>
         <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
     </include>
 
