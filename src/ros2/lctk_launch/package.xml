@@ -18,7 +18,6 @@
   <exec_depend>gscam</exec_depend>
   <exec_depend>aruco_locator_node</exec_depend>
   <exec_depend>calibration_board_locator_node</exec_depend>
-  <exec_depend>sensor_synchronizer_node</exec_depend>
   <exec_depend>extrinsic_solver_node</exec_depend>
   <exec_depend>pointcloud_image_overlay_node</exec_depend>
 

@@ -18,7 +18,6 @@
   <exec_depend>gscam</exec_depend>
 
   <!-- LCTK dependencies -->
-  <exec_depend>sensor_synchronizer</exec_depend>
   <exec_depend>lctk_launch</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
