@@ -1,5 +1,5 @@
 [package]
-name = "multi_wayside"
+name = "multi_wayside_cli"
 version = "0.1.1"
 authors = ["yahoo55025502 <yahoo55025502@gmail.com>"]
 edition = "2021"
