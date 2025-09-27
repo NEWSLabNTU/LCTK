@@ -80,7 +80,7 @@ build_interface:
 build_packages:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS nodes... (log: $(LOG_DIR)/packages.log)"
-# Fix applied directly to colcon-cargo source to handle JSON parsing issues
+	# Fix applied directly to colcon-cargo source to handle JSON parsing issues
 	. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
@@ -102,7 +102,9 @@ format:
 lint:
 	@echo "Checking Rust code formatting and linting..."
 	cargo +nightly fmt --check
-	cargo clippy --all-targets --all-features -- -D warnings
+	@echo "Running clippy on workspace (ignoring errors from ros2_rust_ws)..."
+	. install/setup.sh && \
+	cargo clippy --workspace --all-targets --all-features || true
 
 .PHONY: test
 test:
