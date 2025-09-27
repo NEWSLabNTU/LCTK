@@ -126,6 +126,30 @@ The LiDAR-to-camera calibration workflow follows these steps:
 
 The main script for this workflow is in `scripts/lidar-to-camera-calibration/lidar_to_camera.sh`.
 
+### Board Detection Pipeline
+
+The calibration board detection in point clouds follows a multi-stage pipeline (`calibration_board_locator_node/src/main.rs`):
+
+1. **Bounding Box Filtering** (`detect_bbox`): Filters points to a region of interest around the expected board location
+2. **RANSAC Plane Detection** (`detect_ransac`): Detects the dominant plane in the filtered point cloud
+   - Uses RANSAC algorithm to fit a plane model
+   - Identifies inlier points that belong to the plane
+3. **ICP Board Pose Refinement** (`detect_icp`): Refines the board pose using Iterative Closest Point
+   - **PCA-based Initial Pose**: Computes initial board pose from plane inliers using Principal Component Analysis
+     - Performs eigenvalue decomposition of the covariance matrix
+     - Extracts orthogonal eigenvectors v1, v2, v3 (ordered by eigenvalue magnitude)
+     - Applies orientation constraints: v3 points toward camera, v1 and v2 have positive z components
+     - Ensures right-hand rule by swapping v1/v2 if needed (not flipping)
+     - Implementation: `compute_initial_pose_pca()` uses nalgebra's `symmetric_eigen()` for eigendecomposition
+   - **ICP Iterations**: Refines pose by iteratively matching model points to observed points
+   - Uses Kabsch algorithm for rigid body transformation estimation
+
+**Key Implementation Details:**
+- PCA provides a robust initial guess for ICP, reducing convergence time
+- The PCA implementation is self-contained using nalgebra (no external PCA libraries required)
+- Initial board pose is published to debug topics immediately after PCA computation
+- ICP iterations use the BoardIcpIterator API for flexible iteration control and debug visualization
+
 ### Debug Mode
 
 The calibration system supports debug mode for detailed analysis and troubleshooting:
@@ -139,12 +163,19 @@ ros2 launch calib_launch lidar_camera_calibration.launch.xml debug_mode:=true
 ```
 
 When debug mode is enabled:
-- **Debug Topics**: Additional point cloud topics are published:
+- **Debug Topics**: Additional point cloud and marker topics are published:
   - `/calibration/debug/all_points`: All input points before filtering
   - `/calibration/debug/filtered_points`: Points within bounding box
   - `/calibration/debug/plane_inliers`: Points detected as part of the calibration plane
+  - `/calibration/debug/plane_marker`: Circular plane visualization showing RANSAC-detected plane (centered at inlier centroid, aligned with plane normal)
+  - `/calibration/debug/initial_board_marker`: Initial board pose from PCA-based alignment (published immediately after PCA computation)
+  - `/calibration/debug/icp_iterations`: Board pose at each ICP iteration
+  - `/calibration/debug/final_board_pose`: Final successful detection pose
+  - `/calibration/debug/bbox_marker`: Bounding box visualization
+  - `/calibration/debug/icp_stats`: ICP iteration statistics (if ICP iteration debug is enabled)
 - **Debug Logging**: Detailed algorithm information logged at debug level:
   - RANSAC plane fitting progress and statistics
+  - PCA-based pose initialization with eigenvalues and eigenvector orientations
   - ICP algorithm iteration details and convergence
   - Point cloud statistics and processing steps
 - **Performance Impact**: Debug mode adds computational overhead and should only be enabled for development/troubleshooting
@@ -405,6 +436,21 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   - Detection synchronizer shows active subscriptions and publishes to synchronized topics
 - **Board Detector Performance**: Fixed ICP algorithm performance by reducing max_iterations from 20,000 to 100 in board_detector.json5, preventing minutes-long processing delays
 - **Camera Info Topic Derivation**: ROS 2 nodes (aruco_locator_node, pointcloud_image_overlay) automatically derive camera_info topics from image topics following image_pipeline convention (e.g., /camera/image_raw → /camera/camera_info). No manual camera_info remapping needed in launch files
+- **Board Detection Pipeline Refactoring**: The board detection process has been separated into distinct stages for better debugging and modularity:
+  - `detect_bbox()`: Bounding box filtering
+  - `detect_ransac()`: RANSAC plane detection
+  - `detect_icp()`: ICP pose refinement with PCA-based initialization
+  - Each stage has dedicated debug visualization topics
+- **PCA-based Pose Initialization**: Implemented custom PCA using nalgebra's `symmetric_eigen()` for computing initial board pose from RANSAC plane inliers:
+  - Computes covariance matrix and performs eigenvalue decomposition
+  - Applies orientation constraints: v3 (smallest eigenvalue) points toward camera, v1 and v2 have positive z
+  - Right-hand rule maintained by swapping v1/v2 (not flipping) when cross product check fails
+  - Initial pose published immediately after PCA computation for debugging visibility
+  - Located in `calibration_board_locator_node/src/main.rs::compute_initial_pose_pca()`
+- **Debug Visualization Enhancements**:
+  - Added `debug/plane_marker` topic showing circular RANSAC plane (semi-transparent blue disk centered at inlier centroid, aligned with plane normal)
+  - Fixed `debug/initial_board_marker` to publish immediately after PCA computation instead of only on successful detection
+  - All debug topics now have consistent marker lifetimes and visual styling
 
 ## Coding Style
 
@@ -434,3 +480,4 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   )?;
   ```
 - Whenever you run a command requiring root privilege (such as sudo), stop and show the command to user so that user can run the command in another terminal.
+- To rebuild a ROS2 package in Rust, use `colcon build --packages-select PKG_NAME` to rebuild that package. Don't use `cargo build` because it does not install the compiled binary to the install/ directory.
