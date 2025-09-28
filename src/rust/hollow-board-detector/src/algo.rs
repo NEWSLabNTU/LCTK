@@ -43,6 +43,27 @@ pub fn fit_plane_ransac<'a>(
         return Ok(None);
     }
 
+    // Compute point cloud statistics for debugging
+    let centroid = points
+        .iter()
+        .fold(Vector3::zeros(), |acc, p| acc + p.coords)
+        / points.len() as f64;
+    let variance = points
+        .iter()
+        .map(|p| (p.coords - centroid).norm_squared())
+        .sum::<f64>()
+        / points.len() as f64;
+    let std_dev = variance.sqrt();
+
+    debug!(
+        "RANSAC input: {} points, centroid: ({:.3}, {:.3}, {:.3}), std_dev: {:.3}",
+        points.len(),
+        centroid.x,
+        centroid.y,
+        centroid.z,
+        std_dev
+    );
+
     let mut arrsac = Arrsac::new(plane_ransac_inlier_threshold, rand::thread_rng())
         .max_candidate_hypotheses(plane_ransac_max_iterations);
     let estimator = PlaneEstimator::new();
@@ -50,12 +71,20 @@ pub fn fit_plane_ransac<'a>(
     let (mut plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
             Some(ret) => {
+                let inlier_ratio = ret.1.len() as f64 / points.len() as f64;
+                let plane_dist_from_origin = ret.0.center.coords.dot(&ret.0.normal);
                 debug!(
-                    "RANSAC success: Found {} inliers out of {} points",
+                    "RANSAC success: Found {} inliers out of {} points (ratio: {:.3})",
                     ret.1.len(),
-                    points.len()
+                    points.len(),
+                    inlier_ratio
                 );
                 debug!("RANSAC plane normal: {:?}", ret.0.normal);
+                debug!("RANSAC plane center: {:?}", ret.0.center);
+                debug!(
+                    "RANSAC plane distance from origin: {:.6}",
+                    plane_dist_from_origin
+                );
                 debug!("RANSAC plane pose: {:?}", ret.0.pose());
                 ret
             }
