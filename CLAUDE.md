@@ -481,3 +481,4 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   ```
 - Whenever you run a command requiring root privilege (such as sudo), stop and show the command to user so that user can run the command in another terminal.
 - To rebuild a ROS2 package in Rust, use `colcon build --packages-select PKG_NAME` to rebuild that package. Don't use `cargo build` because it does not install the compiled binary to the install/ directory.
+- Functional struct initialization for large structs in Rust.
