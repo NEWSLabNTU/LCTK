@@ -1,6 +1,7 @@
 mod bbox;
+mod services;
 
-use crate::bbox::BBox;
+use crate::{bbox::BBox, services::BBoxServices};
 use anyhow::{anyhow, bail, Result};
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
@@ -71,6 +72,8 @@ pub struct CalibrationBoardLocatorNode {
     _board_debug_publishers: Option<BoardDebugPublishers>,
     // ICP iteration debug publishers - grouped into a single struct
     _icp_debug_publishers: Option<IcpDebugPublishers>,
+    // BBox configuration services
+    _bbox_services: BBoxServices,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -123,6 +126,9 @@ impl CalibrationBoardLocatorNode {
 
         let bbox = Self::load_bbox_config(&bbox_file_param)?;
         let bbox = Arc::new(Mutex::new(bbox));
+
+        // Store bbox file path for save service
+        let bbox_file_path = bbox_file_param.to_string();
 
         // Create detector
         let detector = Arc::new(BoardDetector::new(
@@ -194,6 +200,9 @@ impl CalibrationBoardLocatorNode {
         let message_counter = Arc::new(AtomicU64::new(0));
         let counter_clone = Arc::clone(&message_counter);
 
+        // Clone bbox for subscription callback
+        let bbox_for_callback = Arc::clone(&bbox);
+
         // Create subscription to PointCloud2 with configurable QoS
         let mut pointcloud_options = SubscriptionOptions::new("input_pointcloud");
         pointcloud_options.qos = qos_profile;
@@ -206,7 +215,7 @@ impl CalibrationBoardLocatorNode {
                     msg,
                     &detector,
                     &detection_publisher_shared,
-                    &bbox,
+                    &bbox_for_callback,
                     &board_debug_shared,
                     &icp_debug_shared,
                 );
@@ -230,12 +239,16 @@ impl CalibrationBoardLocatorNode {
             );
         }
 
+        // Create BBox services
+        let bbox_services = BBoxServices::new(&node, Arc::clone(&bbox), bbox_file_path)?;
+
         Ok(Self {
             _node: node,
             _detection_publisher: detection_publisher,
             _pointcloud_subscription: pointcloud_subscription,
             _board_debug_publishers: board_debug_publishers,
             _icp_debug_publishers: icp_debug_publishers,
+            _bbox_services: bbox_services,
         })
     }
 

@@ -13,6 +13,8 @@ exclude = [
     "src/ros2/extrinsic_solver_node",
     "src/ros2/iou_overlapping",
     "src/ros2/pointcloud_image_overlay",
+    # Interface package without Cargo.toml (CMake-based ROS package)
+    "src/interface/lctk_interfaces",
 ]
 
 [workspace.dependencies]
@@ -70,6 +72,7 @@ vision_msgs = { path = "src/ros2_rust_ws/install/vision_msgs/share/vision_msgs/r
 visualization_msgs = { path = "src/ros2_rust_ws/install/visualization_msgs/share/visualization_msgs/rust" }
 builtin_interfaces = { path = "src/ros2_rust_ws/install/builtin_interfaces/share/builtin_interfaces/rust" }
 tf2_msgs = { path = "src/ros2_rust_ws/install/tf2_msgs/share/tf2_msgs/rust" }
+lctk_interfaces = { path = "install/lctk_interfaces/share/lctk_interfaces/rust" }
 
 [profile.test-release]
 inherits = "release"

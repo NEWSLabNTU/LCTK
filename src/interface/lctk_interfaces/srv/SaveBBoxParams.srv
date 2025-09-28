@@ -1,0 +1,10 @@
+# SaveBBoxParams.srv
+# Service to save current bounding box parameters to file
+
+# Request
+string file_path              # Optional: custom file path to save to. If empty, uses default config file
+---
+# Response
+bool success                  # True if parameters were successfully saved to file
+string message               # Success message or error description
+string saved_file_path       # Actual file path where parameters were saved

@@ -1,0 +1,10 @@
+# SetBBoxParams.srv
+# Service to update bounding box parameters
+
+# Request
+geometry_msgs/Pose pose        # New pose for the bounding box center
+float64[3] size_xyz           # New size of the bounding box [x, y, z] in meters
+---
+# Response
+bool success                  # True if parameters were successfully updated
+string message               # Success message or error description

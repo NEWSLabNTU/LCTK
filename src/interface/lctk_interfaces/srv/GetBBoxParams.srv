@@ -1,0 +1,8 @@
+# GetBBoxParams.srv
+# Service to retrieve current bounding box parameters
+
+# Request (empty - no parameters needed)
+---
+# Response
+geometry_msgs/Pose pose        # Current pose of the bounding box center
+float64[3] size_xyz           # Current size of the bounding box [x, y, z] in meters
