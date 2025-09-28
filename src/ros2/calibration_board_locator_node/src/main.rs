@@ -30,7 +30,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use std_msgs::msg::{Float64, Header, String as StringMsg};
+use std_msgs::msg::{ColorRGBA, Float64, Header, String as StringMsg};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
 use visualization_msgs::msg::{Marker, MarkerArray};
 
@@ -571,8 +571,9 @@ impl CalibrationBoardLocatorNode {
         // Publish bbox marker for visualization in RViz
         if let Some(debug_pubs) = board_debug_publishers {
             let bbox_marker = Self::create_bbox_marker(&bbox_guard, header)?;
-            let mut marker_array = MarkerArray::default();
-            marker_array.markers.push(bbox_marker);
+            let marker_array = MarkerArray {
+                markers: vec![bbox_marker],
+            };
             if let Err(e) = debug_pubs.bbox_marker.publish(marker_array) {
                 log_warn!(LOGGER_NAME, "Failed to publish bbox marker: {e}");
             }
@@ -1018,7 +1019,8 @@ impl CalibrationBoardLocatorNode {
         // Add assertions to verify correctness (debug builds only)
         #[cfg(debug_assertions)]
         {
-            let rotation_matrix = final_rotation.to_rotation_matrix().matrix();
+            let rotation_matrix_obj = final_rotation.to_rotation_matrix();
+            let rotation_matrix = rotation_matrix_obj.matrix();
             let det = rotation_matrix.determinant();
             log_debug!(LOGGER_NAME, "Rotation matrix determinant: {:.6}", det);
             assert!(
@@ -1028,7 +1030,7 @@ impl CalibrationBoardLocatorNode {
             );
 
             // Check orthogonality
-            let should_be_identity = &rotation_matrix * rotation_matrix.transpose();
+            let should_be_identity = rotation_matrix * rotation_matrix.transpose();
             let identity = na::Matrix3::<f64>::identity();
             let diff_norm = (&should_be_identity - &identity).norm();
             log_debug!(
@@ -1255,40 +1257,40 @@ impl CalibrationBoardLocatorNode {
     }
 
     fn create_bbox_marker(bbox: &BBox, header: &Header) -> Result<Marker> {
-        // Create a cube marker to visualize the bounding box
-        let mut marker = Marker::default();
-        marker.header = header.clone();
-        marker.ns = "bbox".to_string();
-        marker.id = 0;
-        marker.type_ = 1; // CUBE
-        marker.action = 0; // ADD
-
-        // Set position from bbox pose
-        marker.pose.position.x = bbox.pose.translation.x;
-        marker.pose.position.y = bbox.pose.translation.y;
-        marker.pose.position.z = bbox.pose.translation.z;
-
-        // Set orientation from bbox pose
         let q = bbox.pose.rotation.quaternion();
-        marker.pose.orientation.x = q.i;
-        marker.pose.orientation.y = q.j;
-        marker.pose.orientation.z = q.k;
-        marker.pose.orientation.w = q.w;
 
-        // Set scale from bbox size
-        marker.scale.x = bbox.size_xyz[0];
-        marker.scale.y = bbox.size_xyz[1];
-        marker.scale.z = bbox.size_xyz[2];
-
-        // Set color (semi-transparent green)
-        marker.color.r = 0.0;
-        marker.color.g = 1.0;
-        marker.color.b = 0.0;
-        marker.color.a = 0.3;
-
-        // Set lifetime (0 = forever)
-        marker.lifetime.sec = 0;
-        marker.lifetime.nanosec = 0;
+        let marker = Marker {
+            header: header.clone(),
+            ns: "bbox".to_string(),
+            id: 0,
+            type_: 1,  // CUBE
+            action: 0, // ADD
+            pose: geometry_msgs::msg::Pose {
+                position: Point {
+                    x: bbox.pose.translation.x,
+                    y: bbox.pose.translation.y,
+                    z: bbox.pose.translation.z,
+                },
+                orientation: Quaternion {
+                    x: q.i,
+                    y: q.j,
+                    z: q.k,
+                    w: q.w,
+                },
+            },
+            scale: GeomVector3 {
+                x: bbox.size_xyz[0],
+                y: bbox.size_xyz[1],
+                z: bbox.size_xyz[2],
+            },
+            color: ColorRGBA {
+                r: 0.0,
+                g: 1.0,
+                b: 0.0,
+                a: 0.2,
+            },
+            ..Default::default()
+        };
 
         Ok(marker)
     }
@@ -1347,61 +1349,75 @@ impl CalibrationBoardLocatorNode {
 
         // Board cube marker (id 0)
         let board_cube = {
-            let mut m = Marker::default();
-            m.header = header.clone();
-            m.ns = "board".to_string();
-            m.id = 0;
-            m.type_ = 1; // CUBE
-            m.action = 0; // ADD
-            m.pose.position.x = base_translation.x;
-            m.pose.position.y = base_translation.y;
-            m.pose.position.z = base_translation.z;
             let q = base_rotation.quaternion();
-            m.pose.orientation.x = q.i;
-            m.pose.orientation.y = q.j;
-            m.pose.orientation.z = q.k;
-            m.pose.orientation.w = q.w;
-            m.scale.x = board_model.board_shape.board_width.as_meters();
-            m.scale.y = board_model.board_shape.board_width.as_meters();
-            m.scale.z = 0.02; // 2 cm thickness
-            m.color.r = 0.0;
-            m.color.g = 0.2;
-            m.color.b = 1.0;
-            m.color.a = 0.4;
-            m
+            Marker {
+                header: header.clone(),
+                ns: "board".to_string(),
+                id: 0,
+                type_: 1,  // CUBE
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose {
+                    position: Point {
+                        x: base_translation.x,
+                        y: base_translation.y,
+                        z: base_translation.z,
+                    },
+                    orientation: Quaternion {
+                        x: q.i,
+                        y: q.j,
+                        z: q.k,
+                        w: q.w,
+                    },
+                },
+                scale: GeomVector3 {
+                    x: board_model.board_shape.board_width.as_meters(),
+                    y: board_model.board_shape.board_width.as_meters(),
+                    z: 0.02, // 2 cm thickness
+                },
+                color: ColorRGBA {
+                    r: 0.0,
+                    g: 1.0,
+                    b: 0.0,
+                    a: 0.6,
+                },
+                ..Default::default()
+            }
         };
 
         // Helper to build an arrow marker oriented along the board frame's X axis, then rotated
         let make_axis_arrow =
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
-                let mut m = Marker::default();
-                m.header = header.clone();
-                m.ns = "board_axes".to_string();
-                m.id = id;
-                m.type_ = 0; // ARROW
-                m.action = 0; // ADD
-                m.pose.position.x = base_translation.x;
-                m.pose.position.y = base_translation.y;
-                m.pose.position.z = base_translation.z;
-
-                let rot = base_rotation * rot_after_x; // orientation in world
+                let rot = base_rotation * rot_after_x;
                 let q = rot.quaternion();
-                m.pose.orientation.x = q.i;
-                m.pose.orientation.y = q.j;
-                m.pose.orientation.z = q.k;
-                m.pose.orientation.w = q.w;
-
-                // Shaft length = 0.5 * board width, diameters small
                 let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
-                m.scale.x = len; // shaft length
-                m.scale.y = 0.02; // shaft diameter
-                m.scale.z = 0.04; // head diameter
 
-                m.color.r = r;
-                m.color.g = g;
-                m.color.b = b;
-                m.color.a = 1.0;
-                m
+                Marker {
+                    header: header.clone(),
+                    ns: "board_axes".to_string(),
+                    id,
+                    type_: 0,  // ARROW
+                    action: 0, // ADD
+                    pose: geometry_msgs::msg::Pose {
+                        position: Point {
+                            x: base_translation.x,
+                            y: base_translation.y,
+                            z: base_translation.z,
+                        },
+                        orientation: Quaternion {
+                            x: q.i,
+                            y: q.j,
+                            z: q.k,
+                            w: q.w,
+                        },
+                    },
+                    scale: GeomVector3 {
+                        x: len,  // shaft length
+                        y: 0.02, // shaft diameter
+                        z: 0.04, // head diameter
+                    },
+                    color: ColorRGBA { r, g, b, a: 1.0 },
+                    ..Default::default()
+                }
             };
 
         // Rotations to map X axis to Y/Z in the board frame
@@ -1413,11 +1429,9 @@ impl CalibrationBoardLocatorNode {
         let y_arrow = make_axis_arrow(2, rot_y, 0.0, 1.0, 0.0); // Green Y
         let z_arrow = make_axis_arrow(3, rot_z, 0.0, 0.0, 1.0); // Blue Z
 
-        let mut arr = MarkerArray::default();
-        arr.markers.push(board_cube);
-        arr.markers.push(x_arrow);
-        arr.markers.push(y_arrow);
-        arr.markers.push(z_arrow);
+        let arr = MarkerArray {
+            markers: vec![board_cube, x_arrow, y_arrow, z_arrow],
+        };
         Ok(arr)
     }
 
@@ -1432,21 +1446,6 @@ impl CalibrationBoardLocatorNode {
             .iter()
             .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
             / (plane_inlier_points.len() as f64);
-
-        // Create a circular plane marker
-        let mut marker = Marker::default();
-        marker.header = header.clone();
-        marker.ns = "ransac_plane".to_string();
-        marker.id = 0;
-        marker.type_ = 3; // CYLINDER for a circular plane
-        marker.action = 0; // ADD
-
-        // Position at centroid
-        marker.pose.position = Point {
-            x: centroid.x,
-            y: centroid.y,
-            z: centroid.z,
-        };
 
         // Simply use the plane normal directly - no rotation corrections
         let normal = plane_model.normal;
@@ -1467,27 +1466,39 @@ impl CalibrationBoardLocatorNode {
                 .unwrap_or(na::UnitQuaternion::identity())
         };
 
-        marker.pose.orientation = Quaternion {
-            x: rotation_quat.i,
-            y: rotation_quat.j,
-            z: rotation_quat.k,
-            w: rotation_quat.w,
+        // Create a circular plane marker
+        let marker = Marker {
+            header: header.clone(),
+            ns: "ransac_plane".to_string(),
+            id: 0,
+            type_: 3,  // CYLINDER for a circular plane
+            action: 0, // ADD
+            pose: geometry_msgs::msg::Pose {
+                position: Point {
+                    x: centroid.x,
+                    y: centroid.y,
+                    z: centroid.z,
+                },
+                orientation: Quaternion {
+                    x: rotation_quat.i,
+                    y: rotation_quat.j,
+                    z: rotation_quat.k,
+                    w: rotation_quat.w,
+                },
+            },
+            scale: GeomVector3 {
+                x: 1.0,  // diameter
+                y: 1.0,  // diameter
+                z: 0.01, // thin disk
+            },
+            color: ColorRGBA {
+                r: 0.0,
+                g: 1.0,
+                b: 1.0,
+                a: 0.5, // Semi-transparent cyan for RANSAC plane
+            },
+            ..Default::default()
         };
-
-        // Set size (radius=0.5m, height=0.01m for a thin disk)
-        marker.scale.x = 1.0; // diameter
-        marker.scale.y = 1.0; // diameter
-        marker.scale.z = 0.01; // thin disk
-
-        // Set color (semi-transparent blue)
-        marker.color.r = 0.0;
-        marker.color.g = 0.0;
-        marker.color.b = 1.0;
-        marker.color.a = 0.3; // Semi-transparent
-
-        // Set lifetime
-        marker.lifetime.sec = 0;
-        marker.lifetime.nanosec = 500_000_000; // 0.5 seconds
 
         Ok(MarkerArray {
             markers: vec![marker],
@@ -1502,59 +1513,74 @@ impl CalibrationBoardLocatorNode {
         let base_rotation = &board_model.pose.rotation;
 
         let board_cube = {
-            let mut m = Marker::default();
-            m.header = header.clone();
-            m.ns = "board_icp".to_string();
-            m.id = 1000;
-            m.type_ = 1; // CUBE
-            m.action = 0; // ADD
-            m.pose.position.x = base_translation.x;
-            m.pose.position.y = base_translation.y;
-            m.pose.position.z = base_translation.z;
             let q = base_rotation.quaternion();
-            m.pose.orientation.x = q.i;
-            m.pose.orientation.y = q.j;
-            m.pose.orientation.z = q.k;
-            m.pose.orientation.w = q.w;
-            m.scale.x = board_model.board_shape.board_width.as_meters();
-            m.scale.y = board_model.board_shape.board_width.as_meters();
-            m.scale.z = 0.02;
-            m.color.r = 1.0;
-            m.color.g = 0.5;
-            m.color.b = 0.0;
-            m.color.a = 0.3;
-            m
+            Marker {
+                header: header.clone(),
+                ns: "board_icp".to_string(),
+                id: 1000,
+                type_: 1,  // CUBE
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose {
+                    position: Point {
+                        x: base_translation.x,
+                        y: base_translation.y,
+                        z: base_translation.z,
+                    },
+                    orientation: Quaternion {
+                        x: q.i,
+                        y: q.j,
+                        z: q.k,
+                        w: q.w,
+                    },
+                },
+                scale: GeomVector3 {
+                    x: board_model.board_shape.board_width.as_meters(),
+                    y: board_model.board_shape.board_width.as_meters(),
+                    z: 0.02,
+                },
+                color: ColorRGBA {
+                    r: 1.0,
+                    g: 0.5,
+                    b: 0.0,
+                    a: 0.3,
+                },
+                ..Default::default()
+            }
         };
 
         let make_axis_arrow =
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
-                let mut m = Marker::default();
-                m.header = header.clone();
-                m.ns = "board_axes_icp".to_string();
-                m.id = id;
-                m.type_ = 0; // ARROW
-                m.action = 0; // ADD
-                m.pose.position.x = base_translation.x;
-                m.pose.position.y = base_translation.y;
-                m.pose.position.z = base_translation.z;
-
                 let rot = base_rotation * rot_after_x;
                 let q = rot.quaternion();
-                m.pose.orientation.x = q.i;
-                m.pose.orientation.y = q.j;
-                m.pose.orientation.z = q.k;
-                m.pose.orientation.w = q.w;
-
                 let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
-                m.scale.x = len;
-                m.scale.y = 0.02;
-                m.scale.z = 0.04;
 
-                m.color.r = r;
-                m.color.g = g;
-                m.color.b = b;
-                m.color.a = 0.9;
-                m
+                Marker {
+                    header: header.clone(),
+                    ns: "board_axes_icp".to_string(),
+                    id,
+                    type_: 0,  // ARROW
+                    action: 0, // ADD
+                    pose: geometry_msgs::msg::Pose {
+                        position: Point {
+                            x: base_translation.x,
+                            y: base_translation.y,
+                            z: base_translation.z,
+                        },
+                        orientation: Quaternion {
+                            x: q.i,
+                            y: q.j,
+                            z: q.k,
+                            w: q.w,
+                        },
+                    },
+                    scale: GeomVector3 {
+                        x: len,
+                        y: 0.02,
+                        z: 0.04,
+                    },
+                    color: ColorRGBA { r, g, b, a: 0.9 },
+                    ..Default::default()
+                }
             };
 
         let rot_x = na::UnitQuaternion::identity();
@@ -1565,11 +1591,9 @@ impl CalibrationBoardLocatorNode {
         let y_arrow = make_axis_arrow(1002, rot_y, 0.2, 1.0, 0.2);
         let z_arrow = make_axis_arrow(1003, rot_z, 0.2, 0.2, 1.0);
 
-        let mut arr = MarkerArray::default();
-        arr.markers.push(board_cube);
-        arr.markers.push(x_arrow);
-        arr.markers.push(y_arrow);
-        arr.markers.push(z_arrow);
+        let arr = MarkerArray {
+            markers: vec![board_cube, x_arrow, y_arrow, z_arrow],
+        };
         Ok(arr)
     }
 
@@ -1597,8 +1621,9 @@ impl CalibrationBoardLocatorNode {
         }
 
         // Publish current loss value
-        let mut loss_msg = Float64::default();
-        loss_msg.data = state.avg_loss;
+        let loss_msg = Float64 {
+            data: state.avg_loss,
+        };
         let _ = debug_publishers.loss.publish(loss_msg);
 
         // Publish iteration statistics
@@ -1610,8 +1635,7 @@ impl CalibrationBoardLocatorNode {
             state.total_correspondences,
             state.adaptive_threshold
         );
-        let mut stats_msg = StringMsg::default();
-        stats_msg.data = stats_text;
+        let stats_msg = StringMsg { data: stats_text };
         let _ = debug_publishers.stats.publish(stats_msg);
     }
 
@@ -1686,100 +1710,127 @@ impl CalibrationBoardLocatorNode {
         let scale = 0.3;
 
         // V1 (1st PC - largest variance) - RED
-        let mut v1_marker = Marker::default();
-        v1_marker.header = header.clone();
-        v1_marker.ns = "pca_eigenvectors".to_string();
-        v1_marker.id = 0;
-        v1_marker.type_ = 0; // ARROW
-        v1_marker.action = 0; // ADD
-        v1_marker.pose.position = Point {
-            x: centroid.x,
-            y: centroid.y,
-            z: centroid.z,
-        };
+        let v1_marker = {
+            // Direction from centroid along v1
+            let direction = v1.normalize();
+            let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
+                .unwrap_or(na::UnitQuaternion::identity());
 
-        // Direction from centroid along v1
-        let direction = v1.normalize();
-        let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
-            .unwrap_or(na::UnitQuaternion::identity());
-        v1_marker.pose.orientation = Quaternion {
-            x: q.i,
-            y: q.j,
-            z: q.k,
-            w: q.w,
+            Marker {
+                header: header.clone(),
+                ns: "pca_eigenvectors".to_string(),
+                id: 0,
+                type_: 0,  // ARROW
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose {
+                    position: Point {
+                        x: centroid.x,
+                        y: centroid.y,
+                        z: centroid.z,
+                    },
+                    orientation: Quaternion {
+                        x: q.i,
+                        y: q.j,
+                        z: q.k,
+                        w: q.w,
+                    },
+                },
+                scale: GeomVector3 {
+                    x: scale, // shaft length
+                    y: 0.02,  // shaft diameter
+                    z: 0.04,  // head diameter
+                },
+                color: ColorRGBA {
+                    r: 1.0, // RED
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+                ..Default::default()
+            }
         };
-
-        v1_marker.scale.x = scale; // shaft length
-        v1_marker.scale.y = 0.02; // shaft diameter
-        v1_marker.scale.z = 0.04; // head diameter
-        v1_marker.color.r = 1.0; // RED
-        v1_marker.color.g = 0.0;
-        v1_marker.color.b = 0.0;
-        v1_marker.color.a = 1.0;
         markers.push(v1_marker);
 
         // V2 (2nd PC) - GREEN
-        let mut v2_marker = Marker::default();
-        v2_marker.header = header.clone();
-        v2_marker.ns = "pca_eigenvectors".to_string();
-        v2_marker.id = 1;
-        v2_marker.type_ = 0; // ARROW
-        v2_marker.action = 0; // ADD
-        v2_marker.pose.position = Point {
-            x: centroid.x,
-            y: centroid.y,
-            z: centroid.z,
-        };
+        let v2_marker = {
+            let direction = v2.normalize();
+            let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
+                .unwrap_or(na::UnitQuaternion::identity());
 
-        let direction = v2.normalize();
-        let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
-            .unwrap_or(na::UnitQuaternion::identity());
-        v2_marker.pose.orientation = Quaternion {
-            x: q.i,
-            y: q.j,
-            z: q.k,
-            w: q.w,
+            Marker {
+                header: header.clone(),
+                ns: "pca_eigenvectors".to_string(),
+                id: 1,
+                type_: 0,  // ARROW
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose {
+                    position: Point {
+                        x: centroid.x,
+                        y: centroid.y,
+                        z: centroid.z,
+                    },
+                    orientation: Quaternion {
+                        x: q.i,
+                        y: q.j,
+                        z: q.k,
+                        w: q.w,
+                    },
+                },
+                scale: GeomVector3 {
+                    x: scale,
+                    y: 0.02,
+                    z: 0.04,
+                },
+                color: ColorRGBA {
+                    r: 0.0,
+                    g: 1.0, // GREEN
+                    b: 0.0,
+                    a: 1.0,
+                },
+                ..Default::default()
+            }
         };
-
-        v2_marker.scale.x = scale;
-        v2_marker.scale.y = 0.02;
-        v2_marker.scale.z = 0.04;
-        v2_marker.color.r = 0.0;
-        v2_marker.color.g = 1.0; // GREEN
-        v2_marker.color.b = 0.0;
-        v2_marker.color.a = 1.0;
         markers.push(v2_marker);
 
         // V3 (3rd PC - smallest variance, normal) - BLUE
-        let mut v3_marker = Marker::default();
-        v3_marker.header = header.clone();
-        v3_marker.ns = "pca_eigenvectors".to_string();
-        v3_marker.id = 2;
-        v3_marker.type_ = 0; // ARROW
-        v3_marker.action = 0; // ADD
-        v3_marker.pose.position = Point {
-            x: centroid.x,
-            y: centroid.y,
-            z: centroid.z,
-        };
+        let v3_marker = {
+            let direction = v3.normalize();
+            let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
+                .unwrap_or(na::UnitQuaternion::identity());
 
-        let direction = v3.normalize();
-        let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
-            .unwrap_or(na::UnitQuaternion::identity());
-        v3_marker.pose.orientation = Quaternion {
-            x: q.i,
-            y: q.j,
-            z: q.k,
-            w: q.w,
+            Marker {
+                header: header.clone(),
+                ns: "pca_eigenvectors".to_string(),
+                id: 2,
+                type_: 0,  // ARROW
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose {
+                    position: Point {
+                        x: centroid.x,
+                        y: centroid.y,
+                        z: centroid.z,
+                    },
+                    orientation: Quaternion {
+                        x: q.i,
+                        y: q.j,
+                        z: q.k,
+                        w: q.w,
+                    },
+                },
+                scale: GeomVector3 {
+                    x: scale,
+                    y: 0.02,
+                    z: 0.04,
+                },
+                color: ColorRGBA {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 1.0, // BLUE
+                    a: 1.0,
+                },
+                ..Default::default()
+            }
         };
-
-        v3_marker.scale.x = scale;
-        v3_marker.scale.y = 0.02;
-        v3_marker.scale.z = 0.04;
-        v3_marker.color.r = 0.0;
-        v3_marker.color.g = 0.0;
-        v3_marker.color.b = 1.0; // BLUE
-        v3_marker.color.a = 1.0;
         markers.push(v3_marker);
 
         Ok(MarkerArray { markers })
@@ -1790,13 +1841,6 @@ impl CalibrationBoardLocatorNode {
 
         // Create line markers for each correspondence
         for (i, (data_point, model_point)) in state.correspondences.iter().enumerate() {
-            let mut marker = Marker::default();
-            marker.header = header.clone();
-            marker.ns = "icp_correspondences".to_string();
-            marker.id = i as i32;
-            marker.type_ = 4; // LINE_STRIP
-            marker.action = 0; // ADD
-
             // Create line from data point to model point
             let start_point = Point {
                 x: data_point.x,
@@ -1809,18 +1853,26 @@ impl CalibrationBoardLocatorNode {
                 z: model_point.z,
             };
 
-            marker.points = vec![start_point, end_point];
-
-            // Set line properties
-            marker.scale.x = 0.002; // Line width
-            marker.color.r = 1.0; // Red lines
-            marker.color.g = 0.0;
-            marker.color.b = 0.0;
-            marker.color.a = 0.8; // Semi-transparent
-
-            // Set lifetime
-            marker.lifetime.sec = 0;
-            marker.lifetime.nanosec = 500_000_000; // 0.5 seconds
+            let marker = Marker {
+                header: header.clone(),
+                ns: "icp_correspondences".to_string(),
+                id: i as i32,
+                type_: 4,  // LINE_STRIP
+                action: 0, // ADD
+                points: vec![start_point, end_point],
+                scale: GeomVector3 {
+                    x: 0.002, // Line width
+                    y: 0.0,
+                    z: 0.0,
+                },
+                color: ColorRGBA {
+                    r: 1.0, // Red lines
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.8, // Semi-transparent
+                },
+                ..Default::default()
+            };
 
             markers.push(marker);
         }
