@@ -2,10 +2,10 @@
     // ========================================
     // RANSAC Plane Fitting Parameters
     // ========================================
-    // max number of RANSAC steps
-    "plane_ransac_max_iterations": 500,
-    // the loss threshold that a point is considered an inlier
-    "plane_ransac_inlier_threshold": 0.5,
+    // max number of RANSAC steps (increased for more stable plane orientation)
+    "plane_ransac_max_iterations": 1000,
+    // the loss threshold that a point is considered an inlier (decreased for better accuracy)
+    "plane_ransac_inlier_threshold": 0.3,
 
     // ========================================
     // ICP Algorithm Parameters
@@ -19,14 +19,14 @@
     "icp_rejection_threshold": 0.03,
     // good fit threshold for convergence detection (tightened for accuracy)
     "icp_good_fit_threshold": 0.01,  // Tightened from 0.03 to 0.01
-    // outlier rejection threshold for correspondence filtering (tightened)
-    "icp_outlier_threshold": 0.08,  // Tightened from 0.12 to 0.08
+    // outlier rejection threshold for correspondence filtering
+    "icp_outlier_threshold": 0.12,  // Relaxed to allow initial convergence
     // adaptive threshold multiplier for outlier rejection
-    "icp_adaptive_threshold_multiplier": 1.2,
+    "icp_adaptive_threshold_multiplier": 1.5,  // Increased for more tolerance
     // minimum adaptive threshold value
-    "icp_adaptive_threshold_min": 0.01,  // Tightened from 0.015 to 0.01
+    "icp_adaptive_threshold_min": 0.02,  // Relaxed to handle initial pose errors
     // maximum adaptive threshold value
-    "icp_adaptive_threshold_max": 0.15,  // Tightened from 0.3 to 0.15
+    "icp_adaptive_threshold_max": 0.30,  // Relaxed to allow convergence from rough initial pose
     // damping factor for pose updates (increased for better convergence)
     "icp_damping_factor": 0.6,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations
