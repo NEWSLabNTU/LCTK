@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
 geometry_msgs.workspace = true
-hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config", features = ["kiss3d"] }
+hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config" }
 hollow-board-detector = { version = "0.1.0", path = "../../rust/hollow-board-detector" }
 json5 = { workspace = true }
 ndarray = "0.16"
