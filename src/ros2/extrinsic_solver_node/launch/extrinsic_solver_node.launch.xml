@@ -43,7 +43,7 @@
          description="Input ArUco detections topic"/>
 
     <arg name="board_detections"
-         default="/calibration/calibration_board_locator/calibration_board_detections"
+         default="/calibration/lidar_board_detector/calibration_board_detections"
          description="Input calibration board detections topic"/>
 
     <arg name="image_with_detections"

@@ -21,7 +21,7 @@
          description="Input ArUco detections topic"/>
 
     <arg name="board_detections_topic"
-         default="/calibration/calibration_board_locator/board_detections"
+         default="/calibration/lidar_board_detector/board_detections"
          description="Input board detections topic"/>
 
 

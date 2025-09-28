@@ -1,7 +1,7 @@
 <package format="3">
-  <name>calibration_board_locator_node</name>
+  <name>lidar_board_detector</name>
   <version>0.1.0</version>
-  <description>ROS 2 node for hollow board detection in point clouds</description>
+  <description>ROS 2 node for LiDAR-based hollow board detection in point clouds</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
   <license>MIT</license>
 

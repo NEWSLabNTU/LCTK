@@ -1,5 +1,5 @@
 [package]
-name = "calibration_board_locator_node"
+name = "lidar_board_detector"
 version = "0.1.1"
 edition = "2021"
 
@@ -30,5 +30,5 @@ visualization_msgs.workspace = true
 workspace = true
 
 [[bin]]
-name = "calibration_board_locator_node"
+name = "lidar_board_detector"
 path = "src/main.rs"

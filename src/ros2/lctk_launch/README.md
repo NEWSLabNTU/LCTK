@@ -7,7 +7,7 @@ This package provides YAML launch files for the LCTK (LiDAR and Camera Toolkit) 
 The calibration pipeline consists of the following nodes:
 
 1. **aruco_locator_node**: Detects ArUco markers in camera images
-2. **calibration_board_locator**: Detects calibration boards in point clouds
+2. **lidar_board_detector**: Detects calibration boards in point clouds
 3. **synchronizer**: Synchronizes detections from both sensors using timestamps
 4. **extrinsic_solver**: Solves camera-LiDAR extrinsic transformation parameters
 5. **pointcloud_image_overlay**: Visualizes calibration results using Rerun
@@ -71,7 +71,7 @@ ros2 launch calib_launch calibration_pipeline.launch.yaml \
 The pipeline publishes the following topics:
 
 - `/calibration/aruco_locator/aruco_detections` - ArUco marker detections
-- `/calibration/calibration_board_locator/board_detections` - Board detections
+- `/calibration/lidar_board_detector/board_detections` - Board detections
 - `/calibration/synchronizer/synchronized_detections` - Synchronized detection pairs
 - `/calibration/synchronizer/synchronized_pointcloud` - Synchronized point clouds
 - `/calibration/synchronizer/synchronized_image` - Synchronized images

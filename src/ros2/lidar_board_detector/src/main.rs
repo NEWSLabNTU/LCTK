@@ -1886,8 +1886,8 @@ fn main() -> Result<()> {
     init_logging();
 
     let mut executor = Context::default_from_env()?.create_basic_executor();
-    let node = executor.create_node("calibration_board_locator")?;
-    let _calibration_board_locator_node = CalibrationBoardLocatorNode::new(node)?;
+    let node = executor.create_node("lidar_board_detector")?;
+    let _lidar_board_detector_node = CalibrationBoardLocatorNode::new(node)?;
 
     // Spin the executor
     executor

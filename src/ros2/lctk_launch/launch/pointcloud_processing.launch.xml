@@ -49,11 +49,11 @@
          default="true"
          description="Use best effort QoS for sensor input topics"/>
 
-    <!-- Calibration Board Locator Node -->
-    <node pkg="calibration_board_locator_node"
-          exec="calibration_board_locator_node"
-          name="calibration_board_locator"
-          namespace="$(var namespace)/calibration_board_locator"
+    <!-- LiDAR Board Detector Node -->
+    <node pkg="lidar_board_detector"
+          exec="lidar_board_detector"
+          name="lidar_board_detector"
+          namespace="$(var namespace)/lidar_board_detector"
           output="screen"
           args="--ros-args --log-level $(var log_level)">
         <param name="board_detector_file" value="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"/>

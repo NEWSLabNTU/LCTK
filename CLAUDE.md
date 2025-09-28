@@ -92,7 +92,7 @@ The project is organized into:
 2. **ROS 2 Nodes** (`src/bin/`): ROS 2 nodes and command-line tools
    - `aruco_generator_node`: Generate ArUco board images
    - `aruco_locator_node`: Detect ArUco markers in images
-   - `calibration_board_locator`: Detect calibration boards in point clouds
+   - `lidar_board_detector`: Detect calibration boards in point clouds
    - `extrinsic_solver`: Solve extrinsic parameters between LiDAR and camera (requires SFCGAL)
    - `multi_wayside`: Handle multi-wayside calibration (requires SFCGAL)
    - `multi_wayside_node`: Multi-wayside calibration ROS node (requires SFCGAL)
@@ -128,7 +128,7 @@ The main script for this workflow is in `scripts/lidar-to-camera-calibration/lid
 
 ### Board Detection Pipeline
 
-The calibration board detection in point clouds follows a multi-stage pipeline (`calibration_board_locator_node/src/main.rs`):
+The calibration board detection in point clouds follows a multi-stage pipeline (`lidar_board_detector/src/main.rs`):
 
 1. **Bounding Box Filtering** (`detect_bbox`): Filters points to a region of interest around the expected board location
 2. **RANSAC Plane Detection** (`detect_ransac`): Detects the dominant plane in the filtered point cloud
@@ -301,7 +301,7 @@ Several LCTK tools have been converted to ROS 2 nodes:
    - Subscribes to: `/image` (sensor_msgs/Image)
    - Publishes to: `/aruco_detections` (vision_msgs/Detection2DArray)
 
-2. **calibration_board_locator**: Detects calibration boards in point clouds
+2. **lidar_board_detector**: Detects calibration boards in point clouds
    - Subscribes to: `/input_pointcloud` (sensor_msgs/PointCloud2)
    - Publishes to: `/calibration_board_detections` (vision_msgs/Detection3DArray)
 
@@ -340,7 +340,7 @@ make build
 ros2 run aruco_locator_node aruco_locator_node --intrinsics-file config/intrinsics.yaml
 
 # Run calibration board locator node
-ros2 run calibration_board_locator calibration_board_locator
+ros2 run lidar_board_detector lidar_board_detector
 
 # Run extrinsic solver node
 ros2 run extrinsic_solver extrinsic_solver --intrinsics-file config/intrinsics.yaml
@@ -410,7 +410,7 @@ make launch_sensor  # Plays LiDAR and camera data in loop
 - Git ignores build artifacts: ansible_collections/, build/, install/, log/, build_logs/, .cargo/, ros2_rust_ws/{build,install,log}/
 - **Config File Parameters**: All ROS2 nodes now require mandatory config file parameters - no hardcoded defaults:
   - `aruco_locator_node`: Requires `aruco_config_file` parameter (no default path)
-  - `calibration_board_locator`: Requires `board_detector_file`, `aruco_pattern_file`, and `bbox_file` parameters
+  - `lidar_board_detector`: Requires `board_detector_file`, `aruco_pattern_file`, and `bbox_file` parameters
   - Config files are passed from launch files to ensure explicit configuration
 - **GStreamer Video Playback**: The camera.launch.xml now uses `filesrc location=$(var video_file) ! decodebin ! videoconvert` instead of test patterns
 - **ROS2 Daemon Issues**: If ROS2 daemon becomes unresponsive, kill it with: `pkill -9 -f ros2-daemon`
@@ -446,7 +446,7 @@ make launch_sensor  # Plays LiDAR and camera data in loop
   - Applies orientation constraints: v3 (smallest eigenvalue) points toward camera, v1 and v2 have positive z
   - Right-hand rule maintained by swapping v1/v2 (not flipping) when cross product check fails
   - Initial pose published immediately after PCA computation for debugging visibility
-  - Located in `calibration_board_locator_node/src/main.rs::compute_initial_pose_pca()`
+  - Located in `lidar_board_detector/src/main.rs::compute_initial_pose_pca()`
 - **Debug Visualization Enhancements**:
   - Added `debug/plane_marker` topic showing circular RANSAC plane (semi-transparent blue disk centered at inlier centroid, aligned with plane normal)
   - Fixed `debug/initial_board_marker` to publish immediately after PCA computation instead of only on successful detection

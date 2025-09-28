@@ -1,4 +1,4 @@
-# calibration_board_locator
+# lidar_board_detector
 
 A ROS 2 node for detecting calibration boards in point cloud data.
 
@@ -19,13 +19,13 @@ This node processes 3D point cloud data to detect hollow calibration boards used
 source /opt/ros/humble/setup.bash
 make build_interface
 source install/setup.bash
-cargo build --release --manifest-path src/bin/calibration_board_locator/Cargo.toml
+cargo build --release --manifest-path src/bin/lidar_board_detector/Cargo.toml
 
 # Run the node
-ros2 run calibration_board_locator calibration_board_locator
+ros2 run lidar_board_detector lidar_board_detector
 
 # Run with custom configuration
-ros2 run calibration_board_locator calibration_board_locator \
+ros2 run lidar_board_detector lidar_board_detector \
     --ros-args -p board_detector_config:=/path/to/config.json5
 ```
 

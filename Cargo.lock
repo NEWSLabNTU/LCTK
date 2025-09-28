@@ -1335,32 +1335,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "calibration_board_locator_node"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "aruco-config",
- "env_logger",
- "geometry_msgs",
- "hollow-board-config",
- "hollow-board-detector",
- "json5",
- "nalgebra 0.32.6",
- "ndarray",
- "once_cell",
- "pcd-rs",
- "petal-decomposition",
- "plane-estimator",
- "rclrs",
- "sensor_msgs",
- "serde",
- "serde_json",
- "std_msgs",
- "vision_msgs",
- "visualization_msgs",
-]
-
-[[package]]
 name = "calloop"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4626,6 +4600,32 @@ dependencies = [
  "bitflags 2.9.4",
  "libc",
  "redox_syscall 0.5.17",
+]
+
+[[package]]
+name = "lidar_board_detector"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "aruco-config",
+ "env_logger",
+ "geometry_msgs",
+ "hollow-board-config",
+ "hollow-board-detector",
+ "json5",
+ "nalgebra 0.32.6",
+ "ndarray",
+ "once_cell",
+ "pcd-rs",
+ "petal-decomposition",
+ "plane-estimator",
+ "rclrs",
+ "sensor_msgs",
+ "serde",
+ "serde_json",
+ "std_msgs",
+ "vision_msgs",
+ "visualization_msgs",
 ]
 
 [[package]]
@@ -12091,10 +12091,6 @@ name = "aruco_locator_node"
 version = "0.1.1"
 
 [[patch.unused]]
-name = "calibration_board_locator_node"
-version = "0.1.1"
-
-[[patch.unused]]
 name = "composition_interfaces"
 version = "1.2.2"
 
@@ -12105,6 +12101,10 @@ version = "4.9.0"
 [[patch.unused]]
 name = "example_interfaces"
 version = "0.9.3"
+
+[[patch.unused]]
+name = "lidar_board_detector"
+version = "0.1.1"
 
 [[patch.unused]]
 name = "lifecycle_msgs"

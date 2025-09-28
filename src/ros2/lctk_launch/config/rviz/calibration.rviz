@@ -94,7 +94,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /calibration/calibration_board_locator/debug/all_points
+            Value: /calibration/lidar_board_detector/debug/all_points
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
@@ -110,7 +110,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/bbox_marker
+                Value: /calibration/lidar_board_detector/debug/bbox_marker
               Value: true
             - Alpha: 1
               Autocompute Intensity Bounds: true
@@ -142,7 +142,7 @@ Visualization Manager:
                 Filter size: 10
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/filtered_points
+                Value: /calibration/lidar_board_detector/debug/filtered_points
               Use Fixed Frame: true
               Use rainbow: true
               Value: false
@@ -160,7 +160,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/plane_marker
+                Value: /calibration/lidar_board_detector/debug/plane_marker
               Value: true
             - Alpha: 1
               Autocompute Intensity Bounds: true
@@ -192,7 +192,7 @@ Visualization Manager:
                 Filter size: 10
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/plane_inliers
+                Value: /calibration/lidar_board_detector/debug/plane_inliers
               Use Fixed Frame: true
               Use rainbow: true
               Value: true
@@ -210,7 +210,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/pca_eigenvectors
+                Value: /calibration/lidar_board_detector/debug/pca_eigenvectors
               Value: true
             - Class: rviz_default_plugins/MarkerArray
               Enabled: true
@@ -223,7 +223,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/initial_board_marker
+                Value: /calibration/lidar_board_detector/debug/initial_board_marker
               Value: true
             - Class: rviz_default_plugins/MarkerArray
               Enabled: true
@@ -235,7 +235,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Reliable
-                Value: /calibration/calibration_board_locator/debug/final_board_pose
+                Value: /calibration/lidar_board_detector/debug/final_board_pose
               Value: true
           Enabled: true
           Name: ICP

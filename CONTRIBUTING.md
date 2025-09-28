@@ -31,7 +31,7 @@ Command-line tools and ROS 2 nodes:
 
 #### ROS 2 Nodes
 - **[aruco_locator_node](src/bin/aruco_locator_node/)** - Detect ArUco markers in images
-- **[calibration_board_locator_node](src/bin/calibration_board_locator_node/)** - Detect calibration boards in point clouds
+- **[lidar_board_detector](src/bin/lidar_board_detector/)** - Detect calibration boards in point clouds
 - **[extrinsic_solver_node](src/bin/extrinsic_solver_node/)** - Compute extrinsic calibration parameters
 - **[multi_wayside_node](src/bin/multi_wayside_node/)** - Multi-wayside calibration ROS node
 - **[pointcloud_image_overlay](src/bin/pointcloud_image_overlay/)** - Overlay point clouds on camera images
@@ -68,28 +68,28 @@ Integration layer for ROS 2 Rust support, including message generation and bindi
   - `/calibration/aruco_locator/image_with_detections` (sensor_msgs/Image)
 
 #### Calibration Board Locator Node
-- **Package**: `calibration_board_locator_node`
-- **Node Name**: `/calibration/calibration_board_locator/calibration_board_locator`
+- **Package**: `lidar_board_detector`
+- **Node Name**: `/calibration/lidar_board_detector/lidar_board_detector`
 - **Subscribes**:
   - `/sensing/lidar/top/pointcloud_raw` (sensor_msgs/PointCloud2)
 - **Publishes**:
-  - `/calibration/calibration_board_locator/calibration_board_detections` (vision_msgs/Detection3DArray)
+  - `/calibration/lidar_board_detector/calibration_board_detections` (vision_msgs/Detection3DArray)
 - **Debug Topics** (when `debug_mode=true`):
-  - `/calibration/calibration_board_locator/debug/all_points` (sensor_msgs/PointCloud2)
-  - `/calibration/calibration_board_locator/debug/filtered_points` (sensor_msgs/PointCloud2)
-  - `/calibration/calibration_board_locator/debug/plane_inliers` (sensor_msgs/PointCloud2)
-  - `/calibration/calibration_board_locator/debug/bbox_marker` (visualization_msgs/MarkerArray)
-  - `/calibration/calibration_board_locator/debug/final_board_pose` (visualization_msgs/MarkerArray)
-  - `/calibration/calibration_board_locator/debug/icp_iterations` (visualization_msgs/MarkerArray)
-  - `/calibration/calibration_board_locator/debug/initial_board_marker` (visualization_msgs/MarkerArray)
-  - `/calibration/calibration_board_locator/debug/icp_stats` (std_msgs/String)
+  - `/calibration/lidar_board_detector/debug/all_points` (sensor_msgs/PointCloud2)
+  - `/calibration/lidar_board_detector/debug/filtered_points` (sensor_msgs/PointCloud2)
+  - `/calibration/lidar_board_detector/debug/plane_inliers` (sensor_msgs/PointCloud2)
+  - `/calibration/lidar_board_detector/debug/bbox_marker` (visualization_msgs/MarkerArray)
+  - `/calibration/lidar_board_detector/debug/final_board_pose` (visualization_msgs/MarkerArray)
+  - `/calibration/lidar_board_detector/debug/icp_iterations` (visualization_msgs/MarkerArray)
+  - `/calibration/lidar_board_detector/debug/initial_board_marker` (visualization_msgs/MarkerArray)
+  - `/calibration/lidar_board_detector/debug/icp_stats` (std_msgs/String)
 
 #### Extrinsic Solver Node
 - **Package**: `extrinsic_solver_node`
 - **Node Name**: `/calibration/extrinsic_solver/extrinsic_solver_node`
 - **Subscribes**:
   - `/calibration/aruco_locator/aruco_detections` (vision_msgs/Detection2DArray)
-  - `/calibration/calibration_board_locator/calibration_board_detections` (vision_msgs/Detection3DArray)
+  - `/calibration/lidar_board_detector/calibration_board_detections` (vision_msgs/Detection3DArray)
   - `/sensing/camera/front_center/camera_info` (sensor_msgs/CameraInfo)
 - **Publishes**:
   - `/calibration/extrinsic_solver/extrinsic_transform` (geometry_msgs/TransformStamped)
@@ -145,7 +145,7 @@ LCTK follows a hierarchical topic naming convention:
 
 ### Calibration Pipeline
 - `/calibration/aruco_locator/` - ArUco detection results
-- `/calibration/calibration_board_locator/` - Board detection results
+- `/calibration/lidar_board_detector/` - Board detection results
 - `/calibration/extrinsic_solver/` - Calibration computation results
 
 ### Debug Topics

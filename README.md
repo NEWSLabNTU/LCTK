@@ -46,7 +46,7 @@ graph TB
     subgraph PointCloudProcessing[Point Cloud Processing]
         VD[velodyne_driver_node]
         VT[velodyne_transform_node]
-        CBL[calibration_board_locator]
+        CBL[lidar_board_detector]
     end
 
     %% Image Processing Pipeline
@@ -272,7 +272,7 @@ RCUTILS_LOGGING_SEVERITY=DEBUG make launch_lidar_camera_calibration debug_mode=t
 
 # View debug topics in another terminal
 ros2 topic list | grep debug
-ros2 topic echo /calibration/calibration_board_locator/debug/icp_stats
+ros2 topic echo /calibration/lidar_board_detector/debug/icp_stats
 ```
 
 Debug mode provides:
