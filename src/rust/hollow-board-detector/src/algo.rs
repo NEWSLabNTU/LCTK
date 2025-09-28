@@ -1181,20 +1181,27 @@ impl<'a> BoardIcpIterator<'a> {
         let target_matrix = nalgebra::Matrix3xX::from_columns(&centered_target);
 
         // Compute covariance matrix H = sum(input_i * target_i^T)
+        // With column-major matrices: input_matrix * target_matrix.transpose()
         let covariance = input_matrix * target_matrix.transpose();
 
-        // SVD decomposition
+        // SVD decomposition: H = U * S * V^T
         let svd = nalgebra::SVD::new(covariance, true, true);
         let u = svd.u?;
         let v_t = svd.v_t?;
 
-        // Compute rotation matrix
-        let d = (u * v_t).determinant();
-        let correction = nalgebra::Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, d.signum()));
-        let rotation_matrix = u * correction * v_t;
+        // Standard Kabsch algorithm: R = V * diag(1, 1, det(V * U^T)) * U^T
+        // Since nalgebra SVD gives us V^T, we need to transpose it to get V
+        let v = v_t.transpose();
+        let u_t = u.transpose();
 
-        // Convert to unit quaternion
-        let rotation = UnitQuaternion::from_matrix(&rotation_matrix);
+        // Compute the determinant to check for reflection
+        let d = (&v * &u_t).determinant();
+        let correction = nalgebra::Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, d.signum()));
+        let rotation_matrix = &v * correction * u_t;
+
+        // Convert to unit quaternion (convert dynamic matrix to fixed 3x3)
+        let rotation_matrix_3x3 = rotation_matrix.fixed_view::<3, 3>(0, 0).into_owned();
+        let rotation = UnitQuaternion::from_matrix(&rotation_matrix_3x3);
 
         // Compute translation
         let translation =
@@ -1216,5 +1223,343 @@ impl<'a> BoardIcpIterator<'a> {
             .iter()
             .fold(Vector3::zeros(), |acc, p| acc + p.coords);
         Some(Point3::from(sum / points.len() as f64))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
+    use std::f64::consts::PI;
+
+    const EPSILON: f64 = 1e-10;
+
+    /// Helper function to create test points
+    fn create_test_points() -> Vec<Point3<f64>> {
+        vec![
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(1.0, 0.0, 1.0),
+        ]
+    }
+
+    /// Helper function to apply transformation to points
+    fn transform_points(points: &[Point3<f64>], transform: &Isometry3<f64>) -> Vec<Point3<f64>> {
+        points.iter().map(|p| transform * p).collect()
+    }
+
+    /// Helper function to check if two transformations are approximately equal
+    fn transformations_approx_equal(t1: &Isometry3<f64>, t2: &Isometry3<f64>, eps: f64) -> bool {
+        let translation_diff = (t1.translation.vector - t2.translation.vector).norm();
+        let rotation_diff = t1.rotation.rotation_to(&t2.rotation).angle();
+
+        translation_diff < eps && rotation_diff < eps
+    }
+
+    /// Helper function to check if points are approximately equal
+    fn points_approx_equal(p1: &Point3<f64>, p2: &Point3<f64>, eps: f64) -> bool {
+        (p1 - p2).norm() < eps
+    }
+
+    #[test]
+    fn test_kabsch_identity_transformation() {
+        // Test with identical point sets - should return identity transformation
+        let input_points = create_test_points();
+        let target_points = input_points.clone();
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let transform = result.unwrap();
+
+        // Should be close to identity
+        let identity = Isometry3::identity();
+        assert!(transformations_approx_equal(&transform, &identity, EPSILON));
+    }
+
+    #[test]
+    fn test_kabsch_pure_translation() {
+        // Test with pure translation transformation
+        let input_points = create_test_points();
+        let translation = Translation3::new(2.0, 3.0, 1.5);
+        let expected_transform = Isometry3::from_parts(translation, UnitQuaternion::identity());
+        let target_points = transform_points(&input_points, &expected_transform);
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct by applying it to input points
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, EPSILON));
+        }
+    }
+
+    #[test]
+    fn test_kabsch_pure_rotation() {
+        // Test with pure rotation around Z-axis
+        let input_points = create_test_points();
+        let rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), PI / 4.0);
+        let expected_transform = Isometry3::from_parts(Translation3::identity(), rotation);
+        let target_points = transform_points(&input_points, &expected_transform);
+
+        println!("Input points: {:?}", input_points);
+        println!("Target points: {:?}", target_points);
+        println!("Expected transform: {:?}", expected_transform);
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        println!("Computed transform: {:?}", computed_transform);
+
+        // Verify the transformation is correct
+        for (i, (input, target)) in input_points.iter().zip(target_points.iter()).enumerate() {
+            let transformed = computed_transform * input;
+            let error = (transformed - target).norm();
+            println!(
+                "Point {}: input={:?}, target={:?}, transformed={:?}, error={:.2e}",
+                i, input, target, transformed, error
+            );
+            assert!(
+                points_approx_equal(&transformed, target, 1e-6),
+                "Point {} failed: error={:.2e} > tolerance=1e-6",
+                i,
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_kabsch_rotation_and_translation() {
+        // Test with combined rotation and translation
+        let input_points = create_test_points();
+        let rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), PI / 6.0);
+        let translation = Translation3::new(1.0, -2.0, 3.0);
+        let expected_transform = Isometry3::from_parts(translation, rotation);
+        let target_points = transform_points(&input_points, &expected_transform);
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, EPSILON));
+        }
+    }
+
+    #[test]
+    fn test_kabsch_arbitrary_rotation() {
+        // Test with arbitrary rotation
+        let input_points = create_test_points();
+        let axis = nalgebra::Unit::new_normalize(Vector3::new(1.0, 1.0, 1.0));
+        let rotation = UnitQuaternion::from_axis_angle(&axis, PI / 3.0);
+        let translation = Translation3::new(-1.5, 2.5, -0.5);
+        let expected_transform = Isometry3::from_parts(translation, rotation);
+        let target_points = transform_points(&input_points, &expected_transform);
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, 1e-12));
+        }
+    }
+
+    #[test]
+    fn test_kabsch_insufficient_points() {
+        // Test with insufficient points (less than 3)
+        let input_points = vec![Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
+        let target_points = vec![Point3::new(2.0, 0.0, 0.0), Point3::new(0.0, 2.0, 0.0)];
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_kabsch_empty_points() {
+        // Test with empty point sets
+        let input_points: Vec<Point3<f64>> = vec![];
+        let target_points: Vec<Point3<f64>> = vec![];
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_kabsch_mismatched_sizes() {
+        // Test with mismatched point set sizes
+        let input_points = create_test_points();
+        let target_points = vec![Point3::new(1.0, 0.0, 0.0)];
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_kabsch_collinear_points() {
+        // Test with collinear points (edge case)
+        let input_points = vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 0.0),
+            Point3::new(3.0, 0.0, 0.0),
+        ];
+        let target_points = vec![
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(2.0, 1.0, 0.0),
+            Point3::new(3.0, 1.0, 0.0),
+        ];
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        // Should still work for collinear points
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, 1e-12));
+        }
+    }
+
+    #[test]
+    fn test_kabsch_planar_points() {
+        // Test with planar points (2D points embedded in 3D)
+        let input_points = vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        ];
+
+        // Rotate the square by 45 degrees around Z and translate
+        let rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), PI / 4.0);
+        let translation = Translation3::new(2.0, 3.0, 1.0);
+        let expected_transform = Isometry3::from_parts(translation, rotation);
+        let target_points = transform_points(&input_points, &expected_transform);
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, 1e-12));
+        }
+    }
+
+    #[test]
+    fn test_kabsch_reflection_handling() {
+        // Test reflection handling by creating a reflection transformation
+        let input_points = vec![
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+        ];
+
+        // Create reflected points (mirror across YZ plane)
+        let target_points = vec![
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+        ];
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, 1e-12));
+        }
+
+        // Check that the determinant is positive (proper rotation, not reflection)
+        let det = computed_transform
+            .rotation
+            .to_rotation_matrix()
+            .matrix()
+            .determinant();
+        assert!(
+            det > 0.0,
+            "Kabsch should produce proper rotations, not reflections"
+        );
+    }
+
+    #[test]
+    fn test_kabsch_numerical_stability() {
+        // Test with very small transformations to check numerical stability
+        let input_points = create_test_points();
+        let small_rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 1e-8);
+        let small_translation = Translation3::new(1e-10, 1e-10, 1e-10);
+        let small_transform = Isometry3::from_parts(small_translation, small_rotation);
+        let target_points = transform_points(&input_points, &small_transform);
+
+        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
+
+        assert!(result.is_some());
+        let computed_transform = result.unwrap();
+
+        // Verify the transformation is correct within reasonable tolerance
+        for (input, target) in input_points.iter().zip(target_points.iter()) {
+            let transformed = computed_transform * input;
+            assert!(points_approx_equal(&transformed, target, 1e-8));
+        }
+    }
+
+    #[test]
+    fn test_compute_centroid() {
+        // Test centroid computation
+        let points = vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 0.0),
+            Point3::new(0.0, 2.0, 0.0),
+            Point3::new(0.0, 0.0, 2.0),
+        ];
+
+        let centroid = BoardIcpIterator::compute_centroid(&points);
+        assert!(centroid.is_some());
+
+        let expected_centroid = Point3::new(0.5, 0.5, 0.5);
+        assert!(points_approx_equal(
+            &centroid.unwrap(),
+            &expected_centroid,
+            EPSILON
+        ));
+    }
+
+    #[test]
+    fn test_compute_centroid_empty() {
+        // Test centroid computation with empty points
+        let points: Vec<Point3<f64>> = vec![];
+        let centroid = BoardIcpIterator::compute_centroid(&points);
+        assert!(centroid.is_none());
+    }
+
+    #[test]
+    fn test_compute_centroid_single_point() {
+        // Test centroid computation with single point
+        let points = vec![Point3::new(1.0, 2.0, 3.0)];
+        let centroid = BoardIcpIterator::compute_centroid(&points);
+        assert!(centroid.is_some());
+        assert!(points_approx_equal(&centroid.unwrap(), &points[0], EPSILON));
     }
 }
