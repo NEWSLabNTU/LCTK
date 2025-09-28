@@ -64,7 +64,7 @@ build: build_ros2_rust build_interface build_packages
 build_ros2_rust:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS2 Rust packages... (log: $(LOG_DIR)/ros2_rust.log)"
-	. /opt/ros/humble/setup.sh && \
+	@. /opt/ros/humble/setup.sh && \
 	export RUST_LOG=debug && \
 	$(MAKE) -C src/ros2_rust_ws 2>&1 | tee $(LOG_DIR)/ros2_rust.log
 
@@ -72,7 +72,7 @@ build_ros2_rust:
 build_interface:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building interface packages... (log: $(LOG_DIR)/interface.log)"
-	. ./src/ros2_rust_ws/install/setup.sh && \
+	@. ./src/ros2_rust_ws/install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/interface 2>&1 | tee $(LOG_DIR)/interface.log
@@ -82,7 +82,7 @@ build_packages:
 	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS nodes... (log: $(LOG_DIR)/packages.log)"
 	# Fix applied directly to colcon-cargo source to handle JSON parsing issues
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
 	colcon build $(COLCON_BUILD_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/packages.log
@@ -113,16 +113,14 @@ test:
 	@mkdir -p $(LOG_DIR)
 
 	@echo "Running Rust library tests..."
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
-	cargo nextest run --no-fail-fast 2>&1 | tee $(LOG_DIR)/rust_tests.log
 	cargo nextest run --cargo-profile test-release --no-fail-fast 2>&1 | tee $(LOG_DIR)/rust_tests.log
 
 	@echo "Running ROS2 node tests with colcon..."
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
-	colcon test --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/colcon_tests.log && \
 	colcon test $(COLCON_TEST_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/colcon_tests.log && \
 	colcon test-result --all --verbose
 
@@ -134,7 +132,7 @@ clean:
 .PHONY: launch_lidar_camera_sample_data
 launch_lidar_camera_sample_data:
 	@echo "Creating and starting LiDAR-camera sample data service with ros2systemd..."
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	export RUST_LOG=debug && \
 	ros2 systemd launch --name lctk-lidar-camera-data --replace \
 		lctk_sample_data lidar_camera.launch.xml
@@ -152,7 +150,7 @@ launch_lidar_camera_calibration:
 	@if [ "$(debug_mode)" = "true" ]; then \
 		echo "Debug mode enabled - additional debug topics will be published"; \
 	fi
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	RUST_LOG=debug ros2 systemd launch --name lctk-calibration --replace \
 		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(or $(debug_mode),true) \
