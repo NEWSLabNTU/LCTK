@@ -51,9 +51,6 @@ log = "0.4.20"
 chrono = "0.4.31"
 unzip-n = "0.1.2"
 
-# Graphics
-kiss3d = "0.35.0"
-
 # Random
 rand = "0.8.5"
 

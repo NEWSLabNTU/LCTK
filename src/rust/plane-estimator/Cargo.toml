@@ -12,5 +12,4 @@ simba = "0.8.1"
 anyhow = { workspace = true }
 clap = { workspace = true }
 itertools = { workspace = true }
-kiss3d = { workspace = true }
 pcd-rs = { workspace = true }

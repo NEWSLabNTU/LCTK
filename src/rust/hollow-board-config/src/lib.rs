@@ -1,6 +1,3 @@
-#[cfg(feature = "kiss3d")]
-mod with_kiss3d;
-
 use approx::abs_diff_eq;
 use aruco_config::MultiArucoPattern;
 use measurements::Length;

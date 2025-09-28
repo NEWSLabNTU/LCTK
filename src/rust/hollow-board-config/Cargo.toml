@@ -10,7 +10,6 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config" }
 measurements = { workspace = true, features = ["serde"] }
-kiss3d = { workspace = true, optional = true }
 
 newslab-serde-measurements = { workspace = true }
 newslab-serde-nalgebra = { workspace = true }
