@@ -80,5 +80,5 @@
           Next steps:
           1. Source ROS 2 environment: source /opt/ros/humble/setup.bash
           2. Build the project: make build
-          3. Launch sample data: make launch_sensor
+          3. Launch sample data: make launch_lidar_camera_sample_data
           ====================================

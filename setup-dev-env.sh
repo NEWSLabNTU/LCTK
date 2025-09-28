@@ -218,7 +218,7 @@ if ansible-playbook "playbooks/lctk.dev_env.yaml" "${ansible_args[@]}"; then
     echo "Next steps:"
     echo "1. Reload your shell or run: source ~/.bashrc"
     echo "2. Build the project: make build"
-    echo "3. Test with sample data: make launch_sensor"
+    echo "3. Test with sample data: make launch_lidar_camera_sample_data"
     echo ""
     print_info "For more information, see README.md"
     exit 0

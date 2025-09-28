@@ -23,7 +23,7 @@ make prepare
 make build
 
 # Test with sample data
-make launch_sensor
+make launch_lidar_camera_sample_data
 ```
 
 ### Known Issues and Solutions
@@ -370,7 +370,7 @@ The DDS configuration is automatically applied by all Makefile launch targets:
 
 ```bash
 make launch_lidar_camera_calibration  # Uses local DDS config
-make launch_sensor                    # Uses local DDS config
+make launch_lidar_camera_sample_data  # Uses local DDS config
 make launch_two_lidar_calibration     # Uses local DDS config
 ```
 
@@ -390,7 +390,7 @@ The repository includes sample data for testing calibration workflows:
 
 Run sample data playback:
 ```bash
-make launch_sensor  # Plays LiDAR and camera data in loop
+make launch_lidar_camera_sample_data  # Plays LiDAR and camera data in loop
 ```
 
 ## Development Memories
