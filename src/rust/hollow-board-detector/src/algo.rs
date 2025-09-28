@@ -928,6 +928,12 @@ impl<'a> BoardIcpIterator<'a> {
 
     /// Execute one ICP iteration step
     pub fn step(&mut self, current_state: &BoardIcpState) -> BoardIcpState {
+        debug!(
+            "ICP Step {}: Starting iteration with pose: {:?}",
+            current_state.iteration + 1,
+            current_state.board_pose
+        );
+
         // 1. Create board model with current pose
         let board_model = BoardModel {
             pose: current_state.board_pose,
@@ -941,10 +947,20 @@ impl<'a> BoardIcpIterator<'a> {
         }
 
         // 2. Find correspondences using board model
+        debug!(
+            "ICP Step {}: Attempting to find correspondences for {} inlier points",
+            current_state.iteration + 1,
+            current_state.inlier_points.len()
+        );
+
         let correspondences = match board_model.find_correspondences(&current_state.inlier_points) {
             Some(corr) => corr,
             None => {
                 // No correspondences - return terminated state
+                debug!(
+                    "ICP Step {}: Board model find_correspondences returned None",
+                    current_state.iteration + 1
+                );
                 return BoardIcpState {
                     iteration: current_state.iteration + 1,
                     correspondences: Vec::new(),
@@ -958,6 +974,11 @@ impl<'a> BoardIcpIterator<'a> {
         };
 
         let total_correspondences = correspondences.len();
+        debug!(
+            "ICP Step {}: Found {} total correspondences",
+            current_state.iteration + 1,
+            total_correspondences
+        );
 
         // 3. Compute losses for each correspondence
         let correspondence_losses: Vec<_> = correspondences
@@ -966,12 +987,26 @@ impl<'a> BoardIcpIterator<'a> {
             .collect();
 
         let avg_loss = correspondence_losses.iter().sum::<f64>() / correspondences.len() as f64;
+        debug!(
+            "ICP Step {}: Average correspondence loss: {:.4}m",
+            current_state.iteration + 1,
+            avg_loss
+        );
 
         // 4. Filter outliers with adaptive threshold
         let adaptive_threshold = (avg_loss
             * self.board_detector_config.icp_adaptive_threshold_multiplier)
             .max(self.board_detector_config.icp_adaptive_threshold_min)
             .min(self.board_detector_config.icp_adaptive_threshold_max);
+
+        debug!(
+            "ICP Step {}: Adaptive threshold: {:.4}m (multiplier: {:.2}, min: {:.4}, max: {:.4})",
+            current_state.iteration + 1,
+            adaptive_threshold,
+            self.board_detector_config.icp_adaptive_threshold_multiplier,
+            self.board_detector_config.icp_adaptive_threshold_min,
+            self.board_detector_config.icp_adaptive_threshold_max
+        );
 
         let good_correspondences: Vec<_> = correspondences
             .iter()
@@ -986,9 +1021,24 @@ impl<'a> BoardIcpIterator<'a> {
             .collect();
 
         let good_correspondences_len = good_correspondences.len();
+        debug!(
+            "ICP Step {}: After outlier filtering: {} good correspondences (from {} total)",
+            current_state.iteration + 1,
+            good_correspondences_len,
+            total_correspondences
+        );
 
         // 5. Check if we have enough points for Kabsch
         if good_correspondences_len < 3 {
+            debug!(
+                "ICP Step {}: Insufficient correspondences for Kabsch algorithm (need ≥3, got {})",
+                current_state.iteration + 1,
+                good_correspondences_len
+            );
+            debug!(
+                "ICP Step {}: Terminating iterations due to insufficient good correspondences",
+                current_state.iteration + 1
+            );
             return BoardIcpState {
                 iteration: current_state.iteration + 1,
                 correspondences: good_correspondences,
