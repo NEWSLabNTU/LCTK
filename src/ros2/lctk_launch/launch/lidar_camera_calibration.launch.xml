@@ -46,6 +46,10 @@
          default="false"
          description="Launch RViz for calibration visualization"/>
 
+    <arg name="log_level"
+         default="info"
+         description="ROS log level (debug, info, warn, error, fatal)"/>
+
     <arg name="use_best_effort_qos"
          default="true"
          description="Use best effort QoS for sensor input topics (true for live sensors, false for rosbag)"/>
@@ -64,6 +68,7 @@
         <arg name="camera_topic" value="$(var camera_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
+        <arg name="log_level" value="$(var log_level)"/>
         <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
     </include>
 
@@ -79,6 +84,7 @@
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
         <arg name="enable_icp_iteration_debug" value="$(var enable_icp_iteration_debug)"/>
+        <arg name="log_level" value="$(var log_level)"/>
         <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
     </include>
 
@@ -88,6 +94,7 @@
         <arg name="camera_topic" value="$(var camera_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
+        <arg name="log_level" value="$(var log_level)"/>
     </include>
 
     <!-- Pointcloud Image Overlay Visualization (Python) -->
@@ -95,7 +102,8 @@
           exec="overlay_node"
           name="pointcloud_image_overlay"
           namespace="$(var namespace)"
-          output="screen">
+          output="screen"
+          args="--ros-args --log-level $(var log_level)">
         <param name="extrinsic_json5" value="$(find-pkg-share lctk_launch)/config/extrinsic.json5"/>
         <param name="filter_config_file" value="$(find-pkg-share lctk_launch)/config/pointcloud_overlay_filter.json5"/>
         <param name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>

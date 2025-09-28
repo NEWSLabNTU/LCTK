@@ -41,6 +41,10 @@
          default="$(var debug_mode)"
          description="Enable ICP iteration debug publishing to debug/icp/iteration_pose, debug/icp/iteration_stats topics. Defaults to same value as debug_mode."/>
 
+    <arg name="log_level"
+         default="info"
+         description="ROS log level (debug, info, warn, error, fatal)"/>
+
     <arg name="use_best_effort_qos"
          default="true"
          description="Use best effort QoS for sensor input topics"/>
@@ -50,7 +54,8 @@
           exec="calibration_board_locator_node"
           name="calibration_board_locator"
           namespace="$(var namespace)/calibration_board_locator"
-          output="screen">
+          output="screen"
+          args="--ros-args --log-level $(var log_level)">
         <param name="board_detector_file" value="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"/>
         <param name="aruco_pattern_file" value="$(var aruco_config_file)"/>
         <param name="bbox_file" value="$(find-pkg-share lctk_launch)/config/board/bbox.json5"/>

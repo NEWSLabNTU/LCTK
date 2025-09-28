@@ -2,6 +2,7 @@ COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithD
 COLCON_TEST_FLAGS := --ctest-args -C RelWithDebInfo --cargo-args --profile=test-release
 LOG_DIR := build_logs
 debug_mode := true
+log_level := info
 
 .PHONY: default
 default: help
@@ -23,7 +24,7 @@ help:
 	@echo "Launch Commands (using ros2systemd for reliable service management):"
 	@echo "  make launch_lidar_camera_sample_data - Create and start LiDAR-camera sample data service"
 	@echo "  make stop_lidar_camera_sample_data   - Stop LiDAR-camera sample data service"
-	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, rviz=true for RViz, use_best_effort_qos=false for rosbag)"
+	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, log_level=debug for verbose logs, rviz=true for RViz, use_best_effort_qos=false for rosbag)"
 	@echo "  make stop_lidar_camera_calibration   - Stop LiDAR-Camera calibration service"
 	@echo "  make launch_two_lidar_calibration    - Create and start two LiDAR calibration service"
 	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
@@ -79,9 +80,8 @@ build_interface:
 
 .PHONY: build_packages
 build_packages:
-	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS nodes... (log: $(LOG_DIR)/packages.log)"
-	# Fix applied directly to colcon-cargo source to handle JSON parsing issues
+	@mkdir -p $(LOG_DIR)
 	@. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
@@ -154,12 +154,14 @@ launch_lidar_camera_calibration:
 	@if [ "$(debug_mode)" = "true" ]; then \
 		echo "Debug mode enabled - additional debug topics will be published"; \
 	fi
+	@echo "Using log level: $(log_level)"
 	@. install/setup.sh && \
 	RUST_LOG=debug ros2 systemd launch --name lctk-calibration --replace \
 		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(or $(debug_mode),true) \
 		enable_icp_iteration_debug:=$(or $(enable_icp_iteration_debug),true) \
 		enable_rviz:=$(or $(rviz),false) \
+		log_level:=$(or $(log_level),info) \
 		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
 		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)

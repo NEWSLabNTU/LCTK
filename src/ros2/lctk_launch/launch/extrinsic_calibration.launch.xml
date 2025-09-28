@@ -41,6 +41,10 @@
          default="true"
          description="Enable debug logging and visualization"/>
 
+    <arg name="log_level"
+         default="info"
+         description="ROS log level (debug, info, warn, error, fatal)"/>
+
     <arg name="camera_topic"
          default="/sensing/camera/front_center/image_raw"
          description="Camera image topic (used to derive camera_info topic)"/>
@@ -50,7 +54,8 @@
           exec="extrinsic_solver_node"
           name="extrinsic_solver_node"
           namespace="$(var namespace)/extrinsic_solver"
-          output="screen">
+          output="screen"
+          args="--ros-args --log-level $(var log_level)">
         <param name="solver_method" value="$(var solver_method)"/>
         <param name="min_detections_required" value="$(var min_detections_required)"/>
         <param name="max_solver_iterations" value="1000"/>
