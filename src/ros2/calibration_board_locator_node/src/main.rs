@@ -499,8 +499,15 @@ impl CalibrationBoardLocatorNode {
             // Create board markers (cube + axes) using the pose returned by algo.rs and publish them if enabled
             if let Some(debug_pubs) = board_debug_publishers {
                 let marker_array = Self::create_board_markers(&det, &msg.header)?;
+                let marker_count = marker_array.markers.len();
                 if let Err(e) = debug_pubs.board_marker.publish(marker_array) {
                     log_warn!(LOGGER_NAME, "Failed to publish board marker array: {e}");
+                } else {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Published final board pose markers with {} markers",
+                        marker_count
+                    );
                 }
             }
 
@@ -755,6 +762,18 @@ impl CalibrationBoardLocatorNode {
 
         // Step 6: Iterate with optional debug publishing
         loop {
+            // Perform one ICP iteration step FIRST
+            state = iterator.step(&state);
+
+            log_debug!(
+                LOGGER_NAME,
+                "ICP iteration {}: avg_loss={:.6}, good_correspondences={}/{}",
+                state.iteration,
+                state.avg_loss,
+                state.good_correspondences,
+                state.total_correspondences
+            );
+
             // Publish debug information if debug publishers are available
             if let Some(debug_pubs) = icp_debug_publishers {
                 Self::publish_icp_iteration(&state, &board_model_params, header, debug_pubs);
@@ -772,28 +791,16 @@ impl CalibrationBoardLocatorNode {
                 }
             }
 
-            // Check termination condition
+            // Add small delay between iterations only in debug mode for better visualization
+            if icp_debug_publishers.is_some() {
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            // Check termination condition AFTER the step
             if iterator.should_terminate(&state) {
                 let reason = iterator.termination_reason(&state);
                 log_info!(LOGGER_NAME, "ICP iteration terminated: {}", reason);
                 break;
-            }
-
-            // Perform one ICP iteration step
-            state = iterator.step(&state);
-
-            log_debug!(
-                LOGGER_NAME,
-                "ICP iteration {}: avg_loss={:.6}, good_correspondences={}/{}",
-                state.iteration,
-                state.avg_loss,
-                state.good_correspondences,
-                state.total_correspondences
-            );
-
-            // Add small delay between iterations only in debug mode for better visualization
-            if icp_debug_publishers.is_some() {
-                thread::sleep(Duration::from_millis(50));
             }
         }
 
@@ -981,9 +988,10 @@ impl CalibrationBoardLocatorNode {
             log_debug!(LOGGER_NAME, "Swapped v1 and v2 to maintain right-hand rule");
         }
 
-        // Step 7: Create rotation matrix from eigenvectors
+        // Step 7: Create rotation from eigenvectors using UnitQuaternion
         // v1 -> x-axis, v2 -> y-axis, v3 -> z-axis
-        let rotation_matrix = na::Matrix3::from_columns(&[v1, v2, v3]);
+        let pca_rotation_matrix = na::Matrix3::from_columns(&[v1, v2, v3]);
+        let pca_rotation = UnitQuaternion::from_matrix(&pca_rotation_matrix);
 
         log_debug!(
             LOGGER_NAME,
@@ -993,46 +1001,67 @@ impl CalibrationBoardLocatorNode {
             v3.x, v3.y, v3.z
         );
 
-        // Add assertions to verify correctness
-        let det = rotation_matrix.determinant();
-        log_debug!(LOGGER_NAME, "Rotation matrix determinant: {:.6}", det);
-        assert!(
-            (det - 1.0).abs() < 1e-6,
-            "Rotation matrix determinant should be 1.0, got {}",
-            det
-        );
+        // Step 7.5: Apply -45 degree rotation around plane normal to align with board borders
+        // PCA eigenvectors align with diagonal directions, but we want x/y axes aligned with board edges
+        let rotation_angle = std::f64::consts::FRAC_PI_4; // -45 degrees
+        let plane_normal_unit = na::Unit::new_normalize(v3);
+        let normal_rotation = UnitQuaternion::from_axis_angle(&plane_normal_unit, rotation_angle);
 
-        // Check orthogonality
-        let should_be_identity = &rotation_matrix * rotation_matrix.transpose();
-        let identity = na::Matrix3::<f64>::identity();
-        let diff_norm = (&should_be_identity - &identity).norm();
+        // Compose rotations: first PCA, then rotate around plane normal
+        let final_rotation = normal_rotation * pca_rotation;
+
         log_debug!(
             LOGGER_NAME,
-            "Orthogonality check (should be ~0): {:.6}",
-            diff_norm
-        );
-        assert!(
-            diff_norm < 1e-6,
-            "Rotation matrix should be orthogonal, difference norm: {}",
-            diff_norm
+            "Applied -45° rotation around plane normal to align with board borders"
         );
 
-        // Check right-hand rule
-        let computed_v3 = v1.cross(&v2);
-        let v3_alignment = computed_v3.dot(&v3);
-        log_debug!(
-            LOGGER_NAME,
-            "Right-hand rule check (v1 × v2 · v3, should be ~1): {:.6}",
-            v3_alignment
-        );
-        assert!(
-            v3_alignment > 0.9,
-            "Right-hand rule violated, alignment: {}",
-            v3_alignment
-        );
+        // Add assertions to verify correctness (debug builds only)
+        #[cfg(debug_assertions)]
+        {
+            let rotation_matrix = final_rotation.to_rotation_matrix().matrix();
+            let det = rotation_matrix.determinant();
+            log_debug!(LOGGER_NAME, "Rotation matrix determinant: {:.6}", det);
+            assert!(
+                (det - 1.0).abs() < 1e-6,
+                "Rotation matrix determinant should be 1.0, got {}",
+                det
+            );
 
-        // Step 8: Convert to unit quaternion
-        let rotation = UnitQuaternion::from_matrix(&rotation_matrix);
+            // Check orthogonality
+            let should_be_identity = &rotation_matrix * rotation_matrix.transpose();
+            let identity = na::Matrix3::<f64>::identity();
+            let diff_norm = (&should_be_identity - &identity).norm();
+            log_debug!(
+                LOGGER_NAME,
+                "Orthogonality check (should be ~0): {:.6}",
+                diff_norm
+            );
+            assert!(
+                diff_norm < 1e-6,
+                "Rotation matrix should be orthogonal, difference norm: {}",
+                diff_norm
+            );
+        }
+
+        // Check right-hand rule (debug builds only)
+        #[cfg(debug_assertions)]
+        {
+            let computed_v3 = v1.cross(&v2);
+            let v3_alignment = computed_v3.dot(&v3);
+            log_debug!(
+                LOGGER_NAME,
+                "Right-hand rule check (v1 × v2 · v3, should be ~1): {:.6}",
+                v3_alignment
+            );
+            assert!(
+                v3_alignment > 0.9,
+                "Right-hand rule violated, alignment: {}",
+                v3_alignment
+            );
+        }
+
+        // Step 8: Use the final composed rotation
+        let rotation = final_rotation;
 
         let pose = na::Isometry3::from_parts(Translation3::from(centroid), rotation);
 
