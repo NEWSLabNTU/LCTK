@@ -54,7 +54,7 @@ setup:
 .PHONY: prepare
 prepare:
 	@echo "Installing ROS dependencies with rosdep..."
-	. /opt/ros/humble/setup.sh && \
+	@. /opt/ros/humble/setup.sh && \
 	rosdep update && \
 	rosdep install --from-paths src --ignore-src -r -y
 
@@ -63,16 +63,16 @@ build: build_ros2_rust build_interface build_packages
 
 .PHONY: build_ros2_rust
 build_ros2_rust:
-	@mkdir -p $(LOG_DIR)
 	@echo "Building ROS2 Rust packages... (log: $(LOG_DIR)/ros2_rust.log)"
+	@mkdir -p $(LOG_DIR)
 	@. /opt/ros/humble/setup.sh && \
 	export RUST_LOG=debug && \
 	$(MAKE) -C src/ros2_rust_ws 2>&1 | tee $(LOG_DIR)/ros2_rust.log
 
 .PHONY: build_interface
 build_interface:
-	@mkdir -p $(LOG_DIR)
 	@echo "Building interface packages... (log: $(LOG_DIR)/interface.log)"
+	@mkdir -p $(LOG_DIR)
 	@. ./src/ros2_rust_ws/install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
@@ -102,9 +102,9 @@ format:
 .PHONY: lint
 lint:
 	@echo "Checking Rust code formatting and linting..."
-	cargo +nightly fmt --check
-	@echo "Running clippy on workspace (ignoring errors from ros2_rust_ws)..."
-	. install/setup.sh && \
+	@cargo +nightly fmt --check
+	@echo "Running clippy on workspace ..."
+	@. install/setup.sh && \
 	cargo clippy --workspace --all-targets --all-features || true
 
 .PHONY: rust-test
@@ -135,28 +135,23 @@ clean:
 
 .PHONY: launch_lidar_camera_sample_data
 launch_lidar_camera_sample_data:
-	@echo "Creating and starting LiDAR-camera sample data service with ros2systemd..."
 	@. install/setup.sh && \
-	export RUST_LOG=debug && \
-	ros2 systemd launch --name lctk-lidar-camera-data --replace \
+	ros2 systemd launch \
+		--name lctk-lidar-camera-data \
+		--replace \
+		--env RUST_LOG=debug \
 		lctk_sample_data lidar_camera.launch.xml
-	@echo "LiDAR-camera sample data service started. Use 'make service_status' to check status or 'make stop_lidar_camera_sample_data' to stop."
 
 .PHONY: stop_lidar_camera_sample_data
 stop_lidar_camera_sample_data:
-	@echo "Stopping LiDAR-camera sample data service..."
-	. install/setup.sh && \
-	ros2 systemd stop lctk-lidar-camera-data 2>/dev/null || echo "Service not running"
+	@. install/setup.sh && \
+	ros2 systemd stop lctk-lidar-camera-data
 
 .PHONY: launch_lidar_camera_calibration
 launch_lidar_camera_calibration:
-	@echo "Creating and starting LiDAR-Camera calibration service with ros2systemd..."
-	@if [ "$(debug_mode)" = "true" ]; then \
-		echo "Debug mode enabled - additional debug topics will be published"; \
-	fi
-	@echo "Using log level: $(log_level)"
 	@. install/setup.sh && \
-	RUST_LOG=debug ros2 systemd launch --name lctk-calibration --replace \
+	ros2 systemd launch --name lctk-calibration --replace \
+		--env RUST_LOG=debug \
 		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(or $(debug_mode),true) \
 		enable_icp_iteration_debug:=$(or $(enable_icp_iteration_debug),true) \
@@ -165,28 +160,21 @@ launch_lidar_camera_calibration:
 		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
 		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
 		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
-	@echo "Calibration service started. Use 'make service_status' to check status or 'make stop_lidar_camera_calibration' to stop."
-	@echo ""
-	@echo "Note: This only starts the calibration pipeline. To publish sample data, run 'make launch_lidar_camera_sample_data' separately."
 
 .PHONY: stop_lidar_camera_calibration
 stop_lidar_camera_calibration:
-	@echo "Stopping LiDAR-Camera calibration service..."
-	. install/setup.sh && \
-	ros2 systemd stop lctk-calibration 2>/dev/null || echo "Service not running"
+	@. install/setup.sh && \
+	ros2 systemd stop lctk-calibration
 
 .PHONY: launch_rviz
 launch_rviz:
-	@echo "Launching RViz for calibration visualization..."
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	export RUST_LOG=debug && \
 	ros2 launch lctk_launch rviz.launch.xml
 
 .PHONY: launch_iou_overlapping
 launch_iou_overlapping:
-	@echo "Launching IoU overlapping evaluator..."
-	@echo "This will evaluate extrinsic matrix quality using IoU between board detection and LiDAR projection."
-	. install/setup.sh && \
+	@. install/setup.sh && \
 	export RUST_LOG=debug && \
 	ros2 launch iou_overlapping iou_evaluator.launch.xml \
 		extrinsic_json:=$(or $(extrinsic_json),$(PWD)/install/iou_overlapping/share/iou_overlapping/config/extrinsic.json) \
@@ -196,19 +184,17 @@ launch_iou_overlapping:
 
 .PHONY: launch_two_lidar_calibration
 launch_two_lidar_calibration:
-	@echo "Creating and starting two LiDAR calibration service with ros2systemd..."
-	. install/setup.sh && \
-	RUST_LOG=debug ros2 systemd launch --name lctk-two-lidar --replace \
+	@. install/setup.sh && \
+	ros2 systemd launch \
+		--name lctk-two-lidar \
+		--replace \
+		--env RUST_LOG=debug \
 		lctk_launch two_lidar_calibration.launch.xml
-	@echo "Two LiDAR calibration service started. Use 'make service_status' to check status or 'make stop_two_lidar_calibration' to stop."
-	@echo ""
-	@echo "Note: You need to publish two LiDAR data streams separately for calibration to work."
 
 .PHONY: stop_two_lidar_calibration
 stop_two_lidar_calibration:
-	@echo "Stopping two LiDAR calibration service..."
-	. install/setup.sh && \
-	ros2 systemd stop lctk-two-lidar 2>/dev/null || echo "Service not running"
+	@. install/setup.sh && \
+	ros2 systemd stop lctk-two-lidar
 
 # Service Management Utilities
 
