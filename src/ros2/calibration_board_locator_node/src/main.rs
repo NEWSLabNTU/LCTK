@@ -1,7 +1,7 @@
 mod bbox;
 
 use crate::bbox::BBox;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
     Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Vector3 as GeomVector3,
@@ -9,11 +9,14 @@ use geometry_msgs::msg::{
 use hollow_board_config::{BoardModel, BoardShape};
 use hollow_board_detector::{
     algo::{fit_plane_ransac, BoardIcpIterator},
-    detection::{BoardIcpState, BoardModelParams},
+    detection::{BoardIcpState, BoardModelParams, IcpStatistics, PlaneRansacData},
     init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
     Detector as BoardDetector,
 };
-use nalgebra::{self as na, Isometry3, Translation3, UnitQuaternion};
+use nalgebra::{self as na, Translation3, UnitQuaternion};
+use ndarray::Array2;
+use petal_decomposition::PcaBuilder;
+use plane_estimator::PlaneModel;
 use rclrs::{SubscriptionOptions, *};
 use sensor_msgs::msg::{PointCloud2, PointField};
 use std::{
@@ -43,21 +46,29 @@ struct IcpDebugPublishers {
     stats: Arc<Publisher<StringMsg>>,
 }
 
+/// Debug publishers for board detection debugging
+#[derive(Clone)]
+struct BoardDebugPublishers {
+    all_points: Arc<Publisher<PointCloud2>>,
+    filtered_points: Arc<Publisher<PointCloud2>>,
+    plane_inliers: Arc<Publisher<PointCloud2>>,
+    plane_marker: Arc<Publisher<MarkerArray>>,
+    bbox_marker: Arc<Publisher<MarkerArray>>,
+    board_marker: Arc<Publisher<MarkerArray>>,
+    board_marker_icp: Arc<Publisher<MarkerArray>>,
+    initial_board_marker: Arc<Publisher<MarkerArray>>,
+    icp_stats: Arc<Publisher<StringMsg>>,
+    pca_eigenvectors: Arc<Publisher<MarkerArray>>,
+}
+
 // Config files are now mandatory parameters - no defaults
 
 pub struct CalibrationBoardLocatorNode {
     _node: Node,
     _detection_publisher: Publisher<Detection3DArray>,
     _pointcloud_subscription: Subscription<PointCloud2>,
-    // Debug publishers - only created when debug mode is enabled
-    _debug_all_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
-    _debug_filtered_points_publisher: Option<Arc<Publisher<PointCloud2>>>,
-    _debug_plane_inliers_publisher: Option<Arc<Publisher<PointCloud2>>>,
-    _bbox_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
-    _board_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
-    _board_marker_icp_publisher: Option<Arc<Publisher<MarkerArray>>>,
-    _initial_board_marker_publisher: Option<Arc<Publisher<MarkerArray>>>,
-    _icp_stats_publisher: Option<Arc<Publisher<StringMsg>>>,
+    // Board debug publishers - grouped into a single struct
+    _board_debug_publishers: Option<BoardDebugPublishers>,
     // ICP iteration debug publishers - grouped into a single struct
     _icp_debug_publishers: Option<IcpDebugPublishers>,
 }
@@ -123,70 +134,30 @@ impl CalibrationBoardLocatorNode {
         let detection_publisher = node.create_publisher("calibration_board_detections")?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
 
-        // Create debug publishers if debug mode is enabled
-        let debug_all_points_publisher = if enable_debug {
+        // Create board debug publishers if debug mode is enabled
+        let board_debug_publishers = if enable_debug {
             log_info!(
                 LOGGER_NAME,
                 "Debug mode enabled - creating debug publishers"
             );
-            Some(Arc::new(node.create_publisher("debug/all_points")?))
+            Some(BoardDebugPublishers {
+                all_points: Arc::new(node.create_publisher("debug/all_points")?),
+                filtered_points: Arc::new(node.create_publisher("debug/filtered_points")?),
+                plane_inliers: Arc::new(node.create_publisher("debug/plane_inliers")?),
+                plane_marker: Arc::new(node.create_publisher("debug/plane_marker")?),
+                bbox_marker: Arc::new(node.create_publisher("debug/bbox_marker")?),
+                board_marker: Arc::new(node.create_publisher("debug/final_board_pose")?),
+                board_marker_icp: Arc::new(node.create_publisher("debug/icp_iterations")?),
+                initial_board_marker: Arc::new(
+                    node.create_publisher("debug/initial_board_marker")?,
+                ),
+                icp_stats: Arc::new(node.create_publisher("debug/icp_stats")?),
+                pca_eigenvectors: Arc::new(node.create_publisher("debug/pca_eigenvectors")?),
+            })
         } else {
             None
         };
-        let debug_all_points_shared = debug_all_points_publisher.clone();
-
-        let debug_filtered_points_publisher = if enable_debug {
-            Some(Arc::new(node.create_publisher("debug/filtered_points")?))
-        } else {
-            None
-        };
-        let debug_filtered_points_shared = debug_filtered_points_publisher.clone();
-
-        let debug_plane_inliers_publisher = if enable_debug {
-            Some(Arc::new(node.create_publisher("debug/plane_inliers")?))
-        } else {
-            None
-        };
-        let debug_plane_inliers_shared = debug_plane_inliers_publisher.clone();
-
-        // Create bbox marker publisher for visualization
-        let bbox_marker_publisher = if enable_debug {
-            Some(Arc::new(node.create_publisher("debug/bbox_marker")?))
-        } else {
-            None
-        };
-        let bbox_marker_shared = bbox_marker_publisher.clone();
-
-        // Create final board pose marker publisher for visualization
-        let board_marker_publisher = if enable_debug {
-            Some(Arc::new(node.create_publisher("debug/final_board_pose")?))
-        } else {
-            None
-        };
-        let board_marker_shared = board_marker_publisher.clone();
-
-        // ICP iteration progress marker publisher (always on)
-        let board_marker_icp_publisher =
-            Some(Arc::new(node.create_publisher("debug/icp_iterations")?));
-        let board_marker_icp_shared = board_marker_icp_publisher.clone();
-
-        // Initial board pose marker publisher for debug
-        let initial_board_marker_publisher = if enable_debug {
-            Some(Arc::new(
-                node.create_publisher("debug/initial_board_marker")?,
-            ))
-        } else {
-            None
-        };
-        let initial_board_marker_shared = initial_board_marker_publisher.clone();
-
-        // ICP statistics publisher for debug
-        let icp_stats_publisher = if enable_debug {
-            Some(Arc::new(node.create_publisher("debug/icp_stats")?))
-        } else {
-            None
-        };
-        let icp_stats_shared = icp_stats_publisher.clone();
+        let board_debug_shared = board_debug_publishers.clone();
 
         // ICP iteration debug publishers - grouped into single struct
         let icp_debug_publishers = if enable_icp_iteration_debug {
@@ -236,14 +207,7 @@ impl CalibrationBoardLocatorNode {
                     &detector,
                     &detection_publisher_shared,
                     &bbox,
-                    &debug_all_points_shared,
-                    &debug_filtered_points_shared,
-                    &debug_plane_inliers_shared,
-                    &bbox_marker_shared,
-                    &board_marker_shared,
-                    &board_marker_icp_shared,
-                    &initial_board_marker_shared,
-                    &icp_stats_shared,
+                    &board_debug_shared,
                     &icp_debug_shared,
                 );
             })?;
@@ -255,7 +219,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats, debug/pca_eigenvectors"
             );
         }
 
@@ -270,14 +234,7 @@ impl CalibrationBoardLocatorNode {
             _node: node,
             _detection_publisher: detection_publisher,
             _pointcloud_subscription: pointcloud_subscription,
-            _debug_all_points_publisher: debug_all_points_publisher,
-            _debug_filtered_points_publisher: debug_filtered_points_publisher,
-            _debug_plane_inliers_publisher: debug_plane_inliers_publisher,
-            _bbox_marker_publisher: bbox_marker_publisher,
-            _board_marker_publisher: board_marker_publisher,
-            _board_marker_icp_publisher: board_marker_icp_publisher,
-            _initial_board_marker_publisher: initial_board_marker_publisher,
-            _icp_stats_publisher: icp_stats_publisher,
+            _board_debug_publishers: board_debug_publishers,
             _icp_debug_publishers: icp_debug_publishers,
         })
     }
@@ -327,14 +284,7 @@ impl CalibrationBoardLocatorNode {
         detector: &Arc<BoardDetector>,
         publisher: &Publisher<Detection3DArray>,
         bbox: &Arc<Mutex<BBox>>,
-        debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
-        debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
-        debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
-        bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        initial_board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        icp_stats_pub: &Option<Arc<Publisher<StringMsg>>>,
+        board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
     ) {
         let start_time = Instant::now();
@@ -366,14 +316,7 @@ impl CalibrationBoardLocatorNode {
             &msg,
             detector,
             bbox,
-            debug_all_points_pub,
-            debug_filtered_points_pub,
-            debug_plane_inliers_pub,
-            bbox_marker_pub,
-            board_marker_pub,
-            board_marker_icp_pub,
-            initial_board_marker_pub,
-            icp_stats_pub,
+            board_debug_publishers,
             icp_debug_publishers,
         );
 
@@ -401,101 +344,44 @@ impl CalibrationBoardLocatorNode {
         msg: &PointCloud2,
         detector: &Arc<BoardDetector>,
         bbox: &Arc<Mutex<BBox>>,
-        debug_all_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
-        debug_filtered_points_pub: &Option<Arc<Publisher<PointCloud2>>>,
-        debug_plane_inliers_pub: &Option<Arc<Publisher<PointCloud2>>>,
-        bbox_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        initial_board_marker_pub: &Option<Arc<Publisher<MarkerArray>>>,
-        icp_stats_pub: &Option<Arc<Publisher<StringMsg>>>,
+        board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
-        let points = match Self::convert_pointcloud2_to_points(msg) {
-            Ok(pts) => pts,
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Failed to convert point cloud: {e}");
-                return Err(e);
-            }
-        };
+        let points = {
+            let points = match Self::convert_pointcloud2_to_points(msg) {
+                Ok(pts) => pts,
+                Err(e) => {
+                    log_warn!(LOGGER_NAME, "Failed to convert point cloud: {e}");
+                    return Err(e);
+                }
+            };
 
-        log_debug!(
-            LOGGER_NAME,
-            "Converted {} points from PointCloud2",
-            points.len()
-        );
-
-        // Publish debug all points if enabled
-        if let Some(pub_all) = debug_all_points_pub {
             log_debug!(
                 LOGGER_NAME,
-                "Publishing {} points to debug/all_points",
+                "Converted {} points from PointCloud2",
                 points.len()
             );
-            let debug_cloud = Self::create_debug_pointcloud(&points, &msg.header)?;
-            if let Err(e) = pub_all.publish(debug_cloud) {
-                log_warn!(LOGGER_NAME, "Failed to publish debug all points: {e}");
-            }
-        }
 
-        // Filter points using bbox
-        log_debug!(LOGGER_NAME, "Attempting to lock bbox mutex...");
-        let bbox_guard = match bbox.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Failed to lock bbox mutex: {e}");
-                return Err(anyhow!("Failed to lock bbox: {e}"));
+            // Publish debug all points if enabled
+            if let Some(debug_pubs) = board_debug_publishers {
+                log_debug!(
+                    LOGGER_NAME,
+                    "Publishing {} points to debug/all_points",
+                    points.len()
+                );
+                let debug_cloud = Self::create_debug_pointcloud(&points, &msg.header)?;
+                if let Err(e) = debug_pubs.all_points.publish(debug_cloud) {
+                    log_warn!(LOGGER_NAME, "Failed to publish debug all points: {e}");
+                }
             }
+
+            points
         };
-        log_debug!(LOGGER_NAME, "Successfully locked bbox mutex");
 
-        log_debug!(
-            LOGGER_NAME,
-            "Bounding box filter: center=[{:.2}, {:.2}, {:.2}], size=[{:.2}, {:.2}, {:.2}]",
-            bbox_guard.pose.translation.x,
-            bbox_guard.pose.translation.y,
-            bbox_guard.pose.translation.z,
-            bbox_guard.size_xyz[0],
-            bbox_guard.size_xyz[1],
-            bbox_guard.size_xyz[2]
-        );
-
-        // Publish bbox marker for visualization in RViz
-        if let Some(pub_bbox) = bbox_marker_pub {
-            let bbox_marker = Self::create_bbox_marker(&bbox_guard, &msg.header)?;
-            let mut marker_array = MarkerArray::default();
-            marker_array.markers.push(bbox_marker);
-            if let Err(e) = pub_bbox.publish(marker_array) {
-                log_warn!(LOGGER_NAME, "Failed to publish bbox marker: {e}");
-            }
-        }
-
-        let active_points: Vec<_> = points
-            .iter()
-            .filter(|pt| bbox_guard.contains_point(pt))
-            .cloned()
-            .collect();
-        drop(bbox_guard);
-
-        log_debug!(
-            LOGGER_NAME,
-            "Filtered {} points within bounding box",
-            active_points.len()
-        );
-
-        // Publish debug filtered points if enabled (always publish, even if empty)
-        if let Some(pub_filtered) = debug_filtered_points_pub {
-            log_debug!(
-                LOGGER_NAME,
-                "Publishing {} filtered points to debug/filtered_points",
-                active_points.len()
-            );
-            let debug_cloud = Self::create_debug_pointcloud(&active_points, &msg.header)?;
-            if let Err(e) = pub_filtered.publish(debug_cloud) {
-                log_warn!(LOGGER_NAME, "Failed to publish debug filtered points: {e}");
-            }
-        }
+        // Stage 1: Filter points by bounding box
+        let active_points =
+            Self::filter_points_by_bbox(&points, bbox, &msg.header, board_debug_publishers)?;
 
         if active_points.is_empty() {
             log_debug!(
@@ -508,19 +394,44 @@ impl CalibrationBoardLocatorNode {
             });
         }
 
-        // Detect calibration board
+        // Stage 2: RANSAC plane detection
+        let (plane_model, plane_inlier_points) = match Self::detect_plane_ransac(
+            detector,
+            &active_points,
+            &msg.header,
+            board_debug_publishers,
+        )? {
+            Some(result) => result,
+            None => {
+                log_debug!(
+                    LOGGER_NAME,
+                    "RANSAC plane detection failed - no valid plane found"
+                );
+                return Ok(Detection3DArray {
+                    header: msg.header.clone(),
+                    detections: Vec::new(),
+                });
+            }
+        };
+
+        // Stage 3: ICP board pose refinement
         log_debug!(
             LOGGER_NAME,
-            "Starting board detection with {} points",
-            active_points.len()
+            "Starting ICP board detection with {} plane inlier points",
+            plane_inlier_points.len()
         );
 
         let detection: Option<BoardDetection> = Self::detect_icp(
             detector,
-            &active_points,
+            &plane_model,
+            &plane_inlier_points,
+            PlaneRansacData {
+                plane_model: plane_model.clone(),
+                inlier_points: plane_inlier_points.clone(),
+            },
             &msg.header,
             icp_debug_publishers,
-            board_marker_icp_pub,
+            board_debug_publishers,
         );
 
         let mut detections = Vec::new();
@@ -547,27 +458,8 @@ impl CalibrationBoardLocatorNode {
                 final_loss
             );
 
-            // Publish debug plane inliers if enabled
-            if let Some(pub_inliers) = debug_plane_inliers_pub {
-                // Convert plane inlier points to PointCloud2 message
-                let plane_inlier_points = &det.plane_ransac_data.inlier_points;
-                match Self::create_debug_pointcloud(plane_inlier_points, &msg.header) {
-                    Ok(plane_inliers_msg) => {
-                        let _ = pub_inliers.publish(plane_inliers_msg);
-                        log_debug!(
-                            LOGGER_NAME,
-                            "Published {} plane inlier points to debug/plane_inliers",
-                            plane_inlier_points.len()
-                        );
-                    }
-                    Err(e) => {
-                        log_warn!(LOGGER_NAME, "Failed to create plane inliers message: {e}");
-                    }
-                }
-            }
-
             // Publish initial board pose markers if enabled
-            if let Some(pub_initial) = initial_board_marker_pub {
+            if let Some(debug_pubs) = board_debug_publishers {
                 // Create board markers using the initial pose before ICP refinement
                 let initial_board_model = hollow_board_config::BoardModel {
                     pose: det.initial_pose,
@@ -577,13 +469,13 @@ impl CalibrationBoardLocatorNode {
                 if let Ok(initial_markers) =
                     Self::create_board_markers_from_model(&initial_board_model, &msg.header)
                 {
-                    let _ = pub_initial.publish(initial_markers);
+                    let _ = debug_pubs.initial_board_marker.publish(initial_markers);
                     log_debug!(LOGGER_NAME, "Published initial board pose markers");
                 }
             }
 
             // Publish ICP statistics if enabled
-            if let Some(pub_stats) = icp_stats_pub {
+            if let Some(debug_pubs) = board_debug_publishers {
                 let stats_msg = StringMsg {
                         data: format!(
                             "ICP Stats - Iterations: {}, Initial Loss: {:.6}, Final Loss: {:.6}, Min Loss: {:.6}, Successful: {}, Convergence: {}",
@@ -595,7 +487,7 @@ impl CalibrationBoardLocatorNode {
                             det.icp_stats.convergence_reason
                         ),
                     };
-                let _ = pub_stats.publish(stats_msg);
+                let _ = debug_pubs.icp_stats.publish(stats_msg);
                 log_debug!(
                     LOGGER_NAME,
                     "Published ICP statistics: {} iterations, final loss: {:.6}",
@@ -605,9 +497,9 @@ impl CalibrationBoardLocatorNode {
             }
 
             // Create board markers (cube + axes) using the pose returned by algo.rs and publish them if enabled
-            if let Some(pub_board) = board_marker_pub {
+            if let Some(debug_pubs) = board_debug_publishers {
                 let marker_array = Self::create_board_markers(&det, &msg.header)?;
-                if let Err(e) = pub_board.publish(marker_array) {
+                if let Err(e) = debug_pubs.board_marker.publish(marker_array) {
                     log_warn!(LOGGER_NAME, "Failed to publish board marker array: {e}");
                 }
             }
@@ -618,9 +510,9 @@ impl CalibrationBoardLocatorNode {
             log_warn!(LOGGER_NAME, "Detection returned None - board not found");
 
             // Publish empty marker array to ensure topic is active for debugging
-            if let Some(pub_board) = board_marker_pub {
+            if let Some(debug_pubs) = board_debug_publishers {
                 let marker_array = MarkerArray::default();
-                if let Err(e) = pub_board.publish(marker_array) {
+                if let Err(e) = debug_pubs.board_marker.publish(marker_array) {
                     log_warn!(
                         LOGGER_NAME,
                         "Failed to publish empty board marker array: {e}"
@@ -643,18 +535,139 @@ impl CalibrationBoardLocatorNode {
         Ok(detection_array)
     }
 
-    // Detection function using BoardIcpIterator for both debug and non-debug modes
-    fn detect_icp(
+    // Stage 1: Bounding box filter
+    fn filter_points_by_bbox(
+        points: &[na::Point3<f64>],
+        bbox: &Arc<Mutex<BBox>>,
+        header: &Header,
+        board_debug_publishers: &Option<BoardDebugPublishers>,
+    ) -> Result<Vec<na::Point3<f64>>> {
+        let bbox_guard = match bbox.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Failed to lock bbox mutex: {e}");
+                bail!("Failed to lock bbox: {e}");
+            }
+        };
+
+        log_debug!(
+            LOGGER_NAME,
+            "Bounding box filter: center=[{:.2}, {:.2}, {:.2}], size=[{:.2}, {:.2}, {:.2}]",
+            bbox_guard.pose.translation.x,
+            bbox_guard.pose.translation.y,
+            bbox_guard.pose.translation.z,
+            bbox_guard.size_xyz[0],
+            bbox_guard.size_xyz[1],
+            bbox_guard.size_xyz[2]
+        );
+
+        // Publish bbox marker for visualization in RViz
+        if let Some(debug_pubs) = board_debug_publishers {
+            let bbox_marker = Self::create_bbox_marker(&bbox_guard, header)?;
+            let mut marker_array = MarkerArray::default();
+            marker_array.markers.push(bbox_marker);
+            if let Err(e) = debug_pubs.bbox_marker.publish(marker_array) {
+                log_warn!(LOGGER_NAME, "Failed to publish bbox marker: {e}");
+            }
+        }
+
+        let active_points: Vec<_> = points
+            .iter()
+            .filter(|pt| bbox_guard.contains_point(pt))
+            .cloned()
+            .collect();
+
+        log_debug!(
+            LOGGER_NAME,
+            "Filtered {} points within bounding box",
+            active_points.len()
+        );
+
+        // Publish debug filtered points if enabled (always publish, even if empty)
+        if let Some(debug_pubs) = board_debug_publishers {
+            log_debug!(
+                LOGGER_NAME,
+                "Publishing {} filtered points to debug/filtered_points",
+                active_points.len()
+            );
+            let debug_cloud = Self::create_debug_pointcloud(&active_points, header)?;
+            if let Err(e) = debug_pubs.filtered_points.publish(debug_cloud) {
+                log_warn!(LOGGER_NAME, "Failed to publish debug filtered points: {e}");
+            }
+        }
+
+        Ok(active_points)
+    }
+
+    // Stage 2: RANSAC plane detection
+    fn detect_plane_ransac(
         detector: &Arc<BoardDetector>,
         active_points: &[na::Point3<f64>],
         header: &Header,
-        icp_debug_publishers: &Option<IcpDebugPublishers>,
-        board_marker_icp_pub: &Option<Arc<Publisher<MarkerArray>>>,
-    ) -> Option<BoardDetection> {
-        log_info!(
+        board_debug_publishers: &Option<BoardDebugPublishers>,
+    ) -> Result<Option<(PlaneModel, Vec<na::Point3<f64>>)>> {
+        let config = detector.config();
+
+        // Fit plane using RANSAC
+        let plane_fit = match fit_plane_ransac(config, active_points) {
+            Ok(Some(fit)) => fit,
+            Ok(None) => {
+                log_warn!(LOGGER_NAME, "Plane fitting failed - no valid plane found");
+                return Ok(None);
+            }
+            Err(e) => {
+                log_warn!(LOGGER_NAME, "Plane fitting error: {}", e);
+                return Err(e.into());
+            }
+        };
+
+        let plane_model = plane_fit.plane_model;
+        let plane_inlier_points: Vec<na::Point3<f64>> =
+            plane_fit.inlier_points.iter().map(|p| **p).collect();
+
+        log_debug!(
             LOGGER_NAME,
-            "Starting board detection with BoardIcpIterator"
+            "RANSAC plane detection successful: {} inlier points found",
+            plane_inlier_points.len()
         );
+
+        // Publish debug plane inliers immediately after RANSAC success
+        if let Some(debug_pubs) = board_debug_publishers {
+            match Self::create_debug_pointcloud(&plane_inlier_points, header) {
+                Ok(plane_inliers_msg) => {
+                    let _ = debug_pubs.plane_inliers.publish(plane_inliers_msg);
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Published {} plane inlier points to debug/plane_inliers after RANSAC",
+                        plane_inlier_points.len()
+                    );
+                }
+                Err(e) => {
+                    log_warn!(LOGGER_NAME, "Failed to create plane inliers message: {e}");
+                }
+            }
+        }
+
+        Ok(Some((plane_model, plane_inlier_points)))
+    }
+
+    // Stage 3: ICP board pose refinement
+    fn detect_icp(
+        detector: &Arc<BoardDetector>,
+        plane_model: &PlaneModel,
+        plane_inlier_points: &[na::Point3<f64>],
+        ransac_data: PlaneRansacData,
+        header: &Header,
+        icp_debug_publishers: &Option<IcpDebugPublishers>,
+        board_debug_publishers: &Option<BoardDebugPublishers>,
+    ) -> Option<BoardDetection> {
+        log_info!(LOGGER_NAME, "Starting ICP board pose refinement");
+
+        // Check if we have enough inlier points
+        if plane_inlier_points.is_empty() {
+            log_warn!(LOGGER_NAME, "No plane inlier points available for ICP");
+            return None;
+        }
 
         // Extract detector configuration and aruco pattern
         let config = detector.config();
@@ -672,23 +685,7 @@ impl CalibrationBoardLocatorNode {
         } = *config;
         let marker_paper_size = aruco_pattern.paper_size();
 
-        // Step 1: Fit plane using RANSAC
-        let plane_fit = match fit_plane_ransac(config, active_points) {
-            Ok(Some(fit)) => fit,
-            Ok(None) => {
-                log_warn!(LOGGER_NAME, "Plane fitting failed - no valid plane found");
-                return None;
-            }
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Plane fitting error: {}", e);
-                return None;
-            }
-        };
-
-        let plane_model = &plane_fit.plane_model;
-        let plane_inlier_points = &plane_fit.inlier_points;
-
-        // Step 2: Create BoardModelParams
+        // Create BoardModelParams
         let board_model_params = BoardModelParams {
             board_shape: BoardShape {
                 board_width,
@@ -698,31 +695,47 @@ impl CalibrationBoardLocatorNode {
             marker_paper_size,
         };
 
-        // Step 3: Create initial pose (from plane normal and centroid)
-        let initial_pose = {
-            let plane_centroid = plane_inlier_points
-                .iter()
-                .map(|p| p.coords)
-                .sum::<na::Vector3<f64>>()
-                / plane_inlier_points.len() as f64;
+        // Step 3: Create initial pose using PCA-based alignment
+        let initial_pose =
+            Self::compute_initial_pose_pca(plane_inlier_points, header, board_debug_publishers)?;
 
-            let plane_normal: na::Vector3<f64> = na::convert(*plane_model.normal);
-
-            // Create rotation from world +Z to plane normal
-            let world_z = na::Vector3::z_axis();
-            let rotation = if (plane_normal.dot(&world_z) - 1.0).abs() < 1e-6 {
-                UnitQuaternion::identity()
-            } else if (plane_normal.dot(&world_z) + 1.0).abs() < 1e-6 {
-                UnitQuaternion::from_axis_angle(&na::Vector3::x_axis(), std::f64::consts::PI)
-            } else {
-                UnitQuaternion::rotation_between(&world_z, &plane_normal).unwrap()
+        // Publish initial board pose for debugging (if debug publishers available)
+        if let Some(debug_pubs) = board_debug_publishers {
+            let initial_board_model = BoardModel {
+                pose: initial_pose,
+                board_shape: board_model_params.board_shape.clone(),
+                marker_paper_size: board_model_params.marker_paper_size,
             };
+            if let Ok(initial_markers) =
+                Self::create_board_markers_from_model(&initial_board_model, header)
+            {
+                let _ = debug_pubs.initial_board_marker.publish(initial_markers);
+                log_debug!(LOGGER_NAME, "Published initial board pose markers from PCA");
+            }
 
-            Isometry3::from_parts(Translation3::from(plane_centroid), rotation)
-        };
+            // Publish RANSAC plane visualization
+            if let Ok(plane_markers) =
+                Self::create_plane_marker(plane_model, plane_inlier_points, header)
+            {
+                let _ = debug_pubs.plane_marker.publish(plane_markers);
+                log_debug!(LOGGER_NAME, "Published RANSAC plane marker");
+
+                // Debug: Compare RANSAC plane normal with PCA board pose z-axis
+                let ransac_normal = plane_model.normal;
+                let board_z_axis = initial_pose.rotation * na::Vector3::z();
+                let alignment = ransac_normal.dot(&board_z_axis);
+                log_debug!(
+                    LOGGER_NAME,
+                    "RANSAC normal: ({:.3}, {:.3}, {:.3}), Board Z-axis: ({:.3}, {:.3}, {:.3}), Alignment: {:.3}",
+                    ransac_normal.x, ransac_normal.y, ransac_normal.z,
+                    board_z_axis.x, board_z_axis.y, board_z_axis.z,
+                    alignment
+                );
+            }
+        }
 
         let initial_inlier_points: Vec<na::Point3<f64>> =
-            plane_inlier_points.iter().map(|p| **p).collect();
+            plane_inlier_points.iter().cloned().collect();
 
         // Step 4: Create BoardIcpIterator
         let mut iterator = BoardIcpIterator::new(
@@ -748,14 +761,14 @@ impl CalibrationBoardLocatorNode {
             }
 
             // Publish board model visualization
-            if let Some(pub_icp) = board_marker_icp_pub {
+            if let Some(debug_pubs) = board_debug_publishers {
                 let board_model = BoardModel {
                     pose: state.board_pose,
                     board_shape: board_model_params.board_shape.clone(),
                     marker_paper_size: board_model_params.marker_paper_size,
                 };
                 if let Ok(arr) = Self::create_board_markers_from_model(&board_model, header) {
-                    let _ = pub_icp.publish(arr);
+                    let _ = debug_pubs.board_marker_icp.publish(arr);
                 }
             }
 
@@ -805,14 +818,14 @@ impl CalibrationBoardLocatorNode {
             // Create Detection with all required fields
             Some(BoardDetection {
                 board_model: board_model.clone(),
-                plane_ransac_data: plane_fit.ransac_data,
+                plane_ransac_data: ransac_data,
                 icp_data: hollow_board_detector::detection::IcpData {
                     correspondences: state.correspondences.clone(),
                     board_model,
                 },
                 icp_losses: vec![state.avg_loss], // Single final loss value
                 initial_pose,
-                icp_stats: hollow_board_detector::detection::IcpStatistics {
+                icp_stats: IcpStatistics {
                     iterations: state.iteration,
                     final_loss: state.avg_loss,
                     min_loss: state.avg_loss, // In our implementation, final loss is the minimum we reached
@@ -832,6 +845,210 @@ impl CalibrationBoardLocatorNode {
             );
             None
         }
+    }
+
+    /// Compute initial board pose using PCA-based alignment
+    fn compute_initial_pose_pca(
+        plane_inlier_points: &[na::Point3<f64>],
+        header: &Header,
+        debug_publishers: &Option<BoardDebugPublishers>,
+    ) -> Option<na::Isometry3<f64>> {
+        if plane_inlier_points.is_empty() {
+            log_warn!(LOGGER_NAME, "Cannot compute PCA pose with empty point set");
+            return None;
+        }
+
+        if plane_inlier_points.len() < 3 {
+            log_warn!(
+                LOGGER_NAME,
+                "Need at least 3 points for PCA, got {}",
+                plane_inlier_points.len()
+            );
+            return None;
+        }
+
+        // Step 1: Compute centroid
+        let centroid = plane_inlier_points
+            .iter()
+            .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
+            / (plane_inlier_points.len() as f64);
+
+        log_debug!(
+            LOGGER_NAME,
+            "PCA pose initialization: centroid=({:.3}, {:.3}, {:.3}), {} points",
+            centroid.x,
+            centroid.y,
+            centroid.z,
+            plane_inlier_points.len()
+        );
+
+        // Step 2: Create data matrix for PCA using petal-decomposition
+        // petal-decomposition expects data as (n_samples, n_features) = (n_points, 3)
+        let n_points = plane_inlier_points.len();
+        let mut data_array = Array2::<f64>::zeros((n_points, 3));
+
+        for (row_idx, point) in plane_inlier_points.iter().enumerate() {
+            data_array[[row_idx, 0]] = point.x;
+            data_array[[row_idx, 1]] = point.y;
+            data_array[[row_idx, 2]] = point.z;
+        }
+
+        // Step 3: Perform PCA using petal-decomposition (keeps all 3 components)
+        let mut pca = PcaBuilder::new(3).build();
+        if let Err(e) = pca.fit(&data_array.view()) {
+            log_warn!(LOGGER_NAME, "PCA fit failed: {}", e);
+            return None;
+        }
+
+        // Step 4: Get singular values and components
+        let singular_values = pca.singular_values();
+        let explained_variance = pca.explained_variance_ratio();
+
+        log_debug!(
+            LOGGER_NAME,
+            "PCA singular values: [{:.6}, {:.6}, {:.6}]",
+            singular_values[0],
+            singular_values[1],
+            singular_values[2]
+        );
+        log_debug!(
+            LOGGER_NAME,
+            "Explained variance ratio: [{:.6}, {:.6}, {:.6}]",
+            explained_variance[0],
+            explained_variance[1],
+            explained_variance[2]
+        );
+
+        // Step 5: Extract principal components (eigenvectors)
+        // petal-decomposition returns components as (n_components, n_features) = (3, 3)
+        // Each row is a principal component
+        let components = pca.components();
+
+        // Extract the three principal components
+        // PC0 has largest variance (lies in plane), PC2 has smallest variance (normal to plane)
+        let mut v1 = na::Vector3::new(components[[0, 0]], components[[0, 1]], components[[0, 2]]); // 1st PC - largest variance (in plane)
+        let mut v2 = na::Vector3::new(components[[1, 0]], components[[1, 1]], components[[1, 2]]); // 2nd PC - middle variance (in plane)
+        let mut v3 = na::Vector3::new(components[[2, 0]], components[[2, 1]], components[[2, 2]]); // 3rd PC - smallest variance (normal to plane)
+
+        log_debug!(
+            LOGGER_NAME,
+            "PCA component assignment: v1=PC0({:.6}), v2=PC1({:.6}), v3=PC2({:.6})",
+            singular_values[0],
+            singular_values[1],
+            singular_values[2]
+        );
+
+        log_debug!(
+            LOGGER_NAME,
+            "Initial eigenvectors: v1=({:.3}, {:.3}, {:.3}), v2=({:.3}, {:.3}, {:.3}), v3=({:.3}, {:.3}, {:.3})",
+            v1.x, v1.y, v1.z,
+            v2.x, v2.y, v2.z,
+            v3.x, v3.y, v3.z
+        );
+
+        // Publish raw eigenvectors for debugging (before any orientation constraints)
+        if let Some(debug_pubs) = debug_publishers {
+            if let Ok(eigenvector_markers) =
+                Self::create_pca_eigenvector_markers(&centroid, &v1, &v2, &v3, header)
+            {
+                let _ = debug_pubs.pca_eigenvectors.publish(eigenvector_markers);
+                log_debug!(LOGGER_NAME, "Published raw PCA eigenvectors");
+            }
+        }
+
+        // Step 6: Apply orientation constraints
+        // Ensure v3 (normal) points toward camera (positive z in camera frame)
+        // Assuming camera is above the calibration board
+        if v3.z < 0.0 {
+            v3 = -v3;
+            log_debug!(LOGGER_NAME, "Flipped v3 to point toward camera");
+        }
+
+        // Ensure v1 and v2 have positive z components (point generally upward)
+        if v1.z < 0.0 {
+            v1 = -v1;
+            log_debug!(LOGGER_NAME, "Flipped v1 for positive z component");
+        }
+        if v2.z < 0.0 {
+            v2 = -v2;
+            log_debug!(LOGGER_NAME, "Flipped v2 for positive z component");
+        }
+
+        // Ensure right-hand rule: v3 = v1 × v2
+        let cross_product = v1.cross(&v2);
+        if cross_product.dot(&v3) < 0.0 {
+            std::mem::swap(&mut v1, &mut v2); // Swap v1 and v2 to maintain right-hand rule
+            log_debug!(LOGGER_NAME, "Swapped v1 and v2 to maintain right-hand rule");
+        }
+
+        // Step 7: Create rotation matrix from eigenvectors
+        // v1 -> x-axis, v2 -> y-axis, v3 -> z-axis
+        let rotation_matrix = na::Matrix3::from_columns(&[v1, v2, v3]);
+
+        log_debug!(
+            LOGGER_NAME,
+            "Final eigenvectors: v1=({:.3}, {:.3}, {:.3}), v2=({:.3}, {:.3}, {:.3}), v3=({:.3}, {:.3}, {:.3})",
+            v1.x, v1.y, v1.z,
+            v2.x, v2.y, v2.z,
+            v3.x, v3.y, v3.z
+        );
+
+        // Add assertions to verify correctness
+        let det = rotation_matrix.determinant();
+        log_debug!(LOGGER_NAME, "Rotation matrix determinant: {:.6}", det);
+        assert!(
+            (det - 1.0).abs() < 1e-6,
+            "Rotation matrix determinant should be 1.0, got {}",
+            det
+        );
+
+        // Check orthogonality
+        let should_be_identity = &rotation_matrix * rotation_matrix.transpose();
+        let identity = na::Matrix3::<f64>::identity();
+        let diff_norm = (&should_be_identity - &identity).norm();
+        log_debug!(
+            LOGGER_NAME,
+            "Orthogonality check (should be ~0): {:.6}",
+            diff_norm
+        );
+        assert!(
+            diff_norm < 1e-6,
+            "Rotation matrix should be orthogonal, difference norm: {}",
+            diff_norm
+        );
+
+        // Check right-hand rule
+        let computed_v3 = v1.cross(&v2);
+        let v3_alignment = computed_v3.dot(&v3);
+        log_debug!(
+            LOGGER_NAME,
+            "Right-hand rule check (v1 × v2 · v3, should be ~1): {:.6}",
+            v3_alignment
+        );
+        assert!(
+            v3_alignment > 0.9,
+            "Right-hand rule violated, alignment: {}",
+            v3_alignment
+        );
+
+        // Step 8: Convert to unit quaternion
+        let rotation = UnitQuaternion::from_matrix(&rotation_matrix);
+
+        let pose = na::Isometry3::from_parts(Translation3::from(centroid), rotation);
+
+        log_info!(
+            LOGGER_NAME,
+            "PCA initial pose: translation=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
+            pose.translation.x,
+            pose.translation.y,
+            pose.translation.z,
+            pose.rotation.i,
+            pose.rotation.j,
+            pose.rotation.k,
+            pose.rotation.w
+        );
+
+        Some(pose)
     }
 
     fn convert_pointcloud2_to_points(msg: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
@@ -1126,7 +1343,7 @@ impl CalibrationBoardLocatorNode {
         };
 
         // Helper to build an arrow marker oriented along the board frame's X axis, then rotated
-        let mut make_axis_arrow =
+        let make_axis_arrow =
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
                 let mut m = Marker::default();
                 m.header = header.clone();
@@ -1175,6 +1392,79 @@ impl CalibrationBoardLocatorNode {
         Ok(arr)
     }
 
+    /// Create a circular plane marker to visualize the RANSAC-detected plane
+    fn create_plane_marker(
+        plane_model: &PlaneModel,
+        plane_inlier_points: &[na::Point3<f64>],
+        header: &Header,
+    ) -> Result<MarkerArray> {
+        // Compute centroid of inlier points
+        let centroid = plane_inlier_points
+            .iter()
+            .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
+            / (plane_inlier_points.len() as f64);
+
+        // Create a circular plane marker
+        let mut marker = Marker::default();
+        marker.header = header.clone();
+        marker.ns = "ransac_plane".to_string();
+        marker.id = 0;
+        marker.type_ = 3; // CYLINDER for a circular plane
+        marker.action = 0; // ADD
+
+        // Position at centroid
+        marker.pose.position = Point {
+            x: centroid.x,
+            y: centroid.y,
+            z: centroid.z,
+        };
+
+        // Simply use the plane normal directly - no rotation corrections
+        let normal = plane_model.normal;
+        log_debug!(
+            LOGGER_NAME,
+            "Plane normal (RANSAC): ({:.3}, {:.3}, {:.3})",
+            normal.x,
+            normal.y,
+            normal.z
+        );
+
+        // Create rotation to align z-axis with plane normal
+        let z_axis = na::Vector3::new(0.0, 0.0, 1.0);
+        let rotation_quat = if normal.dot(&z_axis).abs() > 0.999 {
+            na::UnitQuaternion::identity()
+        } else {
+            na::UnitQuaternion::rotation_between(&z_axis, &normal)
+                .unwrap_or(na::UnitQuaternion::identity())
+        };
+
+        marker.pose.orientation = Quaternion {
+            x: rotation_quat.i,
+            y: rotation_quat.j,
+            z: rotation_quat.k,
+            w: rotation_quat.w,
+        };
+
+        // Set size (radius=0.5m, height=0.01m for a thin disk)
+        marker.scale.x = 1.0; // diameter
+        marker.scale.y = 1.0; // diameter
+        marker.scale.z = 0.01; // thin disk
+
+        // Set color (semi-transparent blue)
+        marker.color.r = 0.0;
+        marker.color.g = 0.0;
+        marker.color.b = 1.0;
+        marker.color.a = 0.3; // Semi-transparent
+
+        // Set lifetime
+        marker.lifetime.sec = 0;
+        marker.lifetime.nanosec = 500_000_000; // 0.5 seconds
+
+        Ok(MarkerArray {
+            markers: vec![marker],
+        })
+    }
+
     fn create_board_markers_from_model(
         board_model: &hollow_board_config::BoardModel,
         header: &Header,
@@ -1207,7 +1497,7 @@ impl CalibrationBoardLocatorNode {
             m
         };
 
-        let mut make_axis_arrow =
+        let make_axis_arrow =
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
                 let mut m = Marker::default();
                 m.header = header.clone();
@@ -1351,6 +1641,119 @@ impl CalibrationBoardLocatorNode {
         points.push(board_model.marker_center());
 
         Self::create_debug_pointcloud(&points, header)
+    }
+
+    /// Create arrow markers for raw PCA eigenvectors before any orientation constraints
+    fn create_pca_eigenvector_markers(
+        centroid: &na::Vector3<f64>,
+        v1: &na::Vector3<f64>,
+        v2: &na::Vector3<f64>,
+        v3: &na::Vector3<f64>,
+        header: &Header,
+    ) -> Result<MarkerArray> {
+        let mut markers = Vec::new();
+
+        // Scale factor for eigenvector arrows
+        let scale = 0.3;
+
+        // V1 (1st PC - largest variance) - RED
+        let mut v1_marker = Marker::default();
+        v1_marker.header = header.clone();
+        v1_marker.ns = "pca_eigenvectors".to_string();
+        v1_marker.id = 0;
+        v1_marker.type_ = 0; // ARROW
+        v1_marker.action = 0; // ADD
+        v1_marker.pose.position = Point {
+            x: centroid.x,
+            y: centroid.y,
+            z: centroid.z,
+        };
+
+        // Direction from centroid along v1
+        let direction = v1.normalize();
+        let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
+            .unwrap_or(na::UnitQuaternion::identity());
+        v1_marker.pose.orientation = Quaternion {
+            x: q.i,
+            y: q.j,
+            z: q.k,
+            w: q.w,
+        };
+
+        v1_marker.scale.x = scale; // shaft length
+        v1_marker.scale.y = 0.02; // shaft diameter
+        v1_marker.scale.z = 0.04; // head diameter
+        v1_marker.color.r = 1.0; // RED
+        v1_marker.color.g = 0.0;
+        v1_marker.color.b = 0.0;
+        v1_marker.color.a = 1.0;
+        markers.push(v1_marker);
+
+        // V2 (2nd PC) - GREEN
+        let mut v2_marker = Marker::default();
+        v2_marker.header = header.clone();
+        v2_marker.ns = "pca_eigenvectors".to_string();
+        v2_marker.id = 1;
+        v2_marker.type_ = 0; // ARROW
+        v2_marker.action = 0; // ADD
+        v2_marker.pose.position = Point {
+            x: centroid.x,
+            y: centroid.y,
+            z: centroid.z,
+        };
+
+        let direction = v2.normalize();
+        let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
+            .unwrap_or(na::UnitQuaternion::identity());
+        v2_marker.pose.orientation = Quaternion {
+            x: q.i,
+            y: q.j,
+            z: q.k,
+            w: q.w,
+        };
+
+        v2_marker.scale.x = scale;
+        v2_marker.scale.y = 0.02;
+        v2_marker.scale.z = 0.04;
+        v2_marker.color.r = 0.0;
+        v2_marker.color.g = 1.0; // GREEN
+        v2_marker.color.b = 0.0;
+        v2_marker.color.a = 1.0;
+        markers.push(v2_marker);
+
+        // V3 (3rd PC - smallest variance, normal) - BLUE
+        let mut v3_marker = Marker::default();
+        v3_marker.header = header.clone();
+        v3_marker.ns = "pca_eigenvectors".to_string();
+        v3_marker.id = 2;
+        v3_marker.type_ = 0; // ARROW
+        v3_marker.action = 0; // ADD
+        v3_marker.pose.position = Point {
+            x: centroid.x,
+            y: centroid.y,
+            z: centroid.z,
+        };
+
+        let direction = v3.normalize();
+        let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
+            .unwrap_or(na::UnitQuaternion::identity());
+        v3_marker.pose.orientation = Quaternion {
+            x: q.i,
+            y: q.j,
+            z: q.k,
+            w: q.w,
+        };
+
+        v3_marker.scale.x = scale;
+        v3_marker.scale.y = 0.02;
+        v3_marker.scale.z = 0.04;
+        v3_marker.color.r = 0.0;
+        v3_marker.color.g = 0.0;
+        v3_marker.color.b = 1.0; // BLUE
+        v3_marker.color.a = 1.0;
+        markers.push(v3_marker);
+
+        Ok(MarkerArray { markers })
     }
 
     fn correspondences_to_markers(state: &BoardIcpState, header: &Header) -> Result<MarkerArray> {

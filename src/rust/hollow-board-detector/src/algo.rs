@@ -11,8 +11,8 @@ use aruco_config::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
 use itertools::izip;
 use log::{debug, warn};
-use nalgebra::{Isometry3, Point3, Quaternion, Translation3, UnitQuaternion, Vector3};
-use newslab_geom_algo::{self, centroid_of_points, kabsch, IJKW, XYZ};
+use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
+use newslab_geom_algo::{self, centroid_of_points};
 use noisy_float::prelude::*;
 use plane_estimator::{PlaneEstimator, PlaneModel};
 use sample_consensus::Consensus;
@@ -49,7 +49,16 @@ pub fn fit_plane_ransac<'a>(
 
     let (mut plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
-            Some(ret) => ret,
+            Some(ret) => {
+                debug!(
+                    "RANSAC success: Found {} inliers out of {} points",
+                    ret.1.len(),
+                    points.len()
+                );
+                debug!("RANSAC plane normal: {:?}", ret.0.normal);
+                debug!("RANSAC plane pose: {:?}", ret.0.pose());
+                ret
+            }
             None => {
                 warn!("RANSAC failed: No valid plane found");
                 return Ok(None);
@@ -61,9 +70,17 @@ pub fn fit_plane_ransac<'a>(
     {
         let desired_front = Vector3::x_axis();
         let current_normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
+        debug!(
+            "RANSAC: Original normal: {:?}, dot with +X: {:.6}",
+            current_normal,
+            current_normal.dot(&desired_front)
+        );
         if current_normal.dot(&desired_front) < 0.0 {
             let flipped = nalgebra::Unit::new_normalize(-current_normal);
             plane_model.normal = flipped;
+            debug!("RANSAC: Flipped normal to: {:?}", plane_model.normal);
+        } else {
+            debug!("RANSAC: Keeping original normal direction");
         }
     }
 
@@ -73,6 +90,12 @@ pub fn fit_plane_ransac<'a>(
         plane_model: plane_model.clone(),
         inlier_points: inlier_points.iter().map(|point| **point).collect(),
     };
+
+    debug!(
+        "RANSAC result: {} inliers, plane normal: {:?}",
+        inlier_points.len(),
+        plane_model.normal
+    );
 
     Ok(Some(FitPlaneRansac {
         plane_model,
@@ -340,23 +363,11 @@ pub fn fit_board_icp(
                     // Our correspondences are (data_point, model_point).
                     // To compute a transform that moves the model toward the data
                     // (so pose = align_pose * pose), we pass (model_point, data_point).
-                    let pairs = izip!(
-                        good_corresponding_points
-                            .iter()
-                            .map(|&p| -> [f64; 3] { p.into() }),
-                        good_inlier_points.iter().map(|&p| -> [f64; 3] { p.into() }),
-                    );
-
-                    match kabsch(pairs) {
-                        Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => {
-                            let iso = Isometry3 {
-                                rotation: UnitQuaternion::from_quaternion(Quaternion::new(
-                                    w, i, j, k,
-                                )),
-                                translation: Translation3::new(x, y, z),
-                            };
-                            iso
-                        }
+                    match BoardIcpIterator::compute_kabsch_transform(
+                        &good_corresponding_points,
+                        &good_inlier_points,
+                    ) {
+                        Some(iso) => iso,
                         None => {
                             convergence_reason = "Kabsch algorithm failed".to_string();
                             let stats = IcpStatistics {
@@ -1146,25 +1157,64 @@ impl<'a> BoardIcpIterator<'a> {
         }
     }
 
-    /// Helper to compute Kabsch transformation
+    /// Helper to compute Kabsch transformation using nalgebra
     fn compute_kabsch_transform(
-        model_points: &[Point3<f64>],
-        data_points: &[Point3<f64>],
+        input_points: &[Point3<f64>],
+        target_points: &[Point3<f64>],
     ) -> Option<Isometry3<f64>> {
-        let pairs = izip!(
-            model_points.iter().map(|&p| -> [f64; 3] { p.into() }),
-            data_points.iter().map(|&p| -> [f64; 3] { p.into() }),
-        );
-
-        match kabsch(pairs) {
-            Some((XYZ([x, y, z]), IJKW([i, j, k, w]))) => {
-                let iso = Isometry3 {
-                    rotation: UnitQuaternion::from_quaternion(Quaternion::new(w, i, j, k)),
-                    translation: Translation3::new(x, y, z),
-                };
-                Some(iso)
-            }
-            None => None,
+        if input_points.len() != target_points.len() || input_points.len() < 3 {
+            return None;
         }
+
+        // Compute centroids
+        let input_centroid = Self::compute_centroid(input_points)?;
+        let target_centroid = Self::compute_centroid(target_points)?;
+
+        // Center the points
+        let centered_input: Vec<Vector3<f64>> =
+            input_points.iter().map(|p| p - input_centroid).collect();
+        let centered_target: Vec<Vector3<f64>> =
+            target_points.iter().map(|p| p - target_centroid).collect();
+
+        // Create matrices
+        let input_matrix = nalgebra::Matrix3xX::from_columns(&centered_input);
+        let target_matrix = nalgebra::Matrix3xX::from_columns(&centered_target);
+
+        // Compute covariance matrix H = sum(input_i * target_i^T)
+        let covariance = input_matrix * target_matrix.transpose();
+
+        // SVD decomposition
+        let svd = nalgebra::SVD::new(covariance, true, true);
+        let u = svd.u?;
+        let v_t = svd.v_t?;
+
+        // Compute rotation matrix
+        let d = (u * v_t).determinant();
+        let correction = nalgebra::Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, d.signum()));
+        let rotation_matrix = u * correction * v_t;
+
+        // Convert to unit quaternion
+        let rotation = UnitQuaternion::from_matrix(&rotation_matrix);
+
+        // Compute translation
+        let translation =
+            Translation3::from(target_centroid.coords - rotation * input_centroid.coords);
+
+        Some(Isometry3 {
+            rotation,
+            translation,
+        })
+    }
+
+    /// Helper to compute centroid of points
+    fn compute_centroid(points: &[Point3<f64>]) -> Option<Point3<f64>> {
+        if points.is_empty() {
+            return None;
+        }
+
+        let sum = points
+            .iter()
+            .fold(Vector3::zeros(), |acc, p| acc + p.coords);
+        Some(Point3::from(sum / points.len() as f64))
     }
 }
