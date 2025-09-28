@@ -107,22 +107,26 @@ lint:
 	. install/setup.sh && \
 	cargo clippy --workspace --all-targets --all-features || true
 
-.PHONY: test
-test:
-	@echo "Running all tests including ICP comparison tests..."
-	@mkdir -p $(LOG_DIR)
-
+.PHONY: rust-test
+rust-test:
 	@echo "Running Rust library tests..."
 	@. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	export RUST_LOG=debug && \
 	cargo nextest run --cargo-profile test-release --no-fail-fast 2>&1 | tee $(LOG_DIR)/rust_tests.log
 
+.PHONY: ros-test
+ros-test:
 	@echo "Running ROS2 node tests with colcon..."
+	@mkdir -p $(LOG_DIR)
 	@. install/setup.sh && \
 	export OPENCV_PKGCONFIG_NAME=opencv4 && \
 	colcon test $(COLCON_TEST_FLAGS) --base-paths src/ros2 2>&1 | tee $(LOG_DIR)/colcon_tests.log && \
 	colcon test-result --all --verbose
+
+.PHONY: test
+test: rust-test ros-test
+	@echo "Running all tests..."
 
 .PHONY: clean
 clean:
