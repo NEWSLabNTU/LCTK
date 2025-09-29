@@ -1,147 +1,134 @@
 #!/usr/bin/env python3
+"""
+Educational Extrinsic Calibration Node
+
+This simplified ROS2 node demonstrates LiDAR-camera extrinsic calibration
+using the Perspective-n-Point (PnP) algorithm with OpenCV.
+
+Learning Objectives:
+1. Understand coordinate system transformations (camera, LiDAR, world)
+2. Learn PnP problem formulation and solution
+3. Practice with OpenCV computer vision functions
+4. Work with ROS2 message types and transformations
+
+Required packages: numpy (1.x), opencv-python, rclpy
+Educational focus: cv2 for computer vision, numpy for array operations
+
+Author: LCTK Educational Team
+License: MIT
+"""
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-import numpy as np
-import cv2
-import json
-import os
+import numpy as np  # Ubuntu 22.04 default (1.x)
+import cv2          # OpenCV for computer vision tasks
 import yaml
-from typing import List, Tuple, Optional, Dict, Any
-import threading
+import os
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
+import threading
 
 # ROS2 message types
-from std_msgs.msg import String, Header
-from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import Header
+from sensor_msgs.msg import CameraInfo
 from geometry_msgs.msg import Transform, TransformStamped, Vector3, Quaternion
 from vision_msgs.msg import Detection2DArray, Detection2D, Detection3DArray, Detection3D
 
 
 @dataclass
 class ArUcoMarker:
-    """Represents an ArUco marker detection"""
+    """
+    Represents an ArUco marker detection in image coordinates.
 
+    Educational note: ArUco markers provide known 3D-2D correspondences
+    needed for PnP solving. Each marker has 4 corner points that can be
+    precisely detected in images and matched to known 3D positions.
+    """
     id: int
-    corners: List[Tuple[float, float]]  # 4 corners in image coordinates
-    center: Tuple[float, float]
+    corners: List[Tuple[float, float]]  # 4 corners in pixel coordinates
+    center: Tuple[float, float]         # Center point in pixels
 
 
 @dataclass
 class BoardDetection:
-    """Represents a calibration board detection"""
+    """
+    Represents a calibration board detection in 3D LiDAR coordinates.
 
-    position: Tuple[float, float, float]  # x, y, z
+    Educational note: Board pose provides the 3D reference frame for
+    transforming marker coordinates from local to world space. The board
+    serves as a common reference object visible to both LiDAR and camera.
+    """
+    position: Tuple[float, float, float]        # x, y, z in meters (LiDAR frame)
     orientation: Tuple[float, float, float, float]  # quaternion w, x, y, z
 
 
-class SimpleExtrinsicSolver(Node):
+class EducationalExtrinsicSolver(Node):
     """
-    Simple ROS2 node for demonstrating solvePnP with ArUco and board detections.
-    This is a simplified version of the Rust extrinsic_solver_node.
+    Educational ROS2 node for LiDAR-camera extrinsic calibration.
+
+    This node demonstrates the complete calibration pipeline:
+    1. Receive ArUco marker detections (2D image coordinates)
+    2. Receive calibration board detections (3D LiDAR coordinates)
+    3. Create 3D-2D point correspondences
+    4. Solve PnP problem using OpenCV
+    5. Publish camera-to-LiDAR transformation
+
+    Key Educational Concepts:
+    - Coordinate system transformations
+    - Homogeneous coordinates and camera projection
+    - PnP problem formulation and solution
+    - Rotation representations (matrices, vectors, quaternions)
+
+    Coordinate System Conventions:
+    - Camera frame: X-right, Y-down, Z-forward (OpenCV convention)
+    - LiDAR frame: X-forward, Y-left, Z-up (ROS REP-103)
+    - Board frame: Z-normal to board surface
+    - World frame: Same as LiDAR frame for this application
     """
 
     def __init__(self):
-        super().__init__("extrinsic_solver_node")
+        super().__init__("educational_extrinsic_solver")
 
-        # Declare parameters
+        # Parameter declaration (compatible with existing launch files)
         self.declare_parameter("parent_frame", "lidar")
-        self.declare_parameter("camera_topic", "")
         self.declare_parameter("child_frame", "camera")
-        self.declare_parameter("aruco_pattern_file", "")
-        self.declare_parameter("enable_quality_assessment", True)
-        # External config files
-        self.declare_parameter("aruco_config_file", "")
-        self.declare_parameter("board_detector_file", "")
+        self.declare_parameter("camera_topic", "")
         self.declare_parameter("intrinsics_file", "")
 
-        # Get parameters
+        # Educational note: Accept additional parameters for launch file compatibility
+        # These maintain compatibility with existing launch files but are ignored in educational version
+        self.declare_parameter("solver_method", "SQPNP")  # Educational: We use OpenCV solvePnP
+        self.declare_parameter("min_detections_required", 1)
+        self.declare_parameter("max_solver_iterations", 1000)
+        self.declare_parameter("convergence_threshold", 1e-6)
+        self.declare_parameter("debug_mode", True)  # Educational: Always educational
+        self.declare_parameter("enable_quality_assessment", False)  # Educational: Removed for simplicity
+
+        # Get parameters with simple error handling
         self.parent_frame = (
             self.get_parameter("parent_frame").get_parameter_value().string_value
         )
         self.child_frame = (
             self.get_parameter("child_frame").get_parameter_value().string_value
         )
-        self.aruco_pattern_file = (
-            self.get_parameter("aruco_pattern_file").get_parameter_value().string_value
-        )
-        self.enable_quality_assessment = (
-            self.get_parameter("enable_quality_assessment")
-            .get_parameter_value()
-            .bool_value
-        )
-        # Get config file paths, use defaults if empty
-        aruco_config_file = (
-            self.get_parameter("aruco_config_file").get_parameter_value().string_value
-        )
-        board_detector_file = (
-            self.get_parameter("board_detector_file").get_parameter_value().string_value
-        )
-        intrinsics_file = (
-            self.get_parameter("intrinsics_file").get_parameter_value().string_value
-        )
 
-        # Use environment variable to find workspace root for default configs (portable)
-        workspace_root = ""
-        # Prefer current working dir if it contains config/
-        cwd = os.getcwd()
-        if os.path.exists(os.path.join(cwd, "config")):
-            workspace_root = cwd
-        # Try to resolve from AMENT_PREFIX_PATH (dev/installed workspaces)
-        if not workspace_root:
-            ament_prefix = os.environ.get("AMENT_PREFIX_PATH", "")
-            if ament_prefix:
-                first_prefix = ament_prefix.split(":")[0]
-                candidate = first_prefix
-                if candidate.endswith("/install"):
-                    candidate = candidate[: -len("/install")]
-                if os.path.exists(os.path.join(candidate, "config")):
-                    workspace_root = candidate
-        # Final fallback: search upward for config/
-        if not workspace_root:
-            cur = cwd
-            for _ in range(4):
-                if os.path.exists(os.path.join(cur, "config")):
-                    workspace_root = cur
-                    break
-                parent = os.path.dirname(cur)
-                if parent == cur:
-                    break
-                cur = parent
-
-        # Set default paths if empty
-        self.aruco_config_file = (
-            aruco_config_file
-            if aruco_config_file
-            else os.path.join(workspace_root, "config", "aruco_pattern.json5")
-        )
-        self.board_detector_file = (
-            board_detector_file
-            if board_detector_file
-            else os.path.join(workspace_root, "config", "board_detector.json5")
-        )
-        self.intrinsics_file = (
-            intrinsics_file
-            if intrinsics_file
-            else os.path.join(workspace_root, "config", "intrinsics.yaml")
-        )
-
-        # State variables
+        # Educational note: Cache latest detections for processing
+        # We use simple variables instead of complex synchronization
         self.latest_aruco_detection: Optional[Detection2DArray] = None
         self.latest_board_detection: Optional[Detection3DArray] = None
         self.camera_info: Optional[CameraInfo] = None
-        self.latest_debug_image_header: Optional[Header] = None
 
-        # Thread safety
+        # Thread safety for simple caching
         self.lock = threading.Lock()
 
-        # ArUco pattern configuration (simplified)
-        self.aruco_pattern = self._load_aruco_pattern()
-        # Optionally preload intrinsics if provided (used when camera_info topic absent)
-        if self.intrinsics_file:
-            self._maybe_load_intrinsics_from_yaml(self.intrinsics_file)
+        # Load camera intrinsics if provided
+        intrinsics_file = (
+            self.get_parameter("intrinsics_file").get_parameter_value().string_value
+        )
+        if intrinsics_file and os.path.exists(intrinsics_file):
+            self._load_camera_intrinsics(intrinsics_file)
 
         # QoS profile for reliable communication
         qos_profile = QoSProfile(
@@ -150,18 +137,9 @@ class SimpleExtrinsicSolver(Node):
             depth=10,
         )
 
-        # Publishers
+        # Publishers - only essential output
         self.transform_publisher = self.create_publisher(
             TransformStamped, "extrinsic_transform", qos_profile
-        )
-        self.quality_publisher = self.create_publisher(
-            String, "calibration_quality", qos_profile
-        )
-        self.debug_aruco_publisher = self.create_publisher(
-            Detection2DArray, "debug/recent_aruco_detections", qos_profile
-        )
-        self.debug_board_publisher = self.create_publisher(
-            Detection3DArray, "debug/recent_board_detections", qos_profile
         )
 
         # Subscribers
@@ -176,332 +154,264 @@ class SimpleExtrinsicSolver(Node):
             qos_profile,
         )
 
-        # Derive camera_info topic from camera_topic parameter (following image_pipeline convention)
+        # Derive camera_info topic from camera_topic parameter (image_pipeline convention)
         camera_topic = (
             self.get_parameter("camera_topic").get_parameter_value().string_value
         )
         if camera_topic:
-            # Derive camera_info topic from image topic following image_pipeline convention
+            # Educational note: ROS image_pipeline convention
+            # Replace last component with 'camera_info'
             if "/" in camera_topic:
                 base_path = camera_topic.rsplit("/", 1)[0]
                 camera_info_topic = f"{base_path}/camera_info"
             else:
                 camera_info_topic = "camera_info"
             self.get_logger().info(
-                f"Deriving camera_info topic from camera topic '{camera_topic}' -> '{camera_info_topic}'"
+                f"Deriving camera_info topic: '{camera_topic}' -> '{camera_info_topic}'"
             )
         else:
-            # Fallback to default camera_info topic if no camera_topic specified
             camera_info_topic = "camera_info"
-            self.get_logger().warn(
-                "No camera_topic parameter provided, using default 'camera_info' topic"
-            )
 
         self.camera_info_subscription = self.create_subscription(
             CameraInfo, camera_info_topic, self.camera_info_callback, qos_profile
         )
 
-        # Optional debug overlay image (for timestamp alignment/monitoring)
-        self.debug_image_subscription = self.create_subscription(
-            Image, "image_with_detections", self.debug_image_callback, qos_profile
-        )
+        # Educational note: Log configuration for learning purposes
+        solver_method = self.get_parameter("solver_method").get_parameter_value().string_value
+        min_detections = self.get_parameter("min_detections_required").get_parameter_value().integer_value
 
         self.get_logger().info(
-            f"Simple Extrinsic Solver initialized. "
-            f"Subscribing to: aruco_detections, calibration_board_detections, camera_info. "
-            f"Publishing to: extrinsic_transform, calibration_quality, debug topics. "
-            f"Parent frame: {self.parent_frame}, Child frame: {self.child_frame}"
+            f"Educational Extrinsic Solver initialized\n"
+            f"Educational Mode: Simplified PnP calibration using OpenCV\n"
+            f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
+            f"Publishing to: extrinsic_transform\n"
+            f"Transform: {self.parent_frame} -> {self.child_frame}\n"
+            f"Launch file compatibility: solver_method={solver_method} (using cv2.solvePnP), "
+            f"min_detections={min_detections}"
         )
 
-    def _load_aruco_pattern(self) -> Dict[str, Any]:
-        """Load ArUco pattern configuration"""
-        # Legacy param name support
-        if not self.aruco_config_file and self.aruco_pattern_file:
-            self.aruco_config_file = self.aruco_pattern_file
-        if self.aruco_config_file:
-            try:
-                with open(self.aruco_config_file, "r") as f:
-                    text = f.read()
-                    # Support JSON and JSON5 by stripping comments heuristically
-                    try:
-                        return json.loads(text)
-                    except Exception:
-                        # crude removal of // and /* */ comments
-                        import re
+    def _load_camera_intrinsics(self, yaml_path: str) -> None:
+        """
+        Load camera intrinsics from YAML file.
 
-                        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-                        text = re.sub(r"//.*", "", text)
-                        return json.loads(text)
-            except Exception as e:
-                self.get_logger().warn(
-                    f"Failed to load ArUco config file '{self.aruco_config_file}': {e}"
-                )
-
-        # Default ArUco pattern (simplified)
-        return {
-            "markers": [
-                {"id": 0, "size": 0.1},  # 10cm markers
-                {"id": 1, "size": 0.1},
-                {"id": 2, "size": 0.1},
-                {"id": 3, "size": 0.1},
-            ],
-            "board_size": [1.0, 1.0],  # 1m x 1m board
-            "marker_spacing": 0.2,  # 20cm spacing
-        }
-
-    def _maybe_load_intrinsics_from_yaml(self, yaml_path: str) -> None:
-        """Load intrinsics YAML and populate self.camera_info if not already set."""
+        Educational note: Camera intrinsics define the internal geometry
+        of the camera including focal length, principal point, and distortion.
+        These parameters are needed for the PnP problem.
+        """
         try:
-            if not os.path.isfile(yaml_path):
-                self.get_logger().warn(f"Intrinsics file not found: {yaml_path}")
-                return
             with open(yaml_path, "r") as f:
                 data = yaml.safe_load(f)
+
+            # Create CameraInfo message from YAML data
             ci = CameraInfo()
-            # image size
             ci.width = int(data.get("image_width", 0))
             ci.height = int(data.get("image_height", 0))
-            # camera matrix
+
+            # Camera matrix K (3x3) - most important for PnP
+            # K = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
             km = data.get("camera_matrix", {}).get("data", [])
             if len(km) == 9:
                 ci.k = [float(x) for x in km]
-            # distortion
+
+            # Distortion coefficients (typically 4, 5, or 8 parameters)
             ci.distortion_model = str(data.get("distortion_model", "plumb_bob"))
             d = data.get("distortion_coefficients", {}).get("data", [])
             ci.d = [float(x) for x in d]
-            # rectification
-            r = data.get("rectification_matrix", {}).get("data", [])
-            if len(r) == 9:
-                ci.r = [float(x) for x in r]
-            # projection
-            p = data.get("projection_matrix", {}).get("data", [])
-            if len(p) == 12:
-                ci.p = [float(x) for x in p]
+
             with self.lock:
-                if self.camera_info is None:
-                    self.camera_info = ci
+                self.camera_info = ci
+
             self.get_logger().info(
-                f"Loaded intrinsics from {yaml_path} - {ci.width}x{ci.height}, model: {ci.distortion_model}"
+                f"Loaded camera intrinsics: {ci.width}x{ci.height}, "
+                f"fx={ci.k[0]:.1f}, fy={ci.k[4]:.1f}, "
+                f"cx={ci.k[2]:.1f}, cy={ci.k[5]:.1f}"
             )
         except Exception as e:
-            self.get_logger().warn(f"Failed to load intrinsics YAML: {e}")
+            self.get_logger().warn(f"Failed to load intrinsics: {e}")
 
     def camera_info_callback(self, msg: CameraInfo):
-        """Handle camera info messages"""
+        """
+        Handle camera info messages.
+
+        Educational note: Camera info provides the intrinsic parameters
+        needed for PnP solving. This includes the camera matrix K and
+        distortion coefficients.
+        """
         with self.lock:
             self.camera_info = msg
-            self.get_logger().debug(
-                f"Camera info received - {msg.width}x{msg.height} resolution, "
-                f"distortion model: {msg.distortion_model}"
-            )
+            self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
 
     def aruco_callback(self, msg: Detection2DArray):
-        """Handle ArUco detection messages"""
+        """
+        Handle ArUco detection messages.
+
+        Educational note: ArUco markers provide precise 2D corner detections
+        that correspond to known 3D marker geometry. These 2D-3D correspondences
+        are essential for solving the PnP problem.
+        """
         self.get_logger().debug(
-            f"ArUco callback - {len(msg.detections)} detections at timestamp "
-            f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec}"
+            f"ArUco detection: {len(msg.detections)} markers at "
+            f"t={msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
         )
 
         # Only cache non-empty detections
         if msg.detections:
-            self.get_logger().debug(
-                f"Caching non-empty ArUco detection with {len(msg.detections)} markers"
-            )
-
-            # Log detailed info about detections
-            for i, detection in enumerate(msg.detections):
-                self.get_logger().debug(
-                    f"  Marker {i}: bbox center=({detection.bbox.center.position.x:.2f}, "
-                    f"{detection.bbox.center.position.y:.2f}), size=({detection.bbox.size_x:.2f}, "
-                    f"{detection.bbox.size_y:.2f}), ID: {detection.id}"
-                )
-
             with self.lock:
                 self.latest_aruco_detection = msg
 
-            # Publish to debug topic
-            try:
-                self.debug_aruco_publisher.publish(msg)
-                self.get_logger().debug("Published ArUco detection to debug topic")
-            except Exception as e:
-                self.get_logger().warn(f"Failed to publish debug ArUco detection: {e}")
+            # Try to process if we have both detection types
+            self._try_solve_calibration()
         else:
             self.get_logger().debug("Ignoring empty ArUco detection")
 
-        # Try to process cached detections
-        self._try_process_cached_detections()
-
-    def debug_image_callback(self, msg: Image):
-        """Cache the latest debug overlay image header for potential sync/monitoring"""
-        with self.lock:
-            self.latest_debug_image_header = Header()
-            self.latest_debug_image_header.stamp = msg.header.stamp
-        self.get_logger().debug(
-            f"Received debug overlay image at {msg.header.stamp.sec}.{msg.header.stamp.nanosec}"
-        )
-
     def board_callback(self, msg: Detection3DArray):
-        """Handle board detection messages"""
+        """
+        Handle board detection messages.
+
+        Educational note: Board detections provide the 3D pose of the
+        calibration board in LiDAR coordinates. This pose is used to
+        transform marker coordinates from local to world space.
+        """
         self.get_logger().debug(
-            f"Board callback - {len(msg.detections)} detections at timestamp "
-            f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec}"
+            f"Board detection: {len(msg.detections)} boards at "
+            f"t={msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
         )
 
         # Only cache non-empty detections
         if msg.detections:
-            self.get_logger().debug(
-                f"Caching non-empty board detection with {len(msg.detections)} boards"
-            )
-
-            # Log detailed info about board detections
-            for i, detection in enumerate(msg.detections):
-                if detection.results:
-                    pose = detection.results[0].pose.pose
-                    self.get_logger().debug(
-                        f"  Board {i}: position=({pose.position.x:.3f}, {pose.position.y:.3f}, "
-                        f"{pose.position.z:.3f}), orientation=({pose.orientation.x:.3f}, "
-                        f"{pose.orientation.y:.3f}, {pose.orientation.z:.3f}, {pose.orientation.w:.3f})"
-                    )
-
             with self.lock:
                 self.latest_board_detection = msg
 
-            # Publish to debug topic
-            try:
-                self.debug_board_publisher.publish(msg)
-                self.get_logger().debug("Published board detection to debug topic")
-            except Exception as e:
-                self.get_logger().warn(f"Failed to publish debug board detection: {e}")
+            # Try to process if we have both detection types
+            self._try_solve_calibration()
         else:
-            self.get_logger().error("Received EMPTY board detection - NOT caching")
+            self.get_logger().warn("Received empty board detection")
 
-        # Try to process cached detections
-        self._try_process_cached_detections()
+    def _try_solve_calibration(self):
+        """
+        Attempt to solve calibration if both detection types are available.
 
-    def _try_process_cached_detections(self):
-        """Try to process cached ArUco and board detections"""
+        Educational note: We need both ArUco (2D) and board (3D) detections
+        to create the point correspondences required for PnP solving.
+        """
         with self.lock:
-            aruco_detection = self.latest_aruco_detection
-            board_detection = self.latest_board_detection
+            aruco_msg = self.latest_aruco_detection
+            board_msg = self.latest_board_detection
 
-        # Check if we have both non-empty cached detections
-        if aruco_detection and board_detection:
-            self.get_logger().debug(
-                f"BOTH cached detections available - ArUco: {len(aruco_detection.detections)} markers, "
-                f"Board: {len(board_detection.detections)} boards"
+        # Check if we have both detection types
+        if aruco_msg and board_msg:
+            self.get_logger().info(
+                f"Processing detection pair: {len(aruco_msg.detections)} ArUco markers, "
+                f"{len(board_msg.detections)} boards"
             )
 
             try:
-                solved = self._process_detection_pair(aruco_detection, board_detection)
-                if solved:
-                    self.get_logger().info(
-                        "Successfully processed cached detection pair - SOLUTION COMPUTED!"
-                    )
+                self._solve_extrinsic_calibration(aruco_msg, board_msg)
             except Exception as e:
-                self.get_logger().error(f"Failed to process cached detection pair: {e}")
+                self.get_logger().error(f"Calibration failed: {e}")
         else:
-            self.get_logger().debug(
-                f"Waiting for both detections - ArUco cached: {aruco_detection is not None}, "
-                f"Board cached: {board_detection is not None}"
-            )
+            missing = []
+            if not aruco_msg:
+                missing.append("ArUco")
+            if not board_msg:
+                missing.append("Board")
+            self.get_logger().debug(f"Waiting for detections: missing {', '.join(missing)}")
 
-    def _process_detection_pair(
+    def _solve_extrinsic_calibration(
         self, aruco_msg: Detection2DArray, board_msg: Detection3DArray
     ) -> bool:
-        """Process a pair of ArUco and board detections. Returns True if a PnP solution was published."""
-        self.get_logger().info(
-            f"PROCESSING DETECTION PAIR - ArUco: {len(aruco_msg.detections)} detections, "
-            f"Board: {len(board_msg.detections)} detections"
-        )
+        """
+        Solve extrinsic calibration using PnP.
 
-        # Check if both detections are present
-        if not aruco_msg.detections or not board_msg.detections:
-            self.get_logger().warn(
-                f"Skipping pair - ArUco empty: {not aruco_msg.detections}, "
-                f"Board empty: {not board_msg.detections}"
-            )
-            return False
+        Educational Pipeline:
+        1. Check prerequisites (camera info, detections)
+        2. Convert ROS messages to internal format
+        3. Create 3D-2D point correspondences
+        4. Solve PnP problem using OpenCV
+        5. Publish transformation result
 
-        self.get_logger().info("Both ArUco and Board detections present - proceeding")
-
-        # Check if camera info is available
+        Returns:
+            bool: True if calibration succeeded and transform was published
+        """
+        # Step 1: Check prerequisites
         if not self.camera_info:
-            self.get_logger().error(
-                "Camera info not available - cannot proceed with calibration"
-            )
+            self.get_logger().error("No camera info available for PnP solving")
             return False
 
-        # Convert detections to internal format
+        if not aruco_msg.detections or not board_msg.detections:
+            self.get_logger().error("Empty detections - cannot solve PnP")
+            return False
+
+        # Step 2: Convert ROS messages to internal format
         aruco_markers = self._detection2d_to_aruco_markers(aruco_msg)
         board_detection = self._detection3d_to_board_detection(board_msg.detections[0])
 
-        # Create point correspondences
-        object_points, image_points = self._create_point_correspondences(
+        # Step 3: Create point correspondences
+        object_points, image_points = self._create_point_correspondences_educational(
             aruco_markers, board_detection
         )
 
-        if len(object_points) == 0:
+        if len(object_points) < 4:
             self.get_logger().error(
-                "No point correspondences created - cannot solve PnP"
+                f"Insufficient correspondences: {len(object_points)} < 4 required for PnP"
             )
-            return
+            return False
 
-        self.get_logger().debug(
+        self.get_logger().info(
             f"Created {len(object_points)} point correspondences for PnP solving"
         )
 
-        # Solve PnP
-        success, rvec, tvec = self._solve_pnp(object_points, image_points)
+        # Step 4: Solve PnP problem
+        success, rvec, tvec = self._solve_pnp_educational(object_points, image_points)
 
-        if success:
+        if not success:
+            self.get_logger().error("PnP solver failed")
+            return False
+
+        # Step 5: Publish transformation
+        transform_msg = self._create_transform_message_educational(
+            rvec, tvec, aruco_msg.header
+        )
+
+        try:
+            self.transform_publisher.publish(transform_msg)
             self.get_logger().info(
-                f"PnP solver SUCCESS! - translation=({float(tvec.flatten()[0]):.3f}, {float(tvec.flatten()[1]):.3f}, {float(tvec.flatten()[2]):.3f})"
+                f"Published extrinsic transform: "
+                f"t=({tvec.flatten()[0]:.3f}, {tvec.flatten()[1]:.3f}, {tvec.flatten()[2]:.3f})"
             )
-
-            # Convert to transform message
-            transform_msg = self._create_transform_message(rvec, tvec, aruco_msg.header)
-
-            # Publish transform
-            try:
-                self.transform_publisher.publish(transform_msg)
-                self.get_logger().info("Published extrinsic transform")
-
-                # Log the 4x4 transformation matrix
-                self._log_transformation_matrix(rvec, tvec)
-
-            except Exception as e:
-                self.get_logger().warn(f"Failed to publish transform: {e}")
-
-            # Quality assessment if enabled
-            if self.enable_quality_assessment:
-                self._assess_quality(
-                    object_points, image_points, rvec, tvec, aruco_msg, board_msg
-                )
             return True
-        else:
-            self.get_logger().error("PnP solver FAILED to find solution")
+        except Exception as e:
+            self.get_logger().error(f"Failed to publish transform: {e}")
             return False
 
     def _detection2d_to_aruco_markers(
         self, detection_msg: Detection2DArray
     ) -> List[ArUcoMarker]:
-        """Convert Detection2DArray to ArUcoMarker objects"""
+        """
+        Convert ROS Detection2DArray to ArUcoMarker objects.
+
+        Educational note: This converts from ROS message format to our
+        internal representation for easier processing. We extract the
+        bounding box and convert to corner coordinates.
+        """
         markers = []
 
         for detection in detection_msg.detections:
-            # Extract corner points from bounding box (simplified approach)
+            # Extract bounding box information
             bbox = detection.bbox
             center_x = bbox.center.position.x
             center_y = bbox.center.position.y
             size_x = bbox.size_x
             size_y = bbox.size_y
 
-            # Create 4 corners from bounding box
+            # Convert bounding box to 4 corner points
+            # Educational note: ArUco detectors typically provide corner coordinates,
+            # but this simplified version reconstructs from bounding box
             corners = [
-                (center_x - size_x / 2.0, center_y - size_y / 2.0),
-                (center_x + size_x / 2.0, center_y - size_y / 2.0),
-                (center_x + size_x / 2.0, center_y + size_y / 2.0),
-                (center_x - size_x / 2.0, center_y + size_y / 2.0),
+                (center_x - size_x / 2.0, center_y - size_y / 2.0),  # Top-left
+                (center_x + size_x / 2.0, center_y - size_y / 2.0),  # Top-right
+                (center_x + size_x / 2.0, center_y + size_y / 2.0),  # Bottom-right
+                (center_x - size_x / 2.0, center_y + size_y / 2.0),  # Bottom-left
             ]
 
             # Extract marker ID
@@ -514,7 +424,13 @@ class SimpleExtrinsicSolver(Node):
         return markers
 
     def _detection3d_to_board_detection(self, detection: Detection3D) -> BoardDetection:
-        """Convert Detection3D to BoardDetection object"""
+        """
+        Convert ROS Detection3D to BoardDetection object.
+
+        Educational note: This extracts the 3D pose of the calibration board
+        from the ROS message format. The pose includes both position and
+        orientation in 3D space.
+        """
         if not detection.results:
             raise ValueError("No detection results available")
 
@@ -522,266 +438,252 @@ class SimpleExtrinsicSolver(Node):
         return BoardDetection(
             position=(pose.position.x, pose.position.y, pose.position.z),
             orientation=(
-                pose.orientation.w,
+                pose.orientation.w,  # Note: OpenCV uses w-first quaternions
                 pose.orientation.x,
                 pose.orientation.y,
                 pose.orientation.z,
             ),
         )
 
-    def _create_point_correspondences(
+    def _create_point_correspondences_educational(
         self, aruco_markers: List[ArUcoMarker], board_detection: BoardDetection
-    ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-        """Create 3D-2D point correspondences for PnP solving"""
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Create 3D-2D point correspondences for PnP solving.
+
+        Educational Pipeline:
+        1. Define marker geometry in local coordinates (marker frame)
+        2. Transform to world coordinates using board pose (LiDAR frame)
+        3. Associate with detected 2D image coordinates (camera frame)
+
+        The PnP algorithm needs these correspondences to estimate camera pose:
+        - object_points: 3D coordinates in world space (LiDAR frame)
+        - image_points: 2D coordinates in image space (pixel coordinates)
+
+        Mathematical relationship: s * p = K * (R * P + t)
+        Where:
+        - P: 3D world point (object_points)
+        - p: 2D image point (image_points)
+        - K: camera intrinsic matrix
+        - R, t: camera extrinsic parameters (what we solve for)
+        - s: scale factor
+        """
         object_points = []
         image_points = []
 
-        # Get camera matrix from camera info
-        camera_matrix = np.array(
-            [
-                [self.camera_info.k[0], self.camera_info.k[1], self.camera_info.k[2]],
-                [self.camera_info.k[3], self.camera_info.k[4], self.camera_info.k[5]],
-                [self.camera_info.k[6], self.camera_info.k[7], self.camera_info.k[8]],
-            ]
+        # Standard ArUco marker size (educational assumption)
+        marker_size = 0.1  # 10cm square markers
+
+        self.get_logger().info(
+            f"Creating correspondences for {len(aruco_markers)} markers "
+            f"with board at position {board_detection.position}"
         )
 
-        # For each ArUco marker, create 3D object points and corresponding 2D image points
-        for marker in aruco_markers:
-            # Create 3D points for this marker (simplified - assuming markers are on a plane)
-            marker_size = 0.1  # 10cm markers
-            marker_3d_points = np.array(
-                [
-                    [-marker_size / 2, -marker_size / 2, 0],
-                    [marker_size / 2, -marker_size / 2, 0],
-                    [marker_size / 2, marker_size / 2, 0],
-                    [-marker_size / 2, marker_size / 2, 0],
-                ],
-                dtype=np.float32,
-            )
+        for i, marker in enumerate(aruco_markers):
+            # Step 1: Define 4 corners in marker's local coordinate system
+            # Educational note: Consistent corner ordering is critical for PnP
+            # We use the standard ArUco corner ordering: TL, TR, BR, BL
+            local_corners = np.array([
+                [-marker_size/2, -marker_size/2, 0],  # Top-left
+                [ marker_size/2, -marker_size/2, 0],  # Top-right
+                [ marker_size/2,  marker_size/2, 0],  # Bottom-right
+                [-marker_size/2,  marker_size/2, 0]   # Bottom-left
+            ], dtype=np.float32)
 
-            # Transform 3D points to board coordinate system
-            # This is simplified - in reality you'd need proper board pose transformation
-            board_pose = np.array(board_detection.position)
-            for point_3d in marker_3d_points:
-                # Simple translation (in reality you'd apply full pose transformation)
-                transformed_point = point_3d + board_pose
-                object_points.append(transformed_point)
+            # Step 2: Transform to world coordinates using board pose
+            # Educational simplification: assume markers are coplanar with board
+            # In a full implementation, this would use the complete rigid transformation
+            board_position = np.array(board_detection.position, dtype=np.float32)
+
+            # Simple translation (could be extended to full rigid transformation)
+            world_corners = local_corners + board_position
+
+            # Step 3: Add to correspondence lists
+            object_points.extend(world_corners)
 
             # Add corresponding 2D image points
-            for corner in marker.corners:
-                image_points.append(np.array([corner[0], corner[1]], dtype=np.float32))
+            image_corners = np.array(marker.corners, dtype=np.float32)
+            image_points.extend(image_corners)
 
-        return object_points, image_points
+            self.get_logger().debug(
+                f"Marker {i}: 4 corners at board offset {board_position} "
+                f"-> image center ({marker.center[0]:.1f}, {marker.center[1]:.1f})"
+            )
 
-    def _solve_pnp(
-        self, object_points: List[np.ndarray], image_points: List[np.ndarray]
-    ) -> Tuple[bool, np.ndarray, np.ndarray]:
-        """Solve PnP problem using OpenCV"""
+        return np.array(object_points, dtype=np.float32), np.array(image_points, dtype=np.float32)
+
+    def _solve_pnp_educational(
+        self, object_points: np.ndarray, image_points: np.ndarray
+    ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
+        """
+        Solve the Perspective-n-Point problem using OpenCV.
+
+        Educational Context:
+        The PnP problem estimates camera pose given:
+        - N >= 4 known 3D points in world coordinates (object_points)
+        - Corresponding 2D projections in image coordinates (image_points)
+        - Camera intrinsic parameters (focal length, principal point, distortion)
+
+        Mathematical formulation:
+        For each point i: s_i * p_i = K * (R * P_i + t)
+        Where:
+        - P_i: 3D world point
+        - p_i: 2D image point (homogeneous coordinates)
+        - K: camera intrinsic matrix
+        - R: rotation matrix (camera to world)
+        - t: translation vector
+        - s_i: scale factor
+
+        OpenCV Methods Available:
+        - SOLVEPNP_ITERATIVE: Iterative Levenberg-Marquardt optimization
+        - SOLVEPNP_EPNP: Efficient PnP for N >= 4 points
+        - SOLVEPNP_P3P: Perspective-3-Point for exactly 3 points
+        """
         if len(object_points) < 4:
+            self.get_logger().error("PnP requires at least 4 point correspondences")
             return False, None, None
 
-        # Convert to numpy arrays
-        obj_pts = np.array(object_points, dtype=np.float32)
-        img_pts = np.array(image_points, dtype=np.float32)
+        # Extract camera intrinsic matrix (3x3) from camera_info
+        # Educational note: K matrix defines internal camera geometry
+        K = np.array(self.camera_info.k, dtype=np.float32).reshape(3, 3)
 
-        # Get camera matrix and distortion coefficients
-        camera_matrix = np.array(
-            [
-                [self.camera_info.k[0], self.camera_info.k[1], self.camera_info.k[2]],
-                [self.camera_info.k[3], self.camera_info.k[4], self.camera_info.k[5]],
-                [self.camera_info.k[6], self.camera_info.k[7], self.camera_info.k[8]],
-            ]
-        )
-
+        # Extract distortion coefficients
+        # Educational note: Distortion coefficients correct for lens imperfections
         dist_coeffs = np.array(self.camera_info.d, dtype=np.float32)
 
-        # Solve PnP using SOLVEPNP_ITERATIVE method
+        self.get_logger().info(
+            f"Solving PnP with {len(object_points)} correspondences\n"
+            f"Camera matrix K:\n{K}\n"
+            f"Distortion coefficients: {dist_coeffs[:4] if len(dist_coeffs) >= 4 else dist_coeffs}"
+        )
+
         try:
+            # Solve PnP using OpenCV's iterative method
+            # Educational note: ITERATIVE method is robust and educational
             success, rvec, tvec = cv2.solvePnP(
-                obj_pts,
-                img_pts,
-                camera_matrix,
-                dist_coeffs,
-                flags=cv2.SOLVEPNP_ITERATIVE,
+                object_points,      # 3D object points (Nx3)
+                image_points,       # 2D image points (Nx2)
+                K,                  # Camera intrinsic matrix (3x3)
+                dist_coeffs,        # Distortion coefficients
+                flags=cv2.SOLVEPNP_ITERATIVE
             )
-            return success, rvec, tvec
-        except Exception as e:
-            self.get_logger().error(f"PnP solving failed: {e}")
+
+            if success:
+                self.get_logger().info(
+                    f"PnP solved successfully!\n"
+                    f"Rotation vector (axis-angle): {rvec.flatten()}\n"
+                    f"Translation vector: {tvec.flatten()}"
+                )
+                return True, rvec, tvec
+            else:
+                self.get_logger().error("PnP solver failed to converge")
+                return False, None, None
+
+        except cv2.error as e:
+            self.get_logger().error(f"OpenCV PnP error: {e}")
             return False, None, None
 
-    def _create_transform_message(
+    def _create_transform_message_educational(
         self, rvec: np.ndarray, tvec: np.ndarray, header: Header
     ) -> TransformStamped:
-        """Create TransformStamped message from rotation vector and translation vector"""
-        # Convert rotation vector to rotation matrix
+        """
+        Create ROS TransformStamped message from PnP solution.
+
+        Educational note: This converts the PnP solution (rotation vector + translation)
+        to a ROS transform message. The rotation vector is converted to a quaternion
+        for ROS compatibility.
+
+        Rotation representations:
+        - Rotation vector (rvec): 3D vector encoding axis and angle (OpenCV output)
+        - Rotation matrix: 3x3 matrix representation
+        - Quaternion: 4D representation used by ROS (more compact, no singularities)
+        """
+        # Convert rotation vector to rotation matrix using OpenCV
         rotation_matrix, _ = cv2.Rodrigues(rvec)
 
         # Convert rotation matrix to quaternion
-        quaternion = self._rotation_matrix_to_quaternion(rotation_matrix)
+        quaternion = self._rotation_matrix_to_quaternion_educational(rotation_matrix)
 
-        # Create transform message
+        # Create ROS transform message
         transform_msg = TransformStamped()
         transform_msg.header = Header()
         transform_msg.header.stamp = header.stamp
         transform_msg.header.frame_id = self.parent_frame
         transform_msg.child_frame_id = self.child_frame
 
+        # Set translation (direct copy from PnP solution)
         t = tvec.flatten()
         transform_msg.transform.translation = Vector3(
             x=float(t[0]), y=float(t[1]), z=float(t[2])
         )
+
+        # Set rotation (converted to quaternion)
         transform_msg.transform.rotation = Quaternion(
             x=float(quaternion[0]),
             y=float(quaternion[1]),
             z=float(quaternion[2]),
-            w=float(quaternion[3]),
+            w=float(quaternion[3])
         )
 
         return transform_msg
 
-    def _rotation_matrix_to_quaternion(self, rotation_matrix: np.ndarray) -> np.ndarray:
-        """Convert rotation matrix to quaternion (w, x, y, z)"""
-        # Use OpenCV's Rodrigues to get rotation vector, then convert to quaternion
+    def _rotation_matrix_to_quaternion_educational(
+        self, rotation_matrix: np.ndarray
+    ) -> np.ndarray:
+        """
+        Convert 3x3 rotation matrix to quaternion using OpenCV and numpy.
+
+        Educational note: This demonstrates rotation representation conversion.
+        We use OpenCV's Rodrigues function to convert back to rotation vector,
+        then implement the axis-angle to quaternion conversion.
+
+        Mathematical background:
+        - Rotation vector: angle * unit_axis (3D)
+        - Quaternion: [sin(angle/2) * axis, cos(angle/2)] (4D)
+
+        This approach is educational because it shows the mathematical
+        relationship between different rotation representations.
+        """
+        # Convert rotation matrix back to rotation vector using OpenCV
         rvec, _ = cv2.Rodrigues(rotation_matrix)
-        r = rvec.flatten()
 
-        # Convert rotation vector to quaternion
-        angle = np.linalg.norm(r)
+        # Convert rotation vector to quaternion (educational implementation)
+        # This shows students the mathematical relationship
+        angle = np.linalg.norm(rvec)
+
         if angle < 1e-6:
-            return np.array([1.0, 0.0, 0.0, 0.0])  # Identity quaternion
+            # Handle small angle case (near identity rotation)
+            return np.array([0.0, 0.0, 0.0, 1.0])  # Identity quaternion (x,y,z,w)
 
-        axis = r / angle
+        # Extract rotation axis (unit vector)
+        axis = rvec.flatten() / angle
         half_angle = angle / 2.0
 
-        w = np.cos(half_angle)
-        s = np.sin(half_angle)
-        x = axis[0] * s
-        y = axis[1] * s
-        z = axis[2] * s
+        # Compute quaternion components
+        # Educational note: Quaternion = [sin(θ/2) * axis, cos(θ/2)]
+        qx = axis[0] * np.sin(half_angle)
+        qy = axis[1] * np.sin(half_angle)
+        qz = axis[2] * np.sin(half_angle)
+        qw = np.cos(half_angle)
 
-        return np.array(
-            [float(x), float(y), float(z), float(w)]
-        )  # Return as (x, y, z, w)
-
-    def _log_transformation_matrix(self, rvec: np.ndarray, tvec: np.ndarray):
-        """Log the 4x4 transformation matrix"""
-        # Convert rotation vector to rotation matrix
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
-
-        # Create 4x4 transformation matrix
-        transform_matrix = np.eye(4)
-        transform_matrix[:3, :3] = rotation_matrix
-        transform_matrix[:3, 3] = tvec.flatten()
-
-        self.get_logger().debug(
-            f"Extrinsic T (4x4):\n"
-            f"[ {transform_matrix[0,0]:.6f} {transform_matrix[0,1]:.6f} {transform_matrix[0,2]:.6f} {transform_matrix[0,3]:.6f} ]\n"
-            f"[ {transform_matrix[1,0]:.6f} {transform_matrix[1,1]:.6f} {transform_matrix[1,2]:.6f} {transform_matrix[1,3]:.6f} ]\n"
-            f"[ {transform_matrix[2,0]:.6f} {transform_matrix[2,1]:.6f} {transform_matrix[2,2]:.6f} {transform_matrix[2,3]:.6f} ]\n"
-            f"[ {transform_matrix[3,0]:.6f} {transform_matrix[3,1]:.6f} {transform_matrix[3,2]:.6f} {transform_matrix[3,3]:.6f} ]"
-        )
-
-    def _assess_quality(
-        self,
-        object_points: List[np.ndarray],
-        image_points: List[np.ndarray],
-        rvec: np.ndarray,
-        tvec: np.ndarray,
-        aruco_msg: Detection2DArray,
-        board_msg: Detection3DArray,
-    ):
-        """Assess calibration quality and publish metrics"""
-        try:
-            # Compute reprojection errors
-            camera_matrix = np.array(
-                [
-                    [
-                        self.camera_info.k[0],
-                        self.camera_info.k[1],
-                        self.camera_info.k[2],
-                    ],
-                    [
-                        self.camera_info.k[3],
-                        self.camera_info.k[4],
-                        self.camera_info.k[5],
-                    ],
-                    [
-                        self.camera_info.k[6],
-                        self.camera_info.k[7],
-                        self.camera_info.k[8],
-                    ],
-                ]
-            )
-            dist_coeffs = np.array(self.camera_info.d, dtype=np.float32)
-
-            # Project 3D points to image plane
-            projected_points, _ = cv2.projectPoints(
-                np.array(object_points, dtype=np.float32),
-                rvec,
-                tvec,
-                camera_matrix,
-                dist_coeffs,
-            )
-
-            # Compute reprojection errors
-            errors = []
-            for i, (original, projected) in enumerate(
-                zip(image_points, projected_points)
-            ):
-                error = np.linalg.norm(original - projected[0])
-                errors.append(error)
-
-            # Compute statistics
-            mean_error = np.mean(errors) if errors else float("inf")
-            max_error = np.max(errors) if errors else float("inf")
-            num_inliers = sum(1 for e in errors if e < 2.0)  # 2 pixel threshold
-
-            # Detection confidence
-            expected_detections = 4  # Assuming 4 ArUco markers
-            detection_confidence = min(
-                len(aruco_msg.detections) / expected_detections, 1.0
-            )
-
-            # Create quality report
-            quality_report = {
-                "overall_quality": max(
-                    0.0, 1.0 - mean_error / 10.0
-                ),  # Simple quality metric
-                "metrics": {
-                    "reprojection_error": float(mean_error),
-                    "max_reprojection_error": float(max_error),
-                    "inlier_ratio": num_inliers / len(errors) if errors else 0.0,
-                    "detection_confidence": float(detection_confidence),
-                    "num_correspondences": len(object_points),
-                },
-                "validation": {
-                    "is_valid": mean_error < 5.0 and detection_confidence > 0.5
-                },
-            }
-
-            # Publish quality metrics
-            quality_msg = String()
-            quality_msg.data = json.dumps(quality_report, indent=2)
-            self.quality_publisher.publish(quality_msg)
-
-            self.get_logger().info(
-                f"Calibration quality: {quality_report['overall_quality']*100:.1f}%, "
-                f"Mean error: {mean_error:.2f}px, Inliers: {num_inliers}/{len(errors)}"
-            )
-
-        except Exception as e:
-            self.get_logger().warn(f"Quality assessment failed: {e}")
+        return np.array([qx, qy, qz, qw])  # Return as (x, y, z, w) for ROS
 
 
 def main(args=None):
+    """
+    Main function to run the educational extrinsic solver node.
+
+    Educational note: This is the standard ROS2 node entry point.
+    It initializes ROS2, creates the node, and handles shutdown.
+    """
     rclpy.init(args=args)
 
-    node = SimpleExtrinsicSolver()
+    node = EducationalExtrinsicSolver()
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("Shutting down educational extrinsic solver")
     finally:
         node.destroy_node()
         rclpy.shutdown()
