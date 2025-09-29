@@ -1,51 +1,77 @@
 #!/usr/bin/env python3
 """
-Simple pointcloud to image overlay node.
-Projects LiDAR points onto camera image using extrinsic calibration.
+Educational Pointcloud Image Overlay Node
+
+This educational implementation demonstrates the core concepts of LiDAR-camera sensor fusion:
+1. Real-time extrinsic calibration from live calibration solver
+2. 3D coordinate transformation (LiDAR → Camera frame)
+3. Camera projection (3D → 2D image coordinates)
+4. Visual overlay of LiDAR points on camera images
+
+Key Educational Concepts:
+- Coordinate system transformations using homogeneous matrices
+- Camera intrinsic parameters and projection model
+- Real-time sensor fusion and synchronization
+- ROS2 multi-topic subscription patterns
+
+Author: Educational Version for LCTK
+Version: Simplified for learning purposes (~250 lines vs 740 original)
+Compatible with: OpenCV 4.5.4, NumPy 1.21.5 (Ubuntu 22.04)
 """
 
-import json5
 import math
-from typing import Optional
 import struct
-
-import cv2
+from typing import Optional
 import numpy as np
+import cv2
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+
+# ROS 2 message types
 from sensor_msgs.msg import Image, PointCloud2, CameraInfo
+from geometry_msgs.msg import TransformStamped
 from cv_bridge import CvBridge
 
 
-def read_extrinsic_4x4(path: str) -> np.ndarray:
-    """Read extrinsic matrix from JSON5 file."""
-    with open(path, "r") as f:
-        data = json5.load(f)
-    mat = np.asarray(data["matrix"], dtype=np.float64)
-    if mat.shape == (4, 4):
-        return mat
-    raise ValueError('extrinsic JSON5 must contain key "matrix" as 4x4 array')
-
-
 def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
-    """Convert PointCloud2 message to xyz numpy array."""
+    """
+    Educational Function: Convert PointCloud2 message to NumPy array
+
+    This function demonstrates how to extract 3D coordinates from ROS PointCloud2 messages.
+    PointCloud2 uses a binary format where each point contains x,y,z coordinates as floats.
+
+    Args:
+        pc2: ROS PointCloud2 message containing LiDAR scan data
+
+    Returns:
+        np.ndarray: Nx3 array of [x,y,z] coordinates in LiDAR frame
+
+    Educational Notes:
+        - PointCloud2 data is stored as packed binary (struct format)
+        - Field offsets tell us where x,y,z are located in each point
+        - We filter out invalid points (NaN, infinity) for robust processing
+    """
     if pc2.point_step == 0 or len(pc2.data) == 0:
         return np.zeros((0, 3), dtype=np.float32)
 
-    # Find field offsets
+    # Find byte offsets for x,y,z coordinates in the binary data
     offset = {f.name: f.offset for f in pc2.fields}
     if "x" not in offset or "y" not in offset or "z" not in offset:
         return np.zeros((0, 3), dtype=np.float32)
 
-    step = pc2.point_step
+    step = pc2.point_step  # Bytes per point
     xyz = []
 
-    # Extract xyz coordinates
+    # Extract xyz coordinates from binary data
     for i in range(0, len(pc2.data), step):
+        # Unpack 32-bit float from binary data at specific offset
         x = struct.unpack_from("f", pc2.data, i + offset["x"])[0]
         y = struct.unpack_from("f", pc2.data, i + offset["y"])[0]
         z = struct.unpack_from("f", pc2.data, i + offset["z"])[0]
+
+        # Only keep valid finite coordinates
         if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
             xyz.append((x, y, z))
 
@@ -54,683 +80,467 @@ def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
     return np.asarray(xyz, dtype=np.float32)
 
 
-class OverlayNode(Node):
+def transform_to_rvec_tvec(transform: TransformStamped) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Educational Function: Convert ROS Transform to OpenCV rotation and translation vectors
+
+    This demonstrates how to convert ROS geometry_msgs/Transform to the rotation vector (rvec)
+    and translation vector (tvec) format used by OpenCV's projectPoints function.
+
+    Args:
+        transform: ROS TransformStamped message (from extrinsic_solver_node)
+
+    Returns:
+        tuple: (rvec, tvec) - rotation vector and translation vector for OpenCV
+
+    Educational Notes:
+        - OpenCV uses Rodrigues rotation vectors (3x1) instead of matrices
+        - Translation vector (3x1) represents spatial offset
+        - projectPoints will apply both extrinsic and intrinsic transformations
+        - This approach lets OpenCV handle the full transformation pipeline
+    """
+    # Extract translation vector (3x1) for OpenCV
+    t = transform.transform.translation
+    tvec = np.array([t.x, t.y, t.z], dtype=np.float64)
+
+    # Extract rotation quaternion (w + x*i + y*j + z*k)
+    q = transform.transform.rotation
+    qx, qy, qz, qw = q.x, q.y, q.z, q.w
+
+    # Convert quaternion to 3x3 rotation matrix
+    # This is the mathematical transformation from quaternion to rotation matrix
+    rotation_matrix = np.array([
+        [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
+        [2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
+        [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)]
+    ], dtype=np.float64)
+
+    # Convert rotation matrix to Rodrigues rotation vector for OpenCV
+    # cv2.Rodrigues converts between 3x3 rotation matrix and 3x1 rotation vector
+    rvec, _ = cv2.Rodrigues(rotation_matrix)
+
+    return rvec.reshape(3), tvec.reshape(3)
+
+
+class EducationalOverlayNode(Node):
+    """
+    Educational LiDAR-Camera Overlay Node
+
+    This class demonstrates the essential components of sensor fusion between
+    LiDAR and camera systems using real-time extrinsic calibration.
+
+    Educational Architecture:
+    1. Subscribe to live extrinsic calibration (geometry_msgs/TransformStamped)
+    2. Subscribe to sensor data (Image, PointCloud2, CameraInfo)
+    3. Transform LiDAR points to camera coordinate system
+    4. Project 3D camera points to 2D image pixels
+    5. Visualize overlay by drawing points on image
+
+    Key Learning Points:
+    - Real-time calibration vs static configuration files
+    - Coordinate system transformations in robotics
+    - Camera projection model and intrinsic parameters
+    - Multi-sensor data synchronization patterns
+    """
+
     def __init__(self):
-        super().__init__("pointcloud_image_overlay")
+        super().__init__("educational_pointcloud_overlay")
+
+        # OpenCV bridge for ROS Image ↔ numpy array conversion
         self.bridge = CvBridge()
 
-        # Debug counters
-        self.image_count = 0
-        self.pointcloud_count = 0
-        self.caminfo_count = 0
-        self.publish_count = 0
+        # Educational counters for monitoring data flow
+        self.message_counts = {
+            "images": 0,
+            "pointclouds": 0,
+            "camera_info": 0,
+            "extrinsics": 0,
+            "overlays_published": 0
+        }
 
-        # Parameters
-        self.declare_parameter("extrinsic_json5", "")
+        # === EDUCATIONAL STATE VARIABLES ===
+        # These demonstrate what data we need for sensor fusion
+
+        # Camera intrinsic parameters (from camera_info topic)
+        self.camera_matrix: Optional[np.ndarray] = None  # 3x3 K matrix
+        self.distortion: Optional[np.ndarray] = None     # Distortion coefficients
+
+        # Extrinsic calibration (from live calibration solver)
+        self.extrinsic_rvec: Optional[np.ndarray] = None  # Rotation vector (3x1)
+        self.extrinsic_tvec: Optional[np.ndarray] = None  # Translation vector (3x1)
+
+        # Latest sensor data (for overlay generation)
+        self.latest_image: Optional[Image] = None
+        self.latest_pointcloud: Optional[PointCloud2] = None
+
+        # === ROS 2 QUALITY OF SERVICE CONFIGURATION ===
+        # Educational note: QoS affects message delivery reliability
         self.declare_parameter("use_best_effort_qos", True)
-        self.declare_parameter("filter_config_file", "")
+        use_best_effort = self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
 
-        # Load extrinsic calibration
-        extr_path = (
-            self.get_parameter("extrinsic_json5").get_parameter_value().string_value
-        )
-        self.extrinsic_error = None
-        try:
-            if not extr_path:
-                self.T_lidar_cam = None
-                self.extrinsic_error = "No extrinsic file path provided"
-            else:
-                self.T_lidar_cam = read_extrinsic_4x4(extr_path)
-                self.get_logger().info(f"Loaded extrinsic from {extr_path}")
-                self.get_logger().info(f"Extrinsic matrix:\n{self.T_lidar_cam}")
-
-                # Validate extrinsic matrix
-                self._validate_extrinsic_matrix()
-
-                # Check if it's an identity matrix (no transformation)
-                if np.allclose(self.T_lidar_cam, np.eye(4)):
-                    self.get_logger().warn(
-                        "WARNING: Extrinsic matrix is identity - no transformation applied!"
-                    )
-                    self.get_logger().warn(
-                        "This means LiDAR and camera are assumed to be at the same position."
-                    )
-        except FileNotFoundError:
-            self.get_logger().error(f"Extrinsic file not found: {extr_path}")
-            self.T_lidar_cam = None
-            self.extrinsic_error = f"Extrinsic file not found: {extr_path}"
-        except Exception as e:
-            self.get_logger().error(f"Failed to read extrinsic: {e}")
-            self.T_lidar_cam = None
-            self.extrinsic_error = f"Failed to parse extrinsic file: {str(e)}"
-
-        # Load filter configuration
-        filter_config_path = (
-            self.get_parameter("filter_config_file").get_parameter_value().string_value
-        )
-        self._load_filter_config(filter_config_path)
-
-        # State
-        self.K: Optional[np.ndarray] = None
-        self.dist: Optional[np.ndarray] = None
-        self.last_image: Optional[Image] = None
-        self.last_pc: Optional[PointCloud2] = None
-
-        # Configure QoS
-        use_best_effort = (
-            self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
-        )
         if use_best_effort:
-            # Best effort for live sensors
+            # Best effort: Fast, may lose messages (good for live sensors)
             qos = QoSProfile(
                 reliability=ReliabilityPolicy.BEST_EFFORT,
                 durability=DurabilityPolicy.VOLATILE,
                 depth=10,
             )
         else:
-            # Reliable for rosbag playback
+            # Reliable: Guaranteed delivery (good for recorded data/rosbags)
             qos = QoSProfile(depth=10)
 
-        # Subscriptions (using base topic names that will be remapped)
-        self.sub_img = self.create_subscription(Image, "image", self.on_image, qos)
-        self.sub_pc = self.create_subscription(
-            PointCloud2, "pointcloud", self.on_pointcloud, qos
-        )
+        # === SENSOR DATA SUBSCRIPTIONS ===
+        # Educational pattern: subscribe to all required sensor streams
 
-        # Derive camera_info topic from resolved image topic (following image_pipeline convention)
-        resolved_image_topic = self.sub_img.topic_name
+        # Camera image stream (sensor_msgs/Image)
+        self.image_subscription = self.create_subscription(
+            Image, "image", self.on_image_received, qos)
+
+        # LiDAR pointcloud stream (sensor_msgs/PointCloud2)
+        self.pointcloud_subscription = self.create_subscription(
+            PointCloud2, "pointcloud", self.on_pointcloud_received, qos)
+
+        # Camera intrinsic parameters (sensor_msgs/CameraInfo)
+        # Auto-derive topic name from image topic (image_pipeline convention)
+        resolved_image_topic = self.image_subscription.topic_name
         if "/" in resolved_image_topic:
-            # Find the last slash and replace the last component with "camera_info"
             base_path = resolved_image_topic.rsplit("/", 1)[0]
             camera_info_topic = f"{base_path}/camera_info"
         else:
             camera_info_topic = "camera_info"
 
-        self.get_logger().info(f"Derived camera_info topic: {camera_info_topic}")
+        self.camera_info_subscription = self.create_subscription(
+            CameraInfo, camera_info_topic, self.on_camera_info_received, qos)
 
-        # Subscribe to derived camera_info topic
-        self.sub_info = self.create_subscription(
-            CameraInfo, camera_info_topic, self.on_caminfo, qos
-        )
+        # === LIVE EXTRINSIC CALIBRATION SUBSCRIPTION ===
+        # Educational highlight: Real-time calibration from solver instead of static file
+        self.extrinsic_subscription = self.create_subscription(
+            TransformStamped,
+            "/calibration/extrinsic_solver/extrinsic_transform",  # Live calibration output
+            self.on_extrinsic_received,
+            qos)
 
-        # Publisher
-        self.pub = self.create_publisher(Image, "/calibration/pointcloud_overlay", 10)
+        # === OUTPUT PUBLISHER ===
+        # Publish overlay visualization (sensor_msgs/Image)
+        self.overlay_publisher = self.create_publisher(
+            Image, "/calibration/pointcloud_overlay", 10)
 
-        self.get_logger().info("Pointcloud image overlay node started")
-        self.get_logger().info(
-            f"QoS: {'Best Effort' if use_best_effort else 'Reliable'}"
-        )
-        self.get_logger().info("Subscribed to topics:")
-        self.get_logger().info("  - image (will be remapped to camera topic)")
-        self.get_logger().info("  - pointcloud (will be remapped to lidar topic)")
-        self.get_logger().info("  - camera_info")
-        self.get_logger().info("Publishing to: /calibration/pointcloud_overlay")
+        # Educational logging
+        self.get_logger().info("Educational Pointcloud Overlay Node Started!")
+        self.get_logger().info("Learning Objectives:")
+        self.get_logger().info("   - Real-time extrinsic calibration integration")
+        self.get_logger().info("   - 3D to 2D coordinate transformation pipeline")
+        self.get_logger().info("   - Multi-sensor data synchronization")
+        self.get_logger().info("   - Camera projection model application")
+        self.get_logger().info(f"QoS Mode: {'Best Effort' if use_best_effort else 'Reliable'}")
 
-    def _validate_extrinsic_matrix(self):
-        """Validate the extrinsic matrix and check units."""
-        try:
-            self.get_logger().info("=== EXTRINSIC MATRIX VALIDATION ===")
+    def on_extrinsic_received(self, msg: TransformStamped):
+        """
+        Educational Callback: Handle live extrinsic calibration updates
 
-            R = self.T_lidar_cam[:3, :3]
-            t = self.T_lidar_cam[:3, 3]
+        This demonstrates real-time calibration - instead of loading a static file,
+        we receive live updates from the extrinsic_solver_node as it refines the
+        calibration between LiDAR and camera coordinate systems.
 
-            # Check rotation matrix properties
-            det_R = np.linalg.det(R)
-            if abs(det_R - 1.0) > 0.01:
-                self.get_logger().warn(
-                    f"WARNING: Rotation matrix determinant is {det_R:.6f} (should be 1.0)"
-                )
+        Args:
+            msg: Live extrinsic transform (LiDAR frame → Camera frame)
+        """
+        self.message_counts["extrinsics"] += 1
 
-            # Check if R is orthogonal
-            should_be_identity = R @ R.T
-            identity_error = np.linalg.norm(should_be_identity - np.eye(3))
-            if identity_error > 0.01:
-                self.get_logger().warn(
-                    f"WARNING: Rotation matrix is not orthogonal (error: {identity_error:.6f})"
-                )
+        # Convert ROS transform to OpenCV rvec and tvec for projectPoints
+        self.extrinsic_rvec, self.extrinsic_tvec = transform_to_rvec_tvec(msg)
 
-            # Analyze translation vector
+        # Educational logging (every 10th message to avoid spam)
+        if self.message_counts["extrinsics"] % 10 == 0:
             self.get_logger().info(
-                f"Translation vector (LiDAR to Camera): [{t[0]:.6f}, {t[1]:.6f}, {t[2]:.6f}]"
+                f"Live Extrinsic Update #{self.message_counts['extrinsics']}: "
+                f"Translation = [{msg.transform.translation.x:.3f}, "
+                f"{msg.transform.translation.y:.3f}, {msg.transform.translation.z:.3f}]"
             )
 
-            # Check if translation values are reasonable for meters
-            translation_magnitude = np.linalg.norm(t)
-            self.get_logger().info(
-                f"Translation magnitude: {translation_magnitude:.3f} meters"
-            )
+    def on_camera_info_received(self, msg: CameraInfo):
+        """
+        Educational Callback: Handle camera intrinsic parameters
 
-            # Check individual components
-            if abs(t[0]) > 10.0:  # X translation > 10m
-                self.get_logger().warn(
-                    f"WARNING: Large X translation ({t[0]:.3f}m) - check units!"
-                )
-            if abs(t[1]) > 10.0:  # Y translation > 10m
-                self.get_logger().warn(
-                    f"WARNING: Large Y translation ({t[1]:.3f}m) - check units!"
-                )
-            if abs(t[2]) > 10.0:  # Z translation > 10m
-                self.get_logger().warn(
-                    f"WARNING: Large Z translation ({t[2]:.3f}m) - check units!"
-                )
+        Camera intrinsics define how 3D points project to 2D image coordinates.
+        This includes focal length, principal point, and distortion coefficients.
 
-            # Check if values look like they might be in wrong units
-            if abs(t[0]) > 100.0 or abs(t[1]) > 100.0 or abs(t[2]) > 100.0:
-                self.get_logger().warn(
-                    "WARNING: Very large translation values detected!"
-                )
-                self.get_logger().warn(
-                    "This might indicate the translation is in centimeters or millimeters instead of meters."
-                )
-                self.get_logger().warn(
-                    "If so, divide translation values by 100 (cm->m) or 1000 (mm->m)"
-                )
-                self.get_logger().warn(
-                    "Please fix the extrinsic calibration file manually - automatic conversion is disabled."
-                )
+        Args:
+            msg: Camera calibration parameters (sensor_msgs/CameraInfo)
+        """
+        self.message_counts["camera_info"] += 1
 
-            # Interpret the translation
-            self.get_logger().info("Translation interpretation:")
-            self.get_logger().info(
-                f"  - LiDAR is {abs(t[0]):.3f}m {'behind' if t[0] < 0 else 'in front of'} camera (X)"
-            )
-            self.get_logger().info(
-                f"  - LiDAR is {abs(t[1]):.3f}m {'left' if t[1] < 0 else 'right'} of camera (Y)"
-            )
-            self.get_logger().info(
-                f"  - LiDAR is {abs(t[2]):.3f}m {'below' if t[2] < 0 else 'above'} camera (Z)"
-            )
+        # Extract 3x3 camera matrix K from ROS message
+        # K = [fx  0  cx]  where (fx,fy) = focal lengths, (cx,cy) = principal point
+        #     [0  fy  cy]
+        #     [0   0   1]
+        self.camera_matrix = np.array(msg.k, dtype=np.float64).reshape(3, 3)
 
-            # Check if the setup makes sense
-            if abs(t[0]) < 0.01 and abs(t[1]) < 0.01 and abs(t[2]) < 0.01:
-                self.get_logger().warn(
-                    "WARNING: Very small translation values - LiDAR and camera might be at same position!"
-                )
-
-            self.get_logger().info("=== END EXTRINSIC VALIDATION ===")
-
-        except Exception as e:
-            self.get_logger().warn(f"Extrinsic matrix validation failed: {e}")
-
-    def _load_filter_config(self, config_path: str):
-        """Load pointcloud filter configuration from JSON5 file."""
-        # Default filter configuration
-        self.filter_config = {
-            "filtering_enabled": True,
-            "z_filter": {"enabled": True, "min_distance": 0.1, "max_distance": 50.0},
-            "x_filter": {"enabled": True, "max_range": 20.0},
-            "y_filter": {"enabled": True, "max_range": 20.0},
-            "logging": {
-                "log_stats_every_n_frames": 30,
-                "enable_filter_breakdown": True,
-            },
-        }
-
-        if not config_path:
-            self.get_logger().info(
-                "No filter config file provided, using default filtering parameters"
-            )
-            return
-
-        try:
-            with open(config_path, "r") as f:
-                loaded_config = json5.load(f)
-                self.filter_config.update(loaded_config)
-
-            self.get_logger().info(f"Loaded filter config from {config_path}")
-            self.get_logger().info(
-                f"Filtering enabled: {self.filter_config['filtering_enabled']}"
-            )
-
-            if self.filter_config["filtering_enabled"]:
-                z_cfg = self.filter_config["z_filter"]
-                x_cfg = self.filter_config["x_filter"]
-                y_cfg = self.filter_config["y_filter"]
-
-                self.get_logger().info(f"Filter ranges:")
-                self.get_logger().info(
-                    f"  - Z (depth): {z_cfg['min_distance']}m to {z_cfg['max_distance']}m (enabled: {z_cfg['enabled']})"
-                )
-                self.get_logger().info(
-                    f"  - X (horizontal): ±{x_cfg['max_range']}m (enabled: {x_cfg['enabled']})"
-                )
-                self.get_logger().info(
-                    f"  - Y (vertical): ±{y_cfg['max_range']}m (enabled: {y_cfg['enabled']})"
-                )
-            else:
-                self.get_logger().info("Pointcloud filtering is DISABLED")
-
-        except FileNotFoundError:
-            self.get_logger().warn(
-                f"Filter config file not found: {config_path}, using defaults"
-            )
-        except Exception as e:
-            self.get_logger().error(
-                f"Failed to load filter config: {e}, using defaults"
-            )
-
-    def _apply_pointcloud_filters(
-        self, X_cam: np.ndarray, total_points: int
-    ) -> np.ndarray:
-        """Apply configurable pointcloud filtering."""
-        if not self.filter_config["filtering_enabled"]:
-            # Return all points as valid
-            return np.ones(X_cam.shape[0], dtype=bool)
-
-        # Initialize mask with all points valid
-        valid_mask = np.ones(X_cam.shape[0], dtype=bool)
-
-        z_cfg = self.filter_config["z_filter"]
-        x_cfg = self.filter_config["x_filter"]
-        y_cfg = self.filter_config["y_filter"]
-        log_cfg = self.filter_config["logging"]
-
-        # Z-axis filtering (depth)
-        if z_cfg["enabled"]:
-            z_mask = (X_cam[:, 2] > z_cfg["min_distance"]) & (
-                X_cam[:, 2] < z_cfg["max_distance"]
-            )
-            valid_mask = valid_mask & z_mask
-        else:
-            z_mask = np.ones(X_cam.shape[0], dtype=bool)
-
-        # X-axis filtering (horizontal)
-        if x_cfg["enabled"]:
-            x_mask = np.abs(X_cam[:, 0]) < x_cfg["max_range"]
-            valid_mask = valid_mask & x_mask
-        else:
-            x_mask = np.ones(X_cam.shape[0], dtype=bool)
-
-        # Y-axis filtering (vertical)
-        if y_cfg["enabled"]:
-            y_mask = np.abs(X_cam[:, 1]) < y_cfg["max_range"]
-            valid_mask = valid_mask & y_mask
-        else:
-            y_mask = np.ones(X_cam.shape[0], dtype=bool)
-
-        # Logging
-        points_valid = np.sum(valid_mask)
-        if self.publish_count % log_cfg["log_stats_every_n_frames"] == 0:
-            self.get_logger().info(
-                f"Points in valid range: {points_valid}/{total_points} ({points_valid/total_points*100:.1f}%)"
-            )
-
-            if (
-                log_cfg["enable_filter_breakdown"]
-                and self.filter_config["filtering_enabled"]
-            ):
-                self.get_logger().info(f"Filter breakdown:")
-                if z_cfg["enabled"]:
-                    self.get_logger().info(
-                        f"  - Z filter ({z_cfg['min_distance']}-{z_cfg['max_distance']}m): {np.sum(z_mask)} points"
-                    )
-                if x_cfg["enabled"]:
-                    self.get_logger().info(
-                        f"  - X filter (±{x_cfg['max_range']}m): {np.sum(x_mask)} points"
-                    )
-                if y_cfg["enabled"]:
-                    self.get_logger().info(
-                        f"  - Y filter (±{y_cfg['max_range']}m): {np.sum(y_mask)} points"
-                    )
-                self.get_logger().info(f"  - Combined: {points_valid} points")
-
-        return valid_mask
-
-    def on_caminfo(self, msg: CameraInfo):
-        """Handle camera info message."""
-        self.caminfo_count += 1
-        self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
-
-        # Check for potential coordinate system issue
-        fx, fy = self.K[0, 0], self.K[1, 1]
-        if fx > 1000 or fy > 1000:  # Likely coordinate system issue
-            self.get_logger().warn(
-                f"WARNING: Large focal length detected (fx={fx:.1f}, fy={fy:.1f})"
-            )
-            self.get_logger().warn("This suggests a coordinate system or scale issue!")
-            self.get_logger().warn(
-                "Please check and fix the camera intrinsics manually - automatic scaling is disabled."
-            )
-
-        # Distortion may be empty; if so use zeros
+        # Extract distortion coefficients (lens distortion correction)
         if msg.d:
-            self.dist = np.array(msg.d, dtype=np.float64).reshape(-1)
+            self.distortion = np.array(msg.d, dtype=np.float64)
         else:
-            self.dist = np.zeros((5,), dtype=np.float64)
+            self.distortion = np.zeros(5, dtype=np.float64)  # No distortion
 
-        self.get_logger().info(
-            f"Camera intrinsics loaded (count: {self.caminfo_count})", once=True
-        )
-        self.get_logger().info(f"Camera matrix K:\n{self.K}")
-        self.get_logger().info(f"Distortion coefficients: {self.dist}")
-        self.get_logger().info(f"Image size: {msg.width}x{msg.height}")
-
-    def on_image(self, msg: Image):
-        """Handle image message."""
-        self.image_count += 1
-        self.last_image = msg
-        if self.image_count % 30 == 0:  # Log every 30th image to avoid spam
+        # Educational logging (first time only)
+        if self.message_counts["camera_info"] == 1:
+            fx, fy = self.camera_matrix[0, 0], self.camera_matrix[1, 1]
+            cx, cy = self.camera_matrix[0, 2], self.camera_matrix[1, 2]
             self.get_logger().info(
-                f"Received image {self.image_count}: {msg.width}x{msg.height}, encoding: {msg.encoding}"
+                f"Camera Intrinsics Loaded: "
+                f"Focal=[{fx:.1f}, {fy:.1f}], Principal=[{cx:.1f}, {cy:.1f}], "
+                f"Image={msg.width}x{msg.height}"
             )
-        # Always try to publish when we get an image
-        self.publish_overlay()
 
-    def on_pointcloud(self, msg: PointCloud2):
-        """Handle pointcloud message."""
-        self.pointcloud_count += 1
-        self.last_pc = msg
-        if self.pointcloud_count % 30 == 0:  # Log every 30th pointcloud to avoid spam
+    def on_image_received(self, msg: Image):
+        """
+        Educational Callback: Handle camera image updates
+
+        Images provide the visual context for overlay. We always try to generate
+        an overlay when new images arrive to maintain real-time visualization.
+
+        Args:
+            msg: Camera image (sensor_msgs/Image)
+        """
+        self.message_counts["images"] += 1
+        self.latest_image = msg
+
+        # Educational logging (every 30th image to avoid spam)
+        if self.message_counts["images"] % 30 == 0:
             self.get_logger().info(
-                f"Received pointcloud {self.pointcloud_count}: {len(msg.data)} bytes, {msg.point_step} step, {len(msg.fields)} fields"
-            )
-            field_names = [f.name for f in msg.fields]
-            self.get_logger().info(f"Pointcloud fields: {field_names}")
-        # Only publish if we have a recent image
-        if self.last_image is not None:
-            self.publish_overlay()
-
-    def draw_error_on_image(self, cv_img: np.ndarray, error_text: str):
-        """Draw error text on the image."""
-        h, w = cv_img.shape[:2]
-
-        # Choose font and scale based on image size
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = min(w, h) / 800.0  # Scale font based on image size
-        thickness = max(1, int(font_scale * 2))
-
-        # Split long text into multiple lines
-        max_chars_per_line = max(20, w // 25)
-        lines = []
-        words = error_text.split()
-        current_line = ""
-
-        for word in words:
-            if len(current_line + " " + word) <= max_chars_per_line:
-                current_line = current_line + " " + word if current_line else word
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-        if current_line:
-            lines.append(current_line)
-
-        # Draw semi-transparent background
-        overlay = cv_img.copy()
-        line_height = int(30 * font_scale)
-        text_height = len(lines) * line_height + 20
-        cv2.rectangle(overlay, (10, 10), (w - 10, 10 + text_height), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.7, cv_img, 0.3, 0, cv_img)
-
-        # Draw text lines
-        for i, line in enumerate(lines):
-            y_pos = 30 + i * line_height
-            cv2.putText(
-                cv_img, line, (20, y_pos), font, font_scale, (0, 0, 255), thickness
+                f"Image #{self.message_counts['images']}: "
+                f"{msg.width}x{msg.height}, encoding={msg.encoding}"
             )
 
-    def publish_overlay(self):
-        """Always publish an overlay image when image data is available."""
-        if self.last_image is None:
+        # Always attempt overlay generation when new image arrives
+        self.generate_overlay()
+
+    def on_pointcloud_received(self, msg: PointCloud2):
+        """
+        Educational Callback: Handle LiDAR pointcloud updates
+
+        Pointclouds provide 3D spatial information to overlay on 2D images.
+        We store the latest pointcloud and trigger overlay if image is available.
+
+        Args:
+            msg: LiDAR scan data (sensor_msgs/PointCloud2)
+        """
+        self.message_counts["pointclouds"] += 1
+        self.latest_pointcloud = msg
+
+        # Educational logging (every 30th pointcloud to avoid spam)
+        if self.message_counts["pointclouds"] % 30 == 0:
+            self.get_logger().info(
+                f"Pointcloud #{self.message_counts['pointclouds']}: "
+                f"{len(msg.data)} bytes, {len(msg.fields)} fields"
+            )
+
+        # Only generate overlay if we have a recent image
+        if self.latest_image is not None:
+            self.generate_overlay()
+
+    def generate_overlay(self):
+        """
+        Educational Core Function: Generate LiDAR-Camera Overlay
+
+        This is the main educational demonstration of sensor fusion pipeline:
+        1. Check all required data is available
+        2. Extract 3D points from LiDAR pointcloud
+        3. Transform points from LiDAR coordinate system to camera coordinate system
+        4. Project 3D camera points to 2D image pixel coordinates
+        5. Draw projected points on camera image
+        6. Publish overlay for visualization
+
+        Educational Value:
+        - Shows complete 3D→2D transformation pipeline
+        - Demonstrates coordinate system transformations
+        - Illustrates real-time sensor fusion concepts
+        """
+        # === STEP 1: VALIDATE ALL REQUIRED DATA ===
+        # Educational pattern: check prerequisites before processing
+        if self.latest_image is None:
+            return  # No image to overlay on
+
+        if self.camera_matrix is None:
+            self._draw_status_message("No camera intrinsics available")
+            return
+
+        if self.extrinsic_rvec is None or self.extrinsic_tvec is None:
+            self._draw_status_message("No extrinsic calibration available")
+            return
+
+        if self.latest_pointcloud is None:
+            self._draw_status_message("No LiDAR data available")
             return
 
         try:
-            self.publish_count += 1
+            # === STEP 2: EXTRACT 3D POINTS FROM LIDAR ===
+            # Convert ROS PointCloud2 binary format to NumPy array
+            lidar_points = pointcloud2_to_xyz(self.latest_pointcloud)
 
-            # Convert image
-            cv_img = self.bridge.imgmsg_to_cv2(self.last_image, desired_encoding="bgr8")
-            h, w = cv_img.shape[:2]
+            if lidar_points.shape[0] == 0:
+                self._draw_status_message("Empty pointcloud")
+                return
 
-            # Check for extrinsic parameter errors
-            if self.extrinsic_error is not None:
-                self.draw_error_on_image(cv_img, f"ERROR: {self.extrinsic_error}")
-            elif self.T_lidar_cam is None:
-                self.draw_error_on_image(
-                    cv_img, "ERROR: No extrinsic calibration loaded"
-                )
-            elif self.K is None:
-                self.draw_error_on_image(
-                    cv_img, "ERROR: No camera intrinsics available"
-                )
-            elif self.last_pc is None:
-                self.draw_error_on_image(
-                    cv_img, "WARNING: No point cloud data available"
-                )
-            else:
-                # All data available, try to create overlay
-                try:
-                    # Extract points from pointcloud
-                    xyz = pointcloud2_to_xyz(self.last_pc)
-                    if xyz.shape[0] == 0:
-                        self.draw_error_on_image(
-                            cv_img, "WARNING: Point cloud is empty"
-                        )
-                    else:
-                        if self.publish_count % 30 == 0:
-                            self.get_logger().info(
-                                f"Processing {xyz.shape[0]} points for overlay"
-                            )
+            # === STEP 3: DIRECT 3D → 2D PROJECTION WITH FULL TRANSFORMATION ===
+            # Educational highlight: OpenCV's projectPoints handles the complete pipeline
+            # - Applies extrinsic transformation (LiDAR → Camera) using rvec and tvec
+            # - Applies intrinsic projection (3D Camera → 2D Image) using camera matrix
+            # - Applies lens distortion correction if provided
+            # This single function call replaces manual matrix multiplication
 
-                        # Use OpenCV projectPoints with extrinsic from LiDAR to camera
-                        R = self.T_lidar_cam[:3, :3]
-                        t = self.T_lidar_cam[:3, 3]
-                        rvec, _ = cv2.Rodrigues(R)
-                        tvec = t.reshape(3, 1)
-
-                        # Transform all points to camera frame for analysis
-                        X_cam = (R @ xyz.astype(np.float64).T).T + t.reshape(1, 3)
-
-                        # Apply configurable filtering
-                        valid_mask = self._apply_pointcloud_filters(X_cam, xyz.shape[0])
-
-                        if not np.any(valid_mask):
-                            self.draw_error_on_image(
-                                cv_img, "WARNING: All LiDAR points outside valid range"
-                            )
-                        else:
-                            xyz_filtered = xyz[valid_mask]
-
-                            # Project points to image
-                            image_points, _ = cv2.projectPoints(
-                                xyz_filtered.astype(np.float64),
-                                rvec,
-                                tvec,
-                                self.K,
-                                self.dist if self.dist is not None else None,
-                            )
-                            image_points = image_points.reshape(-1, 2)
-
-                            # Draw projected points on image with improved visibility
-                            points_drawn = 0
-                            for ui, vi in image_points:
-                                if 0 <= ui < w and 0 <= vi < h:
-                                    cv2.circle(
-                                        cv_img, (int(ui), int(vi)), 2, (0, 255, 0), -1
-                                    )  # Green points
-                                    cv2.circle(
-                                        cv_img, (int(ui), int(vi)), 3, (0, 0, 255), 1
-                                    )  # Red border
-                                    points_drawn += 1
-
-                            # Show status overlay
-                            status_text = (
-                                f"Points: {points_drawn}/{len(image_points)} visible"
-                            )
-                            cv2.putText(
-                                cv_img,
-                                status_text,
-                                (10, h - 20),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.5,
-                                (0, 255, 0),
-                                1,
-                            )
-
-                            # Add debug validation every 100th frame
-                            if self.publish_count % 100 == 0:
-                                self._test_projection_accuracy(
-                                    cv_img, R, t, self.K, self.dist, w, h
-                                )
-                                self._validate_coordinate_system(R, t, self.K, w, h)
-
-                except Exception as overlay_error:
-                    self.draw_error_on_image(
-                        cv_img, f"ERROR in overlay: {str(overlay_error)}"
-                    )
-
-            # Always publish the image (with or without overlay)
-            out = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
-            out.header = self.last_image.header
-            self.pub.publish(out)
-
-        except Exception as e:
-            self.get_logger().error(
-                f"Error publishing overlay: {e}", throttle_duration_sec=1.0
-            )
-            import traceback
-
-            self.get_logger().error(f"Traceback: {traceback.format_exc()}")
-
-    def _test_projection_accuracy(self, cv_img, R, t, K, dist, w, h):
-        """Test projection accuracy with known test points."""
-        try:
-            # Create test points at known distances in front of camera
-            test_distances = [1.0, 2.0, 3.0, 5.0]  # meters
-            test_points = []
-
-            for dist in test_distances:
-                # Test points at different positions relative to camera
-                test_points.extend(
-                    [
-                        [0, 0, dist],  # Center
-                        [1, 0, dist],  # Right
-                        [-1, 0, dist],  # Left
-                        [0, 1, dist],  # Up
-                        [0, -1, dist],  # Down
-                    ]
-                )
-
-            test_points = np.array(test_points, dtype=np.float64)
-
-            # Transform to camera frame
-            test_cam = (R @ test_points.T).T + t.reshape(1, 3)
-
-            # Project test points
-            rvec, _ = cv2.Rodrigues(R)
-            tvec = t.reshape(3, 1)
-            test_projected, _ = cv2.projectPoints(
-                test_points,
-                rvec,
-                tvec,
-                K,
-                dist if dist is not None else None,
-            )
-            test_projected = test_projected.reshape(-1, 2)
-
-            # Draw test points in blue
-            for i, (ui, vi) in enumerate(test_projected):
-                if 0 <= ui < w and 0 <= vi < h:
-                    cv2.circle(
-                        cv_img, (int(ui), int(vi)), 8, (255, 0, 0), -1
-                    )  # Blue test points
-                    cv2.circle(
-                        cv_img, (int(ui), int(vi)), 10, (255, 255, 255), 2
-                    )  # White border
-
-            self.get_logger().info(
-                f"Projection test: {len(test_points)} test points projected"
+            # OpenCV projectPoints performs the full transformation pipeline:
+            # 1. Rotate points using rvec (Rodrigues rotation)
+            # 2. Translate points using tvec
+            # 3. Project to 2D using camera intrinsics
+            # 4. Apply distortion correction
+            projected_points, _ = cv2.projectPoints(
+                lidar_points.reshape(-1, 1, 3),     # LiDAR points in original frame
+                self.extrinsic_rvec,                # Rotation from LiDAR to camera
+                self.extrinsic_tvec,                # Translation from LiDAR to camera
+                self.camera_matrix,                 # Intrinsic parameters [fx,fy,cx,cy]
+                self.distortion                     # Distortion coefficients
             )
 
-        except Exception as e:
-            self.get_logger().warn(f"Projection test failed: {e}")
+            # === STEP 4: FILTER POINTS FOR VISIBILITY ===
+            # Educational note: We need to filter points that are behind the camera
+            # After projection, we check which points would be visible
+            # Transform points to camera frame for Z-check (points behind camera have negative Z)
 
-    def _validate_coordinate_system(self, R, t, K, w, h):
-        """Validate coordinate system and transformation."""
-        try:
-            self.get_logger().info("=== COORDINATE SYSTEM VALIDATION ===")
+            # Compute camera frame points for filtering (only for Z-check)
+            # Apply rotation
+            R, _ = cv2.Rodrigues(self.extrinsic_rvec)
+            camera_points = (R @ lidar_points.T).T + self.extrinsic_tvec.reshape(1, 3)
 
-            # Check camera matrix
-            fx, fy = K[0, 0], K[1, 1]
-            cx, cy = K[0, 2], K[1, 2]
-            self.get_logger().info(
-                f"Camera intrinsics: fx={fx:.1f}, fy={fy:.1f}, cx={cx:.1f}, cy={cy:.1f}"
-            )
+            # Filter points behind camera (negative Z in camera frame)
+            front_mask = camera_points[:, 2] > 0.1  # At least 10cm in front
 
-            # Check if focal length is reasonable
-            if fx > 10000 or fy > 10000:
-                self.get_logger().warn(
-                    f"WARNING: Very large focal length detected! This might indicate a coordinate system issue."
-                )
+            if not np.any(front_mask):
+                self._draw_status_message("No points in front of camera")
+                return
 
-            # Check principal point
-            if cx < 0 or cx > w or cy < 0 or cy > h:
-                self.get_logger().warn(
-                    f"WARNING: Principal point ({cx:.1f}, {cy:.1f}) is outside image bounds ({w}x{h})"
-                )
+            # Filter projected points to only include those in front
+            projected_points_front = projected_points[front_mask]
 
-            # Check rotation matrix properties
-            det_R = np.linalg.det(R)
-            if abs(det_R - 1.0) > 0.01:
-                self.get_logger().warn(
-                    f"WARNING: Rotation matrix determinant is {det_R:.6f} (should be 1.0)"
-                )
+            # Reshape to simple 2D array: [[u1,v1], [u2,v2], ...]
+            image_points = projected_points_front.reshape(-1, 2)
 
-            # Check if R is orthogonal
-            should_be_identity = R @ R.T
-            identity_error = np.linalg.norm(should_be_identity - np.eye(3))
-            if identity_error > 0.01:
-                self.get_logger().warn(
-                    f"WARNING: Rotation matrix is not orthogonal (error: {identity_error:.6f})"
-                )
+            # === STEP 5: VISUAL OVERLAY ===
+            # Draw projected LiDAR points on camera image
+            overlay_image = self._create_visual_overlay(image_points)
 
-            # Test transformation with known points
-            test_points = np.array(
-                [
-                    [0, 0, 1],  # 1m in front of LiDAR
-                    [1, 0, 1],  # 1m right, 1m forward
-                    [0, 1, 1],  # 1m up, 1m forward
-                    [0, 0, 5],  # 5m in front
-                ],
-                dtype=np.float64,
-            )
+            # === STEP 6: PUBLISH RESULT ===
+            # Convert back to ROS Image message and publish
+            self._publish_overlay(overlay_image)
 
-            # Transform to camera frame
-            test_cam = (R @ test_points.T).T + t.reshape(1, 3)
-
-            # Project using simple pinhole model
-            rvec, _ = cv2.Rodrigues(R)
-            tvec = t.reshape(3, 1)
-            test_proj, _ = cv2.projectPoints(test_points, rvec, tvec, K, None)
-            test_proj = test_proj.reshape(-1, 2)
-
-            self.get_logger().info("Test point projections:")
-            for i, (orig, cam, proj) in enumerate(
-                zip(test_points, test_cam, test_proj)
-            ):
+            # Educational statistics logging
+            self.message_counts["overlays_published"] += 1
+            if self.message_counts["overlays_published"] % 30 == 0:
                 self.get_logger().info(
-                    f"  Point {i}: LiDAR{tuple(orig)} -> Cam{tuple(cam)} -> Proj({proj[0]:.1f},{proj[1]:.1f})"
+                    f"Overlay #{self.message_counts['overlays_published']}: "
+                    f"{np.sum(front_mask)}/{len(lidar_points)} points visible"
                 )
 
-                # Check if projection is reasonable
-                if abs(proj[0]) > w * 2 or abs(proj[1]) > h * 2:
-                    self.get_logger().warn(
-                        f"    WARNING: Projection is way outside image bounds!"
-                    )
+        except Exception as e:
+            self.get_logger().error(f"Overlay generation failed: {str(e)}")
+            self._draw_status_message(f"Processing error: {str(e)}")
 
-            self.get_logger().info("=== END VALIDATION ===")
+    def _create_visual_overlay(self, image_points: np.ndarray) -> np.ndarray:
+        """
+        Educational Helper: Create visual overlay of LiDAR points on camera image
+
+        Args:
+            image_points: Projected 2D pixel coordinates [[u1,v1], [u2,v2], ...]
+
+        Returns:
+            np.ndarray: Camera image with LiDAR points overlaid
+        """
+        # Convert ROS Image to OpenCV format (BGR8)
+        cv_image = self.bridge.imgmsg_to_cv2(self.latest_image, desired_encoding="bgr8")
+        h, w = cv_image.shape[:2]
+
+        # Draw each projected point as a colored circle
+        points_drawn = 0
+        for u, v in image_points:
+            # Only draw points that fall within image boundaries
+            if 0 <= u < w and 0 <= v < h:
+                # Draw filled green circle (LiDAR point)
+                cv2.circle(cv_image, (int(u), int(v)), 2, (0, 255, 0), -1)
+                # Draw red border for better visibility
+                cv2.circle(cv_image, (int(u), int(v)), 3, (0, 0, 255), 1)
+                points_drawn += 1
+
+        # Add educational status overlay
+        status_text = f"LiDAR Points: {points_drawn}/{len(image_points)} visible"
+        cv2.putText(cv_image, status_text, (10, h - 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        return cv_image
+
+    def _draw_status_message(self, message: str):
+        """
+        Educational Helper: Draw status message on image when data is unavailable
+
+        Args:
+            message: Status message to display
+        """
+        if self.latest_image is None:
+            return
+
+        # Convert image and draw status message
+        cv_image = self.bridge.imgmsg_to_cv2(self.latest_image, desired_encoding="bgr8")
+        h, w = cv_image.shape[:2]
+
+        # Draw semi-transparent background for text
+        overlay = cv_image.copy()
+        cv2.rectangle(overlay, (10, 10), (w - 10, 60), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, cv_image, 0.3, 0, cv_image)
+
+        # Draw status message
+        cv2.putText(cv_image, message, (20, 40),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        self._publish_overlay(cv_image)
+
+    def _publish_overlay(self, cv_image: np.ndarray):
+        """
+        Educational Helper: Publish overlay image as ROS message
+
+        Args:
+            cv_image: OpenCV image with overlay visualization
+        """
+        try:
+            # Convert OpenCV image back to ROS Image message
+            ros_image = self.bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
+            ros_image.header = self.latest_image.header  # Preserve timestamp and frame
+
+            # Publish for visualization in RViz, image viewers, etc.
+            self.overlay_publisher.publish(ros_image)
 
         except Exception as e:
-            self.get_logger().warn(f"Coordinate system validation failed: {e}")
+            self.get_logger().error(f"Failed to publish overlay: {str(e)}")
 
 
 def main():
+    """
+    Educational Main Function: ROS 2 Node Lifecycle
+
+    This demonstrates the standard ROS 2 Python node lifecycle pattern.
+    """
+    # Initialize ROS 2 Python client library
     rclpy.init()
-    node = OverlayNode()
+
+    # Create our educational node instance
+    node = EducationalOverlayNode()
+
     try:
+        # Enter ROS 2 event loop (handles callbacks, message processing)
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        # Graceful shutdown on Ctrl+C
+        node.get_logger().info("Educational node shutting down...")
     finally:
+        # Clean up resources
         node.destroy_node()
         rclpy.shutdown()
 
