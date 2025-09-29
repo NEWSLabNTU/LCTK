@@ -498,9 +498,9 @@ class EducationalExtrinsicSolver(Node):
         # Educational note: K matrix defines internal camera geometry
         K = np.array(self.camera_info.k, dtype=np.float32).reshape(3, 3)
 
-        # Extract distortion coefficients
-        # Educational note: Distortion coefficients correct for lens imperfections
-        dist_coeffs = np.array(self.camera_info.d, dtype=np.float32)
+        # Use zero distortion coefficients since ArUco detection now uses undistorted images
+        # Educational note: Images are pre-undistorted in ArUco locator node
+        dist_coeffs = np.zeros(5, dtype=np.float32)
 
         self.get_logger().info(
             f"Solving PnP with {len(object_points)} correspondences\n"
