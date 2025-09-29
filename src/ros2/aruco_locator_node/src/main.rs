@@ -1,19 +1,20 @@
 use anyhow::{anyhow, bail, Result};
+use arc_swap::ArcSwap;
 use aruco_detector::multi_aruco::ImageMarker;
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use opencv::{
-    core::{Scalar, CV_8UC1, CV_8UC3, CV_8UC4},
+    calib3d,
+    core::{Mat, Scalar, CV_8UC1, CV_8UC3, CV_8UC4},
     imgproc::{self, FONT_HERSHEY_SIMPLEX, LINE_8},
     prelude::*,
 };
 use rclrs::{SubscriptionOptions, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::{
-    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
@@ -151,26 +152,35 @@ fn calculate_bounding_box(corners: &[Point2D]) -> BoundingBox2D {
     }
 }
 
+/// Camera calibration data for undistortion (using vectors for thread-safety)
+#[derive(Clone, Debug)]
+struct CameraCalibration {
+    camera_matrix: [f64; 9], // 3x3 matrix in row-major order
+    distortion_coeffs: Vec<f64>,
+    width: i32,
+    height: i32,
+}
+
 /// ArUco detection ROS 2 node
 pub struct ArucoLocatorNode {
     _camera_info_subscription: Subscription<CameraInfo>,
     _image_subscription: Subscription<ImageMsg>,
     detection_publisher: Publisher<Detection2DArray>,
     overlay_publisher: Option<Publisher<ImageMsg>>,
-    detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
-    detection_cache: Arc<Mutex<VecDeque<Detection2DArray>>>,
-    _aruco_config_file: String,
+    detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
+    camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
+    aruco_pattern: Arc<aruco_config::MultiArucoPattern>,
     debug_overlay_enabled: bool,
 }
 
 impl ArucoLocatorNode {
     /// Create a new ArUco locator node
     pub fn new(node: &Node) -> Result<Self> {
-        // Create the detector state
-        let detector_state = Arc::new(Mutex::new(None));
+        // Create the detector state using ArcSwap for lock-free access
+        let detector_state = Arc::new(ArcSwap::from_pointee(None));
 
-        // Create detection cache for overlay functionality
-        let detection_cache = Arc::new(Mutex::new(VecDeque::new()));
+        // Create camera calibration storage using ArcSwap for lock-free access
+        let camera_calibration = Arc::new(ArcSwap::from_pointee(None));
 
         // Get the aruco_config_file parameter (mandatory - must be set by user)
         let aruco_config_file = node
@@ -180,6 +190,9 @@ impl ArucoLocatorNode {
             .to_string();
 
         log_info!(LOGGER_NAME, "Using ArUco config file: {aruco_config_file}");
+
+        // Load ArUco pattern for use in overlay generation
+        let aruco_pattern = Arc::new(Self::load_aruco_pattern(&aruco_config_file)?);
 
         // Get debug overlay parameter (default: false)
         let debug_overlay_enabled = node
@@ -261,6 +274,7 @@ impl ArucoLocatorNode {
 
         // Subscribe to camera_info using derived topic name
         let detector_state_camera_info = Arc::clone(&detector_state);
+        let camera_calibration_camera_info = Arc::clone(&camera_calibration);
         let config_file_for_callback = aruco_config_file.clone();
         let mut camera_info_options = SubscriptionOptions::new(&camera_info_topic);
         camera_info_options.qos = qos_profile.clone();
@@ -269,6 +283,7 @@ impl ArucoLocatorNode {
                 Self::camera_info_callback(
                     msg,
                     Arc::clone(&detector_state_camera_info),
+                    Arc::clone(&camera_calibration_camera_info),
                     &config_file_for_callback,
                 );
             })?;
@@ -276,9 +291,10 @@ impl ArucoLocatorNode {
         std::mem::drop(temp_image_subscription); // Drop the temporary subscription
 
         let detector_state_image = Arc::clone(&detector_state);
-        let detection_cache_image = Arc::clone(&detection_cache);
+        let camera_calibration_image = Arc::clone(&camera_calibration);
         let detection_publisher_image = detection_publisher.clone();
         let overlay_publisher_image = overlay_publisher.clone();
+        let aruco_pattern_image = Arc::clone(&aruco_pattern);
 
         let mut image_options = SubscriptionOptions::new(image_topic);
         image_options.qos = qos_profile.clone();
@@ -287,9 +303,10 @@ impl ArucoLocatorNode {
                 Self::image_callback(
                     msg,
                     Arc::clone(&detector_state_image),
-                    Arc::clone(&detection_cache_image),
+                    Arc::clone(&camera_calibration_image),
                     &detection_publisher_image,
                     &overlay_publisher_image,
+                    Arc::clone(&aruco_pattern_image),
                     debug_overlay_enabled,
                 );
             })?;
@@ -310,8 +327,8 @@ impl ArucoLocatorNode {
             detection_publisher,
             overlay_publisher,
             detector_state,
-            detection_cache,
-            _aruco_config_file: aruco_config_file,
+            camera_calibration,
+            aruco_pattern,
             debug_overlay_enabled,
         };
 
@@ -321,16 +338,12 @@ impl ArucoLocatorNode {
     /// Handle camera info updates
     fn camera_info_callback(
         camera_info: CameraInfo,
-        detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
+        detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
+        camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
         aruco_config_file: &str,
     ) {
-        // Check if detector is already initialized
-        let already_initialized = {
-            match detector_state.lock() {
-                Ok(state) => state.is_some(),
-                Err(_) => false,
-            }
-        };
+        // Check if detector is already initialized (lock-free read)
+        let already_initialized = detector_state.load().is_some();
 
         let aruco_pattern = match Self::load_aruco_pattern(aruco_config_file) {
             Ok(pattern) => pattern,
@@ -339,6 +352,16 @@ impl ArucoLocatorNode {
                 return;
             }
         };
+
+        // Store camera calibration data for undistortion
+        match Self::store_camera_calibration(&camera_info, Arc::clone(&camera_calibration)) {
+            Ok(_) => {
+                log_info!(LOGGER_NAME, "Camera calibration stored for undistortion");
+            }
+            Err(e) => {
+                log_error!(LOGGER_NAME, "Failed to store camera calibration: {e}");
+            }
+        }
 
         let config = ArucoDetectorConfig {
             camera_info,
@@ -353,15 +376,8 @@ impl ArucoLocatorNode {
             }
         };
 
-        let mut state = match detector_state.lock() {
-            Ok(state) => state,
-            Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to lock detector state: {e}");
-                return;
-            }
-        };
-
-        *state = Some(Arc::new(detector));
+        // Store detector using ArcSwap
+        detector_state.store(Arc::new(Some(Arc::new(detector))));
 
         // Only log initialization message once
         if !already_initialized {
@@ -388,16 +404,89 @@ impl ArucoLocatorNode {
         Ok(pattern)
     }
 
-    /// Process the incoming image
+    /// Store camera calibration data for undistortion
+    fn store_camera_calibration(
+        camera_info: &CameraInfo,
+        camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
+    ) -> Result<()> {
+        // Extract camera matrix (3x3) as array
+        let camera_matrix: [f64; 9] = camera_info.k[0..9]
+            .try_into()
+            .map_err(|_| anyhow!("Camera matrix must have 9 elements"))?;
+
+        // Extract distortion coefficients as vector
+        let distortion_coeffs: Vec<f64> = camera_info.d.iter().map(|&x| x as f64).collect();
+
+        let calibration = CameraCalibration {
+            camera_matrix,
+            distortion_coeffs,
+            width: camera_info.width as i32,
+            height: camera_info.height as i32,
+        };
+
+        // Store the calibration using ArcSwap
+        camera_calibration.store(Arc::new(Some(calibration)));
+        Ok(())
+    }
+
+    /// Undistort image using camera calibration
+    fn undistort_image(image: &Mat, calibration: &CameraCalibration) -> Result<Mat> {
+        // Convert camera matrix from array to Mat (CV_64FC1 - double precision)
+        let camera_matrix = Mat::from_slice_2d(&[
+            &calibration.camera_matrix[0..3],
+            &calibration.camera_matrix[3..6],
+            &calibration.camera_matrix[6..9],
+        ])?;
+
+        // Convert distortion coefficients from Vec to Mat (CV_64FC1 - double precision)
+        // OpenCV expects distortion coefficients as a 1xN or Nx1 matrix
+        let distortion_coeffs = if calibration.distortion_coeffs.is_empty() {
+            // No distortion - use zeros
+            Mat::zeros(1, 5, opencv::core::CV_64FC1)?.to_mat()?
+        } else {
+            // Create 1xN matrix from vector (row vector)
+            Mat::from_slice_rows_cols(
+                &calibration.distortion_coeffs,
+                1,
+                calibration.distortion_coeffs.len(),
+            )?
+        };
+
+        let mut undistorted = Mat::default();
+
+        calib3d::undistort(
+            image,
+            &mut undistorted,
+            &camera_matrix,
+            &distortion_coeffs,
+            &opencv::core::no_array(),
+        )?;
+
+        Ok(undistorted)
+    }
+
+    /// Process the incoming image with undistortion
     fn process_image(
         msg: &ImageMsg,
         detector: &ArucoDetector,
-    ) -> Result<aruco_locator::DetectionResult> {
+        camera_calibration: Option<&CameraCalibration>,
+    ) -> Result<(aruco_locator::DetectionResult, Mat)> {
         // Validate image encoding and convert to OpenCV Mat
         let mat = Self::ros_image_to_opencv_mat(msg)?;
 
-        // Detect ArUco markers
-        detector.detect_markers(&mat)
+        // Camera calibration must be available to proceed
+        let calibration = camera_calibration.ok_or_else(|| {
+            anyhow!("process_image called without camera calibration - this is a bug")
+        })?;
+
+        // Undistort image - fail if undistortion fails
+        let processed_mat = Self::undistort_image(&mat, calibration)?;
+        log_debug!(LOGGER_NAME, "Image undistorted for ArUco detection");
+
+        // Detect ArUco markers on processed (undistorted) image
+        let detection_result = detector.detect_markers(&processed_mat)?;
+
+        Ok((detection_result, processed_mat))
     }
 
     /// Convert ROS Image message to OpenCV Mat with proper encoding handling
@@ -458,90 +547,20 @@ impl ArucoLocatorNode {
         Ok(processed_mat)
     }
 
-    /// Save debug images to visualize the processing pipeline
-    fn save_debug_images(mat: &Mat, msg: &ImageMsg) -> Result<()> {
-        use opencv::{
-            core::Vector,
-            imgcodecs::{imwrite, IMWRITE_JPEG_QUALITY},
-        };
-
-        // Create debug directory if it doesn't exist
-        let debug_dir = "debug_images";
-        std::fs::create_dir_all(debug_dir)?;
-
-        // Generate timestamp for unique filenames
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_millis();
-
-        // Save the original BGR/RGB image
-        let original_filename = format!(
-            "{}/original_{}x{}_{}.jpg",
-            debug_dir, msg.width, msg.height, timestamp
-        );
-        let mut jpeg_params = Vector::new();
-        jpeg_params.push(IMWRITE_JPEG_QUALITY);
-        jpeg_params.push(90); // Quality 90%
-
-        match imwrite(&original_filename, mat, &jpeg_params) {
-            Ok(_) => log_info!(LOGGER_NAME, "Saved original image: {}", original_filename),
-            Err(e) => log_warn!(LOGGER_NAME, "Failed to save original image: {}", e),
-        }
-
-        // Convert to grayscale to see what ArUco detection actually sees
-        let mut gray_mat = Mat::default();
-        let channels = mat.channels();
-        if channels > 1 {
-            opencv::imgproc::cvt_color(mat, &mut gray_mat, opencv::imgproc::COLOR_BGR2GRAY, 0)?;
-
-            let gray_filename = format!(
-                "{}/grayscale_{}x{}_{}.jpg",
-                debug_dir, msg.width, msg.height, timestamp
-            );
-
-            match imwrite(&gray_filename, &gray_mat, &jpeg_params) {
-                Ok(_) => log_info!(LOGGER_NAME, "Saved grayscale image: {}", gray_filename),
-                Err(e) => log_warn!(LOGGER_NAME, "Failed to save grayscale image: {}", e),
-            }
-        } else {
-            // Already grayscale
-            let gray_filename = format!(
-                "{}/already_grayscale_{}x{}_{}.jpg",
-                debug_dir, msg.width, msg.height, timestamp
-            );
-
-            match imwrite(&gray_filename, mat, &jpeg_params) {
-                Ok(_) => log_info!(LOGGER_NAME, "Saved grayscale image: {}", gray_filename),
-                Err(e) => log_warn!(LOGGER_NAME, "Failed to save grayscale image: {}", e),
-            }
-        }
-
-        Ok(())
-    }
-
     /// Process incoming image messages and publish detection results
     fn image_callback(
         msg: ImageMsg,
-        detector_state: Arc<Mutex<Option<Arc<ArucoDetector>>>>,
-        detection_cache: Arc<Mutex<VecDeque<Detection2DArray>>>,
+        detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
+        camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
         detection_publisher: &Publisher<Detection2DArray>,
         overlay_publisher: &Option<Publisher<ImageMsg>>,
+        aruco_pattern: Arc<aruco_config::MultiArucoPattern>,
         debug_overlay_enabled: bool,
     ) {
-        // Get detector
+        // Get detector (lock-free read with ArcSwap)
         let detector = {
-            let state_lock = match detector_state.lock() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    log_error!(
-                        LOGGER_NAME,
-                        "Failed to lock detector state in image_callback: {e}"
-                    );
-                    return;
-                }
-            };
-
-            match state_lock.as_ref() {
+            let state = detector_state.load();
+            match state.as_ref() {
                 Some(detector) => Arc::clone(detector),
                 None => {
                     // Detector not initialized yet, skip this frame
@@ -550,8 +569,35 @@ impl ArucoLocatorNode {
             }
         };
 
-        match Self::process_image(&msg, &detector) {
-            Ok(detection_result) => {
+        // Get camera calibration for undistortion (lock-free read with ArcSwap)
+        let calibration = {
+            let calib = camera_calibration.load();
+            (**calib).clone()
+        };
+
+        // Wait for camera_info before processing images
+        let calibration = match calibration {
+            Some(calib) => calib,
+            None => {
+                // Camera info not received yet, skip this frame
+                // Log occasionally to avoid spam
+                static mut NO_CAMERA_INFO_COUNT: u32 = 0;
+                unsafe {
+                    NO_CAMERA_INFO_COUNT += 1;
+                    if NO_CAMERA_INFO_COUNT % 60 == 1 {
+                        // Log every 60th frame to indicate waiting for camera_info
+                        log_warn!(
+                            LOGGER_NAME,
+                            "Waiting for camera_info before processing images (suppressing repeated messages)"
+                        );
+                    }
+                }
+                return;
+            }
+        };
+
+        match Self::process_image(&msg, &detector, Some(&calibration)) {
+            Ok((detection_result, processed_image)) => {
                 // Create message header
                 let header = Header {
                     stamp: msg.header.stamp.clone(),
@@ -598,31 +644,15 @@ impl ArucoLocatorNode {
                     log_error!(LOGGER_NAME, "Failed to publish detection result: {e}");
                 }
 
-                // Cache detection for overlay
-                if debug_overlay_enabled {
-                    if let Ok(mut cache) = detection_cache.lock() {
-                        cache.push_back(detection_msg.clone());
-                        // Keep cache size reasonable (max 10 messages)
-                        while cache.len() > 10 {
-                            cache.pop_front();
-                        }
-                    }
-                }
-
                 // Create and publish overlay image if debug is enabled
                 if debug_overlay_enabled {
-                    if let Some(overlay_pub) = overlay_publisher {
-                        match Self::create_overlay_image(&msg, &detection_msg) {
-                            Ok(overlay_image) => {
-                                if let Err(e) = overlay_pub.publish(&overlay_image) {
-                                    log_error!(LOGGER_NAME, "Failed to publish overlay image: {e}");
-                                }
-                            }
-                            Err(e) => {
-                                log_error!(LOGGER_NAME, "Failed to create overlay image: {e}");
-                            }
-                        }
-                    }
+                    Self::publish_debug_overlay(
+                        &msg,
+                        &processed_image,
+                        &detection_msg,
+                        overlay_publisher,
+                        &aruco_pattern,
+                    );
                 }
             }
             Err(e) => {
@@ -631,21 +661,63 @@ impl ArucoLocatorNode {
         }
     }
 
+    /// Publish debug overlay image with ArUco detection visualizations
+    fn publish_debug_overlay(
+        original_image: &ImageMsg,
+        processed_image: &Mat,
+        detections: &Detection2DArray,
+        overlay_publisher: &Option<Publisher<ImageMsg>>,
+        aruco_pattern: &aruco_config::MultiArucoPattern,
+    ) {
+        if let Some(overlay_pub) = overlay_publisher {
+            match Self::create_overlay_image(
+                original_image,
+                processed_image,
+                detections,
+                aruco_pattern,
+            ) {
+                Ok(overlay_image) => {
+                    if let Err(e) = overlay_pub.publish(&overlay_image) {
+                        log_error!(LOGGER_NAME, "Failed to publish overlay image: {e}");
+                    }
+                }
+                Err(e) => {
+                    log_error!(LOGGER_NAME, "Failed to create overlay image: {e}");
+                }
+            }
+        }
+    }
+
     /// Create an overlay image with ArUco detection visualizations
     fn create_overlay_image(
         original_image: &ImageMsg,
+        processed_image: &Mat,
         detections: &Detection2DArray,
+        aruco_pattern: &aruco_config::MultiArucoPattern,
     ) -> Result<ImageMsg> {
-        // Convert ROS image to OpenCV Mat
-        let mut cv_image = Self::ros_image_to_opencv_mat(original_image)?;
+        // Use the processed (potentially undistorted) image for overlay
+        let mut cv_image = processed_image.clone();
 
-        // Color map for different marker IDs (based on the Python implementation)
-        let colors = [
-            ("696", Scalar::new(0.0, 0.0, 255.0, 0.0)), // Red for ID 696
-            ("64", Scalar::new(0.0, 255.0, 0.0, 0.0)),  // Green for ID 64
-            ("306", Scalar::new(255.0, 0.0, 0.0, 0.0)), // Blue for ID 306
-            ("195", Scalar::new(0.0, 255.0, 255.0, 0.0)), // Cyan for ID 195
+        // Generate color map from ArUco pattern config
+        let predefined_colors = [
+            Scalar::new(0.0, 0.0, 255.0, 0.0),   // Red
+            Scalar::new(0.0, 255.0, 0.0, 0.0),   // Green
+            Scalar::new(255.0, 0.0, 0.0, 0.0),   // Blue
+            Scalar::new(0.0, 255.0, 255.0, 0.0), // Cyan
+            Scalar::new(255.0, 0.0, 255.0, 0.0), // Magenta
+            Scalar::new(255.0, 255.0, 0.0, 0.0), // Yellow
         ];
+
+        let color_map: std::collections::HashMap<String, Scalar> = aruco_pattern
+            .marker_ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| {
+                let color = predefined_colors[i % predefined_colors.len()];
+                (id.to_string(), color)
+            })
+            .collect();
+
         let default_color = Scalar::new(255.0, 0.0, 255.0, 0.0); // Magenta for unknown IDs
 
         if !detections.detections.is_empty() {
@@ -672,11 +744,7 @@ impl ArucoLocatorNode {
                 };
 
                 // Choose color based on marker ID
-                let color = colors
-                    .iter()
-                    .find(|(id, _)| *id == marker_id)
-                    .map(|(_, color)| *color)
-                    .unwrap_or(default_color);
+                let color = color_map.get(marker_id).copied().unwrap_or(default_color);
 
                 // Draw bounding box
                 opencv::imgproc::rectangle(

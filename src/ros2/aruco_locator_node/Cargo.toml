@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
+arc-swap = { workspace = true }
 opencv = { workspace = true, default-features = false, features = ["aruco", "calib3d", "highgui", "imgcodecs", "imgproc", "clang-runtime"] }
 serde_json = { workspace = true }
 aruco-locator = { version = "0.1.0", path = "../../rust/aruco-locator" }

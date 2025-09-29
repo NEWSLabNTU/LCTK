@@ -25,6 +25,7 @@ cv-convert = { version = "0.26.0" }
 
 # Core utilities
 anyhow = "1.0.75"
+arc-swap = "1.7.1"
 eyre = "0.6"
 thiserror = "1.0"
 serde = { version = "1.0.188", features = ["derive"] }
