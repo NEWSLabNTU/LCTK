@@ -241,7 +241,7 @@ src/ros2/lctk_launch/config/
 ├── aruco/              # ArUco marker patterns
 │   └── aruco_5x5_*.yaml        # Marker definitions
 └── camera/             # Camera calibration
-    └── intrinsics.yaml         # Camera intrinsic parameters
+    └── front_center_camera_info.yaml         # Camera intrinsic parameters
 ```
 
 To customize calibration parameters:
@@ -318,6 +318,36 @@ Debug mode provides:
    - Check configuration files in `src/ros2/lctk_launch/config/`
    - Enable debug mode to see intermediate processing steps
    - Ensure ArUco markers are clearly visible to camera
+
+6. **ROS 2 service timeouts with DDS discovery**
+
+   There is a known timing issue with ROS 2 DDS discovery, particularly when using CycloneDDS with localhost-only configuration. Services may become temporarily unreachable during the discovery lease renewal window (around 5 seconds after startup).
+
+   **Symptoms:**
+   - Services are discoverable with `ros2 service list` but calls timeout
+   - Service calls work immediately after launch but fail after ~5 seconds
+   - Random service availability when testing
+
+   **Solution:**
+   ```bash
+   # Wait for service to be fully available before calling
+   ros2 service wait /your/service/name --timeout 30
+
+   # In Python clients, use longer timeouts:
+   if not client.wait_for_service(timeout_sec=10.0):
+       print("Service not available")
+   ```
+
+   **For testing scripts:**
+   ```bash
+   # Add explicit wait in your scripts:
+   source install/setup.sh
+   export ROS_DOMAIN_ID=109
+   ros2 service wait /calibration/lidar_board_detector/get_bbox_params
+   # Then run your test
+   ```
+
+   This is a DDS configuration issue, not related to the service implementation. The `lidar_board_detector` uses lock-free arc-swap for optimal performance.
 
 ## Contributing
 
