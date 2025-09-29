@@ -3,6 +3,7 @@ mod services;
 
 use crate::{bbox::BBox, services::BBoxServices};
 use anyhow::{anyhow, bail, Result};
+use arc_swap::ArcSwap;
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
     Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Vector3 as GeomVector3,
@@ -26,7 +27,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     thread,
     time::{Duration, Instant},
@@ -125,7 +126,7 @@ impl CalibrationBoardLocatorNode {
         let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
 
         let bbox = Self::load_bbox_config(&bbox_file_param)?;
-        let bbox = Arc::new(Mutex::new(bbox));
+        let bbox = Arc::new(ArcSwap::new(Arc::new(bbox)));
 
         // Store bbox file path for save service
         let bbox_file_path = bbox_file_param.to_string();
@@ -296,7 +297,7 @@ impl CalibrationBoardLocatorNode {
         msg: PointCloud2,
         detector: &Arc<BoardDetector>,
         publisher: &Publisher<Detection3DArray>,
-        bbox: &Arc<Mutex<BBox>>,
+        bbox: &Arc<ArcSwap<BBox>>,
         board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
     ) {
@@ -356,7 +357,7 @@ impl CalibrationBoardLocatorNode {
     fn process_pointcloud(
         msg: &PointCloud2,
         detector: &Arc<BoardDetector>,
-        bbox: &Arc<Mutex<BBox>>,
+        bbox: &Arc<ArcSwap<BBox>>,
         board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
     ) -> Result<Detection3DArray> {
@@ -558,32 +559,27 @@ impl CalibrationBoardLocatorNode {
     // Stage 1: Bounding box filter
     fn filter_points_by_bbox(
         points: &[na::Point3<f64>],
-        bbox: &Arc<Mutex<BBox>>,
+        bbox: &Arc<ArcSwap<BBox>>,
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Result<Vec<na::Point3<f64>>> {
-        let bbox_guard = match bbox.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Failed to lock bbox mutex: {e}");
-                bail!("Failed to lock bbox: {e}");
-            }
-        };
+        // Load bbox using lock-free arc-swap
+        let bbox_copy = bbox.load();
 
         log_debug!(
             LOGGER_NAME,
             "Bounding box filter: center=[{:.2}, {:.2}, {:.2}], size=[{:.2}, {:.2}, {:.2}]",
-            bbox_guard.pose.translation.x,
-            bbox_guard.pose.translation.y,
-            bbox_guard.pose.translation.z,
-            bbox_guard.size_xyz[0],
-            bbox_guard.size_xyz[1],
-            bbox_guard.size_xyz[2]
+            bbox_copy.pose.translation.x,
+            bbox_copy.pose.translation.y,
+            bbox_copy.pose.translation.z,
+            bbox_copy.size_xyz[0],
+            bbox_copy.size_xyz[1],
+            bbox_copy.size_xyz[2]
         );
 
         // Publish bbox marker for visualization in RViz
         if let Some(debug_pubs) = board_debug_publishers {
-            let bbox_marker = Self::create_bbox_marker(&bbox_guard, header)?;
+            let bbox_marker = Self::create_bbox_marker(&bbox_copy, header)?;
             let marker_array = MarkerArray {
                 markers: vec![bbox_marker],
             };
@@ -594,7 +590,7 @@ impl CalibrationBoardLocatorNode {
 
         let active_points: Vec<_> = points
             .iter()
-            .filter(|pt| bbox_guard.contains_point(pt))
+            .filter(|pt| bbox_copy.contains_point(pt))
             .cloned()
             .collect();
 

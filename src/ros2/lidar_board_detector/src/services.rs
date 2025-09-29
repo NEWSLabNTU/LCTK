@@ -1,8 +1,9 @@
 use crate::bbox::BBox;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use lctk_interfaces::srv::{GetBBoxParams, SaveBBoxParams, SetBBoxParams};
 use rclrs::{log_debug, log_error, log_info, log_warn, Node, Service};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 // Type aliases to avoid ambiguity
 type GetBBoxParamsResponse = lctk_interfaces::srv::GetBBoxParams_Response;
@@ -22,27 +23,27 @@ pub struct BBoxServices {
 
 impl BBoxServices {
     /// Create all BBox services
-    pub fn new(node: &Node, bbox: Arc<Mutex<BBox>>, bbox_file_path: String) -> Result<Self> {
+    pub fn new(node: &Node, bbox: Arc<ArcSwap<BBox>>, bbox_file_path: String) -> Result<Self> {
         // Create GetBBoxParams service
         let get_bbox = Arc::clone(&bbox);
         let get_service = node
-            .create_service::<GetBBoxParams, _>("get_bbox_params", move |_request| {
-                handle_get_bbox_params(&get_bbox)
+            .create_service::<GetBBoxParams, _>("get_bbox_params", move |request, info| {
+                handle_get_bbox_params(request, info, &get_bbox)
             })?;
 
         // Create SetBBoxParams service
         let set_bbox = Arc::clone(&bbox);
         let set_service = node
-            .create_service::<SetBBoxParams, _>("set_bbox_params", move |request| {
-                handle_set_bbox_params(&set_bbox, request)
+            .create_service::<SetBBoxParams, _>("set_bbox_params", move |request, info| {
+                handle_set_bbox_params(request, info, &set_bbox)
             })?;
 
         // Create SaveBBoxParams service
         let save_bbox = Arc::clone(&bbox);
         let save_bbox_file_path = bbox_file_path.clone();
-        let save_service = node
-            .create_service::<SaveBBoxParams, _>("save_bbox_params", move |request| {
-                handle_save_bbox_params(&save_bbox, &save_bbox_file_path, request)
+        let save_service =
+            node.create_service::<SaveBBoxParams, _>("save_bbox_params", move |request, info| {
+                handle_save_bbox_params(request, info, &save_bbox, &save_bbox_file_path)
             })?;
 
         log_info!(
@@ -59,48 +60,40 @@ impl BBoxServices {
 }
 
 /// Handle GetBBoxParams service request
-fn handle_get_bbox_params(bbox: &Arc<Mutex<BBox>>) -> GetBBoxParamsResponse {
+fn handle_get_bbox_params(
+    _request: lctk_interfaces::srv::GetBBoxParams_Request,
+    _info: rclrs::ServiceInfo,
+    bbox: &Arc<ArcSwap<BBox>>,
+) -> GetBBoxParamsResponse {
     log_debug!(LOGGER_NAME, "GetBBoxParams service called");
 
-    match bbox.lock() {
-        Ok(bbox_guard) => {
-            let response = GetBBoxParamsResponse {
-                pose: bbox_guard.to_ros_pose(),
-                size_xyz: bbox_guard.size_xyz,
-            };
+    // Load bbox using lock-free arc-swap
+    let bbox_arc = bbox.load();
 
-            log_debug!(
-                LOGGER_NAME,
-                "GetBBoxParams success: pose=({:.3}, {:.3}, {:.3}), size=[{:.1}, {:.1}, {:.1}]",
-                response.pose.position.x,
-                response.pose.position.y,
-                response.pose.position.z,
-                response.size_xyz[0],
-                response.size_xyz[1],
-                response.size_xyz[2]
-            );
+    let response = GetBBoxParamsResponse {
+        pose: bbox_arc.to_ros_pose(),
+        size_xyz: bbox_arc.size_xyz,
+    };
 
-            response
-        }
-        Err(e) => {
-            log_error!(
-                LOGGER_NAME,
-                "Failed to lock bbox mutex in GetBBoxParams: {}",
-                e
-            );
-            // Return default values on error
-            GetBBoxParamsResponse {
-                pose: geometry_msgs::msg::Pose::default(),
-                size_xyz: [1.0, 1.0, 1.0],
-            }
-        }
-    }
+    log_debug!(
+        LOGGER_NAME,
+        "GetBBoxParams success: pose=({:.3}, {:.3}, {:.3}), size=[{:.1}, {:.1}, {:.1}]",
+        response.pose.position.x,
+        response.pose.position.y,
+        response.pose.position.z,
+        response.size_xyz[0],
+        response.size_xyz[1],
+        response.size_xyz[2]
+    );
+
+    response
 }
 
 /// Handle SetBBoxParams service request
 fn handle_set_bbox_params(
-    bbox: &Arc<Mutex<BBox>>,
     request: SetBBoxParamsRequest,
+    _info: rclrs::ServiceInfo,
+    bbox: &Arc<ArcSwap<BBox>>,
 ) -> SetBBoxParamsResponse {
     log_debug!(
         LOGGER_NAME,
@@ -133,42 +126,32 @@ fn handle_set_bbox_params(
         }
     };
 
-    // Update the shared bbox
-    match bbox.lock() {
-        Ok(mut bbox_guard) => {
-            *bbox_guard = new_bbox;
-            log_info!(
-                LOGGER_NAME,
-                "BBox parameters updated successfully: pose=({:.3}, {:.3}, {:.3}), size=[{:.1}, {:.1}, {:.1}]",
-                request.pose.position.x,
-                request.pose.position.y,
-                request.pose.position.z,
-                size_array[0],
-                size_array[1],
-                size_array[2]
-            );
+    // Update the shared bbox using lock-free arc-swap
+    bbox.store(Arc::new(new_bbox));
 
-            SetBBoxParamsResponse {
-                success: true,
-                message: "BBox parameters updated successfully".to_string(),
-            }
-        }
-        Err(e) => {
-            let error_msg = format!("Failed to lock bbox mutex: {}", e);
-            log_error!(LOGGER_NAME, "SetBBoxParams failed: {}", error_msg);
-            SetBBoxParamsResponse {
-                success: false,
-                message: error_msg,
-            }
-        }
+    log_info!(
+        LOGGER_NAME,
+        "BBox parameters updated successfully: pose=({:.3}, {:.3}, {:.3}), size=[{:.1}, {:.1}, {:.1}]",
+        request.pose.position.x,
+        request.pose.position.y,
+        request.pose.position.z,
+        size_array[0],
+        size_array[1],
+        size_array[2]
+    );
+
+    SetBBoxParamsResponse {
+        success: true,
+        message: "BBox parameters updated successfully".to_string(),
     }
 }
 
 /// Handle SaveBBoxParams service request
 fn handle_save_bbox_params(
-    bbox: &Arc<Mutex<BBox>>,
-    default_file_path: &str,
     request: SaveBBoxParamsRequest,
+    _info: rclrs::ServiceInfo,
+    bbox: &Arc<ArcSwap<BBox>>,
+    default_file_path: &str,
 ) -> SaveBBoxParamsResponse {
     log_debug!(
         LOGGER_NAME,
@@ -185,34 +168,24 @@ fn handle_save_bbox_params(
 
     log_debug!(LOGGER_NAME, "Using file path: {}", file_path);
 
-    // Get current bbox and save it
-    match bbox.lock() {
-        Ok(bbox_guard) => match bbox_guard.save_to_file(&file_path) {
-            Ok(()) => {
-                log_info!(
-                    LOGGER_NAME,
-                    "BBox parameters saved successfully to: {}",
-                    file_path
-                );
+    // Load current bbox and save it using lock-free arc-swap
+    let bbox_arc = bbox.load();
+    match bbox_arc.save_to_file(&file_path) {
+        Ok(()) => {
+            log_info!(
+                LOGGER_NAME,
+                "BBox parameters saved successfully to: {}",
+                file_path
+            );
 
-                SaveBBoxParamsResponse {
-                    success: true,
-                    message: "BBox parameters saved successfully".to_string(),
-                    saved_file_path: file_path,
-                }
+            SaveBBoxParamsResponse {
+                success: true,
+                message: "BBox parameters saved successfully".to_string(),
+                saved_file_path: file_path,
             }
-            Err(e) => {
-                let error_msg = format!("Failed to save bbox to file '{}': {}", file_path, e);
-                log_error!(LOGGER_NAME, "SaveBBoxParams failed: {}", error_msg);
-                SaveBBoxParamsResponse {
-                    success: false,
-                    message: error_msg,
-                    saved_file_path: String::new(),
-                }
-            }
-        },
+        }
         Err(e) => {
-            let error_msg = format!("Failed to lock bbox mutex: {}", e);
+            let error_msg = format!("Failed to save bbox to file '{}': {}", file_path, e);
             log_error!(LOGGER_NAME, "SaveBBoxParams failed: {}", error_msg);
             SaveBBoxParamsResponse {
                 success: false,
