@@ -18,7 +18,6 @@ Author: LCTK Educational Team
 License: MIT
 """
 
-import os
 import threading
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -26,7 +25,6 @@ from typing import List, Optional, Tuple
 import cv2  # OpenCV for computer vision tasks
 import numpy as np  # Ubuntu 22.04 default (1.x)
 import rclpy
-import yaml
 from geometry_msgs.msg import Quaternion, Transform, TransformStamped, Vector3
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -93,24 +91,11 @@ class EducationalExtrinsicSolver(Node):
     def __init__(self):
         super().__init__("educational_extrinsic_solver")
 
-        # Parameter declaration (compatible with existing launch files)
+        # Essential parameter declarations
         self.declare_parameter("parent_frame", "lidar")
         self.declare_parameter("child_frame", "camera")
         self.declare_parameter("camera_topic", "")
-        self.declare_parameter("intrinsics_file", "")
-
-        # Educational note: Accept additional parameters for launch file compatibility
-        # These maintain compatibility with existing launch files but are ignored in educational version
-        self.declare_parameter(
-            "solver_method", "SQPNP"
-        )  # Educational: We use OpenCV solvePnP
-        self.declare_parameter("min_detections_required", 1)
-        self.declare_parameter("max_solver_iterations", 1000)
-        self.declare_parameter("convergence_threshold", 1e-6)
-        self.declare_parameter("debug_mode", True)  # Educational: Always educational
-        self.declare_parameter(
-            "enable_quality_assessment", False
-        )  # Educational: Removed for simplicity
+        self.declare_parameter("debug_mode", True)
 
         # Get parameters with simple error handling
         self.parent_frame = (
@@ -128,13 +113,6 @@ class EducationalExtrinsicSolver(Node):
 
         # Thread safety for simple caching
         self.lock = threading.Lock()
-
-        # Load camera intrinsics if provided
-        intrinsics_file = (
-            self.get_parameter("intrinsics_file").get_parameter_value().string_value
-        )
-        if intrinsics_file and os.path.exists(intrinsics_file):
-            self._load_camera_intrinsics(intrinsics_file)
 
         # QoS profile for reliable communication
         qos_profile = QoSProfile(
@@ -183,14 +161,6 @@ class EducationalExtrinsicSolver(Node):
         )
 
         # Educational note: Log configuration for learning purposes
-        solver_method = (
-            self.get_parameter("solver_method").get_parameter_value().string_value
-        )
-        min_detections = (
-            self.get_parameter("min_detections_required")
-            .get_parameter_value()
-            .integer_value
-        )
 
         self.get_logger().info(
             f"Educational Extrinsic Solver initialized\n"
@@ -198,48 +168,8 @@ class EducationalExtrinsicSolver(Node):
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
-            f"Launch file compatibility: solver_method={solver_method} (using cv2.solvePnP), "
-            f"min_detections={min_detections}"
+            f"Using cv2.solvePnP for educational demonstration"
         )
-
-    def _load_camera_intrinsics(self, yaml_path: str) -> None:
-        """
-        Load camera intrinsics from YAML file.
-
-        Educational note: Camera intrinsics define the internal geometry
-        of the camera including focal length, principal point, and distortion.
-        These parameters are needed for the PnP problem.
-        """
-        try:
-            with open(yaml_path, "r") as f:
-                data = yaml.safe_load(f)
-
-            # Create CameraInfo message from YAML data
-            ci = CameraInfo()
-            ci.width = int(data.get("image_width", 0))
-            ci.height = int(data.get("image_height", 0))
-
-            # Camera matrix K (3x3) - most important for PnP
-            # K = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
-            km = data.get("camera_matrix", {}).get("data", [])
-            if len(km) == 9:
-                ci.k = [float(x) for x in km]
-
-            # Distortion coefficients (typically 4, 5, or 8 parameters)
-            ci.distortion_model = str(data.get("distortion_model", "plumb_bob"))
-            d = data.get("distortion_coefficients", {}).get("data", [])
-            ci.d = [float(x) for x in d]
-
-            with self.lock:
-                self.camera_info = ci
-
-            self.get_logger().info(
-                f"Loaded camera intrinsics: {ci.width}x{ci.height}, "
-                f"fx={ci.k[0]:.1f}, fy={ci.k[4]:.1f}, "
-                f"cx={ci.k[2]:.1f}, cy={ci.k[5]:.1f}"
-            )
-        except Exception as e:
-            self.get_logger().warn(f"Failed to load intrinsics: {e}")
 
     def camera_info_callback(self, msg: CameraInfo):
         """

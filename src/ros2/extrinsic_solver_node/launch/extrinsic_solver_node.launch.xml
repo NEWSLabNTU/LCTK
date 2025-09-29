@@ -2,8 +2,8 @@
 <!--
     Launch file for extrinsic solver node.
 
-    This node demonstrates solvePnP with ArUco and board detections
-    to compute extrinsic calibration between LiDAR and camera.
+    This node solves LiDAR-camera extrinsic calibration using ArUco markers
+    and calibration board detections via the Perspective-n-Point (PnP) algorithm.
 -->
 <launch>
     <!-- Frame Arguments -->
@@ -15,27 +15,10 @@
          default="camera"
          description="Child frame for the extrinsic transform"/>
 
-    <!-- Configuration File Arguments -->
-    <arg name="aruco_pattern_file"
-         default=""
-         description="Path to ArUco pattern configuration file"/>
-
-    <arg name="aruco_config_file"
-         default="$(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5"
-         description="Path to ArUco pattern configuration JSON/JSON5 file"/>
-
-    <arg name="board_detector_file"
-         default="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"
-         description="Path to board detector JSON5 file"/>
-
-    <arg name="intrinsics_file"
-         default="config/intrinsics.yaml"
-         description="Path to camera intrinsics YAML file (relative to workspace root)"/>
-
-    <!-- Feature Flags -->
-    <arg name="enable_quality_assessment"
-         default="true"
-         description="Enable calibration quality assessment"/>
+    <!-- Camera Topic Argument -->
+    <arg name="camera_topic"
+         default="/sensing/camera/front_center/image_raw"
+         description="Camera image topic (camera_info topic will be derived from this)"/>
 
     <!-- Topic Arguments -->
     <arg name="aruco_detections"
@@ -46,39 +29,34 @@
          default="/calibration/lidar_board_detector/calibration_board_detections"
          description="Input calibration board detections topic"/>
 
-    <arg name="image_with_detections"
-         default="/calibration/aruco_locator/image_with_detections"
-         description="Input debug overlay image topic"/>
-
-    <arg name="camera_info"
-         default="/camera_info"
-         description="Camera info topic"/>
-
     <arg name="extrinsic_transform"
          default="/calibration/extrinsic_solver/extrinsic_transform"
          description="Output extrinsic transform topic"/>
 
-    <arg name="calibration_quality"
-         default="/calibration/extrinsic_solver/calibration_quality"
-         description="Output calibration quality topic"/>
+    <!-- Debug Mode -->
+    <arg name="debug_mode"
+         default="true"
+         description="Enable debug logging"/>
+
+    <arg name="log_level"
+         default="info"
+         description="ROS log level (debug, info, warn, error, fatal)"/>
 
     <!-- Extrinsic Solver Node -->
     <node pkg="extrinsic_solver_node"
           exec="extrinsic_solver_node"
           name="extrinsic_solver_node"
-          output="screen">
+          output="screen"
+          args="--ros-args --log-level $(var log_level)">
+        <!-- Essential parameters -->
         <param name="parent_frame" value="$(var parent_frame)"/>
         <param name="child_frame" value="$(var child_frame)"/>
-        <param name="aruco_pattern_file" value="$(var aruco_pattern_file)"/>
-        <param name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <param name="board_detector_file" value="$(var board_detector_file)"/>
-        <param name="intrinsics_file" value="$(var intrinsics_file)"/>
-        <param name="enable_quality_assessment" value="$(var enable_quality_assessment)"/>
+        <param name="camera_topic" value="$(var camera_topic)"/>
+        <param name="debug_mode" value="$(var debug_mode)"/>
+
+        <!-- Topic remapping -->
         <remap from="aruco_detections" to="$(var aruco_detections)"/>
         <remap from="calibration_board_detections" to="$(var board_detections)"/>
-        <remap from="image_with_detections" to="$(var image_with_detections)"/>
-        <remap from="camera_info" to="$(var camera_info)"/>
         <remap from="extrinsic_transform" to="$(var extrinsic_transform)"/>
-        <remap from="calibration_quality" to="$(var calibration_quality)"/>
     </node>
 </launch>
