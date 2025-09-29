@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 
-import sys
-import signal
 import curses
 import math
+import signal
+import sys
 import threading
 from typing import Optional
 
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import Pose, Point, Quaternion
-from lctk_interfaces.srv import GetBBoxParams, SetBBoxParams, SaveBBoxParams
 import numpy as np
+import rclpy
+from geometry_msgs.msg import Point, Pose, Quaternion
+from lctk_interfaces.srv import GetBBoxParams, SaveBBoxParams, SetBBoxParams
+from rclpy.node import Node
 
 
 def quaternion_to_euler(q):

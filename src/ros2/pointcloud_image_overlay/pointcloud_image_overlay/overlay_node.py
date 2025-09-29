@@ -22,17 +22,16 @@ Compatible with: OpenCV 4.5.4, NumPy 1.21.5 (Ubuntu 22.04)
 import math
 import struct
 from typing import Optional
-import numpy as np
+
 import cv2
-
+import numpy as np
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
-
-# ROS 2 message types
-from sensor_msgs.msg import Image, PointCloud2, CameraInfo
-from geometry_msgs.msg import TransformStamped
 from cv_bridge import CvBridge
+from geometry_msgs.msg import TransformStamped
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+# ROS 2 message types
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
 
 def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
@@ -80,7 +79,9 @@ def pointcloud2_to_xyz(pc2: PointCloud2) -> np.ndarray:
     return np.asarray(xyz, dtype=np.float32)
 
 
-def transform_to_rvec_tvec(transform: TransformStamped) -> tuple[np.ndarray, np.ndarray]:
+def transform_to_rvec_tvec(
+    transform: TransformStamped,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Educational Function: Convert ROS Transform to OpenCV rotation and translation vectors
 
@@ -109,11 +110,14 @@ def transform_to_rvec_tvec(transform: TransformStamped) -> tuple[np.ndarray, np.
 
     # Convert quaternion to 3x3 rotation matrix
     # This is the mathematical transformation from quaternion to rotation matrix
-    rotation_matrix = np.array([
-        [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
-        [2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
-        [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)]
-    ], dtype=np.float64)
+    rotation_matrix = np.array(
+        [
+            [1 - 2 * (qy**2 + qz**2), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+            [2 * (qx * qy + qz * qw), 1 - 2 * (qx**2 + qz**2), 2 * (qy * qz - qx * qw)],
+            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx**2 + qy**2)],
+        ],
+        dtype=np.float64,
+    )
 
     # Convert rotation matrix to Rodrigues rotation vector for OpenCV
     # cv2.Rodrigues converts between 3x3 rotation matrix and 3x1 rotation vector
@@ -155,7 +159,7 @@ class EducationalOverlayNode(Node):
             "pointclouds": 0,
             "camera_info": 0,
             "extrinsics": 0,
-            "overlays_published": 0
+            "overlays_published": 0,
         }
 
         # === EDUCATIONAL STATE VARIABLES ===
@@ -163,7 +167,7 @@ class EducationalOverlayNode(Node):
 
         # Camera intrinsic parameters (from camera_info topic)
         self.camera_matrix: Optional[np.ndarray] = None  # 3x3 K matrix
-        self.distortion: Optional[np.ndarray] = None     # Distortion coefficients
+        self.distortion: Optional[np.ndarray] = None  # Distortion coefficients
 
         # Extrinsic calibration (from live calibration solver)
         self.extrinsic_rvec: Optional[np.ndarray] = None  # Rotation vector (3x1)
@@ -176,7 +180,9 @@ class EducationalOverlayNode(Node):
         # === ROS 2 QUALITY OF SERVICE CONFIGURATION ===
         # Educational note: QoS affects message delivery reliability
         self.declare_parameter("use_best_effort_qos", True)
-        use_best_effort = self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
+        use_best_effort = (
+            self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
+        )
 
         if use_best_effort:
             # Best effort: Fast, may lose messages (good for live sensors)
@@ -194,11 +200,13 @@ class EducationalOverlayNode(Node):
 
         # Camera image stream (sensor_msgs/Image)
         self.image_subscription = self.create_subscription(
-            Image, "image", self.on_image_received, qos)
+            Image, "image", self.on_image_received, qos
+        )
 
         # LiDAR pointcloud stream (sensor_msgs/PointCloud2)
         self.pointcloud_subscription = self.create_subscription(
-            PointCloud2, "pointcloud", self.on_pointcloud_received, qos)
+            PointCloud2, "pointcloud", self.on_pointcloud_received, qos
+        )
 
         # Camera intrinsic parameters (sensor_msgs/CameraInfo)
         # Auto-derive topic name from image topic (image_pipeline convention)
@@ -210,7 +218,8 @@ class EducationalOverlayNode(Node):
             camera_info_topic = "camera_info"
 
         self.camera_info_subscription = self.create_subscription(
-            CameraInfo, camera_info_topic, self.on_camera_info_received, qos)
+            CameraInfo, camera_info_topic, self.on_camera_info_received, qos
+        )
 
         # === LIVE EXTRINSIC CALIBRATION SUBSCRIPTION ===
         # Educational highlight: Real-time calibration from solver instead of static file
@@ -218,12 +227,14 @@ class EducationalOverlayNode(Node):
             TransformStamped,
             "/calibration/extrinsic_solver/extrinsic_transform",  # Live calibration output
             self.on_extrinsic_received,
-            qos)
+            qos,
+        )
 
         # === OUTPUT PUBLISHER ===
         # Publish overlay visualization (sensor_msgs/Image)
         self.overlay_publisher = self.create_publisher(
-            Image, "/calibration/pointcloud_overlay", 10)
+            Image, "/calibration/pointcloud_overlay", 10
+        )
 
         # Educational logging
         self.get_logger().info("Educational Pointcloud Overlay Node Started!")
@@ -232,7 +243,9 @@ class EducationalOverlayNode(Node):
         self.get_logger().info("   - 3D to 2D coordinate transformation pipeline")
         self.get_logger().info("   - Multi-sensor data synchronization")
         self.get_logger().info("   - Camera projection model application")
-        self.get_logger().info(f"QoS Mode: {'Best Effort' if use_best_effort else 'Reliable'}")
+        self.get_logger().info(
+            f"QoS Mode: {'Best Effort' if use_best_effort else 'Reliable'}"
+        )
 
     def on_extrinsic_received(self, msg: TransformStamped):
         """
@@ -395,11 +408,11 @@ class EducationalOverlayNode(Node):
             # 3. Project to 2D using camera intrinsics
             # 4. Apply distortion correction
             projected_points, _ = cv2.projectPoints(
-                lidar_points.reshape(-1, 1, 3),     # LiDAR points in original frame
-                self.extrinsic_rvec,                # Rotation from LiDAR to camera
-                self.extrinsic_tvec,                # Translation from LiDAR to camera
-                self.camera_matrix,                 # Intrinsic parameters [fx,fy,cx,cy]
-                self.distortion                     # Distortion coefficients
+                lidar_points.reshape(-1, 1, 3),  # LiDAR points in original frame
+                self.extrinsic_rvec,  # Rotation from LiDAR to camera
+                self.extrinsic_tvec,  # Translation from LiDAR to camera
+                self.camera_matrix,  # Intrinsic parameters [fx,fy,cx,cy]
+                self.distortion,  # Distortion coefficients
             )
 
             # === STEP 4: FILTER POINTS FOR VISIBILITY ===
@@ -472,8 +485,15 @@ class EducationalOverlayNode(Node):
 
         # Add educational status overlay
         status_text = f"LiDAR Points: {points_drawn}/{len(image_points)} visible"
-        cv2.putText(cv_image, status_text, (10, h - 20),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(
+            cv_image,
+            status_text,
+            (10, h - 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+        )
 
         return cv_image
 
@@ -497,8 +517,9 @@ class EducationalOverlayNode(Node):
         cv2.addWeighted(overlay, 0.7, cv_image, 0.3, 0, cv_image)
 
         # Draw status message
-        cv2.putText(cv_image, message, (20, 40),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(
+            cv_image, message, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2
+        )
 
         self._publish_overlay(cv_image)
 

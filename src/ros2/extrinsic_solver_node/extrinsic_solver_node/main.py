@@ -18,23 +18,23 @@ Author: LCTK Educational Team
 License: MIT
 """
 
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-
-import numpy as np  # Ubuntu 22.04 default (1.x)
-import cv2          # OpenCV for computer vision tasks
-import yaml
 import os
-from typing import List, Tuple, Optional
-from dataclasses import dataclass
 import threading
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
+import cv2  # OpenCV for computer vision tasks
+import numpy as np  # Ubuntu 22.04 default (1.x)
+import rclpy
+import yaml
+from geometry_msgs.msg import Quaternion, Transform, TransformStamped, Vector3
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import CameraInfo
 # ROS2 message types
 from std_msgs.msg import Header
-from sensor_msgs.msg import CameraInfo
-from geometry_msgs.msg import Transform, TransformStamped, Vector3, Quaternion
-from vision_msgs.msg import Detection2DArray, Detection2D, Detection3DArray, Detection3D
+from vision_msgs.msg import (Detection2D, Detection2DArray, Detection3D,
+                             Detection3DArray)
 
 
 @dataclass
@@ -46,9 +46,10 @@ class ArUcoMarker:
     needed for PnP solving. Each marker has 4 corner points that can be
     precisely detected in images and matched to known 3D positions.
     """
+
     id: int
     corners: List[Tuple[float, float]]  # 4 corners in pixel coordinates
-    center: Tuple[float, float]         # Center point in pixels
+    center: Tuple[float, float]  # Center point in pixels
 
 
 @dataclass
@@ -60,7 +61,8 @@ class BoardDetection:
     transforming marker coordinates from local to world space. The board
     serves as a common reference object visible to both LiDAR and camera.
     """
-    position: Tuple[float, float, float]        # x, y, z in meters (LiDAR frame)
+
+    position: Tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
     orientation: Tuple[float, float, float, float]  # quaternion w, x, y, z
 
 
@@ -99,12 +101,16 @@ class EducationalExtrinsicSolver(Node):
 
         # Educational note: Accept additional parameters for launch file compatibility
         # These maintain compatibility with existing launch files but are ignored in educational version
-        self.declare_parameter("solver_method", "SQPNP")  # Educational: We use OpenCV solvePnP
+        self.declare_parameter(
+            "solver_method", "SQPNP"
+        )  # Educational: We use OpenCV solvePnP
         self.declare_parameter("min_detections_required", 1)
         self.declare_parameter("max_solver_iterations", 1000)
         self.declare_parameter("convergence_threshold", 1e-6)
         self.declare_parameter("debug_mode", True)  # Educational: Always educational
-        self.declare_parameter("enable_quality_assessment", False)  # Educational: Removed for simplicity
+        self.declare_parameter(
+            "enable_quality_assessment", False
+        )  # Educational: Removed for simplicity
 
         # Get parameters with simple error handling
         self.parent_frame = (
@@ -177,8 +183,14 @@ class EducationalExtrinsicSolver(Node):
         )
 
         # Educational note: Log configuration for learning purposes
-        solver_method = self.get_parameter("solver_method").get_parameter_value().string_value
-        min_detections = self.get_parameter("min_detections_required").get_parameter_value().integer_value
+        solver_method = (
+            self.get_parameter("solver_method").get_parameter_value().string_value
+        )
+        min_detections = (
+            self.get_parameter("min_detections_required")
+            .get_parameter_value()
+            .integer_value
+        )
 
         self.get_logger().info(
             f"Educational Extrinsic Solver initialized\n"
@@ -315,7 +327,9 @@ class EducationalExtrinsicSolver(Node):
                 missing.append("ArUco")
             if not board_msg:
                 missing.append("Board")
-            self.get_logger().debug(f"Waiting for detections: missing {', '.join(missing)}")
+            self.get_logger().debug(
+                f"Waiting for detections: missing {', '.join(missing)}"
+            )
 
     def _solve_extrinsic_calibration(
         self, aruco_msg: Detection2DArray, board_msg: Detection3DArray
@@ -472,7 +486,9 @@ class EducationalExtrinsicSolver(Node):
         image_points = []
 
         # Standard ArUco marker size (educational assumption)
-        marker_size = 0.1  # 10cm square markers
+        marker_size = (
+            0.2  # 20cm square markers (from 500mm board with 2x2 grid and 0.8 ratio)
+        )
 
         self.get_logger().info(
             f"Creating correspondences for {len(aruco_markers)} markers "
@@ -483,12 +499,15 @@ class EducationalExtrinsicSolver(Node):
             # Step 1: Define 4 corners in marker's local coordinate system
             # Educational note: Consistent corner ordering is critical for PnP
             # We use the standard ArUco corner ordering: TL, TR, BR, BL
-            local_corners = np.array([
-                [-marker_size/2, -marker_size/2, 0],  # Top-left
-                [ marker_size/2, -marker_size/2, 0],  # Top-right
-                [ marker_size/2,  marker_size/2, 0],  # Bottom-right
-                [-marker_size/2,  marker_size/2, 0]   # Bottom-left
-            ], dtype=np.float32)
+            local_corners = np.array(
+                [
+                    [-marker_size / 2, -marker_size / 2, 0],  # Top-left
+                    [marker_size / 2, -marker_size / 2, 0],  # Top-right
+                    [marker_size / 2, marker_size / 2, 0],  # Bottom-right
+                    [-marker_size / 2, marker_size / 2, 0],  # Bottom-left
+                ],
+                dtype=np.float32,
+            )
 
             # Step 2: Transform to world coordinates using board pose
             # Educational simplification: assume markers are coplanar with board
@@ -510,7 +529,9 @@ class EducationalExtrinsicSolver(Node):
                 f"-> image center ({marker.center[0]:.1f}, {marker.center[1]:.1f})"
             )
 
-        return np.array(object_points, dtype=np.float32), np.array(image_points, dtype=np.float32)
+        return np.array(object_points, dtype=np.float32), np.array(
+            image_points, dtype=np.float32
+        )
 
     def _solve_pnp_educational(
         self, object_points: np.ndarray, image_points: np.ndarray
@@ -561,11 +582,11 @@ class EducationalExtrinsicSolver(Node):
             # Solve PnP using OpenCV's iterative method
             # Educational note: ITERATIVE method is robust and educational
             success, rvec, tvec = cv2.solvePnP(
-                object_points,      # 3D object points (Nx3)
-                image_points,       # 2D image points (Nx2)
-                K,                  # Camera intrinsic matrix (3x3)
-                dist_coeffs,        # Distortion coefficients
-                flags=cv2.SOLVEPNP_ITERATIVE
+                object_points,  # 3D object points (Nx3)
+                image_points,  # 2D image points (Nx2)
+                K,  # Camera intrinsic matrix (3x3)
+                dist_coeffs,  # Distortion coefficients
+                flags=cv2.SOLVEPNP_ITERATIVE,
             )
 
             if success:
@@ -622,7 +643,7 @@ class EducationalExtrinsicSolver(Node):
             x=float(quaternion[0]),
             y=float(quaternion[1]),
             z=float(quaternion[2]),
-            w=float(quaternion[3])
+            w=float(quaternion[3]),
         )
 
         return transform_msg

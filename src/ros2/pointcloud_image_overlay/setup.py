@@ -1,5 +1,6 @@
 import os
 from glob import glob
+
 from setuptools import setup
 
 package_name = "pointcloud_image_overlay"

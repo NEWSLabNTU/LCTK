@@ -5,9 +5,9 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image, PointCloud2, CameraInfo
 from cv_bridge import CvBridge
+from rclpy.node import Node
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
 
 def read_extrinsic_json(path: str) -> Tuple[np.ndarray, np.ndarray]:
