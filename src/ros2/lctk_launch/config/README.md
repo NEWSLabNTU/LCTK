@@ -23,7 +23,7 @@ config/
 - `board_detector.json5` - Board detection algorithm parameters
 
 ### Camera Configurations (`camera/`)
-- `intrinsics.yaml` - Camera intrinsic parameters (focal length, distortion, etc.)
+- `front_center_camera_info.yaml` - Camera intrinsic parameters (focal length, distortion, etc.)
 
 ### LiDAR Configurations (`lidar/`)
 - LiDAR sensor specific configuration files (if any)
