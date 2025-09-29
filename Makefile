@@ -30,6 +30,9 @@ help:
 	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
 	@echo "  make launch_rviz                     - Launch RViz for calibration visualization"
 	@echo ""
+	@echo "Interactive Tools:"
+	@echo "  make tune_filter_box                 - Launch interactive bbox filter tuner (for lidar_board_detector)"
+	@echo ""
 	@echo "Service Management:"
 	@echo "  make service_status             - Show status of all LCTK services"
 	@echo "  make service_logs               - Show logs for all LCTK services"
@@ -171,6 +174,12 @@ launch_rviz:
 	@. install/setup.sh && \
 	export RUST_LOG=debug && \
 	ros2 launch lctk_launch rviz.launch.xml
+
+.PHONY: tune_filter_box
+tune_filter_box:
+	@. install/setup.sh && \
+	export RUST_LOG=info && \
+	ros2 run filter_box_tuner filter_box_tuner
 
 .PHONY: launch_iou_overlapping
 launch_iou_overlapping:

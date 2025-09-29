@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>filter_box_tuner</name>
+  <version>0.1.0</version>
+  <description>Interactive CLI tool for tuning bounding box filter parameters</description>
+
+  <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>lctk_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
