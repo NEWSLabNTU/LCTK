@@ -713,8 +713,12 @@ impl CalibrationBoardLocatorNode {
         };
 
         // Step 3: Create initial pose using PCA-based alignment
-        let initial_pose =
-            Self::compute_initial_pose_pca(plane_inlier_points, header, board_debug_publishers)?;
+        let initial_pose = Self::compute_initial_pose_pca(
+            plane_inlier_points,
+            board_width.as_meters(),
+            header,
+            board_debug_publishers,
+        )?;
 
         // Publish initial board pose for debugging (if debug publishers available)
         if let Some(debug_pubs) = board_debug_publishers {
@@ -867,6 +871,7 @@ impl CalibrationBoardLocatorNode {
     /// Compute initial board pose using PCA-based alignment
     fn compute_initial_pose_pca(
         plane_inlier_points: &[na::Point3<f64>],
+        board_width_meters: f64,
         header: &Header,
         debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Option<na::Isometry3<f64>> {
@@ -1074,18 +1079,28 @@ impl CalibrationBoardLocatorNode {
         // Step 8: Use the final composed rotation
         let rotation = final_rotation;
 
-        let pose = na::Isometry3::from_parts(Translation3::from(centroid), rotation);
+        // Step 9: Compute bottom corner position from centroid
+        // BoardModel::find_correspondences() uses bottom_corner() as the origin,
+        // so pose.translation MUST be at the bottom corner (0,0) in board coordinates
+        let center_to_corner_board =
+            na::Vector3::new(-board_width_meters / 2.0, -board_width_meters / 2.0, 0.0);
+        let corner_offset_world = rotation * center_to_corner_board;
+        let corner_position = na::Point3::from(centroid + corner_offset_world);
+
+        let pose = na::Isometry3::from_parts(Translation3::from(corner_position.coords), rotation);
 
         log_info!(
             LOGGER_NAME,
-            "PCA initial pose: translation=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
+            "PCA initial pose (corner): centroid=({:.3}, {:.3}, {:.3}), offset=({:.3}, {:.3}, {:.3}), corner=({:.3}, {:.3}, {:.3})",
+            centroid.x,
+            centroid.y,
+            centroid.z,
+            corner_offset_world.x,
+            corner_offset_world.y,
+            corner_offset_world.z,
             pose.translation.x,
             pose.translation.y,
-            pose.translation.z,
-            pose.rotation.i,
-            pose.rotation.j,
-            pose.rotation.k,
-            pose.rotation.w
+            pose.translation.z
         );
 
         Some(pose)
