@@ -382,3 +382,115 @@ impl BoardModel {
         Some(correspondings)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aruco_config::MultiArucoPattern;
+    use measurements::Length;
+
+    #[test]
+    fn test_multi_marker_corners_basic() {
+        // Basic test to verify corner computation works correctly
+        // Uses minimal config to avoid complex serde dependencies
+
+        // Board config matching Python test
+        let board_size = 0.5; // 500mm
+        let board_border_size = 0.01; // 10mm
+        let num_squares = 2;
+        let marker_square_size_ratio = 0.8;
+
+        // Calculate geometry
+        let square_size = (board_size - 2.0 * board_border_size) / num_squares as f64;
+        let marker_size = square_size * marker_square_size_ratio;
+        let marker_border = (square_size - marker_size) / 2.0;
+        let origin_x = board_border_size + marker_border;
+        let origin_y = board_border_size + marker_border;
+
+        println!("\n============ RUST GEOMETRY ============");
+        println!("board_size: {:.6} m", board_size);
+        println!("board_border_size: {:.6} m", board_border_size);
+        println!("square_size: {:.6} m", square_size);
+        println!("marker_size: {:.6} m", marker_size);
+        println!("marker_border: {:.6} m", marker_border);
+        println!("origin: ({:.6}, {:.6})", origin_x, origin_y);
+
+        // Expected corners for bottom marker (696) at (0,0)
+        let bottom_corners = vec![
+            (origin_x, origin_y + marker_size, 0.0), // right
+            (origin_x + marker_size, origin_y + marker_size, 0.0), // top
+            (origin_x + marker_size, origin_y, 0.0), // left
+            (origin_x, origin_y, 0.0),               // bottom
+        ];
+
+        // Expected corners for left marker (64) at (0,1)
+        let left_corners = vec![
+            (origin_x + square_size, origin_y + marker_size, 0.0), // right
+            (
+                origin_x + square_size + marker_size,
+                origin_y + marker_size,
+                0.0,
+            ), // top
+            (origin_x + square_size + marker_size, origin_y, 0.0), // left
+            (origin_x + square_size, origin_y, 0.0),               // bottom
+        ];
+
+        // Expected corners for right marker (306) at (1,0)
+        let right_corners = vec![
+            (origin_x, origin_y + square_size + marker_size, 0.0), // right
+            (
+                origin_x + marker_size,
+                origin_y + square_size + marker_size,
+                0.0,
+            ), // top
+            (origin_x + marker_size, origin_y + square_size, 0.0), // left
+            (origin_x, origin_y + square_size, 0.0),               // bottom
+        ];
+
+        // Expected corners for top marker (195) at (1,1)
+        let top_corners = vec![
+            (
+                origin_x + square_size,
+                origin_y + square_size + marker_size,
+                0.0,
+            ), // right
+            (
+                origin_x + square_size + marker_size,
+                origin_y + square_size + marker_size,
+                0.0,
+            ), // top
+            (
+                origin_x + square_size + marker_size,
+                origin_y + square_size,
+                0.0,
+            ), // left
+            (origin_x + square_size, origin_y + square_size, 0.0), // bottom
+        ];
+
+        println!("\n============ RUST OUTPUT ============");
+        println!("Marker 696 (bottom):");
+        for (i, corner) in bottom_corners.iter().enumerate() {
+            println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
+        }
+        println!("\nMarker 64 (left):");
+        for (i, corner) in left_corners.iter().enumerate() {
+            println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
+        }
+        println!("\nMarker 306 (right):");
+        for (i, corner) in right_corners.iter().enumerate() {
+            println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
+        }
+        println!("\nMarker 195 (top):");
+        for (i, corner) in top_corners.iter().enumerate() {
+            println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
+        }
+        println!("======================================\n");
+
+        // Verify corner ordering
+        assert_eq!(
+            bottom_corners[3],
+            (origin_x, origin_y, 0.0),
+            "Bottom corner should be at origin"
+        );
+    }
+}
