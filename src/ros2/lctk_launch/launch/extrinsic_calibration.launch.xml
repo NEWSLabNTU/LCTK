@@ -16,6 +16,10 @@
 -->
 <launch>
     <!-- Launch Arguments -->
+    <arg name="aruco_config_file"
+         default="$(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5"
+         description="Path to ArUco pattern configuration JSON5 file"/>
+
     <arg name="aruco_detections_topic"
          default="/calibration/aruco_locator/aruco_detections"
          description="Input ArUco detections topic"/>
@@ -56,6 +60,7 @@
           namespace="$(var namespace)/extrinsic_solver"
           output="screen"
           args="--ros-args --log-level $(var log_level)">
+        <param name="aruco_config_file" value="$(var aruco_config_file)"/>
         <param name="solver_method" value="$(var solver_method)"/>
         <param name="min_detections_required" value="$(var min_detections_required)"/>
         <param name="max_solver_iterations" value="1000"/>

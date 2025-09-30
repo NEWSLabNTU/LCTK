@@ -18,9 +18,10 @@ Author: LCTK Educational Team
 License: MIT
 """
 
+import json
 import threading
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2  # OpenCV for computer vision tasks
 import numpy as np  # Ubuntu 22.04 default (1.x)
@@ -28,6 +29,7 @@ import rclpy
 from geometry_msgs.msg import Quaternion, Transform, TransformStamped, Vector3
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from scipy.spatial.transform import Rotation as R  # Quaternion operations
 from sensor_msgs.msg import CameraInfo
 # ROS2 message types
 from std_msgs.msg import Header
@@ -95,6 +97,7 @@ class EducationalExtrinsicSolver(Node):
         self.declare_parameter("parent_frame", "lidar")
         self.declare_parameter("child_frame", "camera")
         self.declare_parameter("camera_topic", "")
+        self.declare_parameter("aruco_config_file", "")
         self.declare_parameter("debug_mode", True)
 
         # Get parameters with simple error handling
@@ -104,6 +107,12 @@ class EducationalExtrinsicSolver(Node):
         self.child_frame = (
             self.get_parameter("child_frame").get_parameter_value().string_value
         )
+        aruco_config_file = (
+            self.get_parameter("aruco_config_file").get_parameter_value().string_value
+        )
+
+        # Load ArUco pattern configuration
+        self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
 
         # Educational note: Cache latest detections for processing
         # We use simple variables instead of complex synchronization
@@ -382,12 +391,149 @@ class EducationalExtrinsicSolver(Node):
         return BoardDetection(
             position=(pose.position.x, pose.position.y, pose.position.z),
             orientation=(
-                pose.orientation.w,  # Note: OpenCV uses w-first quaternions
-                pose.orientation.x,
-                pose.orientation.y,
+                pose.orientation.x,  # ROS2 quaternion convention: (x, y, z, w)
+                pose.orientation.y,  # This matches SciPy's default scalar-last format
                 pose.orientation.z,
+                pose.orientation.w,
             ),
         )
+
+    def _load_aruco_pattern_config(self, config_file_path: str) -> dict:
+        """
+        Load ArUco pattern configuration from JSON5 file.
+
+        The config file contains board geometry parameters needed for
+        computing accurate 3D positions of ArUco markers on the calibration board.
+
+        Educational note: JSON5 allows comments and trailing commas for better
+        readability. We use standard json module since JSON5 is a superset of JSON.
+        """
+        if not config_file_path:
+            raise ValueError("aruco_config_file parameter is required")
+
+        self.get_logger().info(f"Loading ArUco pattern config from: {config_file_path}")
+
+        import json5
+
+        with open(config_file_path, "r") as f:
+            config = json5.load(f)
+
+        self.get_logger().info(
+            f"Loaded ArUco config: {config['num_squares_per_side']}x{config['num_squares_per_side']} grid, "
+            f"board_size={config['board_size']}, "
+            f"marker IDs={config['marker_ids']}"
+        )
+
+        return config
+
+    def _parse_dimension(self, dim_str: str) -> float:
+        """
+        Parse dimension string like '500mm' or '10mm' to meters.
+
+        Educational note: The config file uses human-readable units (mm)
+        but ROS and OpenCV work in meters.
+        """
+        if dim_str.endswith("mm"):
+            return float(dim_str[:-2]) / 1000.0
+        elif dim_str.endswith("m"):
+            return float(dim_str[:-1])
+        else:
+            return float(dim_str)
+
+    def _compute_multi_marker_corners(
+        self,
+    ) -> Dict[int, List[Tuple[float, float, float]]]:
+        """
+        Compute 3D corner positions for all ArUco markers in board frame.
+
+        This is the Python equivalent of Rust's HollowBoard::multi_marker_corners() method.
+
+        The calibration board has a 2x2 grid layout with 4 ArUco markers positioned at:
+        - Bottom (row 0, col 0)
+        - Left (row 0, col 1)
+        - Right (row 1, col 0)
+        - Top (row 1, col 1)
+
+        Each marker has 4 corners ordered as: TL, TR, BR, BL (counter-clockwise from top-left)
+
+        Returns:
+            Dict mapping marker IDs to their 4 corner positions in board frame coordinates
+        """
+        config = self.aruco_pattern_config
+
+        # Parse board dimensions
+        board_size = self._parse_dimension(config["board_size"])
+        board_border_size = self._parse_dimension(config["board_border_size"])
+        marker_square_size_ratio = config["marker_square_size_ratio"]
+        num_squares = config["num_squares_per_side"]
+        marker_ids = config["marker_ids"]
+
+        # Calculate grid geometry (matching Rust implementation)
+        square_size = (board_size - 2.0 * board_border_size) / num_squares
+        marker_size = square_size * marker_square_size_ratio
+        marker_border = (square_size - marker_size) / 2.0
+
+        self.get_logger().debug(
+            f"Board geometry: square_size={square_size*1000:.1f}mm, "
+            f"marker_size={marker_size*1000:.1f}mm, "
+            f"marker_border={marker_border*1000:.1f}mm"
+        )
+
+        # Helper function to create corners for a marker at given base position
+        def make_corners(
+            base_x: float, base_y: float
+        ) -> List[Tuple[float, float, float]]:
+            """
+            Create 4 corner points for a marker in board-local coordinates.
+            Corner ordering matches Rust: [right, top, left, bottom]
+
+            Rust implementation:
+                let bottom = self.board_plane_point(base_x, base_y);
+                let left = self.board_plane_point(base_x + marker_size, base_y);
+                let right = self.board_plane_point(base_x, base_y + marker_size);
+                let top = self.board_plane_point(base_x + marker_size, base_y + marker_size);
+                vec![right, top, left, bottom]
+
+            In board frame: X-axis points right, Y-axis points up, Z-axis is normal to board.
+            Returns corners in board-local coordinates (z=0 plane).
+            The board pose transformation is applied later when creating correspondences.
+            """
+            # Corners in board-local frame (matching Rust's board_plane_point with identity transform)
+            bottom = (base_x, base_y, 0.0)
+            left = (base_x + marker_size, base_y, 0.0)
+            right = (base_x, base_y + marker_size, 0.0)
+            top = (base_x + marker_size, base_y + marker_size, 0.0)
+
+            # Return in Rust ordering: [right, top, left, bottom]
+            return [right, top, left, bottom]
+
+        # Calculate origin offset (top-left corner of first marker)
+        origin_x = board_border_size + marker_border
+        origin_y = board_border_size + marker_border
+
+        # Create corners for each marker position (2x2 grid, x-major order)
+        # marker_ids = [bottom, left, right, top] for 2x2 grid
+        marker_corners = {}
+
+        # Bottom marker (row 0, col 0)
+        marker_corners[marker_ids[0]] = make_corners(origin_x, origin_y)
+
+        # Left marker (row 0, col 1)
+        marker_corners[marker_ids[1]] = make_corners(origin_x + square_size, origin_y)
+
+        # Right marker (row 1, col 0)
+        marker_corners[marker_ids[2]] = make_corners(origin_x, origin_y + square_size)
+
+        # Top marker (row 1, col 1)
+        marker_corners[marker_ids[3]] = make_corners(
+            origin_x + square_size, origin_y + square_size
+        )
+
+        self.get_logger().debug(
+            f"Computed corners for {len(marker_corners)} markers in board frame"
+        )
+
+        return marker_corners
 
     def _create_point_correspondences_educational(
         self, aruco_markers: List[ArUcoMarker], board_detection: BoardDetection
@@ -415,37 +561,54 @@ class EducationalExtrinsicSolver(Node):
         object_points = []
         image_points = []
 
-        # Standard ArUco marker size (educational assumption)
-        marker_size = (
-            0.2  # 20cm square markers (from 500mm board with 2x2 grid and 0.8 ratio)
-        )
-
         self.get_logger().info(
             f"Creating correspondences for {len(aruco_markers)} markers "
             f"with board at position {board_detection.position}"
         )
 
+        # Convert board orientation quaternion to rotation matrix using SciPy
+        # Board pose represents the rigid transformation from board frame to LiDAR frame
+        # board_detection.orientation is in (x, y, z, w) format matching SciPy's default
+        board_rotation = (
+            R.from_quat(board_detection.orientation).as_matrix().astype(np.float32)
+        )
+        board_position = np.array(board_detection.position, dtype=np.float32)
+
+        self.get_logger().debug(
+            f"Board pose: position={board_position}, "
+            f"quaternion=(x,y,z,w)={board_detection.orientation}"
+        )
+
+        # Compute 3D corner positions for all markers in board frame
+        # This matches the Rust implementation: HollowBoard::multi_marker_corners()
+        board_frame_corners = self._compute_multi_marker_corners()
+
         for i, marker in enumerate(aruco_markers):
-            # Step 1: Define 4 corners in marker's local coordinate system
-            # Educational note: Consistent corner ordering is critical for PnP
-            # We use the standard ArUco corner ordering: TL, TR, BR, BL
-            local_corners = np.array(
-                [
-                    [-marker_size / 2, -marker_size / 2, 0],  # Top-left
-                    [marker_size / 2, -marker_size / 2, 0],  # Top-right
-                    [marker_size / 2, marker_size / 2, 0],  # Bottom-right
-                    [-marker_size / 2, marker_size / 2, 0],  # Bottom-left
-                ],
-                dtype=np.float32,
-            )
+            # Parse marker ID from string format "aruco_696" to integer 696
+            marker_id_str = marker.id
+            if isinstance(marker_id_str, str) and marker_id_str.startswith("aruco_"):
+                marker_id = int(marker_id_str.split("_")[1])
+            else:
+                marker_id = (
+                    int(marker_id_str)
+                    if isinstance(marker_id_str, str)
+                    else marker_id_str
+                )
 
-            # Step 2: Transform to world coordinates using board pose
-            # Educational simplification: assume markers are coplanar with board
-            # In a full implementation, this would use the complete rigid transformation
-            board_position = np.array(board_detection.position, dtype=np.float32)
+            # Look up the pre-computed corner positions for this marker
+            if marker_id not in board_frame_corners:
+                self.get_logger().warn(
+                    f"Marker ID {marker_id} not found in ArUco pattern config, skipping"
+                )
+                continue
 
-            # Simple translation (could be extended to full rigid transformation)
-            world_corners = local_corners + board_position
+            # Step 1: Get 4 corners in marker's local coordinate system (board frame)
+            # Educational note: Each marker has its own position in the 2x2 grid
+            local_corners = np.array(board_frame_corners[marker_id], dtype=np.float32)
+
+            # Step 2: Transform to LiDAR frame using full rigid transformation
+            # world_point = R * local_point + t
+            world_corners = (board_rotation @ local_corners.T).T + board_position
 
             # Step 3: Add to correspondence lists
             object_points.extend(world_corners)
@@ -455,9 +618,13 @@ class EducationalExtrinsicSolver(Node):
             image_points.extend(image_corners)
 
             self.get_logger().debug(
-                f"Marker {i}: 4 corners at board offset {board_position} "
-                f"-> image center ({marker.center[0]:.1f}, {marker.center[1]:.1f})"
+                f"Marker {marker_id} at grid position: "
+                f"local corners in board frame, transformed to world -> "
+                f"image center ({marker.center[0]:.1f}, {marker.center[1]:.1f})"
             )
+
+        if len(object_points) == 0:
+            self.get_logger().error("No valid marker correspondences found")
 
         return np.array(object_points, dtype=np.float32), np.array(
             image_points, dtype=np.float32
