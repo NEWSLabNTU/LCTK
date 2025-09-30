@@ -1346,30 +1346,37 @@ impl CalibrationBoardLocatorNode {
         Ok(marker)
     }
 
-    fn create_board_markers(
-        board_detection: &BoardDetection,
+    /// Create board visualization markers with customizable colors and namespaces
+    fn create_board_visualization(
+        board_model: &hollow_board_config::BoardModel,
         header: &Header,
+        namespace_suffix: &str,
+        id_offset: i32,
+        board_color: ColorRGBA,
+        axes_alpha: f32,
+        marker_area_alpha: f32,
+        hole_alpha: f32,
     ) -> Result<MarkerArray> {
-        let board_model = &board_detection.board_model;
-
-        // Base pose
         let base_translation = &board_model.pose.translation;
         let base_rotation = &board_model.pose.rotation;
 
-        // Board cube marker (id 0)
+        // Board cube marker
+        // NOTE: The cube is centered at board_center(), not pose.translation
+        // because BoardModel expects pose.translation to be at the bottom-left corner (0,0)
         let board_cube = {
+            let board_center = board_model.board_center();
             let q = base_rotation.quaternion();
             Marker {
                 header: header.clone(),
-                ns: "board".to_string(),
-                id: 0,
+                ns: format!("board{}", namespace_suffix),
+                id: id_offset,
                 type_: 1,  // CUBE
                 action: 0, // ADD
                 pose: geometry_msgs::msg::Pose {
                     position: Point {
-                        x: base_translation.x,
-                        y: base_translation.y,
-                        z: base_translation.z,
+                        x: board_center.x,
+                        y: board_center.y,
+                        z: board_center.z,
                     },
                     orientation: Quaternion {
                         x: q.i,
@@ -1381,19 +1388,14 @@ impl CalibrationBoardLocatorNode {
                 scale: GeomVector3 {
                     x: board_model.board_shape.board_width.as_meters(),
                     y: board_model.board_shape.board_width.as_meters(),
-                    z: 0.02, // 2 cm thickness
+                    z: 0.02,
                 },
-                color: ColorRGBA {
-                    r: 0.0,
-                    g: 1.0,
-                    b: 0.0,
-                    a: 0.6,
-                },
+                color: board_color,
                 ..Default::default()
             }
         };
 
-        // Helper to build an arrow marker oriented along the board frame's X axis, then rotated
+        // Helper to build axis arrow markers
         let make_axis_arrow =
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
                 let rot = base_rotation * rot_after_x;
@@ -1402,7 +1404,7 @@ impl CalibrationBoardLocatorNode {
 
                 Marker {
                     header: header.clone(),
-                    ns: "board_axes".to_string(),
+                    ns: format!("board_axes{}", namespace_suffix),
                     id,
                     type_: 0,  // ARROW
                     action: 0, // ADD
@@ -1420,28 +1422,175 @@ impl CalibrationBoardLocatorNode {
                         },
                     },
                     scale: GeomVector3 {
-                        x: len,  // shaft length
-                        y: 0.02, // shaft diameter
-                        z: 0.04, // head diameter
+                        x: len,
+                        y: 0.02,
+                        z: 0.04,
                     },
-                    color: ColorRGBA { r, g, b, a: 1.0 },
+                    color: ColorRGBA {
+                        r,
+                        g,
+                        b,
+                        a: axes_alpha,
+                    },
                     ..Default::default()
                 }
             };
 
-        // Rotations to map X axis to Y/Z in the board frame
         let rot_x = na::UnitQuaternion::identity();
         let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), FRAC_PI_2);
         let rot_z = na::UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), -FRAC_PI_2);
 
-        let x_arrow = make_axis_arrow(1, rot_x, 1.0, 0.0, 0.0); // Red X
-        let y_arrow = make_axis_arrow(2, rot_y, 0.0, 1.0, 0.0); // Green Y
-        let z_arrow = make_axis_arrow(3, rot_z, 0.0, 0.0, 1.0); // Blue Z
+        let x_arrow = make_axis_arrow(id_offset + 1, rot_x, 1.0, 0.0, 0.0);
+        let y_arrow = make_axis_arrow(id_offset + 2, rot_y, 0.0, 1.0, 0.0);
+        let z_arrow = make_axis_arrow(id_offset + 3, rot_z, 0.0, 0.0, 1.0);
 
-        let arr = MarkerArray {
-            markers: vec![board_cube, x_arrow, y_arrow, z_arrow],
+        // ArUco marker area border
+        let marker_border = {
+            let marker_top = board_model.marker_top_corner();
+            let marker_bottom = board_model.marker_bottom_corner();
+            let marker_left = board_model.marker_left_corner();
+            let marker_right = board_model.marker_right_corner();
+
+            Marker {
+                header: header.clone(),
+                ns: format!("board_marker_area{}", namespace_suffix),
+                id: id_offset + 4,
+                type_: 5,  // LINE_LIST
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose::default(),
+                points: vec![
+                    Point {
+                        x: marker_bottom.x,
+                        y: marker_bottom.y,
+                        z: marker_bottom.z,
+                    },
+                    Point {
+                        x: marker_left.x,
+                        y: marker_left.y,
+                        z: marker_left.z,
+                    },
+                    Point {
+                        x: marker_left.x,
+                        y: marker_left.y,
+                        z: marker_left.z,
+                    },
+                    Point {
+                        x: marker_top.x,
+                        y: marker_top.y,
+                        z: marker_top.z,
+                    },
+                    Point {
+                        x: marker_top.x,
+                        y: marker_top.y,
+                        z: marker_top.z,
+                    },
+                    Point {
+                        x: marker_right.x,
+                        y: marker_right.y,
+                        z: marker_right.z,
+                    },
+                    Point {
+                        x: marker_right.x,
+                        y: marker_right.y,
+                        z: marker_right.z,
+                    },
+                    Point {
+                        x: marker_bottom.x,
+                        y: marker_bottom.y,
+                        z: marker_bottom.z,
+                    },
+                ],
+                scale: GeomVector3 {
+                    x: 0.01,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                color: ColorRGBA {
+                    r: 1.0,
+                    g: 0.7,
+                    b: 0.0,
+                    a: marker_area_alpha,
+                },
+                ..Default::default()
+            }
         };
-        Ok(arr)
+
+        // Three circular holes
+        let hole_radius = board_model.board_shape.hole_radius.as_meters();
+
+        let make_hole = |id: i32, center: na::Point3<f64>| -> Marker {
+            let q = base_rotation.quaternion();
+            Marker {
+                header: header.clone(),
+                ns: format!("board_holes{}", namespace_suffix),
+                id,
+                type_: 3,  // CYLINDER
+                action: 0, // ADD
+                pose: geometry_msgs::msg::Pose {
+                    position: Point {
+                        x: center.x,
+                        y: center.y,
+                        z: center.z,
+                    },
+                    orientation: Quaternion {
+                        x: q.i,
+                        y: q.j,
+                        z: q.k,
+                        w: q.w,
+                    },
+                },
+                scale: GeomVector3 {
+                    x: hole_radius * 2.0,
+                    y: hole_radius * 2.0,
+                    z: 0.005,
+                },
+                color: ColorRGBA {
+                    r: 0.3,
+                    g: 0.3,
+                    b: 0.3,
+                    a: hole_alpha,
+                },
+                ..Default::default()
+            }
+        };
+
+        let left_hole = make_hole(id_offset + 5, board_model.left_circle_center());
+        let right_hole = make_hole(id_offset + 6, board_model.right_circle_center());
+        let top_hole = make_hole(id_offset + 7, board_model.top_circle_center());
+
+        Ok(MarkerArray {
+            markers: vec![
+                board_cube,
+                x_arrow,
+                y_arrow,
+                z_arrow,
+                marker_border,
+                left_hole,
+                right_hole,
+                top_hole,
+            ],
+        })
+    }
+
+    fn create_board_markers(
+        board_detection: &BoardDetection,
+        header: &Header,
+    ) -> Result<MarkerArray> {
+        Self::create_board_visualization(
+            &board_detection.board_model,
+            header,
+            "", // No namespace suffix for final board
+            0,  // ID offset 0
+            ColorRGBA {
+                r: 0.0,
+                g: 1.0,
+                b: 0.0,
+                a: 0.6,
+            }, // Green board
+            1.0, // Full opacity for axes
+            1.0, // Full opacity for marker area
+            0.8, // Semi-transparent holes
+        )
     }
 
     /// Create a circular plane marker to visualize the RANSAC-detected plane
@@ -1518,92 +1667,21 @@ impl CalibrationBoardLocatorNode {
         board_model: &hollow_board_config::BoardModel,
         header: &Header,
     ) -> Result<MarkerArray> {
-        let base_translation = &board_model.pose.translation;
-        let base_rotation = &board_model.pose.rotation;
-
-        let board_cube = {
-            let q = base_rotation.quaternion();
-            Marker {
-                header: header.clone(),
-                ns: "board_icp".to_string(),
-                id: 1000,
-                type_: 1,  // CUBE
-                action: 0, // ADD
-                pose: geometry_msgs::msg::Pose {
-                    position: Point {
-                        x: base_translation.x,
-                        y: base_translation.y,
-                        z: base_translation.z,
-                    },
-                    orientation: Quaternion {
-                        x: q.i,
-                        y: q.j,
-                        z: q.k,
-                        w: q.w,
-                    },
-                },
-                scale: GeomVector3 {
-                    x: board_model.board_shape.board_width.as_meters(),
-                    y: board_model.board_shape.board_width.as_meters(),
-                    z: 0.02,
-                },
-                color: ColorRGBA {
-                    r: 1.0,
-                    g: 0.5,
-                    b: 0.0,
-                    a: 0.3,
-                },
-                ..Default::default()
-            }
-        };
-
-        let make_axis_arrow =
-            |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
-                let rot = base_rotation * rot_after_x;
-                let q = rot.quaternion();
-                let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
-
-                Marker {
-                    header: header.clone(),
-                    ns: "board_axes_icp".to_string(),
-                    id,
-                    type_: 0,  // ARROW
-                    action: 0, // ADD
-                    pose: geometry_msgs::msg::Pose {
-                        position: Point {
-                            x: base_translation.x,
-                            y: base_translation.y,
-                            z: base_translation.z,
-                        },
-                        orientation: Quaternion {
-                            x: q.i,
-                            y: q.j,
-                            z: q.k,
-                            w: q.w,
-                        },
-                    },
-                    scale: GeomVector3 {
-                        x: len,
-                        y: 0.02,
-                        z: 0.04,
-                    },
-                    color: ColorRGBA { r, g, b, a: 0.9 },
-                    ..Default::default()
-                }
-            };
-
-        let rot_x = na::UnitQuaternion::identity();
-        let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), FRAC_PI_2);
-        let rot_z = na::UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), -FRAC_PI_2);
-
-        let x_arrow = make_axis_arrow(1001, rot_x, 1.0, 0.2, 0.2);
-        let y_arrow = make_axis_arrow(1002, rot_y, 0.2, 1.0, 0.2);
-        let z_arrow = make_axis_arrow(1003, rot_z, 0.2, 0.2, 1.0);
-
-        let arr = MarkerArray {
-            markers: vec![board_cube, x_arrow, y_arrow, z_arrow],
-        };
-        Ok(arr)
+        Self::create_board_visualization(
+            board_model,
+            header,
+            "_icp", // "_icp" namespace suffix for ICP iterations
+            1000,   // ID offset 1000
+            ColorRGBA {
+                r: 1.0,
+                g: 0.5,
+                b: 0.0,
+                a: 0.3,
+            }, // Orange board for ICP
+            0.9,    // Slightly transparent axes
+            0.8,    // Slightly transparent marker area
+            0.6,    // More transparent holes for ICP
+        )
     }
 
     // Helper functions for ICP iteration debug publishing debug
