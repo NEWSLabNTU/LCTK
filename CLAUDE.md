@@ -333,6 +333,18 @@ cargo build --release --manifest-path src/bin/aruco_locator_node/Cargo.toml
 make build
 ```
 
+### Rebuilding a Single ROS 2 Package
+
+To rebuild a single ROS 2 package after making changes:
+
+```bash
+# Standard way: remove build and install directories, then rebuild
+rm -rf {build,install}/PACKAGE_NAME
+make build_packages
+```
+
+This ensures a clean rebuild and proper installation of the package.
+
 ### Running ROS 2 Nodes
 
 ```bash
@@ -403,7 +415,6 @@ make launch_lidar_camera_sample_data  # Plays LiDAR and camera data in loop
 - Don't make Pokemon exception handlings. For example, `try: except Exception: pass`. It creates silent errors. I prefer to throw errors to the user so developers can fix it.
 - If `source /opt/ros/humble/setup.bash` was done earlier and we would like to test Rust code only without ROS, you can run `cargo clippy --all-targets --all-features`.
 - In Rust, initialize struct fields first and then construct the struct. It avoids creating a mutable struct.
-- When tasks are completed, notify GNU Screen with a bell: `printf '\a'; echo "[Task Complete] <task description>"`
 - Fixed colcon-cargo JSON parsing issue by modifying /home/aeon/.local/lib/python3.10/site-packages/colcon_cargo/task/cargo/build.py to use direct subprocess calls with --quiet flag. This resolves "JSONDecodeError: Expecting value: line 1 column 1" errors caused by patch warnings in cargo metadata output.
 - OpenCV environment variables are set automatically in the Makefile to avoid version 0.0.0 issues.
 - Dependencies are now managed through Ansible playbooks in an Autoware-style setup (setup-dev-env.sh)
