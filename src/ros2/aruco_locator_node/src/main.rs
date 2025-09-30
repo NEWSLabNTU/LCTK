@@ -649,7 +649,7 @@ impl ArucoLocatorNode {
                     Self::publish_debug_overlay(
                         &msg,
                         &processed_image,
-                        &detection_msg,
+                        &detection_result,
                         overlay_publisher,
                         &aruco_pattern,
                     );
@@ -665,7 +665,7 @@ impl ArucoLocatorNode {
     fn publish_debug_overlay(
         original_image: &ImageMsg,
         processed_image: &Mat,
-        detections: &Detection2DArray,
+        detection_result: &aruco_locator::DetectionResult,
         overlay_publisher: &Option<Publisher<ImageMsg>>,
         aruco_pattern: &aruco_config::MultiArucoPattern,
     ) {
@@ -673,7 +673,7 @@ impl ArucoLocatorNode {
             match Self::create_overlay_image(
                 original_image,
                 processed_image,
-                detections,
+                detection_result,
                 aruco_pattern,
             ) {
                 Ok(overlay_image) => {
@@ -692,7 +692,7 @@ impl ArucoLocatorNode {
     fn create_overlay_image(
         original_image: &ImageMsg,
         processed_image: &Mat,
-        detections: &Detection2DArray,
+        detection_result: &aruco_locator::DetectionResult,
         aruco_pattern: &aruco_config::MultiArucoPattern,
     ) -> Result<ImageMsg> {
         // Use the processed (potentially undistorted) image for overlay
@@ -720,154 +720,135 @@ impl ArucoLocatorNode {
 
         let default_color = Scalar::new(255.0, 0.0, 255.0, 0.0); // Magenta for unknown IDs
 
-        if !detections.detections.is_empty() {
-            // Draw detections
-            for detection in &detections.detections {
-                // Get bounding box
-                let bbox = &detection.bbox;
-                let center_x = bbox.center.position.x as i32;
-                let center_y = bbox.center.position.y as i32;
-                let width = bbox.size_x as i32;
-                let height = bbox.size_y as i32;
+        if detection_result.markers_found {
+            // Draw detected markers using actual corner points
+            for (i, &marker_id) in detection_result.marker_ids.iter().enumerate() {
+                if let Some(marker) = detection_result.markers.get(i) {
+                    // Get marker ID string
+                    let marker_id_str = marker_id.to_string();
 
-                // Calculate corners
-                let x1 = center_x - width / 2;
-                let y1 = center_y - height / 2;
-                let x2 = center_x + width / 2;
-                let y2 = center_y + height / 2;
+                    // Choose color based on marker ID
+                    let color = color_map
+                        .get(&marker_id_str)
+                        .copied()
+                        .unwrap_or(default_color);
 
-                // Get marker ID if available
-                let marker_id = if !detection.results.is_empty() {
-                    &detection.results[0].hypothesis.class_id
-                } else {
-                    "Unknown"
-                };
+                    // Draw marker border using actual corner points (TL, TR, BR, BL)
+                    let corners = &marker.corners;
+                    let mut pts = opencv::core::Vector::<opencv::core::Point>::new();
+                    for corner in corners {
+                        pts.push(opencv::core::Point::new(corner.x as i32, corner.y as i32));
+                    }
 
-                // Choose color based on marker ID
-                let color = color_map.get(marker_id).copied().unwrap_or(default_color);
+                    // Close the polygon by adding the first point again
+                    if !corners.is_empty() {
+                        pts.push(opencv::core::Point::new(
+                            corners[0].x as i32,
+                            corners[0].y as i32,
+                        ));
+                    }
 
-                // Draw bounding box
-                opencv::imgproc::rectangle(
-                    &mut cv_image,
-                    opencv::core::Rect::new(x1, y1, width, height),
-                    color,
-                    3,
-                    LINE_8,
-                    0,
-                )?;
+                    // Draw the marker border as a polyline
+                    opencv::imgproc::polylines(
+                        &mut cv_image,
+                        &opencv::core::Vector::<opencv::core::Vector<opencv::core::Point>>::from_iter(vec![pts]),
+                        false, // isClosed=false (we manually closed it)
+                        color,
+                        3, // thickness
+                        LINE_8,
+                        0,
+                    )?;
 
-                // Draw marker ID label with background
-                let label = format!("ArUco {}", marker_id);
-                let font_face = FONT_HERSHEY_SIMPLEX;
-                let font_scale = 0.8;
-                let thickness = 2;
+                    // Calculate centroid for label positioning
+                    let centroid_x = (corners.iter().map(|p| p.x).sum::<f32>() / 4.0) as i32;
+                    let centroid_y = (corners.iter().map(|p| p.y).sum::<f32>() / 4.0) as i32;
 
-                let mut baseline = 0;
-                let text_size = opencv::imgproc::get_text_size(
-                    &label,
-                    font_face,
-                    font_scale,
-                    thickness,
-                    &mut baseline,
-                )?;
+                    // Find topmost corner for label position
+                    let min_y = corners.iter().map(|p| p.y as i32).min().unwrap_or(0);
+                    let label_anchor_x = centroid_x;
+                    let label_anchor_y = min_y;
 
-                // Position label above the box if possible
-                let label_y = if y1 - 10 > text_size.height {
-                    y1 - 10
-                } else {
-                    y2 + text_size.height + 10
-                };
+                    // Draw marker ID label with background
+                    let label = format!("ArUco {}", marker_id);
+                    let font_face = FONT_HERSHEY_SIMPLEX;
+                    let font_scale = 0.8;
+                    let thickness = 2;
 
-                // Draw label background
-                opencv::imgproc::rectangle(
-                    &mut cv_image,
-                    opencv::core::Rect::new(
-                        x1,
-                        label_y - text_size.height - 5,
-                        text_size.width + 10,
-                        text_size.height + 10,
-                    ),
-                    color,
-                    -1,
-                    LINE_8,
-                    0,
-                )?;
+                    let mut baseline = 0;
+                    let text_size = opencv::imgproc::get_text_size(
+                        &label,
+                        font_face,
+                        font_scale,
+                        thickness,
+                        &mut baseline,
+                    )?;
 
-                // Draw label text
-                opencv::imgproc::put_text(
-                    &mut cv_image,
-                    &label,
-                    opencv::core::Point::new(x1 + 5, label_y),
-                    font_face,
-                    font_scale,
-                    Scalar::new(255.0, 255.0, 255.0, 0.0), // White text
-                    thickness,
-                    LINE_8,
-                    false,
-                )?;
+                    // Position label above the marker if possible
+                    let label_y = if label_anchor_y - 10 > text_size.height {
+                        label_anchor_y - 10
+                    } else {
+                        centroid_y + text_size.height + 10
+                    };
 
-                // Draw corner points
-                let corner_radius = 6;
-                opencv::imgproc::circle(
-                    &mut cv_image,
-                    opencv::core::Point::new(x1, y1),
-                    corner_radius,
-                    color,
-                    -1,
-                    LINE_8,
-                    0,
-                )?;
-                opencv::imgproc::circle(
-                    &mut cv_image,
-                    opencv::core::Point::new(x2, y1),
-                    corner_radius,
-                    color,
-                    -1,
-                    LINE_8,
-                    0,
-                )?;
-                opencv::imgproc::circle(
-                    &mut cv_image,
-                    opencv::core::Point::new(x1, y2),
-                    corner_radius,
-                    color,
-                    -1,
-                    LINE_8,
-                    0,
-                )?;
-                opencv::imgproc::circle(
-                    &mut cv_image,
-                    opencv::core::Point::new(x2, y2),
-                    corner_radius,
-                    color,
-                    -1,
-                    LINE_8,
-                    0,
-                )?;
+                    let label_x = label_anchor_x - text_size.width / 2;
 
-                // Draw center point
-                opencv::imgproc::circle(
-                    &mut cv_image,
-                    opencv::core::Point::new(center_x, center_y),
-                    4,
-                    Scalar::new(255.0, 255.0, 255.0, 0.0), // White center
-                    -1,
-                    LINE_8,
-                    0,
-                )?;
-                opencv::imgproc::circle(
-                    &mut cv_image,
-                    opencv::core::Point::new(center_x, center_y),
-                    6,
-                    color,
-                    2,
-                    LINE_8,
-                    0,
-                )?;
+                    // Draw label background
+                    opencv::imgproc::rectangle(
+                        &mut cv_image,
+                        opencv::core::Rect::new(
+                            label_x,
+                            label_y - text_size.height - 5,
+                            text_size.width + 10,
+                            text_size.height + 10,
+                        ),
+                        color,
+                        -1,
+                        LINE_8,
+                        0,
+                    )?;
+
+                    // Draw label text
+                    opencv::imgproc::put_text(
+                        &mut cv_image,
+                        &label,
+                        opencv::core::Point::new(label_x + 5, label_y),
+                        font_face,
+                        font_scale,
+                        Scalar::new(255.0, 255.0, 255.0, 0.0), // White text
+                        thickness,
+                        LINE_8,
+                        false,
+                    )?;
+
+                    // Draw corner points
+                    let corner_radius = 6;
+                    for corner in corners {
+                        opencv::imgproc::circle(
+                            &mut cv_image,
+                            opencv::core::Point::new(corner.x as i32, corner.y as i32),
+                            corner_radius,
+                            color,
+                            -1,
+                            LINE_8,
+                            0,
+                        )?;
+                    }
+
+                    // Draw center point
+                    opencv::imgproc::circle(
+                        &mut cv_image,
+                        opencv::core::Point::new(centroid_x, centroid_y),
+                        corner_radius,
+                        Scalar::new(255.0, 255.0, 0.0, 0.0), // Yellow center
+                        -1,
+                        LINE_8,
+                        0,
+                    )?;
+                }
             }
 
             // Add detection count overlay
-            let detection_text = format!("ArUco Markers: {}", detections.detections.len());
+            let detection_text = format!("ArUco Markers: {}", detection_result.markers.len());
             opencv::imgproc::put_text(
                 &mut cv_image,
                 &detection_text,
