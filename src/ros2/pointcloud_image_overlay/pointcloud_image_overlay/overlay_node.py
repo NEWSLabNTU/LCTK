@@ -176,6 +176,9 @@ class EducationalOverlayNode(Node):
         # Latest sensor data (for overlay generation)
         self.latest_image: Optional[Image] = None
         self.latest_pointcloud: Optional[PointCloud2] = None
+        self.latest_inlier_pointcloud: Optional[PointCloud2] = (
+            None  # Debug inlier points
+        )
 
         # === ROS 2 QUALITY OF SERVICE CONFIGURATION ===
         # Educational note: QoS affects message delivery reliability
@@ -206,6 +209,15 @@ class EducationalOverlayNode(Node):
         # LiDAR pointcloud stream (sensor_msgs/PointCloud2)
         self.pointcloud_subscription = self.create_subscription(
             PointCloud2, "pointcloud", self.on_pointcloud_received, qos
+        )
+
+        # Debug inlier pointcloud stream (sensor_msgs/PointCloud2)
+        # Subscribe to plane inliers from board detector for visualization
+        self.inlier_pointcloud_subscription = self.create_subscription(
+            PointCloud2,
+            "/calibration/lidar_board_detector/debug/plane_inliers",
+            self.on_inlier_pointcloud_received,
+            qos,
         )
 
         # Camera intrinsic parameters (sensor_msgs/CameraInfo)
@@ -352,6 +364,22 @@ class EducationalOverlayNode(Node):
         if self.latest_image is not None:
             self.generate_overlay()
 
+    def on_inlier_pointcloud_received(self, msg: PointCloud2):
+        """
+        Educational Callback: Handle debug inlier pointcloud updates
+
+        Inlier points from RANSAC plane detection show the detected calibration board.
+        These are visualized with bright colors to distinguish from full point cloud.
+
+        Args:
+            msg: Plane inlier points (sensor_msgs/PointCloud2)
+        """
+        self.latest_inlier_pointcloud = msg
+
+        # Trigger overlay regeneration if we have a recent image
+        if self.latest_image is not None:
+            self.generate_overlay()
+
     def generate_overlay(self):
         """
         Educational Core Function: Generate LiDAR-Camera Overlay
@@ -387,128 +415,212 @@ class EducationalOverlayNode(Node):
             return
 
         try:
-            # === STEP 2: EXTRACT 3D POINTS FROM LIDAR ===
+            # === STEP 2: UNDISTORT IMAGE ===
+            # Convert ROS Image to OpenCV format
+            raw_image = self.bridge.imgmsg_to_cv2(
+                self.latest_image, desired_encoding="bgr8"
+            )
+
+            # Undistort the image using camera calibration
+            undistorted_image = cv2.undistort(
+                raw_image, self.camera_matrix, self.distortion
+            )
+
+            self.get_logger().debug(
+                f"[DEBUG] Undistorted image: {undistorted_image.shape}"
+            )
+
+            # === STEP 3: EXTRACT 3D POINTS FROM LIDAR ===
             # Convert ROS PointCloud2 binary format to NumPy array
             lidar_points = pointcloud2_to_xyz(self.latest_pointcloud)
 
             if lidar_points.shape[0] == 0:
-                self._draw_status_message("Empty pointcloud")
+                self._draw_status_message_on_image(
+                    undistorted_image, "Empty pointcloud"
+                )
                 return
 
-            # === STEP 3: DIRECT 3D → 2D PROJECTION WITH FULL TRANSFORMATION ===
-            # Educational highlight: OpenCV's projectPoints handles the complete pipeline
-            # - Applies extrinsic transformation (LiDAR → Camera) using rvec and tvec
-            # - Applies intrinsic projection (3D Camera → 2D Image) using camera matrix
-            # - Applies lens distortion correction if provided
-            # This single function call replaces manual matrix multiplication
+            self.get_logger().debug(
+                f"[DEBUG] Extracted {lidar_points.shape[0]} LiDAR points"
+            )
+            self.get_logger().debug(
+                f"[DEBUG] LiDAR point sample (first 3): {lidar_points[:3]}"
+            )
+            self.get_logger().debug(f"[DEBUG] Extrinsic rvec: {self.extrinsic_rvec}")
+            self.get_logger().debug(f"[DEBUG] Extrinsic tvec: {self.extrinsic_tvec}")
 
-            # OpenCV projectPoints performs the full transformation pipeline:
-            # 1. Rotate points using rvec (Rodrigues rotation)
-            # 2. Translate points using tvec
-            # 3. Project to 2D using camera intrinsics
-            # 4. Apply distortion correction
+            # === STEP 3: PROJECT LIDAR POINTS TO 2D IMAGE COORDINATES ===
+            # Educational note: Let cv2.projectPoints handle the full transformation
+            # - Applies extrinsic transform (LiDAR → Camera frame) using rvec/tvec
+            # - Projects to 2D using camera intrinsics
+            # - No distortion applied since we're projecting onto undistorted image
+
+            self.get_logger().debug(f"[DEBUG] Camera matrix: {self.camera_matrix}")
+
+            # Project LiDAR points directly using extrinsic calibration
+            # cv2.projectPoints handles the transformation internally
             projected_points, _ = cv2.projectPoints(
-                lidar_points.reshape(-1, 1, 3),  # LiDAR points in original frame
-                self.extrinsic_rvec,  # Rotation from LiDAR to camera
-                self.extrinsic_tvec,  # Translation from LiDAR to camera
+                lidar_points.reshape(-1, 1, 3),  # LiDAR points in LiDAR frame
+                self.extrinsic_rvec,  # Rotation: LiDAR → Camera frame
+                self.extrinsic_tvec,  # Translation: LiDAR → Camera frame
                 self.camera_matrix,  # Intrinsic parameters [fx,fy,cx,cy]
-                self.distortion,  # Distortion coefficients
+                None,  # No distortion - projecting onto undistorted image
             )
 
-            # === STEP 4: FILTER POINTS FOR VISIBILITY ===
-            # Educational note: We need to filter points that are behind the camera
-            # After projection, we check which points would be visible
-            # Transform points to camera frame for Z-check (points behind camera have negative Z)
+            # Reshape to simple 2D array: [[u1,v1], [u2,v2], ...]
+            image_points = projected_points.reshape(-1, 2)
 
-            # Compute camera frame points for filtering (only for Z-check)
-            # Apply rotation
-            R, _ = cv2.Rodrigues(self.extrinsic_rvec)
-            camera_points = (R @ lidar_points.T).T + self.extrinsic_tvec.reshape(1, 3)
+            self.get_logger().debug(
+                f"[DEBUG] Projected points sample (first 3): {image_points[:3]}"
+            )
+            self.get_logger().debug(
+                f"[DEBUG] Image size: {self.latest_image.width}x{self.latest_image.height}"
+            )
+            self.get_logger().debug(
+                f"[DEBUG] Projected X range: [{np.min(image_points[:, 0]):.1f}, {np.max(image_points[:, 0]):.1f}]"
+            )
+            self.get_logger().debug(
+                f"[DEBUG] Projected Y range: [{np.min(image_points[:, 1]):.1f}, {np.max(image_points[:, 1]):.1f}]"
+            )
 
-            # Filter points behind camera (negative Z in camera frame)
-            front_mask = camera_points[:, 2] > 0.1  # At least 10cm in front
+            # === STEP 4: FILTER POINTS OUTSIDE IMAGE BOUNDS ===
+            # Educational note: Filter points that project outside the image
+            h, w = self.latest_image.height, self.latest_image.width
+            bounds_mask = (
+                (0 <= image_points[:, 0])
+                & (image_points[:, 0] <= w)
+                & (0 <= image_points[:, 1])
+                & (image_points[:, 1] <= h)
+            )
+            image_points = image_points[bounds_mask]
 
-            if not np.any(front_mask):
-                self._draw_status_message("No points in front of camera")
+            if len(image_points) == 0:
+                self._draw_status_message_on_image(
+                    undistorted_image, "No points project into image bounds"
+                )
                 return
 
-            # Filter projected points to only include those in front
-            projected_points_front = projected_points[front_mask]
+            self.get_logger().debug(
+                f"[DEBUG] Points within image bounds: {len(image_points)}"
+            )
 
-            # Reshape to simple 2D array: [[u1,v1], [u2,v2], ...]
-            image_points = projected_points_front.reshape(-1, 2)
+            # === STEP 5: PROJECT AND FILTER INLIER POINTS (IF AVAILABLE) ===
+            inlier_image_points = None
+            if self.latest_inlier_pointcloud is not None:
+                inlier_points = pointcloud2_to_xyz(self.latest_inlier_pointcloud)
+                if inlier_points.shape[0] > 0:
+                    # Project inlier points using same extrinsic calibration
+                    projected_inliers, _ = cv2.projectPoints(
+                        inlier_points.reshape(-1, 1, 3),
+                        self.extrinsic_rvec,
+                        self.extrinsic_tvec,
+                        self.camera_matrix,
+                        None,  # No distortion
+                    )
+                    inlier_image_points = projected_inliers.reshape(-1, 2)
 
-            # === STEP 5: VISUAL OVERLAY ===
-            # Draw projected LiDAR points on camera image
-            overlay_image = self._create_visual_overlay(image_points)
+                    # Filter inlier points within image bounds
+                    inlier_bounds_mask = (
+                        (0 <= inlier_image_points[:, 0])
+                        & (inlier_image_points[:, 0] <= w)
+                        & (0 <= inlier_image_points[:, 1])
+                        & (inlier_image_points[:, 1] <= h)
+                    )
+                    inlier_image_points = inlier_image_points[inlier_bounds_mask]
 
-            # === STEP 6: PUBLISH RESULT ===
+            # === STEP 6: VISUAL OVERLAY ===
+            # Draw projected LiDAR points on undistorted camera image
+            # Inlier points (bright colors) drawn on top of full pointcloud (darker colors)
+            overlay_image = self._create_visual_overlay(
+                undistorted_image, image_points, inlier_image_points
+            )
+
+            # === STEP 7: PUBLISH RESULT ===
             # Convert back to ROS Image message and publish
             self._publish_overlay(overlay_image)
 
             # Educational statistics logging
             self.message_counts["overlays_published"] += 1
             if self.message_counts["overlays_published"] % 30 == 0:
+                inlier_str = (
+                    f", {len(inlier_image_points)} inliers"
+                    if inlier_image_points is not None
+                    else ""
+                )
                 self.get_logger().info(
                     f"Overlay #{self.message_counts['overlays_published']}: "
-                    f"{np.sum(front_mask)}/{len(lidar_points)} points visible"
+                    f"{len(image_points)}/{len(lidar_points)} points visible{inlier_str}"
                 )
 
         except Exception as e:
             self.get_logger().error(f"Overlay generation failed: {str(e)}")
             self._draw_status_message(f"Processing error: {str(e)}")
 
-    def _create_visual_overlay(self, image_points: np.ndarray) -> np.ndarray:
+    def _create_visual_overlay(
+        self,
+        cv_image: np.ndarray,
+        image_points: np.ndarray,
+        inlier_image_points: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         """
         Educational Helper: Create visual overlay of LiDAR points on camera image
 
         Args:
-            image_points: Projected 2D pixel coordinates [[u1,v1], [u2,v2], ...]
+            cv_image: Undistorted OpenCV image (BGR8 format)
+            image_points: Projected 2D pixel coordinates for full pointcloud [[u1,v1], [u2,v2], ...]
+            inlier_image_points: Optional projected 2D coordinates for inlier points (calibration board)
 
         Returns:
             np.ndarray: Camera image with LiDAR points overlaid
         """
-        # Convert ROS Image to OpenCV format (BGR8)
-        cv_image = self.bridge.imgmsg_to_cv2(self.latest_image, desired_encoding="bgr8")
         h, w = cv_image.shape[:2]
 
-        # Draw each projected point as a colored circle
-        points_drawn = 0
+        # Draw full pointcloud with darker/subdued colors
+        lidar_points_drawn = 0
         for u, v in image_points:
             # Only draw points that fall within image boundaries
             if 0 <= u < w and 0 <= v < h:
-                # Draw filled green circle (LiDAR point)
-                cv2.circle(cv_image, (int(u), int(v)), 2, (0, 255, 0), -1)
-                # Draw red border for better visibility
-                cv2.circle(cv_image, (int(u), int(v)), 3, (0, 0, 255), 1)
-                points_drawn += 1
+                # Draw darker green point (full LiDAR scan) - thicker circle
+                cv2.circle(cv_image, (int(u), int(v)), 2, (0, 128, 0), -1)
+                lidar_points_drawn += 1
+
+        # Draw inlier points with bright colors on top
+        inlier_points_drawn = 0
+        if inlier_image_points is not None and len(inlier_image_points) > 0:
+            for u, v in inlier_image_points:
+                if 0 <= u < w and 0 <= v < h:
+                    # Draw bright cyan point (calibration board inliers) - thicker circle, no border
+                    cv2.circle(cv_image, (int(u), int(v)), 3, (255, 255, 0), -1)
+                    inlier_points_drawn += 1
 
         # Add educational status overlay
-        status_text = f"LiDAR Points: {points_drawn}/{len(image_points)} visible"
+        if inlier_points_drawn > 0:
+            status_text = f"LiDAR: {lidar_points_drawn}, Inliers: {inlier_points_drawn}"
+            text_color = (255, 255, 0)  # Cyan to match inlier points
+        else:
+            status_text = f"LiDAR Points: {lidar_points_drawn}/{len(image_points)}"
+            text_color = (0, 128, 0)  # Dark green to match lidar points
+
         cv2.putText(
             cv_image,
             status_text,
             (10, h - 20),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
-            (0, 255, 0),
+            text_color,
             2,
         )
 
         return cv_image
 
-    def _draw_status_message(self, message: str):
+    def _draw_status_message_on_image(self, cv_image: np.ndarray, message: str):
         """
-        Educational Helper: Draw status message on image when data is unavailable
+        Educational Helper: Draw status message on provided image
 
         Args:
+            cv_image: OpenCV image (BGR8 format) to draw status message on
             message: Status message to display
         """
-        if self.latest_image is None:
-            return
-
-        # Convert image and draw status message
-        cv_image = self.bridge.imgmsg_to_cv2(self.latest_image, desired_encoding="bgr8")
         h, w = cv_image.shape[:2]
 
         # Draw semi-transparent background for text
@@ -522,6 +634,20 @@ class EducationalOverlayNode(Node):
         )
 
         self._publish_overlay(cv_image)
+
+    def _draw_status_message(self, message: str):
+        """
+        Educational Helper: Draw status message on image when data is unavailable
+
+        Args:
+            message: Status message to display
+        """
+        if self.latest_image is None:
+            return
+
+        # Convert image and draw status message
+        cv_image = self.bridge.imgmsg_to_cv2(self.latest_image, desired_encoding="bgr8")
+        self._draw_status_message_on_image(cv_image, message)
 
     def _publish_overlay(self, cv_image: np.ndarray):
         """
