@@ -372,6 +372,12 @@ pub fn fit_board_icp(
                 }
 
                 // compute transformation
+                debug!("fit_board_icp Step {}: === KABSCH TRANSFORMATION ===", step);
+                debug!("fit_board_icp Step {}: Input: {} model points (from board model)", 
+                    step, good_corresponding_points.len());
+                debug!("fit_board_icp Step {}: Target: {} data points (from point cloud)", 
+                    step, good_inlier_points.len());
+                    
                 let align_pose: Isometry3<_> = {
                     // Kabsch expects (input, target) pairs.
                     // Our correspondences are (data_point, model_point).
@@ -383,6 +389,7 @@ pub fn fit_board_icp(
                     ) {
                         Some(iso) => iso,
                         None => {
+                            debug!("fit_board_icp Step {}: KABSCH FAILED!", step);
                             convergence_reason = "Kabsch algorithm failed".to_string();
                             let stats = IcpStatistics {
                                 iterations: step,
@@ -423,16 +430,37 @@ pub fn fit_board_icp(
                 // Apply damping to the pose update (not the transformation itself)
                 // This interpolates between the current pose and the new pose after applying the transformation
                 // CRITICAL FIX: Use correct multiplication order like original wayside-portal
+                debug!("fit_board_icp Step {}: === POSE UPDATE ===", step);
+                debug!("fit_board_icp Step {}: Current pose translation = ({:.6}, {:.6}, {:.6})",
+                    step, pose.translation.x, pose.translation.y, pose.translation.z);
+                debug!("fit_board_icp Step {}: Current pose rotation angle = {:.6} degrees",
+                    step, pose.rotation.angle().to_degrees());
+                    
                 let new_pose = align_pose * pose;
+                
+                debug!("fit_board_icp Step {}: Computed new pose translation = ({:.6}, {:.6}, {:.6})",
+                    step, new_pose.translation.x, new_pose.translation.y, new_pose.translation.z);
+                debug!("fit_board_icp Step {}: Computed new pose rotation angle = {:.6} degrees",
+                    step, new_pose.rotation.angle().to_degrees());
+                debug!("fit_board_icp Step {}: Damping factor = {:.6}", step, damping_factor);
 
                 // Diagnostics for pose delta before damping
                 let delta_t = (new_pose.translation.vector - pose.translation.vector).norm();
                 let delta_ang = new_pose.rotation.rotation_to(&pose.rotation).angle();
+                let delta_trans_vec = new_pose.translation.vector - pose.translation.vector;
 
                 // Debug step-by-step ICP progress
                 debug!(
-                    "ICP Step {}: loss={:.6}, total_points={}, good_correspondences={}/{}, delta_t={:.6}, delta_ang={:.6}",
-                    step, avg_loss, inlier_points.len(), good_correspondences_len, correspondings.len(), delta_t, delta_ang
+                    "fit_board_icp Step {}: loss={:.6}, total_points={}, good_correspondences={}/{}",
+                    step, avg_loss, inlier_points.len(), good_correspondences_len, correspondings.len()
+                );
+                debug!(
+                    "fit_board_icp Step {}: Undamped delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
+                    step, delta_trans_vec.x, delta_trans_vec.y, delta_trans_vec.z, delta_t
+                );
+                debug!(
+                    "fit_board_icp Step {}: Undamped delta_rotation_angle = {:.6} degrees",
+                    step, delta_ang.to_degrees()
                 );
 
                 // Damp the translation component
@@ -445,11 +473,30 @@ pub fn fit_board_icp(
                 let damped_rotation =
                     UnitQuaternion::slerp(&pose.rotation, &new_pose.rotation, damping_factor);
 
+                debug!("fit_board_icp Step {}: Damped translation = ({:.6}, {:.6}, {:.6})",
+                    step, damped_translation.x, damped_translation.y, damped_translation.z);
+                debug!("fit_board_icp Step {}: Damped rotation angle = {:.6} degrees",
+                    step, damped_rotation.angle().to_degrees());
+
                 // Termination criteria based on the actually applied (damped) update
                 {
                     let applied_t = (damped_translation.vector - pose.translation.vector).norm();
                     let applied_ang = damped_rotation.rotation_to(&pose.rotation).angle();
+                    let applied_trans_vec = damped_translation.vector - pose.translation.vector;
+                    
+                    debug!(
+                        "fit_board_icp Step {}: Applied (damped) delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
+                        step, applied_trans_vec.x, applied_trans_vec.y, applied_trans_vec.z, applied_t
+                    );
+                    debug!(
+                        "fit_board_icp Step {}: Applied (damped) delta_rotation_angle = {:.6} degrees",
+                        step, applied_ang.to_degrees()
+                    );
+                    
                     let pose_weight = applied_t + applied_ang;
+                    debug!("fit_board_icp Step {}: Pose weight = {:.6} (threshold = {:.6})",
+                        step, pose_weight, icp_pose_weight_threshold);
+                    
                     if pose_weight <= icp_pose_weight_threshold {
                         termination_count += 1;
                     } else {
@@ -458,6 +505,13 @@ pub fn fit_board_icp(
                 }
 
                 pose = Isometry3::from_parts(damped_translation, damped_rotation);
+                
+                debug!("fit_board_icp Step {}: Final damped pose translation = ({:.6}, {:.6}, {:.6})",
+                    step, pose.translation.x, pose.translation.y, pose.translation.z);
+                debug!("fit_board_icp Step {}: Final damped pose rotation angle = {:.6} degrees",
+                    step, pose.rotation.angle().to_degrees());
+                debug!("fit_board_icp Step {}: Termination count = {}", step, termination_count);
+                    
                 step += 1;
 
                 // Check if we have enough good correspondences to continue
@@ -1061,10 +1115,17 @@ impl<'a> BoardIcpIterator<'a> {
             good_correspondences.into_iter().unzip();
 
         // 6. Compute transformation using Kabsch
+        debug!("ICP Step {}: === KABSCH TRANSFORMATION ===", current_state.iteration + 1);
+        debug!("ICP Step {}: Input: {} model points (from board model)", 
+            current_state.iteration + 1, good_corresponding_points.len());
+        debug!("ICP Step {}: Target: {} data points (from point cloud)", 
+            current_state.iteration + 1, good_inlier_points.len());
+        
         let align_pose: Isometry3<f64> =
             match Self::compute_kabsch_transform(&good_corresponding_points, &good_inlier_points) {
                 Some(iso) => iso,
                 None => {
+                    debug!("ICP Step {}: KABSCH FAILED!", current_state.iteration + 1);
                     // Kabsch failed
                     return BoardIcpState {
                         iteration: current_state.iteration + 1,
@@ -1079,8 +1140,29 @@ impl<'a> BoardIcpIterator<'a> {
             };
 
         // 7. Apply damping and update pose
+        debug!("ICP Step {}: === POSE UPDATE ===", current_state.iteration + 1);
+        debug!("ICP Step {}: Current pose translation = ({:.6}, {:.6}, {:.6})",
+            current_state.iteration + 1,
+            current_state.board_pose.translation.x,
+            current_state.board_pose.translation.y,
+            current_state.board_pose.translation.z);
+        debug!("ICP Step {}: Current pose rotation angle = {:.6} degrees",
+            current_state.iteration + 1,
+            current_state.board_pose.rotation.angle().to_degrees());
+
         let new_pose = align_pose * current_state.board_pose;
+        
+        debug!("ICP Step {}: Computed new pose translation = ({:.6}, {:.6}, {:.6})",
+            current_state.iteration + 1,
+            new_pose.translation.x,
+            new_pose.translation.y,
+            new_pose.translation.z);
+        debug!("ICP Step {}: Computed new pose rotation angle = {:.6} degrees",
+            current_state.iteration + 1,
+            new_pose.rotation.angle().to_degrees());
+
         let damping_factor = self.board_detector_config.icp_damping_factor;
+        debug!("ICP Step {}: Damping factor = {:.6}", current_state.iteration + 1, damping_factor);
 
         // Debug logging
         let delta_t =
@@ -1089,20 +1171,23 @@ impl<'a> BoardIcpIterator<'a> {
             .rotation
             .rotation_to(&current_state.board_pose.rotation)
             .angle();
+        let delta_trans_vec = new_pose.translation.vector - current_state.board_pose.translation.vector;
         debug!(
-            "ICP Step {}: loss={:.6}, inliers={}, correspondences={}/{}, delta_t={:.6}, delta_ang={:.6}",
-            current_state.iteration,
-            avg_loss,
-            good_inlier_points.len(),
-            good_correspondences_len,
-            total_correspondences,
-            delta_t,
-            delta_ang
+            "ICP Step {}: Undamped delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
+            current_state.iteration + 1,
+            delta_trans_vec.x, delta_trans_vec.y, delta_trans_vec.z,
+            delta_t
+        );
+        debug!(
+            "ICP Step {}: Undamped delta_rotation_angle = {:.6} degrees",
+            current_state.iteration + 1,
+            delta_ang.to_degrees()
         );
 
         let damped_translation = Translation3::from(
             current_state.board_pose.translation.vector
-                + (new_pose.translation.vector - current_state.board_pose.translation.vector)
+                + (new_pose.translation.vector - current_state.board
+                    _pose.translation.vector)
                     * damping_factor,
         );
 
@@ -1112,13 +1197,40 @@ impl<'a> BoardIcpIterator<'a> {
             damping_factor,
         );
 
+        debug!("ICP Step {}: Damped translation = ({:.6}, {:.6}, {:.6})",
+            current_state.iteration + 1,
+            damped_translation.x,
+            damped_translation.y,
+            damped_translation.z);
+        debug!("ICP Step {}: Damped rotation angle = {:.6} degrees",
+            current_state.iteration + 1,
+            damped_rotation.angle().to_degrees());
+
         // 8. Check termination criteria for pose convergence
         let applied_t =
             (damped_translation.vector - current_state.board_pose.translation.vector).norm();
         let applied_ang = damped_rotation
             .rotation_to(&current_state.board_pose.rotation)
             .angle();
+        let applied_trans_vec = damped_translation.vector - current_state.board_pose.translation.vector;
+        
+        debug!(
+            "ICP Step {}: Applied (damped) delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
+            current_state.iteration + 1,
+            applied_trans_vec.x, applied_trans_vec.y, applied_trans_vec.z,
+            applied_t
+        );
+        debug!(
+            "ICP Step {}: Applied (damped) delta_rotation_angle = {:.6} degrees",
+            current_state.iteration + 1,
+            applied_ang.to_degrees()
+        );
+        
         let pose_weight = applied_t + applied_ang;
+        debug!("ICP Step {}: Pose weight = {:.6} (threshold = {:.6})",
+            current_state.iteration + 1,
+            pose_weight,
+            self.board_detector_config.icp_pose_weight_threshold);
 
         let termination_count =
             if pose_weight <= self.board_detector_config.icp_pose_weight_threshold {
@@ -1128,6 +1240,16 @@ impl<'a> BoardIcpIterator<'a> {
             };
 
         let damped_pose = Isometry3::from_parts(damped_translation, damped_rotation);
+        
+        debug!("ICP Step {}: Final damped pose translation = ({:.6}, {:.6}, {:.6})",
+            current_state.iteration + 1,
+            damped_pose.translation.x,
+            damped_pose.translation.y,
+            damped_pose.translation.z);
+        debug!("ICP Step {}: Final damped pose rotation angle = {:.6} degrees",
+            current_state.iteration + 1,
+            damped_pose.rotation.angle().to_degrees());
+        debug!("ICP Step {}: Termination count = {}", current_state.iteration + 1, termination_count);
 
         // 9. Return new state
         BoardIcpState {
@@ -1216,12 +1338,24 @@ impl<'a> BoardIcpIterator<'a> {
         target_points: &[Point3<f64>],
     ) -> Option<Isometry3<f64>> {
         if input_points.len() != target_points.len() || input_points.len() < 3 {
+            debug!("KABSCH: Invalid input - input_len={}, target_len={}", input_points.len(), target_points.len());
             return None;
         }
+
+        debug!("KABSCH: Computing transformation for {} point pairs", input_points.len());
 
         // Compute centroids
         let input_centroid = Self::compute_centroid(input_points)?;
         let target_centroid = Self::compute_centroid(target_points)?;
+
+        debug!("KABSCH: input_centroid = ({:.6}, {:.6}, {:.6})", 
+            input_centroid.x, input_centroid.y, input_centroid.z);
+        debug!("KABSCH: target_centroid = ({:.6}, {:.6}, {:.6})", 
+            target_centroid.x, target_centroid.y, target_centroid.z);
+        debug!("KABSCH: centroid_delta = ({:.6}, {:.6}, {:.6})", 
+            target_centroid.x - input_centroid.x, 
+            target_centroid.y - input_centroid.y, 
+            target_centroid.z - input_centroid.z);
 
         // Center the points
         let centered_input: Vec<Vector3<f64>> =
@@ -1237,10 +1371,14 @@ impl<'a> BoardIcpIterator<'a> {
         // With column-major matrices: input_matrix * target_matrix.transpose()
         let covariance = input_matrix * target_matrix.transpose();
 
+        debug!("KABSCH: covariance matrix:\n{:.6}", covariance);
+
         // SVD decomposition: H = U * S * V^T
         let svd = nalgebra::SVD::new(covariance, true, true);
         let u = svd.u?;
         let v_t = svd.v_t?;
+
+        debug!("KABSCH: singular values = {:?}", svd.singular_values);
 
         // Standard Kabsch algorithm: R = V * diag(1, 1, det(V * U^T)) * U^T
         // Since nalgebra SVD gives us V^T, we need to transpose it to get V
@@ -1249,8 +1387,12 @@ impl<'a> BoardIcpIterator<'a> {
 
         // Compute the determinant to check for reflection
         let d = (&v * &u_t).determinant();
+        debug!("KABSCH: determinant = {:.6} ({})", d, if d > 0.0 { "proper rotation" } else { "reflection detected" });
+        
         let correction = nalgebra::Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, d.signum()));
         let rotation_matrix = &v * correction * u_t;
+
+        debug!("KABSCH: rotation matrix:\n{:.6}", rotation_matrix);
 
         // Convert to unit quaternion (convert dynamic matrix to fixed 3x3)
         let rotation_matrix_3x3 = rotation_matrix.fixed_view::<3, 3>(0, 0).into_owned();
@@ -1260,10 +1402,20 @@ impl<'a> BoardIcpIterator<'a> {
         let translation =
             Translation3::from(target_centroid.coords - rotation * input_centroid.coords);
 
-        Some(Isometry3 {
+        debug!("KABSCH: rotation quaternion = ({:.6}, {:.6}, {:.6}, {:.6})", 
+            rotation.w, rotation.i, rotation.j, rotation.k);
+        debug!("KABSCH: rotation angle = {:.6} degrees", rotation.angle().to_degrees());
+        debug!("KABSCH: translation = ({:.6}, {:.6}, {:.6})", 
+            translation.x, translation.y, translation.z);
+
+        let result = Isometry3 {
             rotation,
             translation,
-        })
+        };
+
+        debug!("KABSCH: Complete transform = {:?}", result);
+
+        Some(result)
     }
 
     /// Helper to compute centroid of points
