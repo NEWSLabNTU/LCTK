@@ -122,9 +122,32 @@ impl CalibrationBoardLocatorNode {
         );
 
         // Load configurations
+        log_info!(
+            LOGGER_NAME,
+            "Loading board detector config from: {}",
+            board_detector_file_param
+        );
         let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
+        log_info!(
+            LOGGER_NAME,
+            "Loaded board detector config: ransac_threshold={:.3}m, ransac_iterations={}, icp_iterations={}",
+            board_detector_config.plane_ransac_inlier_threshold,
+            board_detector_config.plane_ransac_max_iterations,
+            board_detector_config.max_icp_iterations
+        );
+
+        log_info!(
+            LOGGER_NAME,
+            "Loading ArUco pattern config from: {}",
+            aruco_pattern_file_param
+        );
         let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
 
+        log_info!(
+            LOGGER_NAME,
+            "Loading bbox config from: {}",
+            bbox_file_param
+        );
         let bbox = Self::load_bbox_config(&bbox_file_param)?;
         let bbox = Arc::new(ArcSwap::new(Arc::new(bbox)));
 
@@ -829,9 +852,69 @@ impl CalibrationBoardLocatorNode {
                 state.inlier_points.len()
             );
 
+            // Apply post-fixup to ensure pose origin is at the lowest corner
+            let corrected_pose = {
+                // Create temporary board model to evaluate corners
+                let temp_board_model = BoardModel {
+                    pose: state.board_pose,
+                    board_shape: board_model_params.board_shape.clone(),
+                    marker_paper_size: board_model_params.marker_paper_size,
+                };
+
+                let board_normal = temp_board_model.board_z_axis();
+
+                let corners = [
+                    temp_board_model.bottom_corner(),
+                    temp_board_model.left_corner(),
+                    temp_board_model.top_corner(),
+                    temp_board_model.right_corner(),
+                ];
+
+                // Find the corner with the lowest z-coordinate
+                let (lowest_index, lowest_corner) = corners
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| a.1.z.partial_cmp(&b.1.z).unwrap())
+                    .unwrap();
+
+                log_debug!(
+                    LOGGER_NAME,
+                    "Post-fixup: lowest corner index={}, position=({:.3}, {:.3}, {:.3})",
+                    lowest_index,
+                    lowest_corner.x,
+                    lowest_corner.y,
+                    lowest_corner.z
+                );
+
+                // Rotate by 90° × index around the board normal to bring lowest corner to "bottom" position
+                let fixup_rotation = {
+                    let angle = FRAC_PI_2 * lowest_index as f64;
+                    na::UnitQuaternion::from_axis_angle(&board_normal, angle)
+                };
+
+                // Move the pose origin to the lowest corner
+                let fixup_translation = {
+                    na::Translation3::new(lowest_corner.x, lowest_corner.y, lowest_corner.z)
+                };
+
+                // Compose the corrected pose: translation * rotation * original_rotation
+                let corrected = fixup_translation * fixup_rotation * state.board_pose.rotation;
+
+                log_info!(
+                    LOGGER_NAME,
+                    "Post-fixup applied: rotation_angle={:.1}°, new_origin=({:.3}, {:.3}, {:.3})",
+                    (FRAC_PI_2 * lowest_index as f64).to_degrees(),
+                    corrected.translation.x,
+                    corrected.translation.y,
+                    corrected.translation.z
+                );
+
+                corrected
+            };
+
             // Create final board model and detection
             let board_model = BoardModel {
-                pose: state.board_pose,
+                pose: corrected_pose,
                 board_shape: board_model_params.board_shape,
                 marker_paper_size: board_model_params.marker_paper_size,
             };
