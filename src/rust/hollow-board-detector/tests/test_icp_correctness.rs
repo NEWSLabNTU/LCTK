@@ -10,11 +10,9 @@ fn create_test_config() -> Config {
         icp_rejection_threshold: 0.1,
         plane_ransac_max_iterations: 1000,
         plane_ransac_inlier_threshold: 0.01,
+        skip_ransac: false,
         icp_good_fit_threshold: 0.05,
         icp_outlier_threshold: 0.1,
-        icp_adaptive_threshold_multiplier: 2.0,
-        icp_adaptive_threshold_min: 0.01,
-        icp_adaptive_threshold_max: 0.2,
         icp_damping_factor: 0.5,
         icp_min_inlier_points: 3,
         board_shape: BoardShape {
@@ -81,11 +79,6 @@ fn test_identity_transformation_convergence() {
             next_state.iteration,
             state.iteration + 1,
             "Iteration should increment"
-        );
-
-        assert!(
-            next_state.adaptive_threshold > 0.0,
-            "Adaptive threshold should be positive"
         );
 
         state = next_state;

@@ -154,9 +154,6 @@ pub fn fit_board_icp(
         icp_rejection_threshold,
         icp_good_fit_threshold,
         icp_outlier_threshold,
-        icp_adaptive_threshold_multiplier,
-        icp_adaptive_threshold_min,
-        icp_adaptive_threshold_max,
         icp_damping_factor,
         icp_min_inlier_points,
         ..

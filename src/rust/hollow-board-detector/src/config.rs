@@ -16,9 +16,6 @@ pub struct Config {
     // ICP algorithm tuning parameters
     pub icp_good_fit_threshold: f64,
     pub icp_outlier_threshold: f64,
-    pub icp_adaptive_threshold_multiplier: f64,
-    pub icp_adaptive_threshold_min: f64,
-    pub icp_adaptive_threshold_max: f64,
     pub icp_damping_factor: f64,
     pub icp_min_inlier_points: usize,
 
