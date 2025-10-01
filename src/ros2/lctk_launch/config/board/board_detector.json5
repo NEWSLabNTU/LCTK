@@ -20,7 +20,7 @@
     // the maximum accepted ICP loss (balanced for stability)
     "icp_rejection_threshold": 0.0229,
     // good fit threshold for convergence detection (tightened for accuracy)
-    "icp_good_fit_threshold": 0.024,  // Tightened from 0.03 to 0.01
+    "icp_good_fit_threshold": 0.028,  // Relaxed to handle downsampled point clouds
     // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
     "icp_outlier_threshold": 1e10,  // Effectively disabled - keep all correspondences
     // damping factor for pose updates (increased for better convergence)
@@ -34,7 +34,7 @@
     // Reduces point cloud density while preserving geometry
     // Recommended for large point clouds (>10K points) to improve ICP speed
     "voxel_downsample_enabled": true,       // Default: disabled (preserve current behavior)
-    "voxel_downsample_size": 0.02,           // 2cm voxels (70-80% reduction)
+    "voxel_downsample_size": 0.03,           // 3cm voxels for aggressive downsampling
                                               // 0.015m: conservative (60-70% reduction)
                                               // 0.02m: balanced (70-80% reduction)
                                               // 0.03m: aggressive (85-90% reduction)
