@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for extrinsic solver node.
+
+    This node solves LiDAR-camera extrinsic calibration using ArUco markers
+    and calibration board detections via the Perspective-n-Point (PnP) algorithm.
+-->
+<launch>
+    <!-- Frame Arguments -->
+    <arg name="parent_frame"
+         default="lidar"
+         description="Parent frame for the extrinsic transform"/>
+
+    <arg name="child_frame"
+         default="camera"
+         description="Child frame for the extrinsic transform"/>
+
+    <!-- Camera Topic Argument -->
+    <arg name="camera_topic"
+         default="/sensing/camera/front_center/image_raw"
+         description="Camera image topic (camera_info topic will be derived from this)"/>
+
+    <!-- Topic Arguments -->
+    <arg name="aruco_detections"
+         default="/calibration/aruco_locator/aruco_detections"
+         description="Input ArUco detections topic"/>
+
+    <arg name="board_detections"
+         default="/calibration/lidar_board_detector/calibration_board_detections"
+         description="Input calibration board detections topic"/>
+
+    <arg name="extrinsic_transform"
+         default="/calibration/extrinsic_solver/extrinsic_transform"
+         description="Output extrinsic transform topic"/>
+
+    <!-- Debug Mode -->
+    <arg name="debug_mode"
+         default="true"
+         description="Enable debug logging"/>
+
+    <arg name="log_level"
+         default="info"
+         description="ROS log level (debug, info, warn, error, fatal)"/>
+
+    <!-- Extrinsic Solver Node -->
+    <node pkg="advanced_extrinsic_solver"
+          exec="advanced_extrinsic_solver"
+          name="advanced_extrinsic_solver"
+          output="screen"
+          args="--ros-args --log-level $(var log_level)">
+        <!-- Essential parameters -->
+        <param name="parent_frame" value="$(var parent_frame)"/>
+        <param name="child_frame" value="$(var child_frame)"/>
+        <param name="camera_topic" value="$(var camera_topic)"/>
+        <param name="debug_mode" value="$(var debug_mode)"/>
+
+        <!-- Topic remapping -->
+        <remap from="aruco_detections" to="$(var aruco_detections)"/>
+        <remap from="calibration_board_detections" to="$(var board_detections)"/>
+        <remap from="extrinsic_transform" to="$(var extrinsic_transform)"/>
+    </node>
+</launch>
