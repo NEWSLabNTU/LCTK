@@ -2,7 +2,7 @@ mod bbox;
 mod services;
 
 use crate::{bbox::BBox, services::BBoxServices};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
@@ -16,8 +16,6 @@ use hollow_board_detector::{
     Detector as BoardDetector,
 };
 use nalgebra::{self as na, Translation3, UnitQuaternion};
-use ndarray::Array2;
-use petal_decomposition::PcaBuilder;
 use plane_estimator::PlaneModel;
 use rclrs::{PublisherOptions, SubscriptionOptions, *};
 use sensor_msgs::msg::{PointCloud2, PointField};
@@ -892,8 +890,9 @@ impl CalibrationBoardLocatorNode {
             marker_paper_size,
         };
 
-        // Step 3: Create initial pose using PCA-based alignment
-        let initial_pose = Self::compute_initial_pose_pca(
+        // Step 3: Create initial pose using plane normal-based alignment
+        let initial_pose = Self::compute_initial_pose_from_plane(
+            plane_model,
             plane_inlier_points,
             board_width.as_meters(),
             header,
@@ -1109,239 +1108,113 @@ impl CalibrationBoardLocatorNode {
         }
     }
 
-    /// Compute initial board pose using PCA-based alignment
-    fn compute_initial_pose_pca(
+    /// Compute initial board pose using plane normal alignment (from wayside-portal)
+    fn compute_initial_pose_from_plane(
+        plane_model: &PlaneModel,
         plane_inlier_points: &[na::Point3<f64>],
         board_width_meters: f64,
-        header: &Header,
-        debug_publishers: &Option<BoardDebugPublishers>,
+        _header: &Header,
+        _debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Option<na::Isometry3<f64>> {
         if plane_inlier_points.is_empty() {
-            log_warn!(LOGGER_NAME, "Cannot compute PCA pose with empty point set");
-            return None;
-        }
-
-        if plane_inlier_points.len() < 3 {
             log_warn!(
                 LOGGER_NAME,
-                "Need at least 3 points for PCA, got {}",
-                plane_inlier_points.len()
+                "Cannot compute initial pose with empty point set"
             );
             return None;
         }
 
-        // Step 1: Compute centroid
-        let centroid = plane_inlier_points
+        // Step 1: Compute centroid of plane inlier points
+        let inlier_centroid = plane_inlier_points
             .iter()
             .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
             / (plane_inlier_points.len() as f64);
 
         log_debug!(
             LOGGER_NAME,
-            "PCA pose initialization: centroid=({:.3}, {:.3}, {:.3}), {} points",
-            centroid.x,
-            centroid.y,
-            centroid.z,
+            "Initial pose from plane: centroid=({:.3}, {:.3}, {:.3}), {} points",
+            inlier_centroid.x,
+            inlier_centroid.y,
+            inlier_centroid.z,
             plane_inlier_points.len()
         );
 
-        // Step 2: Create data matrix for PCA using petal-decomposition
-        // petal-decomposition expects data as (n_samples, n_features) = (n_points, 3)
-        let n_points = plane_inlier_points.len();
-        let mut data_array = Array2::<f64>::zeros((n_points, 3));
-
-        for (row_idx, point) in plane_inlier_points.iter().enumerate() {
-            data_array[[row_idx, 0]] = point.x;
-            data_array[[row_idx, 1]] = point.y;
-            data_array[[row_idx, 2]] = point.z;
-        }
-
-        // Step 3: Perform PCA using petal-decomposition (keeps all 3 components)
-        let mut pca = PcaBuilder::new(3).build();
-        if let Err(e) = pca.fit(&data_array.view()) {
-            log_warn!(LOGGER_NAME, "PCA fit failed: {}", e);
-            return None;
-        }
-
-        // Step 4: Get singular values and components
-        let singular_values = pca.singular_values();
-        let explained_variance = pca.explained_variance_ratio();
-
-        log_debug!(
-            LOGGER_NAME,
-            "PCA singular values: [{:.6}, {:.6}, {:.6}]",
-            singular_values[0],
-            singular_values[1],
-            singular_values[2]
-        );
-        log_debug!(
-            LOGGER_NAME,
-            "Explained variance ratio: [{:.6}, {:.6}, {:.6}]",
-            explained_variance[0],
-            explained_variance[1],
-            explained_variance[2]
-        );
-
-        // Step 5: Extract principal components (eigenvectors)
-        // petal-decomposition returns components as (n_components, n_features) = (3, 3)
-        // Each row is a principal component
-        let components = pca.components();
-
-        // Extract the three principal components
-        // PC0 has largest variance (lies in plane), PC2 has smallest variance (normal to plane)
-        let mut v1 = na::Vector3::new(components[[0, 0]], components[[0, 1]], components[[0, 2]]); // 1st PC - largest variance (in plane)
-        let mut v2 = na::Vector3::new(components[[1, 0]], components[[1, 1]], components[[1, 2]]); // 2nd PC - middle variance (in plane)
-        let mut v3 = na::Vector3::new(components[[2, 0]], components[[2, 1]], components[[2, 2]]); // 3rd PC - smallest variance (normal to plane)
-
-        log_debug!(
-            LOGGER_NAME,
-            "PCA component assignment: v1=PC0({:.6}), v2=PC1({:.6}), v3=PC2({:.6})",
-            singular_values[0],
-            singular_values[1],
-            singular_values[2]
-        );
-
-        log_debug!(
-            LOGGER_NAME,
-            "Initial eigenvectors: v1=({:.3}, {:.3}, {:.3}), v2=({:.3}, {:.3}, {:.3}), v3=({:.3}, {:.3}, {:.3})",
-            v1.x, v1.y, v1.z,
-            v2.x, v2.y, v2.z,
-            v3.x, v3.y, v3.z
-        );
-
-        // Publish raw eigenvectors for debugging (before any orientation constraints)
-        if let Some(debug_pubs) = debug_publishers {
-            if let Ok(eigenvector_markers) =
-                Self::create_pca_eigenvector_markers(&centroid, &v1, &v2, &v3, header)
-            {
-                let _ = debug_pubs.pca_eigenvectors.publish(eigenvector_markers);
-                log_debug!(LOGGER_NAME, "Published raw PCA eigenvectors");
+        // Step 2: Obtain the plane normal vector that points towards the origin
+        let plane_normal = {
+            let normal = plane_model.normal.into_inner();
+            if (na::Point3::origin().coords - inlier_centroid).dot(&normal) < 0.0 {
+                -normal
+            } else {
+                normal
             }
-        }
-
-        // Step 6: Apply orientation constraints
-        // Ensure v3 (normal) points toward camera (positive z in camera frame)
-        // Assuming camera is above the calibration board
-        if v3.z < 0.0 {
-            v3 = -v3;
-            log_debug!(LOGGER_NAME, "Flipped v3 to point toward camera");
-        }
-
-        // Ensure v1 and v2 have positive z components (point generally upward)
-        if v1.z < 0.0 {
-            v1 = -v1;
-            log_debug!(LOGGER_NAME, "Flipped v1 for positive z component");
-        }
-        if v2.z < 0.0 {
-            v2 = -v2;
-            log_debug!(LOGGER_NAME, "Flipped v2 for positive z component");
-        }
-
-        // Ensure right-hand rule: v3 = v1 × v2
-        let cross_product = v1.cross(&v2);
-        if cross_product.dot(&v3) < 0.0 {
-            std::mem::swap(&mut v1, &mut v2); // Swap v1 and v2 to maintain right-hand rule
-            log_debug!(LOGGER_NAME, "Swapped v1 and v2 to maintain right-hand rule");
-        }
-
-        // Step 7: Create rotation from eigenvectors using UnitQuaternion
-        // v1 -> x-axis, v2 -> y-axis, v3 -> z-axis
-        let pca_rotation_matrix = na::Matrix3::from_columns(&[v1, v2, v3]);
-        let pca_rotation = UnitQuaternion::from_matrix(&pca_rotation_matrix);
+        };
 
         log_debug!(
             LOGGER_NAME,
-            "Final eigenvectors: v1=({:.3}, {:.3}, {:.3}), v2=({:.3}, {:.3}, {:.3}), v3=({:.3}, {:.3}, {:.3})",
-            v1.x, v1.y, v1.z,
-            v2.x, v2.y, v2.z,
-            v3.x, v3.y, v3.z
+            "Plane normal (toward origin): ({:.3}, {:.3}, {:.3})",
+            plane_normal.x,
+            plane_normal.y,
+            plane_normal.z
         );
 
-        // Step 7.5: Apply -45 degree rotation around plane normal to align with board borders
-        // PCA eigenvectors align with diagonal directions, but we want x/y axes aligned with board edges
-        let rotation_angle = std::f64::consts::FRAC_PI_4; // -45 degrees
-        let plane_normal_unit = na::Unit::new_normalize(v3);
-        let normal_rotation = UnitQuaternion::from_axis_angle(&plane_normal_unit, rotation_angle);
+        // Step 3: Let the xy-plane projections of board normal and plane normal overlap
+        // This decreases the chance of falling into local minimum
+        let rotation = {
+            // Create lifting rotation: -90° around Y-axis, then -45° around Z-axis
+            let lifting_rotation = na::UnitQuaternion::from_euler_angles(0.0, -FRAC_PI_2, 0.0)
+                * na::UnitQuaternion::from_euler_angles(0.0, 0.0, -std::f64::consts::FRAC_PI_4);
 
-        // Compose rotations: first PCA, then rotate around plane normal
-        let final_rotation = normal_rotation * pca_rotation;
+            let lifted_normal = lifting_rotation * na::Vector3::z_axis();
 
-        log_debug!(
-            LOGGER_NAME,
-            "Applied -45° rotation around plane normal to align with board borders"
-        );
-
-        // Add assertions to verify correctness (debug builds only)
-        #[cfg(debug_assertions)]
-        {
-            let rotation_matrix_obj = final_rotation.to_rotation_matrix();
-            let rotation_matrix = rotation_matrix_obj.matrix();
-            let det = rotation_matrix.determinant();
-            log_debug!(LOGGER_NAME, "Rotation matrix determinant: {:.6}", det);
-            assert!(
-                (det - 1.0).abs() < 1e-6,
-                "Rotation matrix determinant should be 1.0, got {}",
-                det
-            );
-
-            // Check orthogonality
-            let should_be_identity = rotation_matrix * rotation_matrix.transpose();
-            let identity = na::Matrix3::<f64>::identity();
-            let diff_norm = (&should_be_identity - &identity).norm();
             log_debug!(
                 LOGGER_NAME,
-                "Orthogonality check (should be ~0): {:.6}",
-                diff_norm
+                "Lifted normal: ({:.3}, {:.3}, {:.3})",
+                lifted_normal.x,
+                lifted_normal.y,
+                lifted_normal.z
             );
-            assert!(
-                diff_norm < 1e-6,
-                "Rotation matrix should be orthogonal, difference norm: {}",
-                diff_norm
-            );
-        }
 
-        // Check right-hand rule (debug builds only)
-        #[cfg(debug_assertions)]
-        {
-            let computed_v3 = v1.cross(&v2);
-            let v3_alignment = computed_v3.dot(&v3);
-            log_debug!(
-                LOGGER_NAME,
-                "Right-hand rule check (v1 × v2 · v3, should be ~1): {:.6}",
-                v3_alignment
-            );
-            assert!(
-                v3_alignment > 0.9,
-                "Right-hand rule violated, alignment: {}",
-                v3_alignment
-            );
-        }
+            // Create planar rotation to align lifted normal with plane normal's XY projection
+            let planar_rotation = {
+                let planar_plane_normal = na::Vector3::new(plane_normal.x, plane_normal.y, 0.0);
+                na::UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
+                    .unwrap_or_else(|| {
+                        if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
+                            na::UnitQuaternion::identity()
+                        } else {
+                            na::UnitQuaternion::from_euler_angles(0.0, 0.0, std::f64::consts::PI)
+                        }
+                    })
+            };
 
-        // Step 8: Use the final composed rotation
-        let rotation = final_rotation;
+            planar_rotation * lifting_rotation
+        };
 
-        // Step 9: Compute bottom corner position from centroid
-        // BoardModel::find_correspondences() uses bottom_corner() as the origin,
-        // so pose.translation MUST be at the bottom corner (0,0) in board coordinates
-        let center_to_corner_board =
-            na::Vector3::new(-board_width_meters / 2.0, -board_width_meters / 2.0, 0.0);
-        let corner_offset_world = rotation * center_to_corner_board;
-        let corner_position = na::Point3::from(centroid + corner_offset_world);
+        // Step 4: Create initial pose with board center at inlier centroid
+        // We want: board_center_world = inlier_centroid
+        // The board center in board coordinates is at (board_width/2, board_width/2, 0)
+        // board_center_world = pose.translation + rotation * board_center_board
+        // Therefore: pose.translation = inlier_centroid - rotation * board_center_board
+        let board_center_board =
+            na::Vector3::new(board_width_meters / 2.0, board_width_meters / 2.0, 0.0);
+        let board_center_offset = rotation * board_center_board;
+        let corner_position = inlier_centroid - board_center_offset;
 
-        let pose = na::Isometry3::from_parts(Translation3::from(corner_position.coords), rotation);
+        let pose = na::Isometry3::from_parts(na::Translation3::from(corner_position), rotation);
 
         log_info!(
             LOGGER_NAME,
-            "PCA initial pose (corner): centroid=({:.3}, {:.3}, {:.3}), offset=({:.3}, {:.3}, {:.3}), corner=({:.3}, {:.3}, {:.3})",
-            centroid.x,
-            centroid.y,
-            centroid.z,
-            corner_offset_world.x,
-            corner_offset_world.y,
-            corner_offset_world.z,
+            "Initial pose from plane: centroid=({:.3}, {:.3}, {:.3}), corner=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
+            inlier_centroid.x,
+            inlier_centroid.y,
+            inlier_centroid.z,
             pose.translation.x,
             pose.translation.y,
-            pose.translation.z
+            pose.translation.z,
+            rotation.w,
+            rotation.i,
+            rotation.j,
+            rotation.k
         );
 
         Some(pose)
