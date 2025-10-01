@@ -205,11 +205,11 @@ class EducationalOverlayNode(Node):
             qos = QoSProfile(
                 reliability=ReliabilityPolicy.BEST_EFFORT,
                 durability=DurabilityPolicy.VOLATILE,
-                depth=10,
+                depth=1,  # Prevent buffering delays
             )
         else:
             # Reliable: Guaranteed delivery (good for recorded data/rosbags)
-            qos = QoSProfile(depth=10)
+            qos = QoSProfile(depth=1)  # Prevent buffering delays
 
         # === SENSOR DATA SUBSCRIPTIONS ===
         # Educational pattern: subscribe to all required sensor streams

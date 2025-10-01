@@ -230,7 +230,9 @@ impl ArucoLocatorNode {
 
         // Configure QoS for sensor input topics
         let qos_profile = if use_best_effort_qos {
-            QoSProfile::sensor_data_default() // Best effort for live sensors
+            let mut qos = QoSProfile::sensor_data_default();
+            qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 }; // Prevent buffering delays
+            qos
         } else {
             QoSProfile::default() // Reliable for rosbag playback
         };
