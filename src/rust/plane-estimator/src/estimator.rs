@@ -53,8 +53,8 @@ where
         // if there are remaining data points, check if the plane fits.
         for point in data {
             let vec = point - center;
-            let cos = vec.dot(&normal) / vec.norm();
-            if cos >= 1e-8 {
+            let distance = vec.dot(&normal).abs();
+            if distance >= 1e-6 {
                 return None;
             }
         }
