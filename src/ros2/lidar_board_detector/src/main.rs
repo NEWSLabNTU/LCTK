@@ -130,7 +130,8 @@ impl CalibrationBoardLocatorNode {
         let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
         log_info!(
             LOGGER_NAME,
-            "Loaded board detector config: ransac_threshold={:.3}m, ransac_iterations={}, icp_iterations={}",
+            "Loaded board detector config: skip_ransac={}, ransac_threshold={:.3}m, ransac_iterations={}, icp_iterations={}",
+            board_detector_config.skip_ransac,
             board_detector_config.plane_ransac_inlier_threshold,
             board_detector_config.plane_ransac_max_iterations,
             board_detector_config.max_icp_iterations
@@ -431,23 +432,51 @@ impl CalibrationBoardLocatorNode {
             });
         }
 
-        // Stage 2: RANSAC plane detection
-        let (plane_model, plane_inlier_points) = match Self::detect_plane_ransac(
-            detector,
-            &active_points,
-            &msg.header,
-            board_debug_publishers,
-        )? {
-            Some(result) => result,
-            None => {
+        // Stage 2: RANSAC plane detection (or skip if configured)
+        let (plane_model, plane_inlier_points) = if detector.config().skip_ransac {
+            // Skip RANSAC and use all bbox-filtered points directly
+            log_info!(
+                LOGGER_NAME,
+                "RANSAC skipped (skip_ransac=true), using all {} bbox-filtered points for ICP",
+                active_points.len()
+            );
+
+            // Create a simple plane model using PCA on all points
+            let plane_model = Self::compute_plane_from_points(&active_points)?;
+
+            // Publish debug info showing we're using all points
+            if let Some(debug_pubs) = board_debug_publishers {
                 log_debug!(
                     LOGGER_NAME,
-                    "RANSAC plane detection failed - no valid plane found"
+                    "Publishing {} bbox-filtered points to debug/plane_inliers (RANSAC skipped)",
+                    active_points.len()
                 );
-                return Ok(Detection3DArray {
-                    header: msg.header.clone(),
-                    detections: Vec::new(),
-                });
+                let debug_cloud = Self::create_debug_pointcloud(&active_points, &msg.header)?;
+                if let Err(e) = debug_pubs.plane_inliers.publish(debug_cloud) {
+                    log_warn!(LOGGER_NAME, "Failed to publish debug plane inliers: {e}");
+                }
+            }
+
+            (plane_model, active_points.clone())
+        } else {
+            // Normal RANSAC plane detection
+            match Self::detect_plane_ransac(
+                detector,
+                &active_points,
+                &msg.header,
+                board_debug_publishers,
+            )? {
+                Some(result) => result,
+                None => {
+                    log_debug!(
+                        LOGGER_NAME,
+                        "RANSAC plane detection failed - no valid plane found"
+                    );
+                    return Ok(Detection3DArray {
+                        header: msg.header.clone(),
+                        detections: Vec::new(),
+                    });
+                }
             }
         };
 
@@ -1255,6 +1284,67 @@ impl CalibrationBoardLocatorNode {
             data[offset + 3],
         ];
         Ok(f32::from_le_bytes(bytes))
+    }
+
+    /// Compute a plane model from points using PCA (for skip_ransac mode)
+    fn compute_plane_from_points(points: &[na::Point3<f64>]) -> Result<PlaneModel> {
+        if points.len() < 3 {
+            return Err(anyhow!(
+                "Need at least 3 points to compute plane, got {}",
+                points.len()
+            ));
+        }
+
+        // Compute centroid
+        let centroid = points
+            .iter()
+            .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
+            / (points.len() as f64);
+
+        // Compute covariance matrix
+        let mut covariance = na::Matrix3::<f64>::zeros();
+        for point in points {
+            let diff = point.coords - centroid;
+            covariance += diff * diff.transpose();
+        }
+        covariance /= points.len() as f64;
+
+        // Compute eigendecomposition to find plane normal
+        let eigen = covariance.symmetric_eigen();
+
+        // The eigenvector with the smallest eigenvalue is the plane normal
+        let mut eigenvalues_indexed: Vec<(usize, f64)> =
+            (0..3).map(|i| (i, eigen.eigenvalues[i])).collect();
+        eigenvalues_indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+        let normal_idx = eigenvalues_indexed[0].0; // Smallest eigenvalue
+        let normal_vec = eigen.eigenvectors.column(normal_idx).into_owned();
+
+        // Ensure normal points toward positive X (sensor direction)
+        let normal = if normal_vec.x >= 0.0 {
+            na::Unit::new_normalize(normal_vec)
+        } else {
+            na::Unit::new_normalize(-normal_vec)
+        };
+
+        let plane_model = PlaneModel {
+            center: na::Point3::from(centroid),
+            normal,
+        };
+
+        log_info!(
+            LOGGER_NAME,
+            "Computed plane from {} points using PCA: normal=[{:.3}, {:.3}, {:.3}], center=[{:.3}, {:.3}, {:.3}]",
+            points.len(),
+            plane_model.normal.x,
+            plane_model.normal.y,
+            plane_model.normal.z,
+            plane_model.center.x,
+            plane_model.center.y,
+            plane_model.center.z
+        );
+
+        Ok(plane_model)
     }
 
     fn create_debug_pointcloud(

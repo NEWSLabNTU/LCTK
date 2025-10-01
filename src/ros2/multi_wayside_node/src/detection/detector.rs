@@ -34,6 +34,7 @@ impl HollowBoardDetectionProcessor {
             icp_rejection_threshold: 0.01,
             plane_ransac_max_iterations: 1000,
             plane_ransac_inlier_threshold: 0.5,
+            skip_ransac: false,
 
             // ICP algorithm tuning parameters
             icp_good_fit_threshold: 0.015,

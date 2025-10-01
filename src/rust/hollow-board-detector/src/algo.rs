@@ -9,7 +9,6 @@ use anyhow::Result;
 use arrsac::Arrsac;
 use aruco_config::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
-use itertools::izip;
 use log::{debug, warn};
 use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
 use newslab_geom_algo::{self, centroid_of_points};
