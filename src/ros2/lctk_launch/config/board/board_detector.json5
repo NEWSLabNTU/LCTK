@@ -13,18 +13,18 @@
     // ICP Algorithm Parameters
     // ========================================
     // max number of ICP iterations (increased for observing convergence behavior)
-    "max_icp_iterations": 1000,
+    "max_icp_iterations": 500,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is below this threshold several times
     "icp_pose_weight_threshold": 1e-10,
     // the maximum accepted ICP loss (balanced for stability)
-    "icp_rejection_threshold": 0.00000001,
+    "icp_rejection_threshold": 0.001,
     // good fit threshold for convergence detection (tightened for accuracy)
-    "icp_good_fit_threshold": 0.00000001,
+    "icp_good_fit_threshold": 0.024,  // Tightened from 0.03 to 0.01
     // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
     "icp_outlier_threshold": 1e10,  // Effectively disabled - keep all correspondences
     // damping factor for pose updates (increased for better convergence)
-    "icp_damping_factor": 0.5,  // Increased from 0.35 to 0.6
+    "icp_damping_factor": 1,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
     "icp_min_inlier_points": 100,  // Lowered from 1500 to avoid stopping when points are good
 
@@ -37,5 +37,5 @@
     "hole_radius": "150mm",     // mm
     // suppose the center of board is (0, 0)
     // the center of hole will be at (+/- shift, +/- shift)
-    "hole_center_shift": "200mm", // mm
+    "hole_center_shift": "200mm" // mm
 }
