@@ -9,7 +9,7 @@ use opencv::{
     imgproc::{self, FONT_HERSHEY_SIMPLEX, LINE_8},
     prelude::*,
 };
-use rclrs::{SubscriptionOptions, *};
+use rclrs::{PublisherOptions, SubscriptionOptions, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::{
     sync::{
@@ -262,8 +262,13 @@ impl ArucoLocatorNode {
             camera_info_topic
         );
 
-        // Create detection publisher
-        let detection_publisher = node.create_publisher("aruco_detections")?;
+        // Create detection publisher with BEST_EFFORT QoS for timestamp-based matching
+        let mut detection_pub_opts = PublisherOptions::new("aruco_detections");
+        detection_pub_opts.qos = QoSProfile {
+            history: QoSHistoryPolicy::KeepLast { depth: 1 },
+            ..QoSProfile::sensor_data_default() // BEST_EFFORT
+        };
+        let detection_publisher = node.create_publisher(detection_pub_opts)?;
 
         // Create overlay publisher if debug is enabled
         let overlay_publisher = if debug_overlay_enabled {
