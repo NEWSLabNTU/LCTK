@@ -294,8 +294,6 @@ pub fn fit_board_icp(
                 }
 
                 losses.push(avg_loss);
-                debug!("ICP iteration {}: avg_loss = {:.8}", step, avg_loss);
-                eprintln!("[DEBUG] ICP iteration {}: avg_loss = {:.8}", step, avg_loss);
 
                 let damping_factor = icp_damping_factor;
                 let new_pose = align_pose * pose;
@@ -640,7 +638,6 @@ pub fn fit_board_icp_with_iterator<'a>(
     while !iterator.should_terminate(&state) {
         state = iterator.step(&state);
         losses.push(state.avg_loss);
-        debug!("ICP iteration {}: avg_loss = {:.8}", state.iteration, state.avg_loss);
     }
 
     // Determine success based on termination reason
@@ -733,7 +730,6 @@ impl<'a> BoardIcpIterator<'a> {
 
     /// Execute one ICP iteration step
     pub fn step(&mut self, current_state: &BoardIcpState) -> BoardIcpState {
-        eprintln!("[DEBUG] BoardIcpIterator::step() iteration {}", current_state.iteration);
         
         let board_model = BoardModel {
             pose: current_state.board_pose,
@@ -851,10 +847,6 @@ impl<'a> BoardIcpIterator<'a> {
             good_correspondences: good_correspondences_len,
             termination_count,
         };
-        
-        eprintln!("[DEBUG] ICP iteration {}: avg_loss = {:.8}, good_correspondences = {}/{}", 
-                  new_state.iteration, new_state.avg_loss, new_state.good_correspondences, new_state.total_correspondences);
-        debug!("ICP iteration {}: avg_loss = {:.8}", new_state.iteration, new_state.avg_loss);
         
         new_state
     }
