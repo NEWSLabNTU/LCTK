@@ -15,6 +15,10 @@ fn create_test_config() -> Config {
         icp_outlier_threshold: 0.1,
         icp_damping_factor: 0.5,
         icp_min_inlier_points: 3,
+        voxel_downsample_enabled: false,
+        voxel_downsample_size: 0.02,
+        voxel_downsample_use_centroid: true,
+        voxel_parallel_threshold: 50_000,
         board_shape: BoardShape {
             board_width: Length::from_meters(0.5),
             hole_radius: Length::from_meters(0.05),

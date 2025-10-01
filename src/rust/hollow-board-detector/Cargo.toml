@@ -22,6 +22,9 @@ plane-estimator = { version = "0.1.0", path = "../plane-estimator" }
 log = { workspace = true }
 env_logger = "0.11"
 measurements = { workspace = true, features = ["serde"] }
+ahash = "0.8"
+dashmap = { version = "6.1", features = ["rayon"], optional = true }
+rayon = { version = "1.10", optional = true }
 
 [dependencies.newslab-geom-algo]
 git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
@@ -31,3 +34,12 @@ tag = "v0.2.1"
 clap = { workspace = true }
 json5 = { workspace = true }
 pcd-rs = { workspace = true }
+proptest = "1.5"
+criterion = "0.5"
+
+[features]
+parallel = ["dashmap", "rayon"]
+
+[[bench]]
+name = "voxel_downsample"
+harness = false

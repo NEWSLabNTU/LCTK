@@ -10,7 +10,7 @@ use geometry_msgs::msg::{
 };
 use hollow_board_config::{BoardModel, BoardShape};
 use hollow_board_detector::{
-    algo::{fit_plane_ransac, BoardIcpIterator},
+    algo::{fit_plane_ransac, voxel_downsample, BoardIcpIterator},
     detection::{BoardIcpState, BoardModelParams, IcpStatistics, PlaneRansacData},
     init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
     Detector as BoardDetector,
@@ -54,6 +54,7 @@ struct BoardDebugPublishers {
     all_points: Arc<Publisher<PointCloud2>>,
     filtered_points: Arc<Publisher<PointCloud2>>,
     plane_inliers: Arc<Publisher<PointCloud2>>,
+    downsampled_points: Arc<Publisher<PointCloud2>>,
     plane_marker: Arc<Publisher<MarkerArray>>,
     bbox_marker: Arc<Publisher<MarkerArray>>,
     board_marker: Arc<Publisher<MarkerArray>>,
@@ -137,6 +138,22 @@ impl CalibrationBoardLocatorNode {
             board_detector_config.max_icp_iterations
         );
 
+        // Log voxel downsampling configuration
+        if board_detector_config.voxel_downsample_enabled {
+            log_info!(
+                LOGGER_NAME,
+                "Voxel downsampling ENABLED: size={:.3}m, use_centroid={}, parallel_threshold={}",
+                board_detector_config.voxel_downsample_size,
+                board_detector_config.voxel_downsample_use_centroid,
+                board_detector_config.voxel_parallel_threshold
+            );
+        } else {
+            log_info!(
+                LOGGER_NAME,
+                "Voxel downsampling DISABLED (preserving all points for ICP)"
+            );
+        }
+
         log_info!(
             LOGGER_NAME,
             "Loading ArUco pattern config from: {}",
@@ -185,6 +202,9 @@ impl CalibrationBoardLocatorNode {
             let mut plane_inliers_opts = PublisherOptions::new("debug/plane_inliers");
             plane_inliers_opts.qos = debug_qos;
 
+            let mut downsampled_points_opts = PublisherOptions::new("debug/downsampled_points");
+            downsampled_points_opts.qos = debug_qos;
+
             let mut plane_marker_opts = PublisherOptions::new("debug/plane_marker");
             plane_marker_opts.qos = debug_qos;
 
@@ -210,6 +230,7 @@ impl CalibrationBoardLocatorNode {
                 all_points: Arc::new(node.create_publisher(all_points_opts)?),
                 filtered_points: Arc::new(node.create_publisher(filtered_points_opts)?),
                 plane_inliers: Arc::new(node.create_publisher(plane_inliers_opts)?),
+                downsampled_points: Arc::new(node.create_publisher(downsampled_points_opts)?),
                 plane_marker: Arc::new(node.create_publisher(plane_marker_opts)?),
                 bbox_marker: Arc::new(node.create_publisher(bbox_marker_opts)?),
                 board_marker: Arc::new(node.create_publisher(board_marker_opts)?),
@@ -529,20 +550,76 @@ impl CalibrationBoardLocatorNode {
             }
         };
 
-        // Stage 3: ICP board pose refinement
+        // Stage 3a: Voxel downsampling (optional preprocessing)
+        log_info!(
+            LOGGER_NAME,
+            "Plane inlier points before voxel downsampling: {} points",
+            plane_inlier_points.len()
+        );
+
+        let config = detector.config();
+        let downsampled_points = if config.voxel_downsample_enabled {
+            let downsampled = voxel_downsample(
+                &plane_inlier_points,
+                config.voxel_downsample_size,
+                config.voxel_downsample_use_centroid,
+                config.voxel_parallel_threshold,
+            );
+
+            let reduction_pct =
+                (1.0 - downsampled.len() as f64 / plane_inlier_points.len() as f64) * 100.0;
+            log_info!(
+                LOGGER_NAME,
+                "Voxel downsampling: {} → {} points ({:.1}% reduction)",
+                plane_inlier_points.len(),
+                downsampled.len(),
+                reduction_pct
+            );
+
+            // Publish downsampled points for visualization
+            if let Some(debug_pubs) = board_debug_publishers {
+                match Self::create_debug_pointcloud(&downsampled, &msg.header) {
+                    Ok(downsampled_cloud) => {
+                        if let Err(e) = debug_pubs.downsampled_points.publish(downsampled_cloud) {
+                            log_warn!(LOGGER_NAME, "Failed to publish downsampled points: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        log_warn!(LOGGER_NAME, "Failed to create downsampled pointcloud: {e}");
+                    }
+                }
+            }
+
+            downsampled
+        } else {
+            log_debug!(
+                LOGGER_NAME,
+                "Voxel downsampling disabled - using all {} plane inlier points",
+                plane_inlier_points.len()
+            );
+            plane_inlier_points.clone()
+        };
+
+        log_info!(
+            LOGGER_NAME,
+            "Points for ICP: {} points",
+            downsampled_points.len()
+        );
+
+        // Stage 3b: ICP board pose refinement
         log_debug!(
             LOGGER_NAME,
-            "Starting ICP board detection with {} plane inlier points",
-            plane_inlier_points.len()
+            "Starting ICP board detection with {} points",
+            downsampled_points.len()
         );
 
         let detection: Option<BoardDetection> = Self::detect_icp(
             detector,
             &plane_model,
-            &plane_inlier_points,
+            &downsampled_points,
             PlaneRansacData {
                 plane_model: plane_model.clone(),
-                inlier_points: plane_inlier_points.clone(),
+                inlier_points: downsampled_points.clone(),
             },
             &msg.header,
             icp_debug_publishers,
@@ -856,8 +933,10 @@ impl CalibrationBoardLocatorNode {
             }
         }
 
-        let initial_inlier_points: Vec<na::Point3<f64>> =
-            plane_inlier_points.iter().cloned().collect();
+        // Note: plane_inlier_points are already downsampled (if enabled) in process_pointcloud()
+        let icp_points: Vec<na::Point3<f64>> = plane_inlier_points.iter().cloned().collect();
+
+        log_info!(LOGGER_NAME, "Starting ICP with {} points", icp_points.len());
 
         // Step 4: Create BoardIcpIterator
         let mut iterator = BoardIcpIterator::new(
@@ -866,8 +945,8 @@ impl CalibrationBoardLocatorNode {
             None, // No progress callback as we handle debug publishing ourselves
         );
 
-        // Step 5: Create initial state
-        let mut state = iterator.initial_state(initial_pose, initial_inlier_points);
+        // Step 5: Create initial ICP state
+        let mut state = iterator.initial_state(initial_pose, icp_points);
 
         log_debug!(
             LOGGER_NAME,
@@ -875,7 +954,7 @@ impl CalibrationBoardLocatorNode {
             state.board_pose
         );
 
-        // Step 6: Iterate with optional debug publishing
+        // Step 7: Iterate with optional debug publishing
         loop {
             // Perform one ICP iteration step FIRST
             state = iterator.step(&state);

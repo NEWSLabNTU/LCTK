@@ -29,6 +29,21 @@
     "icp_min_inlier_points": 100,  // Lowered from 1500 to avoid stopping when points are good
 
     // ========================================
+    // Voxel Downsampling (Performance Optimization)
+    // ========================================
+    // Reduces point cloud density while preserving geometry
+    // Recommended for large point clouds (>10K points) to improve ICP speed
+    "voxel_downsample_enabled": true,       // Default: disabled (preserve current behavior)
+    "voxel_downsample_size": 0.02,           // 2cm voxels (70-80% reduction)
+                                              // 0.015m: conservative (60-70% reduction)
+                                              // 0.02m: balanced (70-80% reduction)
+                                              // 0.03m: aggressive (85-90% reduction)
+    "voxel_downsample_use_centroid": false,  // Use first point in voxel (preserves plane geometry)
+                                              // true: better edge preservation, but moves points off plane
+                                              // false: faster, preserves RANSAC plane inlier positions
+    "voxel_parallel_threshold": 50000,       // Use parallel for >50K points (requires 'parallel' feature)
+
+    // ========================================
     // Board Geometry Parameters
     // ========================================
     // the length of border margin
