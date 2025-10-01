@@ -190,8 +190,9 @@ impl CalibrationBoardLocatorNode {
                 "Debug mode enabled - creating debug publishers with best-effort QoS"
             );
 
-            // Create best-effort QoS profile for debug topics
-            let debug_qos = QoSProfile::sensor_data_default(); // Best effort
+            // Create best-effort QoS profile with depth=1 (latest only, no queue buildup)
+            let mut debug_qos = QoSProfile::sensor_data_default();
+            debug_qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 };
 
             let mut all_points_opts = PublisherOptions::new("debug/all_points");
             all_points_opts.qos = debug_qos;
@@ -251,8 +252,9 @@ impl CalibrationBoardLocatorNode {
                 "ICP iteration debug mode enabled - creating iteration debug publishers with best-effort QoS"
             );
 
-            // Create best-effort QoS profile for ICP debug topics
-            let icp_debug_qos = QoSProfile::sensor_data_default(); // Best effort
+            // Create best-effort QoS profile with depth=1 (latest only, no queue buildup)
+            let mut icp_debug_qos = QoSProfile::sensor_data_default();
+            icp_debug_qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 };
 
             let mut iteration_pose_opts =
                 PublisherOptions::new("/calibration/icp_debug/iteration_pose");
