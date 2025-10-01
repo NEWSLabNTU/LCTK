@@ -12,5 +12,8 @@ pub use crate::{
 /// Initialize logging for the hollow-board-detector library.
 /// This should be called once at the beginning of your application.
 pub fn init_logging() {
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .format_timestamp_millis()
+        .write_style(env_logger::WriteStyle::Always)
+        .init();
 }

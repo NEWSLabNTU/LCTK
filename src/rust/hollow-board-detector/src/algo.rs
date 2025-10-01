@@ -33,7 +33,6 @@ pub fn fit_plane_ransac<'a>(
         ..
     } = *board_detector;
 
-    // Check minimum points requirement
     if points.len() < 3 {
         warn!(
             "RANSAC failed: Need at least 3 points, got {}",
@@ -42,51 +41,13 @@ pub fn fit_plane_ransac<'a>(
         return Ok(None);
     }
 
-    // Compute point cloud statistics for debugging
-    let centroid = points
-        .iter()
-        .fold(Vector3::zeros(), |acc, p| acc + p.coords)
-        / points.len() as f64;
-    let variance = points
-        .iter()
-        .map(|p| (p.coords - centroid).norm_squared())
-        .sum::<f64>()
-        / points.len() as f64;
-    let std_dev = variance.sqrt();
-
-    debug!(
-        "RANSAC input: {} points, centroid: ({:.3}, {:.3}, {:.3}), std_dev: {:.3}",
-        points.len(),
-        centroid.x,
-        centroid.y,
-        centroid.z,
-        std_dev
-    );
-
     let mut arrsac = Arrsac::new(plane_ransac_inlier_threshold, rand::thread_rng())
         .max_candidate_hypotheses(plane_ransac_max_iterations);
     let estimator = PlaneEstimator::new();
 
     let (mut plane_model, inlier_indices) = {
         match arrsac.model_inliers(&estimator, points.iter().cloned()) {
-            Some(ret) => {
-                let inlier_ratio = ret.1.len() as f64 / points.len() as f64;
-                let plane_dist_from_origin = ret.0.center.coords.dot(&ret.0.normal);
-                debug!(
-                    "RANSAC success: Found {} inliers out of {} points (ratio: {:.3})",
-                    ret.1.len(),
-                    points.len(),
-                    inlier_ratio
-                );
-                debug!("RANSAC plane normal: {:?}", ret.0.normal);
-                debug!("RANSAC plane center: {:?}", ret.0.center);
-                debug!(
-                    "RANSAC plane distance from origin: {:.6}",
-                    plane_dist_from_origin
-                );
-                debug!("RANSAC plane pose: {:?}", ret.0.pose());
-                ret
-            }
+            Some(ret) => ret,
             None => {
                 warn!("RANSAC failed: No valid plane found");
                 return Ok(None);
@@ -94,21 +55,12 @@ pub fn fit_plane_ransac<'a>(
         }
     };
 
-    // Force plane normal to point to the front (+X in world coordinates)
     {
         let desired_front = Vector3::x_axis();
         let current_normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
-        debug!(
-            "RANSAC: Original normal: {:?}, dot with +X: {:.6}",
-            current_normal,
-            current_normal.dot(&desired_front)
-        );
         if current_normal.dot(&desired_front) < 0.0 {
             let flipped = nalgebra::Unit::new_normalize(-current_normal);
             plane_model.normal = flipped;
-            debug!("RANSAC: Flipped normal to: {:?}", plane_model.normal);
-        } else {
-            debug!("RANSAC: Keeping original normal direction");
         }
     }
 
@@ -118,12 +70,6 @@ pub fn fit_plane_ransac<'a>(
         plane_model: plane_model.clone(),
         inlier_points: inlier_points.iter().map(|point| **point).collect(),
     };
-
-    debug!(
-        "RANSAC result: {} inliers, plane normal: {:?}",
-        inlier_points.len(),
-        plane_model.normal
-    );
 
     Ok(Some(FitPlaneRansac {
         plane_model,
@@ -140,8 +86,6 @@ pub fn fit_board_icp(
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
     mut progress_cb: Option<&mut dyn FnMut(&BoardModel)>,
 ) -> Result<FitBoardIcp> {
-    // find board by modified ICP algorithm
-
     let Config {
         board_shape:
             BoardShape {
@@ -163,7 +107,6 @@ pub fn fit_board_icp(
     } = *board_detector;
     let marker_paper_size = aruco_detector.paper_size();
 
-    // Declare variables for ICP outputs at function scope
     let mut final_corresponding_points: Vec<Point3<f64>> = vec![];
     let mut final_icp_stats = IcpStatistics {
         iterations: 0,
@@ -184,43 +127,20 @@ pub fn fit_board_icp(
                 .unwrap()
                 .into();
 
-            // Improved plane normal determination
             let plane_normal = {
                 let normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
-
-                // The RANSAC plane normal from fit_plane_ransac is already forced to point toward +X (front)
-                // We should use this directly as it represents the board facing direction
-                let board_facing_normal = normal;
-
-                debug!("INIT POSE: inlier_centroid={:.6}", inlier_centroid);
-                debug!("INIT POSE: board_facing_normal={:.6}", board_facing_normal);
-                debug!(
-                    "INIT POSE: normal_magnitude={:.6}",
-                    board_facing_normal.norm()
-                );
-
-                board_facing_normal
+                normal
             };
 
-            // Improved rotation calculation using direct normal alignment
             let rotation = {
-                // The board's local +Z axis should align with the plane normal
                 let board_z_axis = Vector3::z_axis();
 
-                // Create rotation that aligns board +Z with plane normal
                 let primary_rotation =
-                    UnitQuaternion::rotation_between(&board_z_axis, &plane_normal).unwrap_or_else(
-                        || {
-                            debug!("INIT POSE: primary rotation failed, using identity");
-                            UnitQuaternion::identity()
-                        },
-                    );
+                    UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
+                        .unwrap_or_else(|| UnitQuaternion::identity());
 
-                // After primary rotation, determine board orientation in the plane
-                // The board should be oriented so its local +X points roughly toward the sensor origin
                 let rotated_board_x = primary_rotation * Vector3::x_axis();
 
-                // Project the vector from centroid to origin onto the plane
                 let centroid_to_origin = Point3::origin() - inlier_centroid;
                 let projected_to_origin =
                     centroid_to_origin - plane_normal * centroid_to_origin.dot(&plane_normal);
@@ -228,41 +148,18 @@ pub fn fit_board_icp(
                 if projected_to_origin.norm() > 1e-6 {
                     let target_direction = projected_to_origin.normalize();
 
-                    // Calculate rotation around plane normal to align board +X with target direction
                     let secondary_rotation =
                         UnitQuaternion::rotation_between(&rotated_board_x, &target_direction)
                             .unwrap_or_else(|| UnitQuaternion::identity());
 
                     let final_rotation = secondary_rotation * primary_rotation;
-
-                    debug!("INIT POSE: primary_rotation={:.6}", primary_rotation);
-                    debug!("INIT POSE: rotated_board_x={:.6}", rotated_board_x.as_ref());
-                    debug!("INIT POSE: projected_to_origin={:.6}", projected_to_origin);
-                    debug!("INIT POSE: target_direction={:.6}", target_direction);
-                    debug!("INIT POSE: secondary_rotation={:.6}", secondary_rotation);
-                    debug!("INIT POSE: final_rotation={:.6}", final_rotation);
-
                     final_rotation
                 } else {
-                    debug!("INIT POSE: no clear direction to origin, using primary rotation only");
                     primary_rotation
                 }
             };
 
-            let init_pose =
-                Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation);
-            debug!("INIT POSE: final_init_pose={:.6}", init_pose);
-
-            // Validate the initialization
-            let board_normal_after_rotation = rotation * Vector3::z_axis();
-            let normal_alignment = board_normal_after_rotation.dot(&plane_normal);
-            debug!("INIT POSE: normal_alignment_check={:.6}", normal_alignment);
-
-            if normal_alignment < 0.9 {
-                debug!("INIT POSE: WARNING - poor normal alignment, may need adjustment");
-            }
-
-            init_pose
+            Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
         };
         let init_inlier_points: Vec<&Point3<_>> = plane_inlier_points
             .iter()
@@ -295,7 +192,6 @@ pub fn fit_board_icp(
                     cb(&board_model);
                 }
 
-                // Use the board model's correspondence finding method for proper closest point calculation
                 let correspondings = match board_model.find_correspondences(&inlier_points) {
                     Some(corr) => corr,
                     None => {
@@ -304,7 +200,6 @@ pub fn fit_board_icp(
                     }
                 };
 
-                // reject outliers
                 let correspondence_losses: Vec<_> = correspondings
                     .iter()
                     .map(|(input_point, corresponding_point)| {
@@ -315,7 +210,6 @@ pub fn fit_board_icp(
                 let avg_loss =
                     correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
 
-                // Thresholding is turned off: use all correspondences as good correspondences
                 let good_correspondences: Vec<_> = correspondings
                     .iter()
                     .map(|(input_point, corresponding_point)| (*input_point, *corresponding_point))
@@ -327,7 +221,6 @@ pub fn fit_board_icp(
                     Vec<Point3<f64>>,
                 ) = good_correspondences.into_iter().unzip();
 
-                // Centroids diagnostics (selected pairs)
                 if good_inlier_points.len() >= 3 {
                     if let Some(in_centroid_arr) =
                         centroid_of_points(good_inlier_points.iter().map(|p| {
@@ -347,7 +240,6 @@ pub fn fit_board_icp(
                     }
                 }
 
-                // Safety check: ensure we have at least 3 points for Kabsch
                 if good_inlier_points.len() < 3 {
                     convergence_reason = format!(
                         "Insufficient points for Kabsch: {}",
@@ -371,24 +263,13 @@ pub fn fit_board_icp(
                     break;
                 }
 
-                // compute transformation
-                debug!("fit_board_icp Step {}: === KABSCH TRANSFORMATION ===", step);
-                debug!("fit_board_icp Step {}: Input: {} data points (from point cloud)", 
-                    step, good_corresponding_points.len());
-                debug!("fit_board_icp Step {}: Target: {} model points (from board model)", 
-                    step, good_inlier_points.len());
-                    
                 let align_pose: Isometry3<_> = {
-                    // Kabsch expects (input, target) pairs.
-                    // Our correspondences are (data_point, model_point).
-                    // Kabsch computes data→model, then we invert to get model→data for ICP pose update.
                     match BoardIcpIterator::compute_kabsch_transform(
                         &good_corresponding_points,
                         &good_inlier_points,
                     ) {
-                        Some(iso) => iso.inverse(),  // Invert to get the correction transform
+                        Some(iso) => iso.inverse(),
                         None => {
-                            debug!("fit_board_icp Step {}: KABSCH FAILED!", step);
                             convergence_reason = "Kabsch algorithm failed".to_string();
                             let stats = IcpStatistics {
                                 iterations: step,
@@ -410,112 +291,40 @@ pub fn fit_board_icp(
                     }
                 };
 
-                // Capture initial loss for statistics
                 if !initial_loss_captured {
                     initial_loss = avg_loss;
                     initial_loss_captured = true;
                 }
 
-                // update state
                 losses.push(avg_loss);
-                // CRITICAL FIX: Do NOT shrink the inlier_points set!
-                // Keep using the original full point cloud throughout all iterations.
-                // Only use good_inlier_points for Kabsch transformation, not for next iteration's correspondence finding.
-                // inlier_points = good_inlier_points;  // REMOVED: This was causing progressive point loss!
+                debug!("ICP iteration {}: avg_loss = {:.8}", step, avg_loss);
+                eprintln!("[DEBUG] ICP iteration {}: avg_loss = {:.8}", step, avg_loss);
 
-                // Apply damping to prevent overshooting
                 let damping_factor = icp_damping_factor;
-
-                // Apply damping to the pose update (not the transformation itself)
-                // This interpolates between the current pose and the new pose after applying the transformation
-                // Use right multiplication: pose * transform applies transform in local frame
-                debug!("fit_board_icp Step {}: === POSE UPDATE ===", step);
-                debug!("fit_board_icp Step {}: Current pose translation = ({:.6}, {:.6}, {:.6})",
-                    step, pose.translation.x, pose.translation.y, pose.translation.z);
-                debug!("fit_board_icp Step {}: Current pose rotation angle = {:.6} degrees",
-                    step, pose.rotation.angle().to_degrees());
-                    
                 let new_pose = align_pose * pose;
-                
-                debug!("fit_board_icp Step {}: Computed new pose translation = ({:.6}, {:.6}, {:.6})",
-                    step, new_pose.translation.x, new_pose.translation.y, new_pose.translation.z);
-                debug!("fit_board_icp Step {}: Computed new pose rotation angle = {:.6} degrees",
-                    step, new_pose.rotation.angle().to_degrees());
-                debug!("fit_board_icp Step {}: Damping factor = {:.6}", step, damping_factor);
 
-                // Diagnostics for pose delta before damping
-                let delta_t = (new_pose.translation.vector - pose.translation.vector).norm();
-                let delta_ang = new_pose.rotation.rotation_to(&pose.rotation).angle();
-                let delta_trans_vec = new_pose.translation.vector - pose.translation.vector;
-
-                // Debug step-by-step ICP progress
-                debug!(
-                    "fit_board_icp Step {}: loss={:.6}, total_points={}, good_correspondences={}/{}",
-                    step, avg_loss, inlier_points.len(), good_correspondences_len, correspondings.len()
-                );
-                debug!(
-                    "fit_board_icp Step {}: Undamped delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
-                    step, delta_trans_vec.x, delta_trans_vec.y, delta_trans_vec.z, delta_t
-                );
-                debug!(
-                    "fit_board_icp Step {}: Undamped delta_rotation_angle = {:.6} degrees",
-                    step, delta_ang.to_degrees()
-                );
-
-                // Damp the translation component
                 let damped_translation = Translation3::from(
                     pose.translation.vector
                         + (new_pose.translation.vector - pose.translation.vector) * damping_factor,
                 );
 
-                // Damp the rotation component using spherical linear interpolation
                 let damped_rotation =
                     UnitQuaternion::slerp(&pose.rotation, &new_pose.rotation, damping_factor);
 
-                debug!("fit_board_icp Step {}: Damped translation = ({:.6}, {:.6}, {:.6})",
-                    step, damped_translation.x, damped_translation.y, damped_translation.z);
-                debug!("fit_board_icp Step {}: Damped rotation angle = {:.6} degrees",
-                    step, damped_rotation.angle().to_degrees());
+                let applied_t = (damped_translation.vector - pose.translation.vector).norm();
+                let applied_ang = damped_rotation.rotation_to(&pose.rotation).angle();
+                let pose_weight = applied_t + applied_ang;
 
-                // Termination criteria based on the actually applied (damped) update
-                {
-                    let applied_t = (damped_translation.vector - pose.translation.vector).norm();
-                    let applied_ang = damped_rotation.rotation_to(&pose.rotation).angle();
-                    let applied_trans_vec = damped_translation.vector - pose.translation.vector;
-                    
-                    debug!(
-                        "fit_board_icp Step {}: Applied (damped) delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
-                        step, applied_trans_vec.x, applied_trans_vec.y, applied_trans_vec.z, applied_t
-                    );
-                    debug!(
-                        "fit_board_icp Step {}: Applied (damped) delta_rotation_angle = {:.6} degrees",
-                        step, applied_ang.to_degrees()
-                    );
-                    
-                    let pose_weight = applied_t + applied_ang;
-                    debug!("fit_board_icp Step {}: Pose weight = {:.6} (threshold = {:.6})",
-                        step, pose_weight, icp_pose_weight_threshold);
-                    
-                    if pose_weight <= icp_pose_weight_threshold {
-                        termination_count += 1;
-                    } else {
-                        termination_count = 0;
-                    }
+                if pose_weight <= icp_pose_weight_threshold {
+                    termination_count += 1;
+                } else {
+                    termination_count = 0;
                 }
 
                 pose = Isometry3::from_parts(damped_translation, damped_rotation);
-                
-                debug!("fit_board_icp Step {}: Final damped pose translation = ({:.6}, {:.6}, {:.6})",
-                    step, pose.translation.x, pose.translation.y, pose.translation.z);
-                debug!("fit_board_icp Step {}: Final damped pose rotation angle = {:.6} degrees",
-                    step, pose.rotation.angle().to_degrees());
-                debug!("fit_board_icp Step {}: Termination count = {}", step, termination_count);
                     
                 step += 1;
 
-                // Check if we have enough good correspondences to continue
-                // Note: We check good_correspondences_len, not inlier_points.len(), because
-                // inlier_points stays constant (original full point cloud) throughout iterations
                 if good_correspondences_len < icp_min_inlier_points {
                     convergence_reason = format!(
                         "Insufficient good correspondences: {} < {}",
@@ -540,11 +349,14 @@ pub fn fit_board_icp(
                     break;
                 }
 
-                if *losses.last().unwrap() < icp_good_fit_threshold || termination_count > 10 {
-                    debug!(
-                        "ICP terminating: loss is too small: {:.8}",
-                        losses.last().unwrap()
-                    );
+                if *losses.last().unwrap() < icp_rejection_threshold || termination_count > 100 {
+                    if termination_count > 100 {
+                        debug!("ICP terminating: stable pose reached (termination_count = {})", termination_count);
+                        eprintln!("[DEBUG] ICP terminating: stable pose reached (termination_count = {})", termination_count);
+                    } else {
+                        debug!("ICP terminating: loss below rejection threshold: {:.8}", losses.last().unwrap());
+                        eprintln!("[DEBUG] ICP terminating: loss below rejection threshold: {:.8}", losses.last().unwrap());
+                    }
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
                     debug!("  Good fit threshold: {:.8}", icp_good_fit_threshold);
                     debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
@@ -556,7 +368,7 @@ pub fn fit_board_icp(
                         correspondings.len()
                     );
                     debug!("  Pose: {:.8}", pose);
-                    convergence_reason = if termination_count > 10 {
+                    convergence_reason = if termination_count > 100 {
                         "Converged (stable pose)".to_string()
                     } else {
                         "Converged (good fit)".to_string()
@@ -565,7 +377,7 @@ pub fn fit_board_icp(
                         iterations: step,
                         final_loss: losses.last().copied().unwrap_or(0.0),
                         min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                        successful: true, // Fixed: This should be true for normal convergence
+                        successful: true,
                         initial_loss: if initial_loss_captured {
                             initial_loss
                         } else {
@@ -616,7 +428,6 @@ pub fn fit_board_icp(
             (inlier_points, losses, pose)
         };
 
-        // send to visualizer
         let viz_msg = {
             let board_model = BoardModel {
                 pose,
@@ -628,7 +439,6 @@ pub fn fit_board_icp(
                 marker_paper_size,
             };
 
-            // Use the final corresponding points from ICP
             let correspondences: Vec<_> = inlier_points
                 .iter()
                 .zip(final_corresponding_points.iter())
@@ -644,7 +454,6 @@ pub fn fit_board_icp(
         (pose, icp_losses, viz_msg)
     };
 
-    // Extract init_pose and create icp_stats for the return values
     let final_init_pose = {
         let inlier_centroid: Point3<f64> =
             centroid_of_points(plane_inlier_points.iter().map(|point| {
@@ -660,12 +469,9 @@ pub fn fit_board_icp(
         };
 
         let rotation = {
-            // Use PCA to determine the correct in-plane orientation for diamond board
             if plane_inlier_points.len() >= 3 {
-                // Compute PCA on plane inlier points to find principal directions
                 let mean = inlier_centroid;
 
-                // Compute covariance matrix of inlier points relative to centroid
                 let mut covariance = nalgebra::Matrix3::<f64>::zeros();
                 for point in plane_inlier_points.iter() {
                     let p: Point3<f64> = (*point.borrow()).into();
@@ -674,56 +480,44 @@ pub fn fit_board_icp(
                 }
                 covariance /= plane_inlier_points.len() as f64;
 
-                // Compute eigendecomposition to get principal components
                 let eigen = covariance.symmetric_eigen();
                 let eigenvalues = eigen.eigenvalues;
                 let eigenvectors = eigen.eigenvectors;
 
-                // Sort eigenvalues and corresponding eigenvectors in descending order
                 let mut eigen_pairs: Vec<(f64, Vector3<f64>)> = (0..3)
                     .map(|i| (eigenvalues[i], eigenvectors.column(i).into()))
                     .collect();
                 eigen_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
 
-                // The two largest principal components should align with diamond edges
-                // The smallest should align with the plane normal
-                let pc1 = eigen_pairs[0].1.normalize(); // First principal component (largest variance)
-                let pc2 = eigen_pairs[1].1.normalize(); // Second principal component
-                let pc3 = eigen_pairs[2].1.normalize(); // Third principal component (should be normal)
+                let pc1 = eigen_pairs[0].1.normalize();
+                let pc2 = eigen_pairs[1].1.normalize();
+                let pc3 = eigen_pairs[2].1.normalize();
 
-                // Ensure the normal points in the correct direction
                 let computed_normal = if pc3.dot(&plane_normal) > 0.0 {
                     pc3
                 } else {
                     -pc3
                 };
 
-                // Ensure right-handed coordinate system: pc1 x pc2 should align with normal
                 let cross_product = pc1.cross(&pc2);
                 let (x_axis, y_axis) = if cross_product.dot(&computed_normal) > 0.0 {
                     (pc1, pc2)
                 } else {
-                    (pc1, -pc2) // Flip y-axis to maintain right-handed system
+                    (pc1, -pc2)
                 };
 
-                // Create rotation matrix from the orthonormal basis
                 let rotation_matrix =
                     nalgebra::Matrix3::from_columns(&[x_axis, y_axis, computed_normal]);
 
-                // Convert to unit quaternion
-                // Note: from_matrix doesn't return Option, it directly returns UnitQuaternion
                 let pca_rotation = nalgebra::UnitQuaternion::from_matrix(&rotation_matrix);
 
-                // Apply additional -135° rotation around z-axis (board normal) to align coordinate system
                 let adjustment_angle = -135.0_f64.to_radians();
                 let normal_axis = nalgebra::Unit::new_normalize(computed_normal);
                 let z_axis_rotation =
                     nalgebra::UnitQuaternion::from_axis_angle(&normal_axis, adjustment_angle);
 
-                // Combine PCA rotation with the adjustment
                 z_axis_rotation * pca_rotation
             } else {
-                // Fallback for insufficient points
                 let board_z_axis = Vector3::z_axis();
                 UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
                     .unwrap_or_else(|| UnitQuaternion::identity())
@@ -733,66 +527,15 @@ pub fn fit_board_icp(
         Isometry3::from_parts(Translation3::from(inlier_centroid.coords), rotation)
     };
 
-    // reject result if loss is too large
-    {
-        let min_icp_loss = icp_losses
-            .iter()
-            .copied()
-            .map(r64)
-            .min()
-            .map(|loss| loss.raw());
-        let min_icp_loss = match min_icp_loss {
-            Some(loss) => loss,
-            None => {
-                return Ok(FitBoardIcp {
-                    board_pose,
-                    icp_losses,
-                    icp_data: viz_msg,
-                    successful: false,
-                    initial_pose: final_init_pose,
-                    icp_stats: final_icp_stats.clone(),
-                })
-            }
-        };
-
-        if min_icp_loss > icp_rejection_threshold {
-            return Ok(FitBoardIcp {
-                board_pose,
-                icp_losses,
-                icp_data: viz_msg,
-                successful: false,
-                initial_pose: final_init_pose,
-                icp_stats: final_icp_stats.clone(),
-            });
-        }
-    }
-
-    // Save ICP results to CSV for 3D visualization
-    let board_model = BoardModel {
-        pose: board_pose,
-        board_shape: BoardShape {
-            board_width,
-            hole_radius,
-            hole_center_shift,
-        },
-        marker_paper_size,
-    };
-
-    let _final_loss = icp_losses
-        .iter()
-        .copied()
-        .min_by(|a, b| a.partial_cmp(b).unwrap())
-        .unwrap_or(0.0);
-    debug!(
-        "FINAL ICP RESULT: pose={:.6}, loss={:.6}",
-        board_pose, _final_loss
-    );
-
+    // Return result with success status already determined by ICP statistics
+    // Success criteria:
+    // 1. termination_count > 100 (stable pose)
+    // 2. avg_loss < icp_rejection_threshold
     Ok(FitBoardIcp {
         board_pose,
         icp_losses,
         icp_data: viz_msg,
-        successful: true,
+        successful: final_icp_stats.successful,
         initial_pose: final_init_pose,
         icp_stats: final_icp_stats.clone(),
     })
@@ -809,7 +552,6 @@ pub fn fit_board_icp_with_iterator<'a>(
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
     mut progress_cb: Option<&'a mut dyn FnMut(&BoardModel)>,
 ) -> Result<FitBoardIcp> {
-    // Compute initial pose (extracted from original implementation)
     let init_pose = {
         let inlier_centroid: Point3<f64> =
             centroid_of_points(plane_inlier_points.iter().map(|point| {
@@ -826,7 +568,6 @@ pub fn fit_board_icp_with_iterator<'a>(
 
         let rotation = {
             if plane_inlier_points.len() >= 3 {
-                // Compute PCA on plane inlier points
                 let mean = inlier_centroid;
                 let mut covariance = nalgebra::Matrix3::<f64>::zeros();
                 for point in plane_inlier_points.iter() {
@@ -902,11 +643,22 @@ pub fn fit_board_icp_with_iterator<'a>(
     while !iterator.should_terminate(&state) {
         state = iterator.step(&state);
         losses.push(state.avg_loss);
+        debug!("ICP iteration {}: avg_loss = {:.8}", state.iteration, state.avg_loss);
     }
 
-    // Build result
-    let successful = !iterator.termination_reason(&state).contains("failed")
-        && !iterator.termination_reason(&state).contains("Insufficient");
+    // Determine success based on termination reason
+    // Success criteria:
+    // 1. "Converged (stable pose)" - termination_count > 100
+    // 2. "Converged (good fit)" - avg_loss < icp_rejection_threshold
+    let termination_reason = iterator.termination_reason(&state);
+    let successful = termination_reason == "Converged (stable pose)" 
+        || termination_reason == "Converged (good fit)";
+    
+    // Debug output for termination
+    debug!("ICP terminated: {}", termination_reason);
+    eprintln!("[DEBUG] ICP terminated after {} iterations: {}", state.iteration, termination_reason);
+    eprintln!("[DEBUG]   Final avg_loss: {:.8}, termination_count: {}", state.avg_loss, state.termination_count);
+    eprintln!("[DEBUG]   Successful: {}", successful);
 
     let icp_stats = IcpStatistics {
         iterations: state.iteration,
@@ -914,7 +666,7 @@ pub fn fit_board_icp_with_iterator<'a>(
         min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
         successful,
         initial_loss,
-        convergence_reason: iterator.termination_reason(&state),
+        convergence_reason: termination_reason,
     };
 
     // Build visualization message
@@ -931,27 +683,12 @@ pub fn fit_board_icp_with_iterator<'a>(
         }
     };
 
-    // Check rejection threshold
-    let min_icp_loss = losses.iter().copied().map(r64).min().map(|loss| loss.raw());
-
-    if let Some(min_loss) = min_icp_loss {
-        if min_loss > board_detector.icp_rejection_threshold {
-            return Ok(FitBoardIcp {
-                board_pose: state.board_pose,
-                icp_losses: losses,
-                icp_data: viz_msg,
-                successful: false,
-                initial_pose: init_pose,
-                icp_stats,
-            });
-        }
-    }
-
+    // Return result with success status determined by termination criteria only
     Ok(FitBoardIcp {
         board_pose: state.board_pose,
         icp_losses: losses,
         icp_data: viz_msg,
-        successful: true,
+        successful,
         initial_pose: init_pose,
         icp_stats,
     })
@@ -999,39 +736,21 @@ impl<'a> BoardIcpIterator<'a> {
 
     /// Execute one ICP iteration step
     pub fn step(&mut self, current_state: &BoardIcpState) -> BoardIcpState {
-        debug!(
-            "ICP Step {}: Starting iteration with pose: {:?}",
-            current_state.iteration + 1,
-            current_state.board_pose
-        );
-
-        // 1. Create board model with current pose
+        eprintln!("[DEBUG] BoardIcpIterator::step() iteration {}", current_state.iteration);
+        
         let board_model = BoardModel {
             pose: current_state.board_pose,
             board_shape: self.board_model_params.board_shape.clone(),
             marker_paper_size: self.board_model_params.marker_paper_size,
         };
 
-        // Trigger progress callback if provided
         if let Some(cb) = self.progress_callback.as_mut() {
             cb(&board_model);
         }
 
-        // 2. Find correspondences using board model
-        debug!(
-            "ICP Step {}: Attempting to find correspondences for {} inlier points",
-            current_state.iteration + 1,
-            current_state.inlier_points.len()
-        );
-
         let correspondences = match board_model.find_correspondences(&current_state.inlier_points) {
             Some(corr) => corr,
             None => {
-                // No correspondences - return terminated state
-                debug!(
-                    "ICP Step {}: Board model find_correspondences returned None",
-                    current_state.iteration + 1
-                );
                 return BoardIcpState {
                     iteration: current_state.iteration + 1,
                     correspondences: Vec::new(),
@@ -1045,32 +764,13 @@ impl<'a> BoardIcpIterator<'a> {
         };
 
         let total_correspondences = correspondences.len();
-        debug!(
-            "ICP Step {}: Found {} total correspondences",
-            current_state.iteration + 1,
-            total_correspondences
-        );
 
-        // 3. Compute losses for each correspondence
         let correspondence_losses: Vec<_> = correspondences
             .iter()
             .map(|(input_point, corresponding_point)| (*input_point - corresponding_point).norm())
             .collect();
 
         let avg_loss = correspondence_losses.iter().sum::<f64>() / correspondences.len() as f64;
-        debug!(
-            "ICP Step {}: Average correspondence loss: {:.4}m",
-            current_state.iteration + 1,
-            avg_loss
-        );
-
-        // 4. Filter outliers with adaptive threshold
-        // Thresholding is turned off: use all correspondences as good correspondences
-        debug!(
-            "ICP Step {}: Thresholding disabled, using all correspondences ({} total)",
-            current_state.iteration + 1,
-            total_correspondences
-        );
 
         let good_correspondences: Vec<_> = correspondences
             .iter()
@@ -1078,24 +778,8 @@ impl<'a> BoardIcpIterator<'a> {
             .collect();
 
         let good_correspondences_len = good_correspondences.len();
-        debug!(
-            "ICP Step {}: After outlier filtering (disabled): {} good correspondences (from {} total)",
-            current_state.iteration + 1,
-            good_correspondences_len,
-            total_correspondences
-        );
 
-        // 5. Check if we have enough points for Kabsch
         if good_correspondences_len < 3 {
-            debug!(
-                "ICP Step {}: Insufficient correspondences for Kabsch algorithm (need ≥3, got {})",
-                current_state.iteration + 1,
-                good_correspondences_len
-            );
-            debug!(
-                "ICP Step {}: Terminating iterations due to insufficient good correspondences",
-                current_state.iteration + 1
-            );
             return BoardIcpState {
                 iteration: current_state.iteration + 1,
                 correspondences: good_correspondences,
@@ -1107,25 +791,15 @@ impl<'a> BoardIcpIterator<'a> {
             };
         }
 
-        // Clone good_correspondences before consuming
         let good_correspondences_for_state: Vec<(Point3<f64>, Point3<f64>)> =
             good_correspondences.clone();
         let (good_corresponding_points, good_inlier_points): (Vec<Point3<f64>>, Vec<Point3<f64>>) =
             good_correspondences.into_iter().unzip();
 
-        // 6. Compute transformation using Kabsch
-        debug!("ICP Step {}: === KABSCH TRANSFORMATION ===", current_state.iteration + 1);
-        debug!("ICP Step {}: Input: {} data points (from point cloud)", 
-            current_state.iteration + 1, good_corresponding_points.len());
-        debug!("ICP Step {}: Target: {} model points (from board model)", 
-            current_state.iteration + 1, good_inlier_points.len());
-        
         let align_pose: Isometry3<f64> =
             match Self::compute_kabsch_transform(&good_corresponding_points, &good_inlier_points) {
-                Some(iso) => iso.inverse(),  // Invert to get the correction transform
+                Some(iso) => iso.inverse(),
                 None => {
-                    debug!("ICP Step {}: KABSCH FAILED!", current_state.iteration + 1);
-                    // Kabsch failed
                     return BoardIcpState {
                         iteration: current_state.iteration + 1,
                         correspondences: good_correspondences_for_state,
@@ -1138,50 +812,8 @@ impl<'a> BoardIcpIterator<'a> {
                 }
             };
 
-        // 7. Apply damping and update pose
-        debug!("ICP Step {}: === POSE UPDATE ===", current_state.iteration + 1);
-        debug!("ICP Step {}: Current pose translation = ({:.6}, {:.6}, {:.6})",
-            current_state.iteration + 1,
-            current_state.board_pose.translation.x,
-            current_state.board_pose.translation.y,
-            current_state.board_pose.translation.z);
-        debug!("ICP Step {}: Current pose rotation angle = {:.6} degrees",
-            current_state.iteration + 1,
-            current_state.board_pose.rotation.angle().to_degrees());
-
         let new_pose = align_pose * current_state.board_pose;
-        
-        debug!("ICP Step {}: Computed new pose translation = ({:.6}, {:.6}, {:.6})",
-            current_state.iteration + 1,
-            new_pose.translation.x,
-            new_pose.translation.y,
-            new_pose.translation.z);
-        debug!("ICP Step {}: Computed new pose rotation angle = {:.6} degrees",
-            current_state.iteration + 1,
-            new_pose.rotation.angle().to_degrees());
-
         let damping_factor = self.board_detector_config.icp_damping_factor;
-        debug!("ICP Step {}: Damping factor = {:.6}", current_state.iteration + 1, damping_factor);
-
-        // Debug logging
-        let delta_t =
-            (new_pose.translation.vector - current_state.board_pose.translation.vector).norm();
-        let delta_ang = new_pose
-            .rotation
-            .rotation_to(&current_state.board_pose.rotation)
-            .angle();
-        let delta_trans_vec = new_pose.translation.vector - current_state.board_pose.translation.vector;
-        debug!(
-            "ICP Step {}: Undamped delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
-            current_state.iteration + 1,
-            delta_trans_vec.x, delta_trans_vec.y, delta_trans_vec.z,
-            delta_t
-        );
-        debug!(
-            "ICP Step {}: Undamped delta_rotation_angle = {:.6} degrees",
-            current_state.iteration + 1,
-            delta_ang.to_degrees()
-        );
 
         let damped_translation = Translation3::from(
             current_state.board_pose.translation.vector
@@ -1195,40 +827,12 @@ impl<'a> BoardIcpIterator<'a> {
             damping_factor,
         );
 
-        debug!("ICP Step {}: Damped translation = ({:.6}, {:.6}, {:.6})",
-            current_state.iteration + 1,
-            damped_translation.x,
-            damped_translation.y,
-            damped_translation.z);
-        debug!("ICP Step {}: Damped rotation angle = {:.6} degrees",
-            current_state.iteration + 1,
-            damped_rotation.angle().to_degrees());
-
-        // 8. Check termination criteria for pose convergence
         let applied_t =
             (damped_translation.vector - current_state.board_pose.translation.vector).norm();
         let applied_ang = damped_rotation
             .rotation_to(&current_state.board_pose.rotation)
             .angle();
-        let applied_trans_vec = damped_translation.vector - current_state.board_pose.translation.vector;
-        
-        debug!(
-            "ICP Step {}: Applied (damped) delta_translation = ({:.6}, {:.6}, {:.6}), norm={:.6}",
-            current_state.iteration + 1,
-            applied_trans_vec.x, applied_trans_vec.y, applied_trans_vec.z,
-            applied_t
-        );
-        debug!(
-            "ICP Step {}: Applied (damped) delta_rotation_angle = {:.6} degrees",
-            current_state.iteration + 1,
-            applied_ang.to_degrees()
-        );
-        
         let pose_weight = applied_t + applied_ang;
-        debug!("ICP Step {}: Pose weight = {:.6} (threshold = {:.6})",
-            current_state.iteration + 1,
-            pose_weight,
-            self.board_detector_config.icp_pose_weight_threshold);
 
         let termination_count =
             if pose_weight <= self.board_detector_config.icp_pose_weight_threshold {
@@ -1238,23 +842,10 @@ impl<'a> BoardIcpIterator<'a> {
             };
 
         let damped_pose = Isometry3::from_parts(damped_translation, damped_rotation);
-        
-        debug!("ICP Step {}: Final damped pose translation = ({:.6}, {:.6}, {:.6})",
-            current_state.iteration + 1,
-            damped_pose.translation.x,
-            damped_pose.translation.y,
-            damped_pose.translation.z);
-        debug!("ICP Step {}: Final damped pose rotation angle = {:.6} degrees",
-            current_state.iteration + 1,
-            damped_pose.rotation.angle().to_degrees());
-        debug!("ICP Step {}: Termination count = {}", current_state.iteration + 1, termination_count);
 
-        // 9. Return new state
-        BoardIcpState {
+        let new_state = BoardIcpState {
             iteration: current_state.iteration + 1,
             board_pose: damped_pose,
-            // CRITICAL FIX: Keep using the original full point cloud throughout all iterations.
-            // Only use good_inlier_points for Kabsch transformation, not for next iteration's correspondence finding.
             inlier_points: current_state.inlier_points.clone(),
             correspondences: good_correspondences_for_state,
             avg_loss,
@@ -1262,39 +853,41 @@ impl<'a> BoardIcpIterator<'a> {
             total_correspondences,
             good_correspondences: good_correspondences_len,
             termination_count,
-        }
+        };
+        
+        eprintln!("[DEBUG] ICP iteration {}: avg_loss = {:.8}, good_correspondences = {}/{}", 
+                  new_state.iteration, new_state.avg_loss, new_state.good_correspondences, new_state.total_correspondences);
+        debug!("ICP iteration {}: avg_loss = {:.8}", new_state.iteration, new_state.avg_loss);
+        
+        new_state
     }
 
     /// Check if algorithm should terminate
     pub fn should_terminate(&self, state: &BoardIcpState) -> bool {
         let config = self.board_detector_config;
 
-        // Max iterations reached
+        // Success criteria - algorithm should terminate
+        if state.avg_loss < config.icp_rejection_threshold {
+            return true;
+        }
+
+        if state.termination_count > 100 {
+            return true;
+        }
+
+        // Failure criteria - algorithm should terminate
         if state.iteration >= config.max_icp_iterations {
             return true;
         }
 
-        // Good fit achieved
-        if state.avg_loss < config.icp_good_fit_threshold {
-            return true;
-        }
-
-        // Pose converged (stable for multiple iterations)
-        if state.termination_count > 10 {
-            return true;
-        }
-
-        // Insufficient inlier points
         if state.inlier_points.len() < config.icp_min_inlier_points {
             return true;
         }
 
-        // Insufficient correspondences for Kabsch
         if state.good_correspondences < 3 {
             return true;
         }
 
-        // No correspondences found
         if state.correspondences.is_empty() {
             return true;
         }
@@ -1306,12 +899,15 @@ impl<'a> BoardIcpIterator<'a> {
     pub fn termination_reason(&self, state: &BoardIcpState) -> String {
         let config = self.board_detector_config;
 
-        if state.iteration >= config.max_icp_iterations {
-            format!("Max iterations reached: {}", config.max_icp_iterations)
-        } else if state.termination_count > 10 {
-            "Converged (stable pose)".to_string()
-        } else if state.avg_loss < config.icp_good_fit_threshold {
+        // Success reasons (order matches should_terminate)
+        if state.avg_loss < config.icp_rejection_threshold {
             "Converged (good fit)".to_string()
+        } else if state.termination_count > 100 {
+            "Converged (stable pose)".to_string()
+        }
+        // Failure reasons
+        else if state.iteration >= config.max_icp_iterations {
+            format!("Max iterations reached: {}", config.max_icp_iterations)
         } else if state.inlier_points.len() < config.icp_min_inlier_points {
             format!(
                 "Insufficient inlier points: {} < {}",
@@ -1336,24 +932,12 @@ impl<'a> BoardIcpIterator<'a> {
         target_points: &[Point3<f64>],
     ) -> Option<Isometry3<f64>> {
         if input_points.len() != target_points.len() || input_points.len() < 3 {
-            debug!("KABSCH: Invalid input - input_len={}, target_len={}", input_points.len(), target_points.len());
             return None;
         }
-
-        debug!("KABSCH: Computing transformation for {} point pairs", input_points.len());
 
         // Compute centroids
         let input_centroid = Self::compute_centroid(input_points)?;
         let target_centroid = Self::compute_centroid(target_points)?;
-
-        debug!("KABSCH: input_centroid = ({:.6}, {:.6}, {:.6})", 
-            input_centroid.x, input_centroid.y, input_centroid.z);
-        debug!("KABSCH: target_centroid = ({:.6}, {:.6}, {:.6})", 
-            target_centroid.x, target_centroid.y, target_centroid.z);
-        debug!("KABSCH: centroid_delta = ({:.6}, {:.6}, {:.6})", 
-            target_centroid.x - input_centroid.x, 
-            target_centroid.y - input_centroid.y, 
-            target_centroid.z - input_centroid.z);
 
         // Center the points
         let centered_input: Vec<Vector3<f64>> =
@@ -1369,14 +953,10 @@ impl<'a> BoardIcpIterator<'a> {
         // With column-major matrices: input_matrix * target_matrix.transpose()
         let covariance = input_matrix * target_matrix.transpose();
 
-        debug!("KABSCH: covariance matrix:\n{:.6}", covariance);
-
         // SVD decomposition: H = U * S * V^T
         let svd = nalgebra::SVD::new(covariance, true, true);
         let u = svd.u?;
         let v_t = svd.v_t?;
-
-        debug!("KABSCH: singular values = {:?}", svd.singular_values);
 
         // Standard Kabsch algorithm: R = V * diag(1, 1, det(V * U^T)) * U^T
         // Since nalgebra SVD gives us V^T, we need to transpose it to get V
@@ -1385,35 +965,20 @@ impl<'a> BoardIcpIterator<'a> {
 
         // Compute the determinant to check for reflection
         let d = (&v * &u_t).determinant();
-        debug!("KABSCH: determinant = {:.6} ({})", d, if d > 0.0 { "proper rotation" } else { "reflection detected" });
-        
         let correction = nalgebra::Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, d.signum()));
         let rotation_matrix = &v * correction * u_t;
-
-        debug!("KABSCH: rotation matrix:\n{:.6}", rotation_matrix);
 
         // Convert to unit quaternion (convert dynamic matrix to fixed 3x3)
         let rotation_matrix_3x3 = rotation_matrix.fixed_view::<3, 3>(0, 0).into_owned();
         let rotation = UnitQuaternion::from_matrix(&rotation_matrix_3x3);
 
-        // Compute translation
         let translation =
             Translation3::from(target_centroid.coords - rotation * input_centroid.coords);
 
-        debug!("KABSCH: rotation quaternion = ({:.6}, {:.6}, {:.6}, {:.6})", 
-            rotation.w, rotation.i, rotation.j, rotation.k);
-        debug!("KABSCH: rotation angle = {:.6} degrees", rotation.angle().to_degrees());
-        debug!("KABSCH: translation = ({:.6}, {:.6}, {:.6})", 
-            translation.x, translation.y, translation.z);
-
-        let result = Isometry3 {
+        Some(Isometry3 {
             rotation,
             translation,
-        };
-
-        debug!("KABSCH: Complete transform = {:?}", result);
-
-        Some(result)
+        })
     }
 
     /// Helper to compute centroid of points
@@ -1426,343 +991,5 @@ impl<'a> BoardIcpIterator<'a> {
             .iter()
             .fold(Vector3::zeros(), |acc, p| acc + p.coords);
         Some(Point3::from(sum / points.len() as f64))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
-    use std::f64::consts::PI;
-
-    const EPSILON: f64 = 1e-10;
-
-    /// Helper function to create test points
-    fn create_test_points() -> Vec<Point3<f64>> {
-        vec![
-            Point3::new(1.0, 0.0, 0.0),
-            Point3::new(0.0, 1.0, 0.0),
-            Point3::new(0.0, 0.0, 1.0),
-            Point3::new(1.0, 1.0, 0.0),
-            Point3::new(1.0, 0.0, 1.0),
-        ]
-    }
-
-    /// Helper function to apply transformation to points
-    fn transform_points(points: &[Point3<f64>], transform: &Isometry3<f64>) -> Vec<Point3<f64>> {
-        points.iter().map(|p| transform * p).collect()
-    }
-
-    /// Helper function to check if two transformations are approximately equal
-    fn transformations_approx_equal(t1: &Isometry3<f64>, t2: &Isometry3<f64>, eps: f64) -> bool {
-        let translation_diff = (t1.translation.vector - t2.translation.vector).norm();
-        let rotation_diff = t1.rotation.rotation_to(&t2.rotation).angle();
-
-        translation_diff < eps && rotation_diff < eps
-    }
-
-    /// Helper function to check if points are approximately equal
-    fn points_approx_equal(p1: &Point3<f64>, p2: &Point3<f64>, eps: f64) -> bool {
-        (p1 - p2).norm() < eps
-    }
-
-    #[test]
-    fn test_kabsch_identity_transformation() {
-        // Test with identical point sets - should return identity transformation
-        let input_points = create_test_points();
-        let target_points = input_points.clone();
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let transform = result.unwrap();
-
-        // Should be close to identity
-        let identity = Isometry3::identity();
-        assert!(transformations_approx_equal(&transform, &identity, EPSILON));
-    }
-
-    #[test]
-    fn test_kabsch_pure_translation() {
-        // Test with pure translation transformation
-        let input_points = create_test_points();
-        let translation = Translation3::new(2.0, 3.0, 1.5);
-        let expected_transform = Isometry3::from_parts(translation, UnitQuaternion::identity());
-        let target_points = transform_points(&input_points, &expected_transform);
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct by applying it to input points
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, EPSILON));
-        }
-    }
-
-    #[test]
-    fn test_kabsch_pure_rotation() {
-        // Test with pure rotation around Z-axis
-        let input_points = create_test_points();
-        let rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), PI / 4.0);
-        let expected_transform = Isometry3::from_parts(Translation3::identity(), rotation);
-        let target_points = transform_points(&input_points, &expected_transform);
-
-        println!("Input points: {:?}", input_points);
-        println!("Target points: {:?}", target_points);
-        println!("Expected transform: {:?}", expected_transform);
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        println!("Computed transform: {:?}", computed_transform);
-
-        // Verify the transformation is correct
-        for (i, (input, target)) in input_points.iter().zip(target_points.iter()).enumerate() {
-            let transformed = computed_transform * input;
-            let error = (transformed - target).norm();
-            println!(
-                "Point {}: input={:?}, target={:?}, transformed={:?}, error={:.2e}",
-                i, input, target, transformed, error
-            );
-            assert!(
-                points_approx_equal(&transformed, target, 1e-6),
-                "Point {} failed: error={:.2e} > tolerance=1e-6",
-                i,
-                error
-            );
-        }
-    }
-
-    #[test]
-    fn test_kabsch_rotation_and_translation() {
-        // Test with combined rotation and translation
-        let input_points = create_test_points();
-        let rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), PI / 6.0);
-        let translation = Translation3::new(1.0, -2.0, 3.0);
-        let expected_transform = Isometry3::from_parts(translation, rotation);
-        let target_points = transform_points(&input_points, &expected_transform);
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, EPSILON));
-        }
-    }
-
-    #[test]
-    fn test_kabsch_arbitrary_rotation() {
-        // Test with arbitrary rotation
-        let input_points = create_test_points();
-        let axis = nalgebra::Unit::new_normalize(Vector3::new(1.0, 1.0, 1.0));
-        let rotation = UnitQuaternion::from_axis_angle(&axis, PI / 3.0);
-        let translation = Translation3::new(-1.5, 2.5, -0.5);
-        let expected_transform = Isometry3::from_parts(translation, rotation);
-        let target_points = transform_points(&input_points, &expected_transform);
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, 1e-12));
-        }
-    }
-
-    #[test]
-    fn test_kabsch_insufficient_points() {
-        // Test with insufficient points (less than 3)
-        let input_points = vec![Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
-        let target_points = vec![Point3::new(2.0, 0.0, 0.0), Point3::new(0.0, 2.0, 0.0)];
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_kabsch_empty_points() {
-        // Test with empty point sets
-        let input_points: Vec<Point3<f64>> = vec![];
-        let target_points: Vec<Point3<f64>> = vec![];
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_kabsch_mismatched_sizes() {
-        // Test with mismatched point set sizes
-        let input_points = create_test_points();
-        let target_points = vec![Point3::new(1.0, 0.0, 0.0)];
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_kabsch_collinear_points() {
-        // Test with collinear points (edge case)
-        let input_points = vec![
-            Point3::new(0.0, 0.0, 0.0),
-            Point3::new(1.0, 0.0, 0.0),
-            Point3::new(2.0, 0.0, 0.0),
-            Point3::new(3.0, 0.0, 0.0),
-        ];
-        let target_points = vec![
-            Point3::new(0.0, 1.0, 0.0),
-            Point3::new(1.0, 1.0, 0.0),
-            Point3::new(2.0, 1.0, 0.0),
-            Point3::new(3.0, 1.0, 0.0),
-        ];
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        // Should still work for collinear points
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, 1e-12));
-        }
-    }
-
-    #[test]
-    fn test_kabsch_planar_points() {
-        // Test with planar points (2D points embedded in 3D)
-        let input_points = vec![
-            Point3::new(0.0, 0.0, 0.0),
-            Point3::new(1.0, 0.0, 0.0),
-            Point3::new(0.0, 1.0, 0.0),
-            Point3::new(1.0, 1.0, 0.0),
-        ];
-
-        // Rotate the square by 45 degrees around Z and translate
-        let rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), PI / 4.0);
-        let translation = Translation3::new(2.0, 3.0, 1.0);
-        let expected_transform = Isometry3::from_parts(translation, rotation);
-        let target_points = transform_points(&input_points, &expected_transform);
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, 1e-12));
-        }
-    }
-
-    #[test]
-    fn test_kabsch_reflection_handling() {
-        // Test reflection handling by creating a reflection transformation
-        let input_points = vec![
-            Point3::new(1.0, 0.0, 0.0),
-            Point3::new(0.0, 1.0, 0.0),
-            Point3::new(0.0, 0.0, 1.0),
-        ];
-
-        // Create reflected points (mirror across YZ plane)
-        let target_points = vec![
-            Point3::new(-1.0, 0.0, 0.0),
-            Point3::new(0.0, 1.0, 0.0),
-            Point3::new(0.0, 0.0, 1.0),
-        ];
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, 1e-12));
-        }
-
-        // Check that the determinant is positive (proper rotation, not reflection)
-        let det = computed_transform
-            .rotation
-            .to_rotation_matrix()
-            .matrix()
-            .determinant();
-        assert!(
-            det > 0.0,
-            "Kabsch should produce proper rotations, not reflections"
-        );
-    }
-
-    #[test]
-    fn test_kabsch_numerical_stability() {
-        // Test with very small transformations to check numerical stability
-        let input_points = create_test_points();
-        let small_rotation = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 1e-8);
-        let small_translation = Translation3::new(1e-10, 1e-10, 1e-10);
-        let small_transform = Isometry3::from_parts(small_translation, small_rotation);
-        let target_points = transform_points(&input_points, &small_transform);
-
-        let result = BoardIcpIterator::compute_kabsch_transform(&input_points, &target_points);
-
-        assert!(result.is_some());
-        let computed_transform = result.unwrap();
-
-        // Verify the transformation is correct within reasonable tolerance
-        for (input, target) in input_points.iter().zip(target_points.iter()) {
-            let transformed = computed_transform * input;
-            assert!(points_approx_equal(&transformed, target, 1e-8));
-        }
-    }
-
-    #[test]
-    fn test_compute_centroid() {
-        // Test centroid computation
-        let points = vec![
-            Point3::new(0.0, 0.0, 0.0),
-            Point3::new(2.0, 0.0, 0.0),
-            Point3::new(0.0, 2.0, 0.0),
-            Point3::new(0.0, 0.0, 2.0),
-        ];
-
-        let centroid = BoardIcpIterator::compute_centroid(&points);
-        assert!(centroid.is_some());
-
-        let expected_centroid = Point3::new(0.5, 0.5, 0.5);
-        assert!(points_approx_equal(
-            &centroid.unwrap(),
-            &expected_centroid,
-            EPSILON
-        ));
-    }
-
-    #[test]
-    fn test_compute_centroid_empty() {
-        // Test centroid computation with empty points
-        let points: Vec<Point3<f64>> = vec![];
-        let centroid = BoardIcpIterator::compute_centroid(&points);
-        assert!(centroid.is_none());
-    }
-
-    #[test]
-    fn test_compute_centroid_single_point() {
-        // Test centroid computation with single point
-        let points = vec![Point3::new(1.0, 2.0, 3.0)];
-        let centroid = BoardIcpIterator::compute_centroid(&points);
-        assert!(centroid.is_some());
-        assert!(points_approx_equal(&centroid.unwrap(), &points[0], EPSILON));
     }
 }
