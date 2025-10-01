@@ -1898,12 +1898,11 @@ impl CalibrationBoardLocatorNode {
 
         // Publish iteration statistics
         let stats_text = format!(
-            "Iteration: {}, Loss: {:.6}, Correspondences: {}/{}, Threshold: {:.6}",
+            "Iteration: {}, Loss: {:.6}, Correspondences: {}/{}",
             state.iteration,
             state.avg_loss,
             state.good_correspondences,
-            state.total_correspondences,
-            state.adaptive_threshold
+            state.total_correspondences
         );
         let stats_msg = StringMsg { data: stats_text };
         let _ = debug_publishers.stats.publish(stats_msg);
