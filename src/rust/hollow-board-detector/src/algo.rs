@@ -315,24 +315,10 @@ pub fn fit_board_icp(
                 let avg_loss =
                     correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
 
-                // Improved outlier filtering with adaptive thresholds
-                // Use a configurable threshold that adapts to the current loss
-                let adaptive_threshold = (avg_loss * icp_adaptive_threshold_multiplier)
-                    .max(icp_adaptive_threshold_min)
-                    .min(icp_adaptive_threshold_max);
-
-                // Alternative: use fixed outlier threshold for more stable filtering
-                // let adaptive_threshold = icp_outlier_threshold;
+                // Thresholding is turned off: use all correspondences as good correspondences
                 let good_correspondences: Vec<_> = correspondings
                     .iter()
-                    .zip(correspondence_losses.iter())
-                    .filter_map(|((input_point, corresponding_point), &loss)| {
-                        if loss <= adaptive_threshold {
-                            Some((*input_point, *corresponding_point))
-                        } else {
-                            None
-                        }
-                    })
+                    .map(|(input_point, corresponding_point)| (*input_point, *corresponding_point))
                     .collect();
 
                 let good_correspondences_len = good_correspondences.len();
@@ -426,8 +412,10 @@ pub fn fit_board_icp(
 
                 // update state
                 losses.push(avg_loss);
-                // Convert back to the expected format for the next iteration
-                inlier_points = good_inlier_points;
+                // CRITICAL FIX: Do NOT shrink the inlier_points set!
+                // Keep using the original full point cloud throughout all iterations.
+                // Only use good_inlier_points for Kabsch transformation, not for next iteration's correspondence finding.
+                // inlier_points = good_inlier_points;  // REMOVED: This was causing progressive point loss!
 
                 // Apply damping to prevent overshooting
                 let damping_factor = icp_damping_factor;
@@ -443,8 +431,8 @@ pub fn fit_board_icp(
 
                 // Debug step-by-step ICP progress
                 debug!(
-                    "ICP Step {}: loss={:.6}, inliers={}, correspondences={}, delta_t={:.6}, delta_ang={:.6}",
-                    step, avg_loss, inlier_points.len(), good_correspondences_len, delta_t, delta_ang
+                    "ICP Step {}: loss={:.6}, total_points={}, good_correspondences={}/{}, delta_t={:.6}, delta_ang={:.6}",
+                    step, avg_loss, inlier_points.len(), good_correspondences_len, correspondings.len(), delta_t, delta_ang
                 );
 
                 // Damp the translation component
@@ -472,11 +460,13 @@ pub fn fit_board_icp(
                 pose = Isometry3::from_parts(damped_translation, damped_rotation);
                 step += 1;
 
-                // Check if we have enough inlier points to continue
-                if inlier_points.len() < icp_min_inlier_points {
+                // Check if we have enough good correspondences to continue
+                // Note: We check good_correspondences_len, not inlier_points.len(), because
+                // inlier_points stays constant (original full point cloud) throughout iterations
+                if good_correspondences_len < icp_min_inlier_points {
                     convergence_reason = format!(
-                        "Insufficient inlier points: {} < {}",
-                        inlier_points.len(),
+                        "Insufficient good correspondences: {} < {}",
+                        good_correspondences_len,
                         icp_min_inlier_points
                     );
                     let stats = IcpStatistics {
@@ -506,10 +496,11 @@ pub fn fit_board_icp(
                     debug!("  Good fit threshold: {:.8}", icp_good_fit_threshold);
                     debug!("  Rejection threshold: {:.8}", icp_rejection_threshold);
                     debug!("  Avg loss: {:.8}", *losses.last().unwrap());
-                    debug!("  Inlier points: {}", inlier_points.len());
+                    debug!("  Total input points: {}", inlier_points.len());
                     debug!(
-                        "  Good corresponding points: {}",
-                        good_corresponding_points.len()
+                        "  Good correspondences: {}/{}",
+                        good_corresponding_points.len(),
+                        correspondings.len()
                     );
                     debug!("  Pose: {:.8}", pose);
                     convergence_reason = if termination_count > 10 {
@@ -947,7 +938,6 @@ impl<'a> BoardIcpIterator<'a> {
             correspondences: Vec::new(),
             avg_loss: f64::INFINITY,
             previous_loss: None,
-            adaptive_threshold: self.board_detector_config.icp_outlier_threshold,
             total_correspondences: 0,
             good_correspondences: 0,
             termination_count: 0,
@@ -1022,35 +1012,21 @@ impl<'a> BoardIcpIterator<'a> {
         );
 
         // 4. Filter outliers with adaptive threshold
-        let adaptive_threshold = (avg_loss
-            * self.board_detector_config.icp_adaptive_threshold_multiplier)
-            .max(self.board_detector_config.icp_adaptive_threshold_min)
-            .min(self.board_detector_config.icp_adaptive_threshold_max);
-
+        // Thresholding is turned off: use all correspondences as good correspondences
         debug!(
-            "ICP Step {}: Adaptive threshold: {:.4}m (multiplier: {:.2}, min: {:.4}, max: {:.4})",
+            "ICP Step {}: Thresholding disabled, using all correspondences ({} total)",
             current_state.iteration + 1,
-            adaptive_threshold,
-            self.board_detector_config.icp_adaptive_threshold_multiplier,
-            self.board_detector_config.icp_adaptive_threshold_min,
-            self.board_detector_config.icp_adaptive_threshold_max
+            total_correspondences
         );
 
         let good_correspondences: Vec<_> = correspondences
             .iter()
-            .zip(correspondence_losses.iter())
-            .filter_map(|((input_point, corresponding_point), &loss)| {
-                if loss <= adaptive_threshold {
-                    Some((**input_point, *corresponding_point))
-                } else {
-                    None
-                }
-            })
+            .map(|(input_point, corresponding_point)| (**input_point, *corresponding_point))
             .collect();
 
         let good_correspondences_len = good_correspondences.len();
         debug!(
-            "ICP Step {}: After outlier filtering: {} good correspondences (from {} total)",
+            "ICP Step {}: After outlier filtering (disabled): {} good correspondences (from {} total)",
             current_state.iteration + 1,
             good_correspondences_len,
             total_correspondences
@@ -1072,7 +1048,6 @@ impl<'a> BoardIcpIterator<'a> {
                 correspondences: good_correspondences,
                 avg_loss,
                 previous_loss: Some(current_state.avg_loss),
-                adaptive_threshold,
                 total_correspondences,
                 good_correspondences: good_correspondences_len,
                 ..current_state.clone()
@@ -1096,7 +1071,6 @@ impl<'a> BoardIcpIterator<'a> {
                         correspondences: good_correspondences_for_state,
                         avg_loss,
                         previous_loss: Some(current_state.avg_loss),
-                        adaptive_threshold,
                         total_correspondences,
                         good_correspondences: good_correspondences_len,
                         ..current_state.clone()
@@ -1163,7 +1137,6 @@ impl<'a> BoardIcpIterator<'a> {
             correspondences: good_correspondences_for_state,
             avg_loss,
             previous_loss: Some(current_state.avg_loss),
-            adaptive_threshold,
             total_correspondences,
             good_correspondences: good_correspondences_len,
             termination_count,

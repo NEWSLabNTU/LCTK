@@ -74,13 +74,10 @@ pub struct BoardIcpState {
     /// Previous iteration's loss (None for iteration 0)
     pub previous_loss: Option<f64>,
 
-    /// Adaptive threshold used for outlier filtering
-    pub adaptive_threshold: f64,
-
-    /// Number of correspondences before outlier filtering
+    /// Total number of correspondences found
     pub total_correspondences: usize,
 
-    /// Number of good correspondences after filtering
+    /// Number of correspondences used (same as total since no filtering)
     pub good_correspondences: usize,
 
     /// Convergence metadata

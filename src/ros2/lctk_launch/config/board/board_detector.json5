@@ -13,26 +13,26 @@
     // ICP Algorithm Parameters
     // ========================================
     // max number of ICP iterations (increased for observing convergence behavior)
-    "max_icp_iterations": 10000,
+    "max_icp_iterations": 1000,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is below this threshold several times
-    "icp_pose_weight_threshold": 1e-5,  // Tightened for better convergence
+    "icp_pose_weight_threshold": 1e-10,  // Tightened for better convergence
     // the maximum accepted ICP loss (balanced for stability)
-    "icp_rejection_threshold": 0.0003,
+    "icp_rejection_threshold": 0.00000001,
     // good fit threshold for convergence detection (tightened for accuracy)
-    "icp_good_fit_threshold": 0.01,  // Tightened from 0.03 to 0.01
-    // outlier rejection threshold for correspondence filtering
-    "icp_outlier_threshold": 0.12,  // Relaxed to allow initial convergence
-    // adaptive threshold multiplier for outlier rejection
-    "icp_adaptive_threshold_multiplier": 1.5,  // Increased for more tolerance
-    // minimum adaptive threshold value
-    "icp_adaptive_threshold_min": 0.0001,  // Relaxed to handle initial pose errors
-    // maximum adaptive threshold value
-    "icp_adaptive_threshold_max": 0.50,  // Relaxed to allow convergence from rough initial pose
+    "icp_good_fit_threshold": 0.00000001,  // Tightened from 0.03 to 0.01
+    // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
+    "icp_outlier_threshold": 1e10,  // Effectively disabled - keep all correspondences
+    // adaptive threshold multiplier for outlier rejection - DISABLED
+    "icp_adaptive_threshold_multiplier": 1e10,  // Effectively disabled - prevents filtering
+    // minimum adaptive threshold value - DISABLED
+    "icp_adaptive_threshold_min": 1e10,  // Effectively disabled - keeps all points
+    // maximum adaptive threshold value - DISABLED
+    "icp_adaptive_threshold_max": 1e10,  // Effectively disabled - no filtering
     // damping factor for pose updates (increased for better convergence)
-    "icp_damping_factor": 0.6,  // Increased from 0.35 to 0.6
-    // minimum number of inlier points required to continue ICP iterations
-    "icp_min_inlier_points": 1500,
+    "icp_damping_factor": 0.7,  // Increased from 0.35 to 0.6
+    // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
+    "icp_min_inlier_points": 100,  // Lowered from 1500 to avoid stopping when points are good
 
     // ========================================
     // Board Geometry Parameters

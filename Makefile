@@ -161,8 +161,8 @@ launch_lidar_camera_calibration:
 		enable_rviz:=$(or $(rviz),false) \
 		log_level:=$(or $(log_level),info) \
 		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
-		camera_topic:=$(or $(camera_topic),/sensing/camera/front_center/image_raw) \
-		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/top/pointcloud_raw)
+		camera_topic:=$(or $(camera_topic),/sensing/camera/zedxm/zed_node/left_raw/image_raw_color) \
+		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/concatenated/pointcloud)
 
 .PHONY: stop_lidar_camera_calibration
 stop_lidar_camera_calibration:

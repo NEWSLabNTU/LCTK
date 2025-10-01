@@ -1,5 +1,5 @@
 use crate::{
-    algo::{fit_board_icp, fit_board_icp_with_iterator, fit_plane_ransac, BoardIcpIterator},
+    algo::{fit_board_icp, fit_plane_ransac, BoardIcpIterator},
     config::Config,
     detection::{BoardIcpState, BoardModelParams, FitBoardIcp, FitPlaneRansac},
     Detection,
