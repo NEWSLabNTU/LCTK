@@ -1,0 +1,9 @@
+# AddDetectionToBuffer.srv
+# Service to add the latest detection pair to the calibration buffer
+
+# Request: empty (uses latest cached detection pair)
+---
+# Response
+bool success                  # True if detection was successfully added to buffer
+string message               # Success message or error description
+int32 buffer_size            # Current number of detection pairs in buffer
