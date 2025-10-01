@@ -19,7 +19,7 @@ use nalgebra::{self as na, Translation3, UnitQuaternion};
 use ndarray::Array2;
 use petal_decomposition::PcaBuilder;
 use plane_estimator::PlaneModel;
-use rclrs::{SubscriptionOptions, *};
+use rclrs::{PublisherOptions, SubscriptionOptions, *};
 use sensor_msgs::msg::{PointCloud2, PointField};
 use std::{
     f64::consts::FRAC_PI_2,
@@ -157,29 +157,66 @@ impl CalibrationBoardLocatorNode {
             aruco_pattern_config,
         ));
 
-        // Create publisher for detections
-        let detection_publisher = node.create_publisher("calibration_board_detections")?;
+        // Create publisher for detections with BEST_EFFORT QoS for timestamp-based matching
+        let mut detection_pub_opts = PublisherOptions::new("calibration_board_detections");
+        detection_pub_opts.qos = QoSProfile {
+            history: QoSHistoryPolicy::KeepLast { depth: 1 },
+            ..QoSProfile::sensor_data_default() // BEST_EFFORT
+        };
+        let detection_publisher = node.create_publisher(detection_pub_opts)?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
 
         // Create board debug publishers if debug mode is enabled
         let board_debug_publishers = if enable_debug {
             log_info!(
                 LOGGER_NAME,
-                "Debug mode enabled - creating debug publishers"
+                "Debug mode enabled - creating debug publishers with best-effort QoS"
             );
+
+            // Create best-effort QoS profile for debug topics
+            let debug_qos = QoSProfile::sensor_data_default(); // Best effort
+
+            let mut all_points_opts = PublisherOptions::new("debug/all_points");
+            all_points_opts.qos = debug_qos;
+
+            let mut filtered_points_opts = PublisherOptions::new("debug/filtered_points");
+            filtered_points_opts.qos = debug_qos;
+
+            let mut plane_inliers_opts = PublisherOptions::new("debug/plane_inliers");
+            plane_inliers_opts.qos = debug_qos;
+
+            let mut plane_marker_opts = PublisherOptions::new("debug/plane_marker");
+            plane_marker_opts.qos = debug_qos;
+
+            let mut bbox_marker_opts = PublisherOptions::new("debug/bbox_marker");
+            bbox_marker_opts.qos = debug_qos;
+
+            let mut board_marker_opts = PublisherOptions::new("debug/final_board_pose");
+            board_marker_opts.qos = debug_qos;
+
+            let mut board_marker_icp_opts = PublisherOptions::new("debug/icp_iterations");
+            board_marker_icp_opts.qos = debug_qos;
+
+            let mut initial_board_marker_opts = PublisherOptions::new("debug/initial_board_marker");
+            initial_board_marker_opts.qos = debug_qos;
+
+            let mut icp_stats_opts = PublisherOptions::new("debug/icp_stats");
+            icp_stats_opts.qos = debug_qos;
+
+            let mut pca_eigenvectors_opts = PublisherOptions::new("debug/pca_eigenvectors");
+            pca_eigenvectors_opts.qos = debug_qos;
+
             Some(BoardDebugPublishers {
-                all_points: Arc::new(node.create_publisher("debug/all_points")?),
-                filtered_points: Arc::new(node.create_publisher("debug/filtered_points")?),
-                plane_inliers: Arc::new(node.create_publisher("debug/plane_inliers")?),
-                plane_marker: Arc::new(node.create_publisher("debug/plane_marker")?),
-                bbox_marker: Arc::new(node.create_publisher("debug/bbox_marker")?),
-                board_marker: Arc::new(node.create_publisher("debug/final_board_pose")?),
-                board_marker_icp: Arc::new(node.create_publisher("debug/icp_iterations")?),
-                initial_board_marker: Arc::new(
-                    node.create_publisher("debug/initial_board_marker")?,
-                ),
-                icp_stats: Arc::new(node.create_publisher("debug/icp_stats")?),
-                pca_eigenvectors: Arc::new(node.create_publisher("debug/pca_eigenvectors")?),
+                all_points: Arc::new(node.create_publisher(all_points_opts)?),
+                filtered_points: Arc::new(node.create_publisher(filtered_points_opts)?),
+                plane_inliers: Arc::new(node.create_publisher(plane_inliers_opts)?),
+                plane_marker: Arc::new(node.create_publisher(plane_marker_opts)?),
+                bbox_marker: Arc::new(node.create_publisher(bbox_marker_opts)?),
+                board_marker: Arc::new(node.create_publisher(board_marker_opts)?),
+                board_marker_icp: Arc::new(node.create_publisher(board_marker_icp_opts)?),
+                initial_board_marker: Arc::new(node.create_publisher(initial_board_marker_opts)?),
+                icp_stats: Arc::new(node.create_publisher(icp_stats_opts)?),
+                pca_eigenvectors: Arc::new(node.create_publisher(pca_eigenvectors_opts)?),
             })
         } else {
             None
@@ -190,20 +227,36 @@ impl CalibrationBoardLocatorNode {
         let icp_debug_publishers = if enable_icp_iteration_debug {
             log_info!(
                 LOGGER_NAME,
-                "ICP iteration debug mode enabled - creating iteration debug publishers"
+                "ICP iteration debug mode enabled - creating iteration debug publishers with best-effort QoS"
             );
+
+            // Create best-effort QoS profile for ICP debug topics
+            let icp_debug_qos = QoSProfile::sensor_data_default(); // Best effort
+
+            let mut iteration_pose_opts =
+                PublisherOptions::new("/calibration/icp_debug/iteration_pose");
+            iteration_pose_opts.qos = icp_debug_qos;
+
+            let mut board_points_opts =
+                PublisherOptions::new("/calibration/icp_debug/board_points");
+            board_points_opts.qos = icp_debug_qos;
+
+            let mut correspondences_opts =
+                PublisherOptions::new("/calibration/icp_debug/correspondences");
+            correspondences_opts.qos = icp_debug_qos;
+
+            let mut loss_opts = PublisherOptions::new("/calibration/icp_debug/loss");
+            loss_opts.qos = icp_debug_qos;
+
+            let mut stats_opts = PublisherOptions::new("/calibration/icp_debug/stats");
+            stats_opts.qos = icp_debug_qos;
+
             Some(IcpDebugPublishers {
-                iteration_pose: Arc::new(
-                    node.create_publisher("/calibration/icp_debug/iteration_pose")?,
-                ),
-                board_points: Arc::new(
-                    node.create_publisher("/calibration/icp_debug/board_points")?,
-                ),
-                correspondences: Arc::new(
-                    node.create_publisher("/calibration/icp_debug/correspondences")?,
-                ),
-                loss: Arc::new(node.create_publisher("/calibration/icp_debug/loss")?),
-                stats: Arc::new(node.create_publisher("/calibration/icp_debug/stats")?),
+                iteration_pose: Arc::new(node.create_publisher(iteration_pose_opts)?),
+                board_points: Arc::new(node.create_publisher(board_points_opts)?),
+                correspondences: Arc::new(node.create_publisher(correspondences_opts)?),
+                loss: Arc::new(node.create_publisher(loss_opts)?),
+                stats: Arc::new(node.create_publisher(stats_opts)?),
             })
         } else {
             None
