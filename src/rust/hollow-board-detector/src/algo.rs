@@ -373,21 +373,20 @@ pub fn fit_board_icp(
 
                 // compute transformation
                 debug!("fit_board_icp Step {}: === KABSCH TRANSFORMATION ===", step);
-                debug!("fit_board_icp Step {}: Input: {} model points (from board model)", 
+                debug!("fit_board_icp Step {}: Input: {} data points (from point cloud)", 
                     step, good_corresponding_points.len());
-                debug!("fit_board_icp Step {}: Target: {} data points (from point cloud)", 
+                debug!("fit_board_icp Step {}: Target: {} model points (from board model)", 
                     step, good_inlier_points.len());
                     
                 let align_pose: Isometry3<_> = {
                     // Kabsch expects (input, target) pairs.
                     // Our correspondences are (data_point, model_point).
-                    // To compute a transform that moves the model toward the data
-                    // (so pose = align_pose * pose), we pass (model_point, data_point).
+                    // Kabsch computes data→model, then we invert to get model→data for ICP pose update.
                     match BoardIcpIterator::compute_kabsch_transform(
                         &good_corresponding_points,
                         &good_inlier_points,
                     ) {
-                        Some(iso) => iso,
+                        Some(iso) => iso.inverse(),  // Invert to get the correction transform
                         None => {
                             debug!("fit_board_icp Step {}: KABSCH FAILED!", step);
                             convergence_reason = "Kabsch algorithm failed".to_string();
@@ -429,7 +428,7 @@ pub fn fit_board_icp(
 
                 // Apply damping to the pose update (not the transformation itself)
                 // This interpolates between the current pose and the new pose after applying the transformation
-                // CRITICAL FIX: Use correct multiplication order like original wayside-portal
+                // Use right multiplication: pose * transform applies transform in local frame
                 debug!("fit_board_icp Step {}: === POSE UPDATE ===", step);
                 debug!("fit_board_icp Step {}: Current pose translation = ({:.6}, {:.6}, {:.6})",
                     step, pose.translation.x, pose.translation.y, pose.translation.z);
@@ -1116,14 +1115,14 @@ impl<'a> BoardIcpIterator<'a> {
 
         // 6. Compute transformation using Kabsch
         debug!("ICP Step {}: === KABSCH TRANSFORMATION ===", current_state.iteration + 1);
-        debug!("ICP Step {}: Input: {} model points (from board model)", 
+        debug!("ICP Step {}: Input: {} data points (from point cloud)", 
             current_state.iteration + 1, good_corresponding_points.len());
-        debug!("ICP Step {}: Target: {} data points (from point cloud)", 
+        debug!("ICP Step {}: Target: {} model points (from board model)", 
             current_state.iteration + 1, good_inlier_points.len());
         
         let align_pose: Isometry3<f64> =
             match Self::compute_kabsch_transform(&good_corresponding_points, &good_inlier_points) {
-                Some(iso) => iso,
+                Some(iso) => iso.inverse(),  // Invert to get the correction transform
                 None => {
                     debug!("ICP Step {}: KABSCH FAILED!", current_state.iteration + 1);
                     // Kabsch failed
@@ -1186,8 +1185,7 @@ impl<'a> BoardIcpIterator<'a> {
 
         let damped_translation = Translation3::from(
             current_state.board_pose.translation.vector
-                + (new_pose.translation.vector - current_state.board
-                    _pose.translation.vector)
+                + (new_pose.translation.vector - current_state.board_pose.translation.vector)
                     * damping_factor,
         );
 
