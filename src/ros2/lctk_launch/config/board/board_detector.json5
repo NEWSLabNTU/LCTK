@@ -2,21 +2,23 @@
     // ========================================
     // RANSAC Plane Fitting Parameters
     // ========================================
-    // max number of RANSAC steps (increased for more stable plane orientation)
-    "plane_ransac_max_iterations": 1000,
-    // the loss threshold that a point is considered an inlier (decreased for better accuracy)
-    "plane_ransac_inlier_threshold": 0.3,
+    // max number of RANSAC steps
+    "plane_ransac_max_iterations": 2000,
+    // the loss threshold that a point is considered an inlier (5cm - reasonable for calibration)
+    "plane_ransac_inlier_threshold": 0.05,
+    // skip RANSAC and use all bbox-filtered points directly for ICP (for testing/debugging)
+    "skip_ransac": true,
 
     // ========================================
     // ICP Algorithm Parameters
     // ========================================
     // max number of ICP iterations (increased for observing convergence behavior)
-    "max_icp_iterations": 3000,
+    "max_icp_iterations": 10000,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is below this threshold several times
     "icp_pose_weight_threshold": 1e-5,  // Tightened for better convergence
     // the maximum accepted ICP loss (balanced for stability)
-    "icp_rejection_threshold": 0.03,
+    "icp_rejection_threshold": 0.0003,
     // good fit threshold for convergence detection (tightened for accuracy)
     "icp_good_fit_threshold": 0.01,  // Tightened from 0.03 to 0.01
     // outlier rejection threshold for correspondence filtering
@@ -24,13 +26,13 @@
     // adaptive threshold multiplier for outlier rejection
     "icp_adaptive_threshold_multiplier": 1.5,  // Increased for more tolerance
     // minimum adaptive threshold value
-    "icp_adaptive_threshold_min": 0.02,  // Relaxed to handle initial pose errors
+    "icp_adaptive_threshold_min": 0.0001,  // Relaxed to handle initial pose errors
     // maximum adaptive threshold value
-    "icp_adaptive_threshold_max": 0.30,  // Relaxed to allow convergence from rough initial pose
+    "icp_adaptive_threshold_max": 0.50,  // Relaxed to allow convergence from rough initial pose
     // damping factor for pose updates (increased for better convergence)
     "icp_damping_factor": 0.6,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations
-    "icp_min_inlier_points": 130,
+    "icp_min_inlier_points": 1500,
 
     // ========================================
     // Board Geometry Parameters
