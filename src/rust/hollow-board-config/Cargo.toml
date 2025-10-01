@@ -10,6 +10,10 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config" }
 measurements = { workspace = true, features = ["serde"] }
+rayon = { version = "1.10", optional = true }
 
 newslab-serde-measurements = { workspace = true }
 newslab-serde-nalgebra = { workspace = true }
+
+[features]
+parallel = ["rayon"]

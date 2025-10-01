@@ -936,6 +936,13 @@ impl<'a> BoardIcpIterator<'a> {
 
         let total_correspondences = correspondences.len();
 
+        #[cfg(feature = "parallel")]
+        let correspondence_losses: Vec<_> = correspondences
+            .par_iter()
+            .map(|(input_point, corresponding_point)| (*input_point - corresponding_point).norm())
+            .collect();
+
+        #[cfg(not(feature = "parallel"))]
         let correspondence_losses: Vec<_> = correspondences
             .iter()
             .map(|(input_point, corresponding_point)| (*input_point - corresponding_point).norm())

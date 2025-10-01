@@ -5,6 +5,9 @@ use nalgebra as na;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 const EPS_F64: f64 = 0.3; // Tolerance for point-to-plane distance during ICP (30cm)
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +155,252 @@ impl BoardModel {
         na::Isometry3::from_parts(translation, self.pose.rotation)
     }
 
+    #[cfg(feature = "parallel")]
+    pub fn find_correspondences<InputPoint, DataIter>(
+        &self,
+        points: DataIter,
+    ) -> Option<Vec<(InputPoint, na::Point3<f64>)>>
+    where
+        DataIter: IntoIterator<Item = InputPoint> + rayon::iter::IntoParallelIterator<Item = InputPoint>,
+        InputPoint: Borrow<na::Point3<f64>> + Send,
+    {
+        let half_board_diagonal = self.board_shape.board_width / 2f64.sqrt();
+        let board_x_axis = self.board_x_axis();
+        let board_y_axis = self.board_y_axis();
+        let board_z_axis = self.board_z_axis();
+        let top_corner = self.top_corner();
+        let bottom_corner = self.bottom_corner();
+        let left_corner = self.left_corner();
+        let right_corner = self.right_corner();
+        let left_circle_center = self.left_circle_center();
+        let right_circle_center = self.right_circle_center();
+        let top_circle_center = self.top_circle_center();
+
+        debug_assert!(abs_diff_eq!(
+            (board_x_axis.cross(&board_y_axis) - *board_z_axis).norm(),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (top_corner - left_corner).dot(&(top_corner - right_corner)),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (bottom_corner - left_corner).dot(&(bottom_corner - right_corner)),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (left_corner - top_corner).dot(&(left_corner - bottom_corner)),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (right_corner - top_corner).dot(&(right_corner - bottom_corner)),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (top_corner - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (bottom_corner - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (left_corner - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (right_corner - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (left_circle_center - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (right_circle_center - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (top_circle_center - self.board_center()).dot(&board_z_axis),
+            0.0,
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (top_corner - left_corner).norm(),
+            self.board_shape.board_width.as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (left_corner - bottom_corner).norm(),
+            self.board_shape.board_width.as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (bottom_corner - right_corner).norm(),
+            self.board_shape.board_width.as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (right_corner - top_corner).norm(),
+            self.board_shape.board_width.as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (left_circle_center - self.board_center()).norm(),
+            (self.board_shape.hole_center_shift * 2f64.sqrt()).as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (right_circle_center - self.board_center()).norm(),
+            (self.board_shape.hole_center_shift * 2f64.sqrt()).as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (top_circle_center - self.board_center()).norm(),
+            (self.board_shape.hole_center_shift * 2f64.sqrt()).as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (left_circle_center - left_corner).norm(),
+            (half_board_diagonal - self.board_shape.hole_center_shift * 2f64.sqrt()).as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (right_circle_center - right_corner).norm(),
+            (half_board_diagonal - self.board_shape.hole_center_shift * 2f64.sqrt()).as_meters(),
+            epsilon = EPS_F64
+        ));
+        debug_assert!(abs_diff_eq!(
+            (top_circle_center - top_corner).norm(),
+            (half_board_diagonal - self.board_shape.hole_center_shift * 2f64.sqrt()).as_meters(),
+            epsilon = EPS_F64
+        ));
+
+        // Define the correspondence computation as a closure to avoid code duplication
+        let compute_correspondence = |point_generic: InputPoint| -> (InputPoint, na::Point3<f64>) {
+            let point = point_generic.borrow();
+
+            // fidn projection point on board plane (regardless of boundary)
+            let vec_point_to_origin = self.bottom_corner() - point;
+            let vec_point_to_proj = board_z_axis.scale(vec_point_to_origin.dot(&board_z_axis));
+            let plane_projection_point: na::Point3<_> = point + vec_point_to_proj;
+
+            // check if projection point is outside the board
+            let vec_origin_to_proj = plane_projection_point - self.bottom_corner();
+            let dot_product = vec_origin_to_proj.dot(&board_z_axis);
+            if !abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64) {
+                eprintln!("🔴 Assertion failure in BoardModel::contains_point:");
+                eprintln!("  dot_product = {}", dot_product);
+                eprintln!("  epsilon = {}", EPS_F64);
+                eprintln!("  abs_diff = {}", dot_product.abs());
+                eprintln!("  point = {:?}", point);
+                eprintln!("  board_z_axis = {:?}", board_z_axis);
+                eprintln!("  vec_origin_to_proj = {:?}", vec_origin_to_proj);
+            }
+            debug_assert!(abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64));
+
+            let plane_position = {
+                let x = Length::from_meters(vec_origin_to_proj.dot(&board_x_axis));
+                let y = Length::from_meters(vec_origin_to_proj.dot(&board_y_axis));
+                (x, y)
+            };
+
+            let border_position = {
+                let (x, y) = plane_position;
+                let border_x = Length::from_meters(
+                    x.as_meters()
+                        .clamp(0.0, self.board_shape.board_width.as_meters()),
+                );
+                let border_y = Length::from_meters(
+                    y.as_meters()
+                        .clamp(0.0, self.board_shape.board_width.as_meters()),
+                );
+                (border_x, border_y)
+            };
+
+            let corresponding_point = if plane_position != border_position {
+                let (x, y) = border_position;
+                self.board_plane_point(x, y)
+            } else {
+                // check if projection point is inside one of the circles
+                // and find nearest point on circles
+                let find_border_point_on_circle = |circle_center: &na::Point3<f64>| {
+                    let vec_circle_center_to_proj = plane_projection_point - circle_center;
+                    let dist_circle_center_to_proj = vec_circle_center_to_proj.norm();
+                    let is_inside_circle =
+                        dist_circle_center_to_proj < self.board_shape.hole_radius.as_meters();
+
+                    let circle_border_point = {
+                        // Handle degenerate case: point exactly at hole center
+                        if dist_circle_center_to_proj < 1e-10 {
+                            // Use arbitrary radial direction (along board x-axis)
+                            circle_center
+                                + board_x_axis.scale(self.board_shape.hole_radius.as_meters())
+                        } else {
+                            let radical_unit =
+                                na::Unit::new_normalize(vec_circle_center_to_proj);
+                            circle_center
+                                + radical_unit.scale(self.board_shape.hole_radius.as_meters())
+                        }
+                    };
+
+                    debug_assert!(abs_diff_eq!(
+                        vec_circle_center_to_proj.dot(&board_z_axis),
+                        0.0,
+                        epsilon = EPS_F64
+                    ));
+                    debug_assert!(abs_diff_eq!(
+                        (circle_border_point - self.bottom_corner()).dot(&board_z_axis),
+                        0.0,
+                        epsilon = EPS_F64
+                    ));
+
+                    (is_inside_circle, circle_border_point)
+                };
+
+                let (is_inside_left_circle, left_circle_border_point) =
+                    find_border_point_on_circle(&left_circle_center);
+                let (is_inside_right_circle, right_circle_border_point) =
+                    find_border_point_on_circle(&right_circle_center);
+                let (is_inside_top_circle, top_circle_border_point) =
+                    find_border_point_on_circle(&top_circle_center);
+
+                if is_inside_left_circle {
+                    left_circle_border_point
+                } else if is_inside_right_circle {
+                    right_circle_border_point
+                } else if is_inside_top_circle {
+                    top_circle_border_point
+                } else {
+                    plane_projection_point
+                }
+            };
+
+            (point_generic, corresponding_point)
+        };
+
+        // Use parallel or serial iterator based on feature flag
+        #[cfg(feature = "parallel")]
+        let correspondings: Vec<_> = points.into_par_iter().map(compute_correspondence).collect();
+
+        #[cfg(not(feature = "parallel"))]
+        let correspondings: Vec<_> = points.into_iter().map(compute_correspondence).collect();
+
+        Some(correspondings)
+    }
+
+    #[cfg(not(feature = "parallel"))]
     pub fn find_correspondences<InputPoint, DataIter>(
         &self,
         points: DataIter,
@@ -283,110 +532,111 @@ impl BoardModel {
             epsilon = EPS_F64
         ));
 
-        let correspondings: Vec<_> = points
-            .into_iter()
-            .map(|point_generic| {
-                let point = point_generic.borrow();
+        // Define the correspondence computation as a closure to avoid code duplication
+        let compute_correspondence = |point_generic: InputPoint| -> (InputPoint, na::Point3<f64>) {
+            let point = point_generic.borrow();
 
-                // fidn projection point on board plane (regardless of boundary)
-                let vec_point_to_origin = self.bottom_corner() - point;
-                let vec_point_to_proj = board_z_axis.scale(vec_point_to_origin.dot(&board_z_axis));
-                let plane_projection_point: na::Point3<_> = point + vec_point_to_proj;
+            // fidn projection point on board plane (regardless of boundary)
+            let vec_point_to_origin = self.bottom_corner() - point;
+            let vec_point_to_proj = board_z_axis.scale(vec_point_to_origin.dot(&board_z_axis));
+            let plane_projection_point: na::Point3<_> = point + vec_point_to_proj;
 
-                // check if projection point is outside the board
-                let vec_origin_to_proj = plane_projection_point - self.bottom_corner();
-                let dot_product = vec_origin_to_proj.dot(&board_z_axis);
-                if !abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64) {
-                    eprintln!("🔴 Assertion failure in BoardModel::contains_point:");
-                    eprintln!("  dot_product = {}", dot_product);
-                    eprintln!("  epsilon = {}", EPS_F64);
-                    eprintln!("  abs_diff = {}", dot_product.abs());
-                    eprintln!("  point = {:?}", point);
-                    eprintln!("  board_z_axis = {:?}", board_z_axis);
-                    eprintln!("  vec_origin_to_proj = {:?}", vec_origin_to_proj);
-                }
-                debug_assert!(abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64));
+            // check if projection point is outside the board
+            let vec_origin_to_proj = plane_projection_point - self.bottom_corner();
+            let dot_product = vec_origin_to_proj.dot(&board_z_axis);
+            if !abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64) {
+                eprintln!("🔴 Assertion failure in BoardModel::contains_point:");
+                eprintln!("  dot_product = {}", dot_product);
+                eprintln!("  epsilon = {}", EPS_F64);
+                eprintln!("  abs_diff = {}", dot_product.abs());
+                eprintln!("  point = {:?}", point);
+                eprintln!("  board_z_axis = {:?}", board_z_axis);
+                eprintln!("  vec_origin_to_proj = {:?}", vec_origin_to_proj);
+            }
+            debug_assert!(abs_diff_eq!(dot_product, 0.0, epsilon = EPS_F64));
 
-                let plane_position = {
-                    let x = Length::from_meters(vec_origin_to_proj.dot(&board_x_axis));
-                    let y = Length::from_meters(vec_origin_to_proj.dot(&board_y_axis));
-                    (x, y)
-                };
+            let plane_position = {
+                let x = Length::from_meters(vec_origin_to_proj.dot(&board_x_axis));
+                let y = Length::from_meters(vec_origin_to_proj.dot(&board_y_axis));
+                (x, y)
+            };
 
-                let border_position = {
-                    let (x, y) = plane_position;
-                    let border_x = Length::from_meters(
-                        x.as_meters()
-                            .clamp(0.0, self.board_shape.board_width.as_meters()),
-                    );
-                    let border_y = Length::from_meters(
-                        y.as_meters()
-                            .clamp(0.0, self.board_shape.board_width.as_meters()),
-                    );
-                    (border_x, border_y)
-                };
+            let border_position = {
+                let (x, y) = plane_position;
+                let border_x = Length::from_meters(
+                    x.as_meters()
+                        .clamp(0.0, self.board_shape.board_width.as_meters()),
+                );
+                let border_y = Length::from_meters(
+                    y.as_meters()
+                        .clamp(0.0, self.board_shape.board_width.as_meters()),
+                );
+                (border_x, border_y)
+            };
 
-                let corresponding_point = if plane_position != border_position {
-                    let (x, y) = border_position;
-                    self.board_plane_point(x, y)
-                } else {
-                    // check if projection point is inside one of the circles
-                    // and find nearest point on circles
-                    let find_border_point_on_circle = |circle_center: &na::Point3<f64>| {
-                        let vec_circle_center_to_proj = plane_projection_point - circle_center;
-                        let dist_circle_center_to_proj = vec_circle_center_to_proj.norm();
-                        let is_inside_circle =
-                            dist_circle_center_to_proj < self.board_shape.hole_radius.as_meters();
+            let corresponding_point = if plane_position != border_position {
+                let (x, y) = border_position;
+                self.board_plane_point(x, y)
+            } else {
+                // check if projection point is inside one of the circles
+                // and find nearest point on circles
+                let find_border_point_on_circle = |circle_center: &na::Point3<f64>| {
+                    let vec_circle_center_to_proj = plane_projection_point - circle_center;
+                    let dist_circle_center_to_proj = vec_circle_center_to_proj.norm();
+                    let is_inside_circle =
+                        dist_circle_center_to_proj < self.board_shape.hole_radius.as_meters();
 
-                        let circle_border_point = {
-                            // Handle degenerate case: point exactly at hole center
-                            if dist_circle_center_to_proj < 1e-10 {
-                                // Use arbitrary radial direction (along board x-axis)
-                                circle_center
-                                    + board_x_axis.scale(self.board_shape.hole_radius.as_meters())
-                            } else {
-                                let radical_unit =
-                                    na::Unit::new_normalize(vec_circle_center_to_proj);
-                                circle_center
-                                    + radical_unit.scale(self.board_shape.hole_radius.as_meters())
-                            }
-                        };
-
-                        debug_assert!(abs_diff_eq!(
-                            vec_circle_center_to_proj.dot(&board_z_axis),
-                            0.0,
-                            epsilon = EPS_F64
-                        ));
-                        debug_assert!(abs_diff_eq!(
-                            (circle_border_point - self.bottom_corner()).dot(&board_z_axis),
-                            0.0,
-                            epsilon = EPS_F64
-                        ));
-
-                        (is_inside_circle, circle_border_point)
+                    let circle_border_point = {
+                        // Handle degenerate case: point exactly at hole center
+                        if dist_circle_center_to_proj < 1e-10 {
+                            // Use arbitrary radial direction (along board x-axis)
+                            circle_center
+                                + board_x_axis.scale(self.board_shape.hole_radius.as_meters())
+                        } else {
+                            let radical_unit =
+                                na::Unit::new_normalize(vec_circle_center_to_proj);
+                            circle_center
+                                + radical_unit.scale(self.board_shape.hole_radius.as_meters())
+                        }
                     };
 
-                    let (is_inside_left_circle, left_circle_border_point) =
-                        find_border_point_on_circle(&left_circle_center);
-                    let (is_inside_right_circle, right_circle_border_point) =
-                        find_border_point_on_circle(&right_circle_center);
-                    let (is_inside_top_circle, top_circle_border_point) =
-                        find_border_point_on_circle(&top_circle_center);
+                    debug_assert!(abs_diff_eq!(
+                        vec_circle_center_to_proj.dot(&board_z_axis),
+                        0.0,
+                        epsilon = EPS_F64
+                    ));
+                    debug_assert!(abs_diff_eq!(
+                        (circle_border_point - self.bottom_corner()).dot(&board_z_axis),
+                        0.0,
+                        epsilon = EPS_F64
+                    ));
 
-                    if is_inside_left_circle {
-                        left_circle_border_point
-                    } else if is_inside_right_circle {
-                        right_circle_border_point
-                    } else if is_inside_top_circle {
-                        top_circle_border_point
-                    } else {
-                        plane_projection_point
-                    }
+                    (is_inside_circle, circle_border_point)
                 };
 
-                (point_generic, corresponding_point)
-            })
-            .collect();
+                let (is_inside_left_circle, left_circle_border_point) =
+                    find_border_point_on_circle(&left_circle_center);
+                let (is_inside_right_circle, right_circle_border_point) =
+                    find_border_point_on_circle(&right_circle_center);
+                let (is_inside_top_circle, top_circle_border_point) =
+                    find_border_point_on_circle(&top_circle_center);
+
+                if is_inside_left_circle {
+                    left_circle_border_point
+                } else if is_inside_right_circle {
+                    right_circle_border_point
+                } else if is_inside_top_circle {
+                    top_circle_border_point
+                } else {
+                    plane_projection_point
+                }
+            };
+
+            (point_generic, corresponding_point)
+        };
+
+        // Use serial iterator for non-parallel build
+        let correspondings: Vec<_> = points.into_iter().map(compute_correspondence).collect();
 
         Some(correspondings)
     }

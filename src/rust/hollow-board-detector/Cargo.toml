@@ -16,7 +16,7 @@ noisy_float = { workspace = true }
 arrsac = "0.10.0"
 rand = { workspace = true }
 unzip-n = { workspace = true }
-hollow-board-config = { version = "0.1.0", path = "../hollow-board-config" }
+hollow-board-config = { version = "0.1.0", path = "../hollow-board-config", features = ["parallel"] }
 aruco-config = { version = "0.1.0", path = "../aruco-config" }
 plane-estimator = { version = "0.1.0", path = "../plane-estimator" }
 log = { workspace = true }

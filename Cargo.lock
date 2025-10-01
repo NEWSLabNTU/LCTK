@@ -3677,6 +3677,7 @@ dependencies = [
  "nalgebra 0.32.6",
  "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
  "newslab-serde-nalgebra 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
+ "rayon",
  "serde",
 ]
 
