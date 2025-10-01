@@ -30,7 +30,7 @@
     // maximum adaptive threshold value - DISABLED
     "icp_adaptive_threshold_max": 1e10,  // Effectively disabled - no filtering
     // damping factor for pose updates (increased for better convergence)
-    "icp_damping_factor": 0.01,  // Increased from 0.35 to 0.6
+    "icp_damping_factor": 0.5,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
     "icp_min_inlier_points": 100,  // Lowered from 1500 to avoid stopping when points are good
 
