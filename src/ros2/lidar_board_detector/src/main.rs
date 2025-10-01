@@ -144,11 +144,7 @@ impl CalibrationBoardLocatorNode {
         );
         let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
 
-        log_info!(
-            LOGGER_NAME,
-            "Loading bbox config from: {}",
-            bbox_file_param
-        );
+        log_info!(LOGGER_NAME, "Loading bbox config from: {}", bbox_file_param);
         let bbox = Self::load_bbox_config(&bbox_file_param)?;
         let bbox = Arc::new(ArcSwap::new(Arc::new(bbox)));
 
@@ -922,9 +918,8 @@ impl CalibrationBoardLocatorNode {
                 };
 
                 // Move the pose origin to the lowest corner
-                let fixup_translation = {
-                    na::Translation3::new(lowest_corner.x, lowest_corner.y, lowest_corner.z)
-                };
+                let fixup_translation =
+                    { na::Translation3::new(lowest_corner.x, lowest_corner.y, lowest_corner.z) };
 
                 // Compose the corrected pose: translation * rotation * original_rotation
                 let corrected = fixup_translation * fixup_rotation * state.board_pose.rotation;
@@ -2114,37 +2109,86 @@ impl CalibrationBoardLocatorNode {
     fn correspondences_to_markers(state: &BoardIcpState, header: &Header) -> Result<MarkerArray> {
         let mut markers = Vec::new();
 
-        // Create line markers for each correspondence
-        for (i, (data_point, model_point)) in state.correspondences.iter().enumerate() {
-            // Create line from data point to model point
-            let start_point = Point {
+        // Collect source (data) and target (model) points
+        let mut source_points = Vec::new();
+        let mut target_points = Vec::new();
+
+        for (data_point, model_point) in state.correspondences.iter() {
+            source_points.push(Point {
                 x: data_point.x,
                 y: data_point.y,
                 z: data_point.z,
-            };
-            let end_point = Point {
+            });
+            target_points.push(Point {
                 x: model_point.x,
                 y: model_point.y,
                 z: model_point.z,
-            };
+            });
+        }
 
+        // Create source points marker (red spheres)
+        markers.push(Marker {
+            header: header.clone(),
+            ns: "correspondence_source".to_string(),
+            id: 0,
+            type_: 7,  // SPHERE_LIST
+            action: 0, // ADD
+            points: source_points.clone(),
+            scale: GeomVector3 {
+                x: 0.015, // Sphere diameter
+                y: 0.015,
+                z: 0.015,
+            },
+            color: ColorRGBA {
+                r: 1.0, // Red
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            ..Default::default()
+        });
+
+        // Create target points marker (green spheres)
+        markers.push(Marker {
+            header: header.clone(),
+            ns: "correspondence_target".to_string(),
+            id: 0,
+            type_: 7,  // SPHERE_LIST
+            action: 0, // ADD
+            points: target_points.clone(),
+            scale: GeomVector3 {
+                x: 0.015, // Sphere diameter
+                y: 0.015,
+                z: 0.015,
+            },
+            color: ColorRGBA {
+                r: 0.0,
+                g: 1.0, // Green
+                b: 0.0,
+                a: 1.0,
+            },
+            ..Default::default()
+        });
+
+        // Create line markers connecting each correspondence pair (yellow lines)
+        for (i, (source, target)) in source_points.iter().zip(target_points.iter()).enumerate() {
             let marker = Marker {
                 header: header.clone(),
-                ns: "icp_correspondences".to_string(),
+                ns: "correspondence_lines".to_string(),
                 id: i as i32,
                 type_: 4,  // LINE_STRIP
                 action: 0, // ADD
-                points: vec![start_point, end_point],
+                points: vec![source.clone(), target.clone()],
                 scale: GeomVector3 {
-                    x: 0.002, // Line width
+                    x: 0.003, // Line width
                     y: 0.0,
                     z: 0.0,
                 },
                 color: ColorRGBA {
-                    r: 1.0, // Red lines
-                    g: 0.0,
+                    r: 1.0, // Yellow
+                    g: 1.0,
                     b: 0.0,
-                    a: 0.8, // Semi-transparent
+                    a: 0.6, // Semi-transparent
                 },
                 ..Default::default()
             };
