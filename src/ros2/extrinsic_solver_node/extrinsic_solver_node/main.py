@@ -316,6 +316,23 @@ class EducationalExtrinsicSolver(Node):
             f"Created {len(object_points)} point correspondences for PnP solving"
         )
 
+        # Debug: Print point correspondences for homework data collection
+        self.get_logger().debug("=" * 80)
+        self.get_logger().debug("HOMEWORK DATA COLLECTION - Point Correspondences")
+        self.get_logger().debug("=" * 80)
+        self.get_logger().debug(f"Number of correspondences: {len(object_points)}")
+        self.get_logger().debug("\n3D Object Points (world frame, meters):")
+        for i, pt in enumerate(object_points):
+            self.get_logger().debug(f"  [{i}] ({pt[0]:.6f}, {pt[1]:.6f}, {pt[2]:.6f})")
+        self.get_logger().debug(
+            "\n2D Image Points (pixels, UNDISTORTED from pipeline):"
+        )
+        for i, pt in enumerate(image_points):
+            self.get_logger().debug(f"  [{i}] ({pt[0]:.2f}, {pt[1]:.2f})")
+        self.get_logger().debug(f"\nCamera Matrix K:\n{self.camera_info.k}")
+        self.get_logger().debug(f"Distortion coefficients: {self.camera_info.d}")
+        self.get_logger().debug("=" * 80)
+
         # Step 4: Solve PnP problem
         success, rvec, tvec = self._solve_pnp_educational(object_points, image_points)
 
