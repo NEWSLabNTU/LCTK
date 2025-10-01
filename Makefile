@@ -6,6 +6,7 @@ enable_icp_iteration_debug := true
 log_level := info
 rviz := false
 use_best_effort_qos := true
+use_advanced_solver := false
 
 ## Topics for sample data
 # camera_topic := /sensing/camera/front_center/image_raw
@@ -172,6 +173,7 @@ launch_lidar_camera_calibration:
 		enable_rviz:=$(rviz) \
 		log_level:=$(log_level) \
 		use_best_effort_qos:=$(use_best_effort_qos) \
+		use_advanced_solver:=$(use_advanced_solver) \
 		camera_topic:=$(camera_topic) \
 		pointcloud_topic:=$(pointcloud_topic)
 
