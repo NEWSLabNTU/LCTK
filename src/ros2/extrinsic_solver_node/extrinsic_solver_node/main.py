@@ -31,10 +31,10 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R  # Quaternion operations
 from sensor_msgs.msg import CameraInfo
+
 # ROS2 message types
 from std_msgs.msg import Header
-from vision_msgs.msg import (Detection2D, Detection2DArray, Detection3D,
-                             Detection3DArray)
+from vision_msgs.msg import Detection2D, Detection2DArray, Detection3D, Detection3DArray
 
 
 @dataclass
@@ -123,11 +123,13 @@ class EducationalExtrinsicSolver(Node):
         # Thread safety for simple caching
         self.lock = threading.Lock()
 
-        # QoS profile for reliable communication
+        # QoS profile for best-effort communication with depth=1
+        # This ensures we always match the most recent detections by timestamp
+        # without accumulating stale data
         qos_profile = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=10,
+            depth=1,
         )
 
         # Publishers - only essential output
