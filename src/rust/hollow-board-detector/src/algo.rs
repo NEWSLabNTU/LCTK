@@ -1133,7 +1133,9 @@ impl<'a> BoardIcpIterator<'a> {
         BoardIcpState {
             iteration: current_state.iteration + 1,
             board_pose: damped_pose,
-            inlier_points: good_inlier_points,
+            // CRITICAL FIX: Keep using the original full point cloud throughout all iterations.
+            // Only use good_inlier_points for Kabsch transformation, not for next iteration's correspondence finding.
+            inlier_points: current_state.inlier_points.clone(),
             correspondences: good_correspondences_for_state,
             avg_loss,
             previous_loss: Some(current_state.avg_loss),
