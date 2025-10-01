@@ -1,9 +1,21 @@
 <?xml version="1.0"?>
 <!--
-    Launch file for extrinsic solver node.
+    Launch file for advanced extrinsic solver node.
 
-    This node solves LiDAR-camera extrinsic calibration using ArUco markers
-    and calibration board detections via the Perspective-n-Point (PnP) algorithm.
+    This node performs multi-pose LiDAR-camera extrinsic calibration using
+    buffered detection data and the Perspective-n-Point (PnP) algorithm.
+
+    Workflow:
+    1. Play rosbag with calibration data
+    2. Call add_detection service to buffer good detection pairs
+    3. Repeat for multiple board poses (e.g., 6 different poses)
+    4. Node automatically re-solves using all buffered data
+    5. Continuous publishing of optimized extrinsic transform
+
+    Services:
+    - ~/add_detection: Add current detection pair to buffer and re-solve
+    - ~/clear_buffer: Clear buffer and stop publishing
+    - ~/get_status: Query buffer status and calibration state
 -->
 <launch>
     <!-- Frame Arguments -->
@@ -42,6 +54,11 @@
          default="info"
          description="ROS log level (debug, info, warn, error, fatal)"/>
 
+    <!-- Publishing Rate -->
+    <arg name="publishing_rate"
+         default="10.0"
+         description="Transform publishing rate in Hz (when calibration is active)"/>
+
     <!-- Extrinsic Solver Node -->
     <node pkg="advanced_extrinsic_solver"
           exec="advanced_extrinsic_solver"
@@ -53,6 +70,7 @@
         <param name="child_frame" value="$(var child_frame)"/>
         <param name="camera_topic" value="$(var camera_topic)"/>
         <param name="debug_mode" value="$(var debug_mode)"/>
+        <param name="publishing_rate" value="$(var publishing_rate)"/>
 
         <!-- Topic remapping -->
         <remap from="aruco_detections" to="$(var aruco_detections)"/>
