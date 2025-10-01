@@ -18,7 +18,7 @@
     // the ICP terminates if pose weight is below this threshold several times
     "icp_pose_weight_threshold": 1e-10,
     // the maximum accepted ICP loss (balanced for stability)
-    "icp_rejection_threshold": 0.001,
+    "icp_rejection_threshold": 0.02308,
     // good fit threshold for convergence detection (tightened for accuracy)
     "icp_good_fit_threshold": 0.024,  // Tightened from 0.03 to 0.01
     // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
