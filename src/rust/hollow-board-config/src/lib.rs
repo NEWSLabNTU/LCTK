@@ -337,10 +337,19 @@ impl BoardModel {
                         let dist_circle_center_to_proj = vec_circle_center_to_proj.norm();
                         let is_inside_circle =
                             dist_circle_center_to_proj < self.board_shape.hole_radius.as_meters();
+
                         let circle_border_point = {
-                            let radical_unit = na::Unit::new_normalize(vec_circle_center_to_proj);
-                            circle_center
-                                + radical_unit.scale(self.board_shape.hole_radius.as_meters())
+                            // Handle degenerate case: point exactly at hole center
+                            if dist_circle_center_to_proj < 1e-10 {
+                                // Use arbitrary radial direction (along board x-axis)
+                                circle_center
+                                    + board_x_axis.scale(self.board_shape.hole_radius.as_meters())
+                            } else {
+                                let radical_unit =
+                                    na::Unit::new_normalize(vec_circle_center_to_proj);
+                                circle_center
+                                    + radical_unit.scale(self.board_shape.hole_radius.as_meters())
+                            }
                         };
 
                         debug_assert!(abs_diff_eq!(
@@ -386,7 +395,6 @@ impl BoardModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aruco_config::MultiArucoPattern;
     use measurements::Length;
 
     #[test]
@@ -469,19 +477,19 @@ mod tests {
 
         println!("\n============ RUST OUTPUT ============");
         println!("Marker 696 (bottom):");
-        for (i, corner) in bottom_corners.iter().enumerate() {
+        for corner in bottom_corners.iter() {
             println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
         }
         println!("\nMarker 64 (left):");
-        for (i, corner) in left_corners.iter().enumerate() {
+        for corner in left_corners.iter() {
             println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
         }
         println!("\nMarker 306 (right):");
-        for (i, corner) in right_corners.iter().enumerate() {
+        for corner in right_corners.iter() {
             println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
         }
         println!("\nMarker 195 (top):");
-        for (i, corner) in top_corners.iter().enumerate() {
+        for corner in top_corners.iter() {
             println!("  [{:.6}, {:.6}, {:.6}]", corner.0, corner.1, corner.2);
         }
         println!("======================================\n");
@@ -491,6 +499,437 @@ mod tests {
             bottom_corners[3],
             (origin_x, origin_y, 0.0),
             "Bottom corner should be at origin"
+        );
+    }
+
+    /// Helper function to create a simple board model for testing
+    fn create_test_board_model() -> BoardModel {
+        let board_shape = BoardShape {
+            board_width: Length::from_meters(1.0),       // 1m board
+            hole_radius: Length::from_meters(0.15),      // 15cm holes
+            hole_center_shift: Length::from_meters(0.2), // 20cm from center
+        };
+
+        BoardModel {
+            pose: na::Isometry3::identity(),
+            marker_paper_size: Length::from_meters(0.3),
+            board_shape,
+        }
+    }
+
+    #[test]
+    fn test_find_correspondences_point_on_plane_no_hole() {
+        let board = create_test_board_model();
+
+        // Point on the board plane, not in a hole (center of board)
+        let point = na::Point3::new(0.5, 0.5, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should map to itself (or very close)
+        assert!(
+            (correspondence - point).norm() < 1e-6,
+            "Point on plane should map to itself. Got {:?}, expected {:?}",
+            correspondence,
+            point
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_above_plane() {
+        let board = create_test_board_model();
+
+        // Point 0.5m above the board center
+        let point = na::Point3::new(0.5, 0.5, 0.5);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project down to the plane
+        let expected = na::Point3::new(0.5, 0.5, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point above plane should project to plane. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_below_plane() {
+        let board = create_test_board_model();
+
+        // Point 0.5m below the board center
+        let point = na::Point3::new(0.5, 0.5, -0.5);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project up to the plane
+        let expected = na::Point3::new(0.5, 0.5, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point below plane should project to plane. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_outside_left_edge() {
+        let board = create_test_board_model();
+
+        // Point outside the board to the left (negative x)
+        let point = na::Point3::new(-0.5, 0.5, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should clamp to left edge (x=0)
+        let expected = na::Point3::new(0.0, 0.5, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point outside left edge should clamp to x=0. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_outside_right_edge() {
+        let board = create_test_board_model();
+
+        // Point outside the board to the right (x > 1.0)
+        let point = na::Point3::new(1.5, 0.5, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should clamp to right edge (x=1.0)
+        let expected = na::Point3::new(1.0, 0.5, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point outside right edge should clamp to x=1.0. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_outside_bottom_edge() {
+        let board = create_test_board_model();
+
+        // Point outside the board at bottom (negative y)
+        let point = na::Point3::new(0.5, -0.5, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should clamp to bottom edge (y=0)
+        let expected = na::Point3::new(0.5, 0.0, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point outside bottom edge should clamp to y=0. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_outside_top_edge() {
+        let board = create_test_board_model();
+
+        // Point outside the board at top (y > 1.0)
+        let point = na::Point3::new(0.5, 1.5, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should clamp to top edge (y=1.0)
+        let expected = na::Point3::new(0.5, 1.0, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point outside top edge should clamp to y=1.0. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_outside_corner() {
+        let board = create_test_board_model();
+
+        // Point outside the board at bottom-left corner
+        let point = na::Point3::new(-0.5, -0.5, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should clamp to corner (0, 0)
+        let expected = na::Point3::new(0.0, 0.0, 0.0);
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point outside corner should clamp to (0,0). Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_inside_left_hole() {
+        let board = create_test_board_model();
+
+        // Left hole center is at (0.5 + 0.2, 0.5 - 0.2) = (0.7, 0.3)
+        // Place a point at the center of the left hole
+        let point = na::Point3::new(0.7, 0.3, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project to the hole border
+        // The correspondence should be at distance = hole_radius from the center
+        let hole_center = na::Point3::new(0.7, 0.3, 0.0);
+        let distance_from_center = (correspondence - hole_center).norm();
+
+        assert!(
+            (distance_from_center - 0.15).abs() < 1e-6,
+            "Point inside left hole should project to hole border (radius=0.15m). Got distance {:?}",
+            distance_from_center
+        );
+
+        // Z coordinate should remain 0
+        assert!(
+            correspondence.z.abs() < 1e-6,
+            "Correspondence z-coordinate should be 0"
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_inside_right_hole() {
+        let board = create_test_board_model();
+
+        // Right hole center is at (0.5 - 0.2, 0.5 + 0.2) = (0.3, 0.7)
+        let point = na::Point3::new(0.3, 0.7, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project to the hole border
+        let hole_center = na::Point3::new(0.3, 0.7, 0.0);
+        let distance_from_center = (correspondence - hole_center).norm();
+
+        assert!(
+            (distance_from_center - 0.15).abs() < 1e-6,
+            "Point inside right hole should project to hole border (radius=0.15m). Got distance {:?}",
+            distance_from_center
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_inside_top_hole() {
+        let board = create_test_board_model();
+
+        // Top hole center is at (0.5 + 0.2, 0.5 + 0.2) = (0.7, 0.7)
+        let point = na::Point3::new(0.7, 0.7, 0.0);
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project to the hole border
+        let hole_center = na::Point3::new(0.7, 0.7, 0.0);
+        let distance_from_center = (correspondence - hole_center).norm();
+
+        assert!(
+            (distance_from_center - 0.15).abs() < 1e-6,
+            "Point inside top hole should project to hole border (radius=0.15m). Got distance {:?}",
+            distance_from_center
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_point_near_hole_edge() {
+        let board = create_test_board_model();
+
+        // Point just inside the left hole, near the edge
+        // Left hole center: (0.7, 0.3), radius: 0.15
+        // Place point at distance 0.05m from center (inside the hole)
+        let point = na::Point3::new(0.75, 0.3, 0.0); // 0.05m to the right of center
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project to hole border along the same direction
+        let hole_center = na::Point3::new(0.7, 0.3, 0.0);
+        let direction = (point - hole_center).normalize();
+        let expected = hole_center + direction.scale(0.15);
+
+        assert!(
+            (correspondence - expected).norm() < 1e-6,
+            "Point near hole edge should project radially to border. Got {:?}, expected {:?}",
+            correspondence,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_multiple_points() {
+        let board = create_test_board_model();
+
+        // Test with multiple points of different types
+        let points = vec![
+            na::Point3::new(0.5, 0.5, 0.0),  // On plane, no hole
+            na::Point3::new(-0.5, 0.5, 0.0), // Outside left edge
+            na::Point3::new(0.7, 0.3, 0.0),  // Inside left hole
+            na::Point3::new(0.5, 0.5, 0.5),  // Above plane
+        ];
+
+        let result = board.find_correspondences(points.clone());
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 4, "Should have 4 correspondences");
+
+        // Check first point (on plane)
+        let (_, corr1) = &correspondences[0];
+        assert!(
+            (corr1 - na::Point3::new(0.5, 0.5, 0.0)).norm() < 1e-6,
+            "First point should map to itself"
+        );
+
+        // Check second point (outside left edge)
+        let (_, corr2) = &correspondences[1];
+        assert!(
+            (corr2 - na::Point3::new(0.0, 0.5, 0.0)).norm() < 1e-6,
+            "Second point should clamp to left edge"
+        );
+
+        // Check third point (inside left hole)
+        let (_, corr3) = &correspondences[2];
+        let hole_center = na::Point3::new(0.7, 0.3, 0.0);
+        let distance_from_center = (corr3 - hole_center).norm();
+        assert!(
+            (distance_from_center - 0.15).abs() < 1e-6,
+            "Third point should project to hole border"
+        );
+
+        // Check fourth point (above plane)
+        let (_, corr4) = &correspondences[3];
+        assert!(
+            (corr4 - na::Point3::new(0.5, 0.5, 0.0)).norm() < 1e-6,
+            "Fourth point should project to plane"
+        );
+    }
+
+    #[test]
+    fn test_find_correspondences_rotated_board() {
+        // Create a board rotated 45 degrees around z-axis
+        let board_shape = BoardShape {
+            board_width: Length::from_meters(1.0),
+            hole_radius: Length::from_meters(0.15),
+            hole_center_shift: Length::from_meters(0.2),
+        };
+
+        let rotation = na::UnitQuaternion::from_euler_angles(0.0, 0.0, std::f64::consts::FRAC_PI_4);
+        let pose = na::Isometry3::from_parts(na::Translation3::identity(), rotation);
+
+        let board = BoardModel {
+            pose,
+            marker_paper_size: Length::from_meters(0.3),
+            board_shape,
+        };
+
+        // Point at board center in board frame (should be at sqrt(2)/4, sqrt(2)/4 in world frame)
+        let board_center = board.board_center();
+        let point = board_center + na::Vector3::new(0.0, 0.0, 0.5); // 0.5m above center
+        let points = vec![point];
+
+        let result = board.find_correspondences(points);
+        assert!(result.is_some());
+
+        let correspondences = result.unwrap();
+        assert_eq!(correspondences.len(), 1);
+
+        let (_, correspondence) = &correspondences[0];
+
+        // Should project to board center
+        assert!(
+            (correspondence - board_center).norm() < 1e-6,
+            "Point above rotated board center should project to center. Got {:?}, expected {:?}",
+            correspondence,
+            board_center
         );
     }
 }
