@@ -2,7 +2,12 @@ COLCON_BUILD_FLAGS := --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithD
 COLCON_TEST_FLAGS := --ctest-args -C RelWithDebInfo --cargo-args --profile=test-release
 LOG_DIR := build_logs
 debug_mode := true
+enable_icp_iteration_debug := true
 log_level := info
+rviz := false
+use_best_effort_qos := true
+camera_topic := /sensing/camera/front_center/image_raw
+pointcloud_topic := /sensing/lidar/top/pointcloud_raw
 
 .PHONY: default
 default: help
@@ -156,13 +161,13 @@ launch_lidar_camera_calibration:
 	ros2 systemd launch --name lctk-calibration --replace \
 		--env RUST_LOG=debug \
 		lctk_launch lidar_camera_calibration.launch.xml \
-		debug_mode:=$(or $(debug_mode),true) \
-		enable_icp_iteration_debug:=$(or $(enable_icp_iteration_debug),true) \
-		enable_rviz:=$(or $(rviz),false) \
-		log_level:=$(or $(log_level),info) \
-		use_best_effort_qos:=$(or $(use_best_effort_qos),true) \
-		camera_topic:=$(or $(camera_topic),/sensing/camera/zedxm/zed_node/left_raw/image_raw_color) \
-		pointcloud_topic:=$(or $(pointcloud_topic),/sensing/lidar/concatenated/pointcloud)
+		debug_mode:=$(debug_mode) \
+		enable_icp_iteration_debug:=$(enable_icp_iteration_debug) \
+		enable_rviz:=$(rviz) \
+		log_level:=$(log_level) \
+		use_best_effort_qos:=$(use_best_effort_qos) \
+		camera_topic:=$(camera_topic) \
+		pointcloud_topic:=$(pointcloud_topic)
 
 .PHONY: stop_lidar_camera_calibration
 stop_lidar_camera_calibration:
