@@ -4,9 +4,9 @@ LOG_DIR := build_logs
 debug_mode := true
 enable_icp_iteration_debug := true
 log_level := info
-rviz := false
+rviz := true
 use_best_effort_qos := true
-use_advanced_solver := false
+use_advanced_solver := true
 
 ## Topics for sample data
 # camera_topic := /sensing/camera/front_center/image_raw
