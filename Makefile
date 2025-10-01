@@ -198,6 +198,11 @@ tune_filter_box:
 	export RUST_LOG=info && \
 	ros2 run filter_box_tuner filter_box_tuner
 
+.PHONY: interactive_solver_controller
+interactive_solver_controller:
+	@. install/setup.sh && \
+	ros2 run interactive_solver_controller interactive_solver_controller
+
 .PHONY: launch_iou_overlapping
 launch_iou_overlapping:
 	@. install/setup.sh && \
