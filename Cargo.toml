@@ -11,6 +11,7 @@ exclude = [
     "src/ros2/lctk_sample_data",
     # Python package without Cargo.toml
     "src/ros2/extrinsic_solver_node",
+    "src/ros2/advanced_extrinsic_solver",
     "src/ros2/filter_box_tuner",
     "src/ros2/calibration_evaluator",
     "src/ros2/calibration_judge",

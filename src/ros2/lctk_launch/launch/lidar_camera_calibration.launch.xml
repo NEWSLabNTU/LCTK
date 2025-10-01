@@ -70,6 +70,10 @@
          default="1.0"
          description="Minimum distance for point cloud filtering (meters)"/>
 
+    <arg name="use_advanced_solver"
+         default="false"
+         description="Use advanced extrinsic solver (buffered multi-pose) instead of educational solver"/>
+
     <!-- Image Processing Pipeline -->
     <include file="$(find-pkg-share lctk_launch)/launch/image_processing.launch.xml">
         <arg name="aruco_config_file" value="$(var aruco_config_file)"/>
@@ -104,6 +108,7 @@
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
         <arg name="log_level" value="$(var log_level)"/>
+        <arg name="use_advanced_solver" value="$(var use_advanced_solver)"/>
     </include>
 
     <!-- Educational Pointcloud Image Overlay Visualization (Python) -->
