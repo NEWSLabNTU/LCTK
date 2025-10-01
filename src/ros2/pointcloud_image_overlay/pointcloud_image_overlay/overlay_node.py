@@ -257,8 +257,14 @@ class EducationalOverlayNode(Node):
 
         # === OUTPUT PUBLISHER ===
         # Publish overlay visualization (sensor_msgs/Image)
+        # Use best-effort QoS for real-time visualization (matches sensor data QoS)
+        overlay_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=10,
+        )
         self.overlay_publisher = self.create_publisher(
-            Image, "/calibration/pointcloud_overlay", 10
+            Image, "/calibration/pointcloud_overlay", overlay_qos
         )
 
         # Educational logging
