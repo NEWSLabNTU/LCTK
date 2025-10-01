@@ -53,7 +53,7 @@ class SyntheticDataGenerator(Node):
 
             in_hole = False
             for hx, hy in hole_positions:
-                if (x - hx) ** 2 + (y - hy) ** 2 < hole_radius**2:
+                if (x - hx) ** 2 + (y - hy) ** 2 < hole_radius ** 2:
                     in_hole = True
                     break
 
@@ -419,7 +419,7 @@ class SyntheticDataGenerator(Node):
                 )
                 if (x - occlusion_center[0]) ** 2 + (
                     y - occlusion_center[1]
-                ) ** 2 < occlusion_radius**2:
+                ) ** 2 < occlusion_radius ** 2:
                     mask[idx] = False
 
             board_points_1 = board_points_1[mask]  # Remove occluded points
@@ -460,7 +460,7 @@ class SyntheticDataGenerator(Node):
                 )
                 if (x - occlusion_center_2[0]) ** 2 + (
                     y - occlusion_center_2[1]
-                ) ** 2 < occlusion_radius_2**2:
+                ) ** 2 < occlusion_radius_2 ** 2:
                     mask2[idx] = False
 
             board_points_2 = board_points_2[mask2]

@@ -317,14 +317,13 @@ pub fn fit_board_icp(
                 }
 
                 pose = Isometry3::from_parts(damped_translation, damped_rotation);
-                    
+
                 step += 1;
 
                 if good_correspondences_len < icp_min_inlier_points {
                     convergence_reason = format!(
                         "Insufficient good correspondences: {} < {}",
-                        good_correspondences_len,
-                        icp_min_inlier_points
+                        good_correspondences_len, icp_min_inlier_points
                     );
                     let stats = IcpStatistics {
                         iterations: step,
@@ -346,11 +345,23 @@ pub fn fit_board_icp(
 
                 if *losses.last().unwrap() < icp_rejection_threshold || termination_count > 100 {
                     if termination_count > 100 {
-                        debug!("ICP terminating: stable pose reached (termination_count = {})", termination_count);
-                        eprintln!("[DEBUG] ICP terminating: stable pose reached (termination_count = {})", termination_count);
+                        debug!(
+                            "ICP terminating: stable pose reached (termination_count = {})",
+                            termination_count
+                        );
+                        eprintln!(
+                            "[DEBUG] ICP terminating: stable pose reached (termination_count = {})",
+                            termination_count
+                        );
                     } else {
-                        debug!("ICP terminating: loss below rejection threshold: {:.8}", losses.last().unwrap());
-                        eprintln!("[DEBUG] ICP terminating: loss below rejection threshold: {:.8}", losses.last().unwrap());
+                        debug!(
+                            "ICP terminating: loss below rejection threshold: {:.8}",
+                            losses.last().unwrap()
+                        );
+                        eprintln!(
+                            "[DEBUG] ICP terminating: loss below rejection threshold: {:.8}",
+                            losses.last().unwrap()
+                        );
                     }
                     debug!("  Pose weight threshold: {:.8}", icp_pose_weight_threshold);
                     debug!("  Good fit threshold: {:.8}", icp_good_fit_threshold);
@@ -645,13 +656,19 @@ pub fn fit_board_icp_with_iterator<'a>(
     // 1. "Converged (stable pose)" - termination_count > 100
     // 2. "Converged (good fit)" - avg_loss < icp_rejection_threshold
     let termination_reason = iterator.termination_reason(&state);
-    let successful = termination_reason == "Converged (stable pose)" 
+    let successful = termination_reason == "Converged (stable pose)"
         || termination_reason == "Converged (good fit)";
-    
+
     // Debug output for termination
     debug!("ICP terminated: {}", termination_reason);
-    eprintln!("[DEBUG] ICP terminated after {} iterations: {}", state.iteration, termination_reason);
-    eprintln!("[DEBUG]   Final avg_loss: {:.8}, termination_count: {}", state.avg_loss, state.termination_count);
+    eprintln!(
+        "[DEBUG] ICP terminated after {} iterations: {}",
+        state.iteration, termination_reason
+    );
+    eprintln!(
+        "[DEBUG]   Final avg_loss: {:.8}, termination_count: {}",
+        state.avg_loss, state.termination_count
+    );
     eprintln!("[DEBUG]   Successful: {}", successful);
 
     let icp_stats = IcpStatistics {
@@ -730,7 +747,6 @@ impl<'a> BoardIcpIterator<'a> {
 
     /// Execute one ICP iteration step
     pub fn step(&mut self, current_state: &BoardIcpState) -> BoardIcpState {
-        
         let board_model = BoardModel {
             pose: current_state.board_pose,
             board_shape: self.board_model_params.board_shape.clone(),
@@ -847,7 +863,7 @@ impl<'a> BoardIcpIterator<'a> {
             good_correspondences: good_correspondences_len,
             termination_count,
         };
-        
+
         new_state
     }
 

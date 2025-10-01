@@ -70,7 +70,7 @@ class CalibrationValidator(Node):
 
         # Compute magnitudes
         translation_magnitude = math.sqrt(
-            translation.x**2 + translation.y**2 + translation.z**2
+            translation.x ** 2 + translation.y ** 2 + translation.z ** 2
         )
 
         # Convert quaternion to rotation angle (simplified)
