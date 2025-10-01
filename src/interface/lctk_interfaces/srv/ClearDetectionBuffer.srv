@@ -1,0 +1,8 @@
+# ClearDetectionBuffer.srv
+# Service to clear the calibration detection buffer and stop publishing
+
+# Request: empty
+---
+# Response
+bool success                  # True if buffer was successfully cleared
+string message               # Success message or error description

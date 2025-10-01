@@ -1,0 +1,13 @@
+# ListDetectionBuffer.srv
+# Service to list all detection pairs in the buffer with details
+
+# Request: empty
+---
+# Response
+bool success                      # True if query succeeded
+string message                   # Status message
+int32 buffer_size                # Total number of detection pairs in buffer
+int32[] aruco_counts             # Number of ArUco markers detected in each pair
+int32[] board_counts             # Number of boards detected in each pair (typically 1)
+int32[] timestamps_sec           # Timestamp seconds for each pair
+uint32[] timestamps_nanosec      # Timestamp nanoseconds for each pair

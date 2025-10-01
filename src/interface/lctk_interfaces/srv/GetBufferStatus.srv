@@ -1,0 +1,10 @@
+# GetBufferStatus.srv
+# Service to query the current buffer status
+
+# Request: empty
+---
+# Response
+int32 buffer_size                # Number of detection pairs in buffer
+int32 total_correspondences      # Total number of 3D-2D point correspondences
+bool is_publishing               # True if node is actively publishing transforms
+string last_solve_status         # Status message from last solve attempt
