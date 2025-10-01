@@ -28,15 +28,23 @@ install(FILES
 )
 
 # Install config files
-install(DIRECTORY config/
-  DESTINATION share/${PROJECT_NAME}/config
-  FILES_MATCHING
-  PATTERN "*.json5"
-  PATTERN "*.yaml"
-  PATTERN "*.yml"
-  PATTERN "*.rviz"
-  PATTERN "README.md"
+# Use file(GLOB_RECURSE) to find all config files, which allows --symlink-install to work
+file(GLOB_RECURSE CONFIG_FILES
+  "config/*.json5"
+  "config/*.yaml"
+  "config/*.yml"
+  "config/*.rviz"
+  "config/README.md"
 )
+
+# Install each file preserving directory structure
+foreach(CONFIG_FILE ${CONFIG_FILES})
+  file(RELATIVE_PATH REL_PATH ${CMAKE_CURRENT_SOURCE_DIR}/config ${CONFIG_FILE})
+  get_filename_component(REL_DIR ${REL_PATH} DIRECTORY)
+  install(FILES ${CONFIG_FILE}
+    DESTINATION share/${PROJECT_NAME}/config/${REL_DIR}
+  )
+endforeach()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
