@@ -6,8 +6,8 @@ enable_icp_iteration_debug := true
 log_level := info
 rviz := false
 use_best_effort_qos := true
-camera_topic := /sensing/camera/front_center/image_raw
-pointcloud_topic := /sensing/lidar/top/pointcloud_raw
+camera_topic := /sensing/camera/zedxm/zed_node/left_raw/image_raw_color
+pointcloud_topic := /sensing/lidar/concatenated/pointcloud
 
 .PHONY: default
 default: help
