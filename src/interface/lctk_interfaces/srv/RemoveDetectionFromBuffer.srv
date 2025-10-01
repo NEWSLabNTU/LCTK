@@ -1,0 +1,10 @@
+# RemoveDetectionFromBuffer.srv
+# Service to remove a specific detection pair from the buffer by index
+
+# Request
+int32 index                      # Index of detection pair to remove (0-based)
+---
+# Response
+bool success                     # True if removal succeeded
+string message                   # Success message or error description
+int32 buffer_size                # New buffer size after removal
