@@ -6,9 +6,9 @@ enable_icp_iteration_debug := true
 enable_evaluator := true
 enable_overlay := true
 log_level := info
-rviz := false
+rviz := true
 use_best_effort_qos := true
-use_advanced_solver := false
+use_advanced_solver := true
 
 ## Topics for sample data
 # camera_topic := /sensing/camera/front_center/image_raw
