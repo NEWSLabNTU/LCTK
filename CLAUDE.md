@@ -44,6 +44,13 @@ sudo apt-get install python3-empy
 
 The setup-dev-env.sh script handles this automatically by ensuring the system package is used.
 
+#### Working Directory Issues
+If Claude Code's working directory becomes invalid or gets lost during a session (showing empty $PWD or directory not found errors):
+- This appears to be a session state issue that cannot be recovered within the current session
+- Solution: Restart the Claude Code session
+- All commands should be run from `/home/jetson/LCTK` (project root)
+- If you see bash commands failing with directory errors, check if the working directory is valid with `pwd` before attempting fixes
+
 ### Build Commands
 
 The project uses a three-pass build process:
@@ -486,6 +493,19 @@ make launch_lidar_camera_sample_data  # Plays LiDAR and camera data in loop
   - **Window**: 0-2s (active discovery) → 2-5s (stabilization) → 5-10s (lease renewal gap) → 10s+ (stable)
   - **Solution**: Use `ros2 service wait /service/name --timeout 30` before service calls
   - **Note**: This is a DDS configuration issue, NOT related to arc-swap implementation
+- **KNOWN ISSUE - 45° Tilt in Pointcloud Overlay**: Ongoing calibration bug (Oct 2, 2025):
+  - **Symptom**: Both board marker points and full pointcloud appear tilted ~45° clockwise in camera overlay image, despite 3D points being correct in RViz
+  - **Confirmed Root Cause**: Corner ordering mismatch between 2D ArUco corners and 3D board model corners in extrinsic solver
+  - **Location**: `src/ros2/extrinsic_solver_node/extrinsic_solver_node/main.py` in `_compute_multi_marker_corners()` (lines 501-555)
+  - **Investigation Findings**:
+    - Tested shift=1 (np.roll by -1): Reversed tilt to counter-clockwise direction
+    - Tested shift=2, shift=3: Scattered/incorrect points
+    - Tested swapping corners (0,2) and (1,3): Scattered/incorrect points
+    - Tested swapping "left" and "right" marker positions in grid assignments (lines 541-544): No improvement
+    - The Python implementation's `make_corners()` function matches Rust's `multi_marker_corners()` in ordering: `[right, top, left, bottom]`
+    - ArUco detector outputs corners in OpenCV standard order: `[top-left, top-right, bottom-right, bottom-left]`
+  - **Still Unknown**: The exact mapping between ArUco corner indices and board model corner indices that would fix the tilt
+  - **Next Steps**: Need to verify the actual corner ordering from ArUco detector output vs. the expected ordering for board model corners. May need to examine wayside-portal's working implementation more carefully for subtle differences in how corners are paired.
 
 ## Coding Style
 
