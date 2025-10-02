@@ -90,6 +90,7 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("aruco_config_file", "")
         self.declare_parameter("debug_mode", True)
         self.declare_parameter("publishing_rate", 10.0)
+        self.declare_parameter("min_poses_required", 2)
 
         # Get parameters
         self.parent_frame = (
@@ -103,6 +104,9 @@ class AdvancedExtrinsicSolver(Node):
         )
         publishing_rate = (
             self.get_parameter("publishing_rate").get_parameter_value().double_value
+        )
+        self.min_poses_required = (
+            self.get_parameter("min_poses_required").get_parameter_value().integer_value
         )
 
         # Load ArUco pattern configuration
@@ -127,7 +131,7 @@ class AdvancedExtrinsicSolver(Node):
 
         # QoS profile
         qos_profile = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
@@ -208,6 +212,7 @@ class AdvancedExtrinsicSolver(Node):
         self.get_logger().info(
             f"Advanced Extrinsic Solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
+            f"Minimum poses required: {self.min_poses_required}\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled)\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
@@ -292,14 +297,95 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(response.message)
             return response
 
+        # Check for duplicate/similar board poses
+        new_board_pos = np.array([
+            board_msg.detections[0].results[0].pose.pose.position.x,
+            board_msg.detections[0].results[0].pose.pose.position.y,
+            board_msg.detections[0].results[0].pose.pose.position.z
+        ])
+        
+        new_board_quat = np.array([
+            board_msg.detections[0].results[0].pose.pose.orientation.x,
+            board_msg.detections[0].results[0].pose.pose.orientation.y,
+            board_msg.detections[0].results[0].pose.pose.orientation.z,
+            board_msg.detections[0].results[0].pose.pose.orientation.w
+        ])
+        
+        # Check against all existing poses in buffer
+        duplicate_found = False
+        min_position_distance = 0.1  # 10cm minimum movement
+        min_rotation_distance = 0.087  # ~5 degrees (in quaternion space)
+        
+        for idx, (existing_aruco, existing_board) in enumerate(self.detection_buffer):
+            existing_pos = np.array([
+                existing_board.detections[0].results[0].pose.pose.position.x,
+                existing_board.detections[0].results[0].pose.pose.position.y,
+                existing_board.detections[0].results[0].pose.pose.position.z
+            ])
+            
+            existing_quat = np.array([
+                existing_board.detections[0].results[0].pose.pose.orientation.x,
+                existing_board.detections[0].results[0].pose.pose.orientation.y,
+                existing_board.detections[0].results[0].pose.pose.orientation.z,
+                existing_board.detections[0].results[0].pose.pose.orientation.w
+            ])
+            
+            pos_distance = np.linalg.norm(new_board_pos - existing_pos)
+            # Quaternion distance: min(||q1-q2||, ||q1+q2||) due to double cover
+            quat_dist1 = np.linalg.norm(new_board_quat - existing_quat)
+            quat_dist2 = np.linalg.norm(new_board_quat + existing_quat)
+            rot_distance = min(quat_dist1, quat_dist2)
+            
+            if pos_distance < min_position_distance and rot_distance < min_rotation_distance:
+                duplicate_found = True
+                self.get_logger().warn(
+                    f"Duplicate pose detected! Too similar to pose #{idx+1} in buffer:\n"
+                    f"  Position distance: {pos_distance:.4f}m (threshold: {min_position_distance}m)\n"
+                    f"  Rotation distance: {rot_distance:.4f} (threshold: {min_rotation_distance})\n"
+                    f"  Existing pose: ({existing_pos[0]:.4f}, {existing_pos[1]:.4f}, {existing_pos[2]:.4f})\n"
+                    f"  New pose:      ({new_board_pos[0]:.4f}, {new_board_pos[1]:.4f}, {new_board_pos[2]:.4f})"
+                )
+                break
+        
+        if duplicate_found:
+            response.success = False
+            response.message = (
+                f"Rejected: Board pose too similar to existing pose #{idx+1}. "
+                f"Move board at least {min_position_distance}m or rotate {np.degrees(2*np.arcsin(min_rotation_distance/2)):.1f}° before adding."
+            )
+            response.buffer_size = len(self.detection_buffer)
+            self.get_logger().error(response.message)
+            return response
+
         # Add to buffer
         with self.lock:
             self.detection_buffer.append((aruco_msg, board_msg))
             buffer_size = len(self.detection_buffer)
 
-        self.get_logger().info(
-            f"Added detection pair to buffer (now {buffer_size} pairs)"
-        )
+        # Log successful addition with diversity metrics
+        if buffer_size == 1:
+            self.get_logger().info(
+                f"✓ Added detection pair #1 to buffer (initial pose)\n"
+                f"  Board position: ({new_board_pos[0]:.4f}, {new_board_pos[1]:.4f}, {new_board_pos[2]:.4f})"
+            )
+        else:
+            # Calculate distance to nearest existing pose
+            min_dist = float('inf')
+            for existing_aruco, existing_board in self.detection_buffer[:-1]:  # Exclude the one we just added
+                existing_pos = np.array([
+                    existing_board.detections[0].results[0].pose.pose.position.x,
+                    existing_board.detections[0].results[0].pose.pose.position.y,
+                    existing_board.detections[0].results[0].pose.pose.position.z
+                ])
+                dist = np.linalg.norm(new_board_pos - existing_pos)
+                min_dist = min(min_dist, dist)
+            
+            self.get_logger().info(
+                f"✓ Added detection pair #{buffer_size} to buffer\n"
+                f"  Board position: ({new_board_pos[0]:.4f}, {new_board_pos[1]:.4f}, {new_board_pos[2]:.4f})\n"
+                f"  Distance to nearest pose: {min_dist:.4f}m\n"
+                f"  Pose diversity: Good ({'>' if min_dist >= 0.2 else '>='} {min_position_distance}m threshold)"
+            )
 
         # Re-solve calibration from entire buffer
         success = self._solve_from_buffer()
@@ -313,12 +399,22 @@ class AdvancedExtrinsicSolver(Node):
             response.buffer_size = buffer_size
             self.get_logger().info(response.message)
         else:
-            response.success = False
-            response.message = (
-                f"Added to buffer but calibration failed: {self.last_solve_status}"
-            )
-            response.buffer_size = buffer_size
-            self.get_logger().error(response.message)
+            # Check if we just need more poses (not an error, just waiting)
+            if buffer_size < self.min_poses_required:
+                response.success = True  # Detection was added successfully
+                response.message = (
+                    f"Detection buffered ({buffer_size}/{self.min_poses_required} poses). "
+                    f"Add {self.min_poses_required - buffer_size} more to solve calibration."
+                )
+                response.buffer_size = buffer_size
+                self.get_logger().info(response.message)
+            else:
+                response.success = False
+                response.message = (
+                    f"Added to buffer but calibration failed: {self.last_solve_status}"
+                )
+                response.buffer_size = buffer_size
+                self.get_logger().error(response.message)
 
         return response
 
@@ -448,13 +544,36 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error("Cannot solve with empty buffer")
             return False
 
-        self.get_logger().info(f"Solving calibration from {buffer_size} buffered poses")
+        # Check minimum poses requirement for multi-pose calibration
+        if buffer_size < self.min_poses_required:
+            self.last_solve_status = (
+                f"Insufficient poses: {buffer_size}/{self.min_poses_required} required"
+            )
+            self.get_logger().warn(
+                f"Buffered {buffer_size} pose(s), need {self.min_poses_required} minimum. "
+                f"Add {self.min_poses_required - buffer_size} more pose(s) to start calibration."
+            )
+            return False
+
+        self.get_logger().info(
+            f"\n{'#'*80}\n"
+            f"{'#'*80}\n"
+            f"  SOLVING MULTI-POSE CALIBRATION FROM {buffer_size} BUFFERED POSES\n"
+            f"{'#'*80}\n"
+            f"{'#'*80}\n"
+        )
 
         # Accumulate all correspondences from buffer
         all_object_points = []
         all_image_points = []
 
-        for aruco_msg, board_msg in self.detection_buffer:
+        for pose_idx, (aruco_msg, board_msg) in enumerate(self.detection_buffer, 1):
+            self.get_logger().info(
+                f"\n{'-'*80}\n"
+                f"Processing Pose #{pose_idx}/{buffer_size}\n"
+                f"{'-'*80}"
+            )
+            
             # Convert messages to internal format
             aruco_markers = self._detection2d_to_aruco_markers(aruco_msg)
             board_detection = self._detection3d_to_board_detection(
@@ -464,6 +583,10 @@ class AdvancedExtrinsicSolver(Node):
             # Create correspondences for this pose
             object_points, image_points = self._create_point_correspondences(
                 aruco_markers, board_detection
+            )
+
+            self.get_logger().info(
+                f"Pose #{pose_idx}: Added {len(object_points)} correspondences"
             )
 
             all_object_points.extend(object_points)
@@ -487,12 +610,21 @@ class AdvancedExtrinsicSolver(Node):
         )
 
         # Solve PnP
+        self.get_logger().info(
+            f"\n{'='*80}\n"
+            f"Solving PnP with {num_correspondences} total correspondences...\n"
+            f"{'='*80}"
+        )
         success, rvec, tvec = self._solve_pnp(all_object_points, all_image_points)
 
         if not success:
             self.last_solve_status = "PnP solver failed"
             self.get_logger().error(self.last_solve_status)
             return False
+
+        # Convert rvec to rotation matrix for logging
+        rotation_matrix, _ = cv2.Rodrigues(rvec)
+        euler_angles = R.from_matrix(rotation_matrix).as_euler('xyz', degrees=True)
 
         # Create transform message
         transform_msg = self._create_transform_message(rvec, tvec)
@@ -505,10 +637,42 @@ class AdvancedExtrinsicSolver(Node):
             self.last_solve_status = "Calibration successful"
 
         self.get_logger().info(
-            f"Calibration solved successfully!\n"
+            f"\n{'#'*80}\n"
+            f"{'#'*80}\n"
+            f"  CALIBRATION SOLVED SUCCESSFULLY!\n"
+            f"{'#'*80}\n"
             f"  Poses: {buffer_size}\n"
             f"  Correspondences: {num_correspondences}\n"
-            f"  Translation: ({tvec.flatten()[0]:.3f}, {tvec.flatten()[1]:.3f}, {tvec.flatten()[2]:.3f})"
+            f"\n"
+            f"  Extrinsic Transform (LiDAR → Camera):\n"
+            f"  -------------------------------------\n"
+            f"  Translation (m):\n"
+            f"    x: {tvec.flatten()[0]:+.6f}\n"
+            f"    y: {tvec.flatten()[1]:+.6f}\n"
+            f"    z: {tvec.flatten()[2]:+.6f}\n"
+            f"\n"
+            f"  Rotation (Rodrigues vector):\n"
+            f"    rx: {rvec.flatten()[0]:+.6f}\n"
+            f"    ry: {rvec.flatten()[1]:+.6f}\n"
+            f"    rz: {rvec.flatten()[2]:+.6f}\n"
+            f"\n"
+            f"  Rotation (Euler angles XYZ, degrees):\n"
+            f"    Roll:  {euler_angles[0]:+.3f}°\n"
+            f"    Pitch: {euler_angles[1]:+.3f}°\n"
+            f"    Yaw:   {euler_angles[2]:+.3f}°\n"
+            f"\n"
+            f"  Rotation Matrix:\n"
+            f"    [{rotation_matrix[0,0]:+.6f}, {rotation_matrix[0,1]:+.6f}, {rotation_matrix[0,2]:+.6f}]\n"
+            f"    [{rotation_matrix[1,0]:+.6f}, {rotation_matrix[1,1]:+.6f}, {rotation_matrix[1,2]:+.6f}]\n"
+            f"    [{rotation_matrix[2,0]:+.6f}, {rotation_matrix[2,1]:+.6f}, {rotation_matrix[2,2]:+.6f}]\n"
+            f"\n"
+            f"  Quaternion (x, y, z, w):\n"
+            f"    ({transform_msg.transform.rotation.x:+.6f}, "
+            f"{transform_msg.transform.rotation.y:+.6f}, "
+            f"{transform_msg.transform.rotation.z:+.6f}, "
+            f"{transform_msg.transform.rotation.w:+.6f})\n"
+            f"{'#'*80}\n"
+            f"{'#'*80}\n"
         )
 
         return True
@@ -643,15 +807,29 @@ class AdvancedExtrinsicSolver(Node):
         object_points = []
         image_points = []
 
-        self.get_logger().debug(
-            f"Creating correspondences for {len(aruco_markers)} markers "
-            f"with board at position {board_detection.position}"
+        # Enhanced debug logging for board detection
+        self.get_logger().info(
+            f"\n{'='*70}\n"
+            f"Creating Point Correspondences\n"
+            f"{'='*70}\n"
+            f"Board Detection (LiDAR frame):\n"
+            f"  Position (x, y, z): ({board_detection.position[0]:.4f}, "
+            f"{board_detection.position[1]:.4f}, {board_detection.position[2]:.4f}) m\n"
+            f"  Orientation (quat x,y,z,w): ({board_detection.orientation[0]:.4f}, "
+            f"{board_detection.orientation[1]:.4f}, {board_detection.orientation[2]:.4f}, "
+            f"{board_detection.orientation[3]:.4f})\n"
+            f"ArUco Markers Detected: {len(aruco_markers)}"
         )
 
         board_rotation = (
             R.from_quat(board_detection.orientation).as_matrix().astype(np.float32)
         )
         board_position = np.array(board_detection.position, dtype=np.float32)
+
+        # Log rotation matrix
+        self.get_logger().info(
+            f"Board Rotation Matrix:\n{board_rotation}"
+        )
 
         board_frame_corners = self._compute_multi_marker_corners()
 
@@ -674,13 +852,40 @@ class AdvancedExtrinsicSolver(Node):
 
             local_corners = np.array(board_frame_corners[marker_id], dtype=np.float32)
             world_corners = (board_rotation @ local_corners.T).T + board_position
-            object_points.extend(world_corners)
-
+            
             image_corners = np.array(marker.corners, dtype=np.float32)
+            
+            # Detailed logging for each marker
+            self.get_logger().info(
+                f"\nMarker ID {marker_id}:\n"
+                f"  Image Corners (pixels):\n"
+                f"    Corner 0: ({image_corners[0][0]:.2f}, {image_corners[0][1]:.2f})\n"
+                f"    Corner 1: ({image_corners[1][0]:.2f}, {image_corners[1][1]:.2f})\n"
+                f"    Corner 2: ({image_corners[2][0]:.2f}, {image_corners[2][1]:.2f})\n"
+                f"    Corner 3: ({image_corners[3][0]:.2f}, {image_corners[3][1]:.2f})\n"
+                f"  Board Frame (local) Corners:\n"
+                f"    Corner 0: ({local_corners[0][0]:.4f}, {local_corners[0][1]:.4f}, {local_corners[0][2]:.4f})\n"
+                f"    Corner 1: ({local_corners[1][0]:.4f}, {local_corners[1][1]:.4f}, {local_corners[1][2]:.4f})\n"
+                f"    Corner 2: ({local_corners[2][0]:.4f}, {local_corners[2][1]:.4f}, {local_corners[2][2]:.4f})\n"
+                f"    Corner 3: ({local_corners[3][0]:.4f}, {local_corners[3][1]:.4f}, {local_corners[3][2]:.4f})\n"
+                f"  World Frame (LiDAR) Corners:\n"
+                f"    Corner 0: ({world_corners[0][0]:.4f}, {world_corners[0][1]:.4f}, {world_corners[0][2]:.4f})\n"
+                f"    Corner 1: ({world_corners[1][0]:.4f}, {world_corners[1][1]:.4f}, {world_corners[1][2]:.4f})\n"
+                f"    Corner 2: ({world_corners[2][0]:.4f}, {world_corners[2][1]:.4f}, {world_corners[2][2]:.4f})\n"
+                f"    Corner 3: ({world_corners[3][0]:.4f}, {world_corners[3][1]:.4f}, {world_corners[3][2]:.4f})"
+            )
+            
+            object_points.extend(world_corners)
             image_points.extend(image_corners)
 
         if len(object_points) == 0:
             self.get_logger().error("No valid marker correspondences found")
+        else:
+            self.get_logger().info(
+                f"\n{'='*70}\n"
+                f"Total Correspondences Created: {len(object_points)} points\n"
+                f"{'='*70}\n"
+            )
 
         return np.array(object_points, dtype=np.float32), np.array(
             image_points, dtype=np.float32
