@@ -46,6 +46,10 @@
          default="false"
          description="Launch RViz for calibration visualization"/>
 
+    <arg name="enable_evaluator"
+         default="false"
+         description="Enable calibration quality evaluator (IoU metrics)"/>
+
     <arg name="log_level"
          default="info"
          description="ROS log level (debug, info, warn, error, fatal)"/>
@@ -115,6 +119,18 @@
         <remap from="image" to="$(var camera_topic)"/>
         <remap from="pointcloud" to="$(var pointcloud_topic)"/>
     </node>
+
+    <!-- Calibration Quality Evaluator (Optional) -->
+    <!-- Measures calibration accuracy by computing IoU between ArUco board regions and projected LiDAR points -->
+    <include file="$(find-pkg-share calibration_evaluator)/launch/calibration_evaluator.launch.xml" if="$(var enable_evaluator)">
+        <arg name="camera_topic" value="$(var camera_topic)"/>
+        <arg name="pointcloud_topic" value="$(var pointcloud_topic)"/>
+        <arg name="aruco_detections_topic" value="/$(var namespace)/aruco_locator/aruco_detections"/>
+        <arg name="extrinsic_transform_topic" value="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
+        <arg name="namespace" value="$(var namespace)"/>
+        <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
+        <arg name="log_level" value="$(var log_level)"/>
+    </include>
 
     <!-- RViz Visualization (Optional) -->
     <include file="$(find-pkg-share lctk_launch)/launch/rviz.launch.xml" if="$(var enable_rviz)"/>

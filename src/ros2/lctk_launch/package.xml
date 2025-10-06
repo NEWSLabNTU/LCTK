@@ -20,6 +20,7 @@
   <exec_depend>lidar_board_detector</exec_depend>
   <exec_depend>extrinsic_solver_node</exec_depend>
   <exec_depend>pointcloud_image_overlay_node</exec_depend>
+  <exec_depend>calibration_evaluator</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
