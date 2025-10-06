@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = "iou_overlapping"
+package_name = "calibration_evaluator"
 
 setup(
     name=package_name,
@@ -10,17 +10,20 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/config", ["config/extrinsic.json"]),
-        ("share/" + package_name + "/launch", ["launch/iou_evaluator.launch.xml"]),
+        (
+            "share/" + package_name + "/launch",
+            ["launch/calibration_evaluator.launch.xml"],
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="LCTK",
     maintainer_email="dev@lctk.local",
-    description="Extrinsic matrix evaluator: IoU between board mask and LiDAR projection.",
+    description="Evaluates extrinsic calibration quality using IoU metrics between detected board regions and projected LiDAR points.",
     license="MIT",
     entry_points={
         "console_scripts": [
-            "evaluator = iou_overlapping.evaluator_node:main",
+            "calibration_evaluator_node = calibration_evaluator.evaluator_node:main",
         ],
     },
 )

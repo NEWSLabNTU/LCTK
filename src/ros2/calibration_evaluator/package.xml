@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>iou_overlapping</name>
+  <name>calibration_evaluator</name>
   <version>0.1.0</version>
-  <description>Extrinsic matrix evaluator: IoU between board ground-truth mask and LiDAR-projected points.</description>
+  <description>Evaluates extrinsic calibration quality using IoU metrics between detected board regions and projected LiDAR points.</description>
 
   <maintainer email="dev@lctk.local">LCTK</maintainer>
   <license>MIT</license>
@@ -13,9 +13,15 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>image_transport</exec_depend>
   <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>lctk_interfaces</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

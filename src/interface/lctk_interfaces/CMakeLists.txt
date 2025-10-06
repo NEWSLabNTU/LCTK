@@ -24,6 +24,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 # Generate interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/CalibrationMetrics.msg"
   "srv/GetBBoxParams.srv"
   "srv/SetBBoxParams.srv"
   "srv/SaveBBoxParams.srv"
