@@ -3,6 +3,8 @@ COLCON_TEST_FLAGS := --ctest-args -C RelWithDebInfo --cargo-args --profile=test-
 LOG_DIR := build_logs
 debug_mode := true
 enable_icp_iteration_debug := true
+enable_evaluator := true
+enable_overlay := true
 log_level := info
 rviz := false
 use_best_effort_qos := true
@@ -35,7 +37,7 @@ help:
 	@echo "Launch Commands (using ros2systemd for reliable service management):"
 	@echo "  make launch_lidar_camera_sample_data - Create and start LiDAR-camera sample data service"
 	@echo "  make stop_lidar_camera_sample_data   - Stop LiDAR-camera sample data service"
-	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, log_level=debug for verbose logs, rviz=true for RViz, use_best_effort_qos=false for rosbag)"
+	@echo "  make launch_lidar_camera_calibration - Create and start LiDAR-Camera calibration pipeline (add debug_mode=true for debug topics, enable_evaluator=true for IoU metrics, log_level=debug for verbose logs, rviz=true for RViz, use_best_effort_qos=false for rosbag)"
 	@echo "  make stop_lidar_camera_calibration   - Stop LiDAR-Camera calibration service"
 	@echo "  make launch_two_lidar_calibration    - Create and start two LiDAR calibration service"
 	@echo "  make stop_two_lidar_calibration      - Stop two LiDAR calibration service"
@@ -169,6 +171,8 @@ launch_lidar_camera_calibration:
 		lctk_launch lidar_camera_calibration.launch.xml \
 		debug_mode:=$(debug_mode) \
 		enable_icp_iteration_debug:=$(enable_icp_iteration_debug) \
+		enable_evaluator:=$(enable_evaluator) \
+		enable_overlay:=$(enable_overlay) \
 		enable_rviz:=$(rviz) \
 		log_level:=$(log_level) \
 		use_best_effort_qos:=$(use_best_effort_qos) \

@@ -50,6 +50,10 @@
          default="false"
          description="Enable calibration quality evaluator (IoU metrics)"/>
 
+    <arg name="enable_overlay"
+         default="true"
+         description="Enable ArUco detection overlay visualization"/>
+
     <arg name="log_level"
          default="info"
          description="ROS log level (debug, info, warn, error, fatal)"/>
@@ -72,6 +76,7 @@
         <arg name="camera_topic" value="$(var camera_topic)"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="debug_mode" value="$(var debug_mode)"/>
+        <arg name="enable_overlay" value="$(var enable_overlay)"/>
         <arg name="log_level" value="$(var log_level)"/>
         <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
     </include>
