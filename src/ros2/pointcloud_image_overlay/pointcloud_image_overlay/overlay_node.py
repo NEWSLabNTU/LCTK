@@ -30,7 +30,6 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-
 # ROS 2 message types
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
@@ -114,19 +113,19 @@ def transform_to_rvec_tvec(
     rotation_matrix = np.array(
         [
             [
-                1 - 2 * (qy ** 2 + qz ** 2),
+                1 - 2 * (qy**2 + qz**2),
                 2 * (qx * qy - qz * qw),
                 2 * (qx * qz + qy * qw),
             ],
             [
                 2 * (qx * qy + qz * qw),
-                1 - 2 * (qx ** 2 + qz ** 2),
+                1 - 2 * (qx**2 + qz**2),
                 2 * (qy * qz - qx * qw),
             ],
             [
                 2 * (qx * qz - qy * qw),
                 2 * (qy * qz + qx * qw),
-                1 - 2 * (qx ** 2 + qy ** 2),
+                1 - 2 * (qx**2 + qy**2),
             ],
         ],
         dtype=np.float64,
@@ -189,9 +188,9 @@ class EducationalOverlayNode(Node):
         # Latest sensor data (for overlay generation)
         self.latest_image: Optional[Image] = None
         self.latest_pointcloud: Optional[PointCloud2] = None
-        self.latest_inlier_pointcloud: Optional[
-            PointCloud2
-        ] = None  # Debug inlier points
+        self.latest_inlier_pointcloud: Optional[PointCloud2] = (
+            None  # Debug inlier points
+        )
 
         # === ROS 2 QUALITY OF SERVICE CONFIGURATION ===
         # Educational note: QoS affects message delivery reliability

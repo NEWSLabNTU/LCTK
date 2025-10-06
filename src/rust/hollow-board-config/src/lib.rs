@@ -161,7 +161,8 @@ impl BoardModel {
         points: DataIter,
     ) -> Option<Vec<(InputPoint, na::Point3<f64>)>>
     where
-        DataIter: IntoIterator<Item = InputPoint> + rayon::iter::IntoParallelIterator<Item = InputPoint>,
+        DataIter:
+            IntoIterator<Item = InputPoint> + rayon::iter::IntoParallelIterator<Item = InputPoint>,
         InputPoint: Borrow<na::Point3<f64>> + Send,
     {
         let half_board_diagonal = self.board_shape.board_width / 2f64.sqrt();
@@ -348,8 +349,7 @@ impl BoardModel {
                             circle_center
                                 + board_x_axis.scale(self.board_shape.hole_radius.as_meters())
                         } else {
-                            let radical_unit =
-                                na::Unit::new_normalize(vec_circle_center_to_proj);
+                            let radical_unit = na::Unit::new_normalize(vec_circle_center_to_proj);
                             circle_center
                                 + radical_unit.scale(self.board_shape.hole_radius.as_meters())
                         }
@@ -593,8 +593,7 @@ impl BoardModel {
                             circle_center
                                 + board_x_axis.scale(self.board_shape.hole_radius.as_meters())
                         } else {
-                            let radical_unit =
-                                na::Unit::new_normalize(vec_circle_center_to_proj);
+                            let radical_unit = na::Unit::new_normalize(vec_circle_center_to_proj);
                             circle_center
                                 + radical_unit.scale(self.board_shape.hole_radius.as_meters())
                         }

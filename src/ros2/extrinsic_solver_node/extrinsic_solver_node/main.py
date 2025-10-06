@@ -31,10 +31,10 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R  # Quaternion operations
 from sensor_msgs.msg import CameraInfo
-
 # ROS2 message types
 from std_msgs.msg import Header
-from vision_msgs.msg import Detection2D, Detection2DArray, Detection3D, Detection3DArray
+from vision_msgs.msg import (Detection2D, Detection2DArray, Detection3D,
+                             Detection3DArray)
 
 
 @dataclass
