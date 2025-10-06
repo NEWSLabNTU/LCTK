@@ -272,10 +272,10 @@ class CalibrationEvaluatorNode(Node):
         self.sync.registerCallback(self.on_synchronized_data)
 
         # Publishers
-        self.pub_iou = self.create_publisher(Float64, "~/iou_score", 10)
-        self.pub_metrics = self.create_publisher(CalibrationMetrics, "~/metrics", 10)
-        self.pub_overlay = self.create_publisher(Image, "~/overlay_image", 10)
-        self.pub_status = self.create_publisher(String, "~/status", 10)
+        self.pub_iou = self.create_publisher(Float64, "~/iou_score", 1)
+        self.pub_metrics = self.create_publisher(CalibrationMetrics, "~/metrics", 1)
+        self.pub_overlay = self.create_publisher(Image, "~/overlay_image", 1)
+        self.pub_status = self.create_publisher(String, "~/status", 1)
 
         self.get_logger().info("Calibration Evaluator Node initialized")
         self.get_logger().info(

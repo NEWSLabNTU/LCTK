@@ -1,3 +1,6 @@
+import os
+from glob import glob
+
 from setuptools import setup
 
 package_name = "calibration_evaluator"
@@ -14,6 +17,7 @@ setup(
             "share/" + package_name + "/launch",
             ["launch/calibration_evaluator.launch.xml"],
         ),
+        (os.path.join("lib", package_name), glob("scripts/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

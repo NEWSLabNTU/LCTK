@@ -261,7 +261,7 @@ class EducationalOverlayNode(Node):
         overlay_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
-            depth=10,
+            depth=1,
         )
         self.overlay_publisher = self.create_publisher(
             Image, "/calibration/pointcloud_overlay", overlay_qos

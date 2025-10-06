@@ -21,8 +21,8 @@ class PoseAdjuster(Node):
     def __init__(self):
         super().__init__("pose_adjuster")
         self.publishers = {
-            1: self.create_publisher(PoseStamped, "/lidar1/board_pose_adjustment", 10),
-            2: self.create_publisher(PoseStamped, "/lidar2/board_pose_adjustment", 10),
+            1: self.create_publisher(PoseStamped, "/lidar1/board_pose_adjustment", 1),
+            2: self.create_publisher(PoseStamped, "/lidar2/board_pose_adjustment", 1),
         }
 
     def send_adjustment(
