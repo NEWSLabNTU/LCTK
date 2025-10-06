@@ -8,6 +8,7 @@
   - [Core Libraries](./architecture/core-libraries.md)
   - [ROS 2 Nodes](./architecture/ros2-nodes.md)
   - [Communication](./architecture/communication.md)
+  - [Calibration Evaluator](./architecture/calibration-evaluator.md)
 - [Calibration Pipeline](./design/pipeline.md)
   - [LiDAR-Camera Calibration](./design/lidar-camera.md)
   - [Multi-LiDAR Calibration](./design/multi-lidar.md)
