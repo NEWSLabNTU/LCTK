@@ -24,7 +24,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     thread,
@@ -296,6 +296,12 @@ impl CalibrationBoardLocatorNode {
         // Counter for debugging message processing
         let message_counter = Arc::new(AtomicU64::new(0));
         let counter_clone = Arc::clone(&message_counter);
+        
+        // Processing flag to prevent callback overload - buffer only one message
+        let processing_flag = Arc::new(AtomicBool::new(false));
+        let processing_flag_clone = Arc::clone(&processing_flag);
+        let dropped_counter = Arc::new(AtomicU64::new(0));
+        let dropped_counter_clone = Arc::clone(&dropped_counter);
 
         // Clone bbox for subscription callback
         let bbox_for_callback = Arc::clone(&bbox);
@@ -306,6 +312,19 @@ impl CalibrationBoardLocatorNode {
         let pointcloud_subscription =
             node.create_subscription(pointcloud_options, move |msg: PointCloud2| {
                 let count = counter_clone.fetch_add(1, Ordering::Relaxed);
+                
+                // Skip processing if previous callback is still running (buffer overflow protection)
+                if processing_flag_clone.swap(true, Ordering::Acquire) {
+                    let dropped = dropped_counter_clone.fetch_add(1, Ordering::Relaxed);
+                    log_debug!(
+                        LOGGER_NAME,
+                        "Dropping message #{} (processing busy, total dropped: {})",
+                        count + 1,
+                        dropped + 1
+                    );
+                    return;
+                }
+                
                 log_debug!(LOGGER_NAME, "Processing message #{}", count + 1);
 
                 Self::pointcloud_callback(
@@ -316,6 +335,9 @@ impl CalibrationBoardLocatorNode {
                     &board_debug_shared,
                     &icp_debug_shared,
                 );
+                
+                // Release processing flag
+                processing_flag_clone.store(false, Ordering::Release);
             })?;
 
         if enable_debug {
