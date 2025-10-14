@@ -17,9 +17,13 @@ License: MIT
 """
 
 import sys
+import time
 from datetime import datetime
+from typing import Optional
 
+import numpy as np
 import rclpy
+from geometry_msgs.msg import TransformStamped
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
     ClearDetectionBuffer,
@@ -28,6 +32,8 @@ from lctk_interfaces.srv import (
     RemoveDetectionFromBuffer,
 )
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from scipy.spatial.transform import Rotation as R
 
 
 class InteractiveSolverController(Node):
@@ -35,6 +41,18 @@ class InteractiveSolverController(Node):
 
     def __init__(self):
         super().__init__("interactive_solver_controller")
+
+        # Latest extrinsic transform
+        self.latest_transform: Optional[TransformStamped] = None
+
+        # Subscribe to extrinsic transform
+        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=10)
+        self.transform_subscription = self.create_subscription(
+            TransformStamped,
+            "/calibration/extrinsic_solver/extrinsic_transform",
+            self._transform_callback,
+            qos,
+        )
 
         # Service clients
         self.add_detection_client = self.create_client(
@@ -102,6 +120,61 @@ class InteractiveSolverController(Node):
                 "Some services are not available. Commands may fail."
             )
 
+    def _transform_callback(self, msg: TransformStamped):
+        """Cache the latest extrinsic transform."""
+        self.latest_transform = msg
+
+    def _display_current_transform(self):
+        """Display the current extrinsic transform in a user-friendly format."""
+        if self.latest_transform is None:
+            print("\n  [No extrinsic transform available yet]")
+            return
+
+        tf = self.latest_transform.transform
+        
+        # Extract translation
+        tx = tf.translation.x
+        ty = tf.translation.y
+        tz = tf.translation.z
+        
+        # Extract rotation as quaternion
+        qx = tf.rotation.x
+        qy = tf.rotation.y
+        qz = tf.rotation.z
+        qw = tf.rotation.w
+        
+        # Convert to Euler angles
+        rot = R.from_quat([qx, qy, qz, qw])
+        euler = rot.as_euler('xyz', degrees=True)
+        
+        # Convert to rotation matrix
+        rot_matrix = rot.as_matrix()
+        
+        print(
+            f"\n"
+            f"{'='*70}\n"
+            f"  Current Extrinsic Transform (LiDAR → Camera)\n"
+            f"{'='*70}\n"
+            f"  Translation (m):\n"
+            f"    x: {tx:+.6f}\n"
+            f"    y: {ty:+.6f}\n"
+            f"    z: {tz:+.6f}\n"
+            f"\n"
+            f"  Rotation (Euler angles XYZ, degrees):\n"
+            f"    Roll:  {euler[0]:+.3f}°\n"
+            f"    Pitch: {euler[1]:+.3f}°\n"
+            f"    Yaw:   {euler[2]:+.3f}°\n"
+            f"\n"
+            f"  Quaternion (x, y, z, w):\n"
+            f"    ({qx:+.6f}, {qy:+.6f}, {qz:+.6f}, {qw:+.6f})\n"
+            f"\n"
+            f"  Rotation Matrix:\n"
+            f"    [{rot_matrix[0,0]:+.6f}, {rot_matrix[0,1]:+.6f}, {rot_matrix[0,2]:+.6f}]\n"
+            f"    [{rot_matrix[1,0]:+.6f}, {rot_matrix[1,1]:+.6f}, {rot_matrix[1,2]:+.6f}]\n"
+            f"    [{rot_matrix[2,0]:+.6f}, {rot_matrix[2,1]:+.6f}, {rot_matrix[2,2]:+.6f}]\n"
+            f"{'='*70}\n"
+        )
+
     def add_detection(self):
         """Call add_detection service."""
         self.get_logger().debug("Calling add_detection service...")
@@ -116,6 +189,15 @@ class InteractiveSolverController(Node):
                 print(
                     f"[SUCCESS] {response.message} (buffer size: {response.buffer_size})"
                 )
+                
+                # Give a brief moment for the transform to be published and received
+                time.sleep(0.1)
+                
+                # Spin once to process any pending callbacks (like transform updates)
+                rclpy.spin_once(self, timeout_sec=0.1)
+                
+                # Display the current extrinsic transform
+                self._display_current_transform()
             else:
                 print(
                     f"[FAILED] {response.message} (buffer size: {response.buffer_size})"
@@ -238,6 +320,7 @@ def print_help():
     print("  add (a)          - Add current detection pair to buffer and re-solve")
     print("  status (s)       - Query buffer status and calibration state")
     print("  list (l)         - List all detection pairs in buffer with details")
+    print("  transform (t)    - Show current extrinsic transform")
     print("  delete [index]   - Delete detection pair (default: last)")
     print("    (d, del)         [index] = specific index, 'last', or omit for last")
     print("  clear (c)        - Clear entire buffer and stop publishing")
@@ -280,6 +363,10 @@ def main(args=None):
                     node.get_status()
                 elif command in ["list", "l"]:
                     node.list_buffer()
+                elif command in ["transform", "t"]:
+                    # Spin once to ensure we have the latest transform
+                    rclpy.spin_once(node, timeout_sec=0.1)
+                    node._display_current_transform()
                 elif command in ["delete", "del", "d"]:
                     # Default: delete last if no argument provided
                     if len(command_parts) < 2 or command_parts[1].lower() == "last":
