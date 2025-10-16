@@ -8,10 +8,12 @@ a ground truth transform matrix to evaluate calibration quality.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import TransformStamped
 import numpy as np
 import yaml
 from typing import Optional, Dict, Any
+from scipy.spatial.transform import Rotation
 
 
 class CalibrationJudgeNode(Node):
@@ -30,6 +32,10 @@ class CalibrationJudgeNode(Node):
         # Get parameters
         ground_truth_file = self.get_parameter('ground_truth_file').value
         transform_topic = self.get_parameter('transform_topic').value
+
+        # Track best score so far
+        self.best_score = None
+        self.best_matrix = None
 
         # Validate that ground truth file is provided
         if not ground_truth_file or ground_truth_file == '':
@@ -53,13 +59,24 @@ class CalibrationJudgeNode(Node):
                               f'Rot[{self.scoring_params["rotation"]["min_error_deg"]}-'
                               f'{self.scoring_params["rotation"]["max_error_deg"]}°]')
 
+        # Create QoS profile with Best Effort reliability and depth 1
+        # This matches the QoS used by the extrinsic_solver publisher
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+
         # Create subscription to extrinsic transform topic
         self.subscription = self.create_subscription(
             TransformStamped,
             transform_topic,
             self._transform_callback,
-            10
+            qos_profile
         )
+
+        # Create timer to print best score every second
+        self.status_timer = self.create_timer(1.0, self._print_status)
 
         self.get_logger().info(f'Calibration judge node started')
         self.get_logger().info(f'Subscribing to: {transform_topic}')
@@ -166,17 +183,11 @@ class CalibrationJudgeNode(Node):
         t = transform.transform.translation
         translation = np.array([t.x, t.y, t.z])
 
-        # Extract rotation quaternion
+        # Extract rotation quaternion and convert to rotation matrix using scipy
         q = transform.transform.rotation
-        qx, qy, qz, qw = q.x, q.y, q.z, q.w
-
-        # Convert quaternion to rotation matrix
-        # Formula from: https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToMatrix/
-        rotation = np.array([
-            [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qw*qz), 2*(qx*qz + qw*qy)],
-            [2*(qx*qy + qw*qz), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qw*qx)],
-            [2*(qx*qz - qw*qy), 2*(qy*qz + qw*qx), 1 - 2*(qx**2 + qy**2)]
-        ])
+        quat = np.array([q.x, q.y, q.z, q.w])
+        r = Rotation.from_quat(quat)
+        rotation = r.as_matrix()
 
         # Build 4x4 transformation matrix
         matrix = np.eye(4)
@@ -303,6 +314,20 @@ class CalibrationJudgeNode(Node):
 
         return score, percentage
 
+    def _print_status(self):
+        """
+        Timer callback to print best score status every second.
+        """
+        if self.best_score is None:
+            self.get_logger().info('Best Calib Score: N/A (waiting for first calibration...)')
+        else:
+            score = self.best_score
+            self.get_logger().info(
+                f'Best Calib Score: Trans err={score["translation_error_m"]:.4f}m ({score["translation_score"]:.1f}/{score["translation_max_score"]:.1f}pts), '
+                f'Rot err={score["rotation_error_deg"]:.3f}° ({score["rotation_score"]:.1f}/{score["rotation_max_score"]:.1f}pts), '
+                f'FINAL={score["final_score"]:.1f}/{score["final_max_score"]:.1f} ({score["final_percentage"]:.1f}%)'
+            )
+
     def _transform_callback(self, msg: TransformStamped):
         """
         Callback for extrinsic transform messages.
@@ -316,21 +341,11 @@ class CalibrationJudgeNode(Node):
         # Compute score (ground_truth_matrix is guaranteed to be loaded)
         score = self._compute_score(estimated_matrix, self.ground_truth_matrix)
 
-        # Log results
-        self.get_logger().info('='*70)
-        self.get_logger().info('Calibration Quality Score:')
-        self.get_logger().info('')
-        self.get_logger().info(f'  Translation Error: {score["translation_error_m"]:.6f} m')
-        self.get_logger().info(f'    → Translation Score: {score["translation_score"]:.2f}/{score["translation_max_score"]:.2f} '
-                              f'({score["translation_percentage"]:.1f}%)')
-        self.get_logger().info('')
-        self.get_logger().info(f'  Rotation Angle Error: {score["rotation_error_deg"]:.4f} degrees')
-        self.get_logger().info(f'    → Rotation Score: {score["rotation_score"]:.2f}/{score["rotation_max_score"]:.2f} '
-                              f'({score["rotation_percentage"]:.1f}%)')
-        self.get_logger().info('')
-        self.get_logger().info(f'  FINAL SCORE: {score["final_score"]:.2f}/{score["final_max_score"]:.2f} '
-                              f'({score["final_percentage"]:.1f}%)')
-        self.get_logger().info('='*70)
+        # Update best score if this is better
+        if self.best_score is None or score['final_score'] > self.best_score['final_score']:
+            self.best_score = score
+            self.best_matrix = estimated_matrix
+            self.get_logger().info(f'New best score: {score["final_score"]:.1f} pts ({score["final_percentage"]:.1f}%)')
 
 
 def main(args=None):
