@@ -1,0 +1,69 @@
+# Ground Truth Configuration for Calibration Judge
+#
+# This file contains the ground truth transformation matrix and scoring parameters
+# for evaluating calibration quality.
+
+ground_truth:
+  # 4x4 transformation matrix from LiDAR to Camera coordinate frame
+  # Format: [R11, R12, R13, Tx]
+  #         [R21, R22, R23, Ty]
+  #         [R31, R32, R33, Tz]
+  #         [  0,   0,   0,  1]
+  # Where R is the 3x3 rotation matrix and T is the 3x1 translation vector
+  matrix:
+    - [-0.008120, -0.999550, +0.028668, -0.016307]
+    - [-0.007539, -0.028730, -0.999556, -0.146427]
+    - [+0.999939, -0.008541, -0.014490, -0.153410]
+    - [0.0, 0.0, 0.0, 1.0]
+
+scoring:
+  # Maximum possible score
+  total_score: 100.0
+
+  # Translation error scoring parameters
+  # Translation contributes 50% to the total score
+  translation:
+    weight: 0.5           # Weight in final score (0.5 = 50%)
+    min_error_m: 0.02     # Minimum error threshold (20mm)
+                          # Errors below this receive full translation points
+    max_error_m: 0.05     # Maximum error threshold (50mm)
+                          # Errors above this receive zero translation points
+                          # Errors between min and max are linearly interpolated
+
+  # Rotation error scoring parameters
+  # Rotation contributes 50% to the total score
+  rotation:
+    weight: 0.5           # Weight in final score (0.5 = 50%)
+    min_error_deg: 2.0    # Minimum error threshold (degrees)
+                          # Errors below this receive full rotation points
+    max_error_deg: 5.0    # Maximum error threshold (degrees)
+                          # Errors above this receive zero rotation points
+                          # Errors between min and max are linearly interpolated
+
+# Scoring Formula:
+# ================
+#
+# Translation Score:
+#   if trans_error <= 0.02:
+#       trans_score = 0.5 * 100.0 = 50.0
+#   elif trans_error >= 0.05:
+#       trans_score = 0
+#   else:
+#       ratio = (0.05 - trans_error) / (0.05 - 0.02)
+#       trans_score = 0.5 * 100.0 * ratio
+#
+# Rotation Score:
+#   if rot_error <= 2.0:
+#       rot_score = 0.5 * 100.0 = 50.0
+#   elif rot_error >= 5.0:
+#       rot_score = 0
+#   else:
+#       ratio = (5.0 - rot_error) / (5.0 - 2.0)
+#       rot_score = 0.5 * 100.0 * ratio
+#
+# Final Score = trans_score + rot_score
+#
+# Example Scores:
+# - Translation 0.02m, Rotation 2.0°:  50.0 + 50.0 = 100.0 (Perfect)
+# - Translation 0.035m, Rotation 3.5°: 25.0 + 25.0 = 50.0 (Pass)
+# - Translation 0.05m, Rotation 5.0°:  0.0 + 0.0 = 0.0 (Fail)

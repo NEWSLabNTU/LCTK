@@ -10,7 +10,8 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TransformStamped
 import numpy as np
-from typing import Optional
+import yaml
+from typing import Optional, Dict, Any
 
 
 class CalibrationJudgeNode(Node):
@@ -33,16 +34,24 @@ class CalibrationJudgeNode(Node):
         # Validate that ground truth file is provided
         if not ground_truth_file or ground_truth_file == '':
             self.get_logger().error('FATAL: ground_truth_file parameter is mandatory but not provided!')
-            self.get_logger().error('Usage: ros2 run calibration_judge judge_node --ros-args -p ground_truth_file:=/path/to/ground_truth.txt')
+            self.get_logger().error('Usage: ros2 run calibration_judge judge_node --ros-args -p ground_truth_file:=/path/to/config.yaml')
             raise ValueError('ground_truth_file parameter is required')
 
-        # Load ground truth transform
-        self.ground_truth_matrix = self._load_ground_truth(ground_truth_file)
-        if self.ground_truth_matrix is None:
-            self.get_logger().error(f'FATAL: Failed to load ground truth from: {ground_truth_file}')
-            raise RuntimeError(f'Could not load ground truth matrix from {ground_truth_file}')
+        # Load ground truth configuration (matrix + scoring parameters)
+        config = self._load_config(ground_truth_file)
+        if config is None:
+            self.get_logger().error(f'FATAL: Failed to load configuration from: {ground_truth_file}')
+            raise RuntimeError(f'Could not load configuration from {ground_truth_file}')
+
+        self.ground_truth_matrix = config['matrix']
+        self.scoring_params = config['scoring']
 
         self.get_logger().info(f'Successfully loaded ground truth from: {ground_truth_file}')
+        self.get_logger().info(f'Scoring: Total={self.scoring_params["total_score"]}, '
+                              f'Trans[{self.scoring_params["translation"]["min_error_m"]}-'
+                              f'{self.scoring_params["translation"]["max_error_m"]}m], '
+                              f'Rot[{self.scoring_params["rotation"]["min_error_deg"]}-'
+                              f'{self.scoring_params["rotation"]["max_error_deg"]}°]')
 
         # Create subscription to extrinsic transform topic
         self.subscription = self.create_subscription(
@@ -55,22 +64,40 @@ class CalibrationJudgeNode(Node):
         self.get_logger().info(f'Calibration judge node started')
         self.get_logger().info(f'Subscribing to: {transform_topic}')
 
-    def _load_ground_truth(self, filepath: str) -> Optional[np.ndarray]:
+    def _load_config(self, filepath: str) -> Optional[Dict[str, Any]]:
         """
-        Load ground truth transformation matrix from file.
+        Load ground truth configuration from YAML file.
 
-        Expected file format: 4x4 transformation matrix (space or comma separated)
+        Expected YAML format:
+            ground_truth:
+                matrix: [[...], [...], [...], [...]]
+            scoring:
+                total_score: 100.0
+                translation:
+                    weight: 0.5
+                    min_error_m: 0.01
+                    max_error_m: 0.10
+                rotation:
+                    weight: 0.5
+                    min_error_deg: 0.5
+                    max_error_deg: 5.0
 
         Args:
-            filepath: Path to the ground truth file
+            filepath: Path to the YAML configuration file
 
         Returns:
-            4x4 numpy array or None if loading fails
+            Dictionary with 'matrix' (numpy array) and 'scoring' (dict), or None if loading fails
         """
         try:
-            matrix = np.loadtxt(filepath)
+            # Load YAML file
+            with open(filepath, 'r') as f:
+                yaml_data = yaml.safe_load(f)
 
-            # Validate shape
+            # Extract ground truth matrix
+            matrix_list = yaml_data['ground_truth']['matrix']
+            matrix = np.array(matrix_list, dtype=float)
+
+            # Validate matrix shape
             if matrix.shape != (4, 4):
                 self.get_logger().error(
                     f'Ground truth matrix must be 4x4, got shape: {matrix.shape}'
@@ -84,10 +111,45 @@ class CalibrationJudgeNode(Node):
                     f'got: {matrix[3, :]}'
                 )
 
-            return matrix
+            # Extract scoring parameters
+            scoring = yaml_data['scoring']
 
+            # Validate scoring parameters
+            required_keys = ['total_score', 'translation', 'rotation']
+            if not all(key in scoring for key in required_keys):
+                self.get_logger().error(f'Missing required scoring keys: {required_keys}')
+                return None
+
+            trans_keys = ['weight', 'min_error_m', 'max_error_m']
+            if not all(key in scoring['translation'] for key in trans_keys):
+                self.get_logger().error(f'Missing translation keys: {trans_keys}')
+                return None
+
+            rot_keys = ['weight', 'min_error_deg', 'max_error_deg']
+            if not all(key in scoring['rotation'] for key in rot_keys):
+                self.get_logger().error(f'Missing rotation keys: {rot_keys}')
+                return None
+
+            # Validate weights sum to 1.0
+            total_weight = scoring['translation']['weight'] + scoring['rotation']['weight']
+            if not np.isclose(total_weight, 1.0):
+                self.get_logger().warn(
+                    f'Translation and rotation weights should sum to 1.0, got: {total_weight}'
+                )
+
+            return {
+                'matrix': matrix,
+                'scoring': scoring
+            }
+
+        except FileNotFoundError:
+            self.get_logger().error(f'Configuration file not found: {filepath}')
+            return None
+        except KeyError as e:
+            self.get_logger().error(f'Missing required key in configuration: {e}')
+            return None
         except Exception as e:
-            self.get_logger().error(f'Error loading ground truth file: {e}')
+            self.get_logger().error(f'Error loading configuration file: {e}')
             return None
 
     def _transform_to_matrix(self, transform: TransformStamped) -> np.ndarray:
@@ -127,42 +189,119 @@ class CalibrationJudgeNode(Node):
         """
         Compute calibration quality score by comparing estimated and ground truth matrices.
 
+        Uses linear interpolation between min and max error thresholds to compute scores.
+
         Args:
             estimated_matrix: 4x4 estimated transformation matrix
             ground_truth_matrix: 4x4 ground truth transformation matrix
 
         Returns:
-            Dictionary containing various error metrics (to be defined)
+            Dictionary containing error metrics and scores
         """
-        # TODO: Implement scoring function
-        # Placeholder for now - will discuss scoring metrics
-
         # Extract rotation and translation components
         R_est = estimated_matrix[:3, :3]
         t_est = estimated_matrix[:3, 3]
         R_gt = ground_truth_matrix[:3, :3]
         t_gt = ground_truth_matrix[:3, 3]
 
-        # Compute translation error (Euclidean distance)
+        # Compute translation error (Euclidean distance in meters)
         translation_error = np.linalg.norm(t_est - t_gt)
 
-        # Compute rotation error (Frobenius norm of difference)
-        rotation_error = np.linalg.norm(R_est - R_gt, 'fro')
-
-        # Compute relative rotation error (angle of rotation difference)
+        # Compute rotation error (angle of rotation difference in degrees)
         R_diff = R_gt.T @ R_est
         trace = np.trace(R_diff)
         rotation_angle_error = np.arccos(np.clip((trace - 1) / 2, -1.0, 1.0))
         rotation_angle_error_deg = np.degrees(rotation_angle_error)
 
-        score = {
+        # Get scoring parameters
+        total_score = self.scoring_params['total_score']
+        trans_params = self.scoring_params['translation']
+        rot_params = self.scoring_params['rotation']
+
+        # Compute translation score with linear interpolation
+        trans_weight = trans_params['weight']
+        trans_min = trans_params['min_error_m']
+        trans_max = trans_params['max_error_m']
+
+        if translation_error <= trans_min:
+            # Perfect score
+            trans_score = trans_weight * total_score
+            trans_percentage = 100.0
+        elif translation_error >= trans_max:
+            # Zero score
+            trans_score = 0.0
+            trans_percentage = 0.0
+        else:
+            # Linear interpolation
+            ratio = (trans_max - translation_error) / (trans_max - trans_min)
+            trans_score = trans_weight * total_score * ratio
+            trans_percentage = ratio * 100.0
+
+        # Compute rotation score with linear interpolation
+        rot_weight = rot_params['weight']
+        rot_min = rot_params['min_error_deg']
+        rot_max = rot_params['max_error_deg']
+
+        if rotation_angle_error_deg <= rot_min:
+            # Perfect score
+            rot_score = rot_weight * total_score
+            rot_percentage = 100.0
+        elif rotation_angle_error_deg >= rot_max:
+            # Zero score
+            rot_score = 0.0
+            rot_percentage = 0.0
+        else:
+            # Linear interpolation
+            ratio = (rot_max - rotation_angle_error_deg) / (rot_max - rot_min)
+            rot_score = rot_weight * total_score * ratio
+            rot_percentage = ratio * 100.0
+
+        # Compute final score
+        final_score = trans_score + rot_score
+        final_percentage = (final_score / total_score) * 100.0
+
+        return {
             'translation_error_m': float(translation_error),
-            'rotation_frobenius_error': float(rotation_error),
-            'rotation_angle_error_deg': float(rotation_angle_error_deg),
-            'overall_score': 0.0  # TODO: Define overall scoring function
+            'translation_score': float(trans_score),
+            'translation_max_score': float(trans_weight * total_score),
+            'translation_percentage': float(trans_percentage),
+            'rotation_error_deg': float(rotation_angle_error_deg),
+            'rotation_score': float(rot_score),
+            'rotation_max_score': float(rot_weight * total_score),
+            'rotation_percentage': float(rot_percentage),
+            'final_score': float(final_score),
+            'final_max_score': float(total_score),
+            'final_percentage': float(final_percentage)
         }
 
-        return score
+    def _linear_interpolate_score(self, error: float, min_threshold: float,
+                                  max_threshold: float, weight: float,
+                                  total_score: float) -> tuple:
+        """
+        Compute score using linear interpolation.
+
+        Args:
+            error: The measured error
+            min_threshold: Error below this gets full points
+            max_threshold: Error above this gets zero points
+            weight: Weight of this component (0-1)
+            total_score: Total possible score
+
+        Returns:
+            Tuple of (score, percentage)
+        """
+        if error <= min_threshold:
+            score = weight * total_score
+            percentage = 100.0
+        elif error >= max_threshold:
+            score = 0.0
+            percentage = 0.0
+        else:
+            ratio = (max_threshold - error) / (max_threshold - min_threshold)
+            score = weight * total_score * ratio
+            percentage = ratio * 100.0
+
+        return score, percentage
 
     def _transform_callback(self, msg: TransformStamped):
         """
@@ -178,13 +317,20 @@ class CalibrationJudgeNode(Node):
         score = self._compute_score(estimated_matrix, self.ground_truth_matrix)
 
         # Log results
-        self.get_logger().info('='*60)
-        self.get_logger().info(f'Calibration Quality Score:')
+        self.get_logger().info('='*70)
+        self.get_logger().info('Calibration Quality Score:')
+        self.get_logger().info('')
         self.get_logger().info(f'  Translation Error: {score["translation_error_m"]:.6f} m')
-        self.get_logger().info(f'  Rotation Error (Frobenius): {score["rotation_frobenius_error"]:.6f}')
-        self.get_logger().info(f'  Rotation Angle Error: {score["rotation_angle_error_deg"]:.4f} degrees')
-        self.get_logger().info(f'  Overall Score: {score["overall_score"]:.4f}')
-        self.get_logger().info('='*60)
+        self.get_logger().info(f'    → Translation Score: {score["translation_score"]:.2f}/{score["translation_max_score"]:.2f} '
+                              f'({score["translation_percentage"]:.1f}%)')
+        self.get_logger().info('')
+        self.get_logger().info(f'  Rotation Angle Error: {score["rotation_error_deg"]:.4f} degrees')
+        self.get_logger().info(f'    → Rotation Score: {score["rotation_score"]:.2f}/{score["rotation_max_score"]:.2f} '
+                              f'({score["rotation_percentage"]:.1f}%)')
+        self.get_logger().info('')
+        self.get_logger().info(f'  FINAL SCORE: {score["final_score"]:.2f}/{score["final_max_score"]:.2f} '
+                              f'({score["final_percentage"]:.1f}%)')
+        self.get_logger().info('='*70)
 
 
 def main(args=None):

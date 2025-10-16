@@ -15,8 +15,8 @@
 <launch>
     <!-- Launch Arguments -->
     <arg name="ground_truth_file"
-         default="$(find-pkg-share lctk_launch)/config/judge/ground_truth_transform.txt"
-         description="Path to ground truth 4x4 transformation matrix file"/>
+         default="$(find-pkg-share lctk_launch)/config/judge/ground_truth_config.yaml"
+         description="Path to ground truth configuration YAML file (matrix + scoring parameters)"/>
 
     <arg name="transform_topic"
          default="/calibration/extrinsic_solver/extrinsic_transform"
