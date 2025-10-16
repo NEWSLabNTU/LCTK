@@ -8,7 +8,7 @@ enable_overlay := true
 log_level := info
 rviz := true
 use_best_effort_qos := true
-use_advanced_solver := true
+use_advanced_solver := false
 
 ## Topics for sample data
 # camera_topic := /sensing/camera/front_center/image_raw
