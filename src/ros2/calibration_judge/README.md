@@ -10,14 +10,13 @@ The `calibration_judge` package subscribes to the `/calibration/extrinsic_solver
 
 ### Running the Node
 
+**IMPORTANT**: The `ground_truth_file` parameter is **mandatory**. The node will fail to start without it.
+
 ```bash
 # Source the workspace
 source install/setup.bash
 
-# Run with default parameters (no ground truth)
-ros2 run calibration_judge judge_node
-
-# Run with ground truth file
+# Run with ground truth file (REQUIRED)
 ros2 run calibration_judge judge_node --ros-args \
   -p ground_truth_file:=/path/to/ground_truth.txt
 
@@ -57,7 +56,7 @@ The `_compute_score()` function is designed to be extended with additional metri
 
 ## Parameters
 
-- `ground_truth_file` (string, default: ''): Path to the ground truth transformation matrix file
+- `ground_truth_file` (string, **REQUIRED**, no default): Path to the ground truth transformation matrix file
 - `transform_topic` (string, default: '/calibration/extrinsic_solver/extrinsic_transform'): Topic name for extrinsic transform messages
 
 ## Topics

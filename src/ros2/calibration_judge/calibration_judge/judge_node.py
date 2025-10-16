@@ -22,24 +22,27 @@ class CalibrationJudgeNode(Node):
     def __init__(self):
         super().__init__('calibration_judge')
 
-        # Declare parameters
-        self.declare_parameter('ground_truth_file', '')
+        # Declare parameters (ground_truth_file is mandatory, no default)
+        self.declare_parameter('ground_truth_file')
         self.declare_parameter('transform_topic', '/calibration/extrinsic_solver/extrinsic_transform')
 
         # Get parameters
         ground_truth_file = self.get_parameter('ground_truth_file').value
         transform_topic = self.get_parameter('transform_topic').value
 
+        # Validate that ground truth file is provided
+        if not ground_truth_file or ground_truth_file == '':
+            self.get_logger().error('FATAL: ground_truth_file parameter is mandatory but not provided!')
+            self.get_logger().error('Usage: ros2 run calibration_judge judge_node --ros-args -p ground_truth_file:=/path/to/ground_truth.txt')
+            raise ValueError('ground_truth_file parameter is required')
+
         # Load ground truth transform
-        self.ground_truth_matrix: Optional[np.ndarray] = None
-        if ground_truth_file:
-            self.ground_truth_matrix = self._load_ground_truth(ground_truth_file)
-            if self.ground_truth_matrix is not None:
-                self.get_logger().info(f'Loaded ground truth from: {ground_truth_file}')
-            else:
-                self.get_logger().error(f'Failed to load ground truth from: {ground_truth_file}')
-        else:
-            self.get_logger().warn('No ground truth file specified. Use "ground_truth_file" parameter.')
+        self.ground_truth_matrix = self._load_ground_truth(ground_truth_file)
+        if self.ground_truth_matrix is None:
+            self.get_logger().error(f'FATAL: Failed to load ground truth from: {ground_truth_file}')
+            raise RuntimeError(f'Could not load ground truth matrix from {ground_truth_file}')
+
+        self.get_logger().info(f'Successfully loaded ground truth from: {ground_truth_file}')
 
         # Create subscription to extrinsic transform topic
         self.subscription = self.create_subscription(
@@ -168,15 +171,10 @@ class CalibrationJudgeNode(Node):
         Args:
             msg: TransformStamped message from extrinsic solver
         """
-        # Check if ground truth is loaded
-        if self.ground_truth_matrix is None:
-            self.get_logger().warn('No ground truth loaded. Cannot compute score.', throttle_duration_sec=5.0)
-            return
-
         # Convert transform message to matrix
         estimated_matrix = self._transform_to_matrix(msg)
 
-        # Compute score
+        # Compute score (ground_truth_matrix is guaranteed to be loaded)
         score = self._compute_score(estimated_matrix, self.ground_truth_matrix)
 
         # Log results
