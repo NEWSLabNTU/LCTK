@@ -24,9 +24,9 @@ scoring:
   # Translation contributes 50% to the total score
   translation:
     weight: 0.5           # Weight in final score (0.5 = 50%)
-    min_error_m: 0.02     # Minimum error threshold (20mm)
+    min_error_m: 0.05     # Minimum error threshold (50mm)
                           # Errors below this receive full translation points
-    max_error_m: 0.05     # Maximum error threshold (50mm)
+    max_error_m: 0.10     # Maximum error threshold (100mm)
                           # Errors above this receive zero translation points
                           # Errors between min and max are linearly interpolated
 
@@ -39,31 +39,3 @@ scoring:
     max_error_deg: 5.0    # Maximum error threshold (degrees)
                           # Errors above this receive zero rotation points
                           # Errors between min and max are linearly interpolated
-
-# Scoring Formula:
-# ================
-#
-# Translation Score:
-#   if trans_error <= 0.02:
-#       trans_score = 0.5 * 15.0 = 7.5
-#   elif trans_error >= 0.05:
-#       trans_score = 0
-#   else:
-#       ratio = (0.05 - trans_error) / (0.05 - 0.02)
-#       trans_score = 0.5 * 15.0 * ratio
-#
-# Rotation Score:
-#   if rot_error <= 2.0:
-#       rot_score = 0.5 * 15.0 = 7.5
-#   elif rot_error >= 5.0:
-#       rot_score = 0
-#   else:
-#       ratio = (5.0 - rot_error) / (5.0 - 2.0)
-#       rot_score = 0.5 * 15.0 * ratio
-#
-# Final Score = trans_score + rot_score
-#
-# Example Scores:
-# - Translation 0.02m, Rotation 2.0°:  7.5 + 7.5 = 15.0 (Perfect)
-# - Translation 0.035m, Rotation 3.5°: 3.75 + 3.75 = 7.5 (Pass)
-# - Translation 0.05m, Rotation 5.0°:  0.0 + 0.0 = 0.0 (Fail)
