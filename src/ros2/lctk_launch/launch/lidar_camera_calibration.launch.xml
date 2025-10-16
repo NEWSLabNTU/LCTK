@@ -50,6 +50,10 @@
          default="false"
          description="Enable calibration quality evaluator (IoU metrics)"/>
 
+    <arg name="enable_judge"
+         default="false"
+         description="Enable calibration quality judge (ground truth comparison)"/>
+
     <arg name="enable_overlay"
          default="true"
          description="Enable ArUco detection overlay visualization"/>
@@ -134,6 +138,14 @@
         <arg name="extrinsic_transform_topic" value="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
         <arg name="namespace" value="$(var namespace)"/>
         <arg name="use_best_effort_qos" value="$(var use_best_effort_qos)"/>
+        <arg name="log_level" value="$(var log_level)"/>
+    </include>
+
+    <!-- Calibration Quality Judge (Optional) -->
+    <!-- Evaluates calibration quality by comparing estimated transforms against ground truth -->
+    <include file="$(find-pkg-share lctk_launch)/launch/calibration_judge.launch.xml" if="$(var enable_judge)">
+        <arg name="transform_topic" value="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
+        <arg name="namespace" value="$(var namespace)"/>
         <arg name="log_level" value="$(var log_level)"/>
     </include>
 

@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for calibration quality judge.
+
+    This launch file starts the calibration judge node that evaluates
+    calibration quality by comparing estimated extrinsic transforms
+    against a ground truth transformation matrix.
+
+    Input topics:
+    - Extrinsic transform topic (from solver)
+
+    Output:
+    - Real-time calibration quality metrics logged to console
+-->
+<launch>
+    <!-- Launch Arguments -->
+    <arg name="ground_truth_file"
+         default="$(find-pkg-share lctk_launch)/config/judge/ground_truth_transform.txt"
+         description="Path to ground truth 4x4 transformation matrix file"/>
+
+    <arg name="transform_topic"
+         default="/calibration/extrinsic_solver/extrinsic_transform"
+         description="Input extrinsic transform topic to evaluate"/>
+
+    <arg name="namespace"
+         default="calibration"
+         description="Namespace for the node"/>
+
+    <arg name="log_level"
+         default="info"
+         description="ROS log level (debug, info, warn, error, fatal)"/>
+
+    <!-- Calibration Judge Node -->
+    <node pkg="calibration_judge"
+          exec="judge_node"
+          name="calibration_judge"
+          namespace="$(var namespace)"
+          output="screen"
+          args="--ros-args --log-level $(var log_level)">
+        <!-- Parameters -->
+        <param name="ground_truth_file" value="$(var ground_truth_file)"/>
+        <param name="transform_topic" value="$(var transform_topic)"/>
+    </node>
+</launch>

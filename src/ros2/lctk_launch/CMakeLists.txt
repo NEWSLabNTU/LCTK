@@ -19,6 +19,7 @@ install(FILES
   launch/image_processing.launch.xml
   launch/pointcloud_processing.launch.xml
   launch/extrinsic_calibration.launch.xml
+  launch/calibration_judge.launch.xml
   # Refactored calibration launch files
   launch/lidar_camera_calibration.launch.xml
   launch/two_lidar_calibration.launch.xml
