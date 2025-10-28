@@ -506,6 +506,12 @@ make launch_lidar_camera_sample_data  # Plays LiDAR and camera data in loop
     - ArUco detector outputs corners in OpenCV standard order: `[top-left, top-right, bottom-right, bottom-left]`
   - **Still Unknown**: The exact mapping between ArUco corner indices and board model corner indices that would fix the tilt
   - **Next Steps**: Need to verify the actual corner ordering from ArUco detector output vs. the expected ordering for board model corners. May need to examine wayside-portal's working implementation more carefully for subtle differences in how corners are paired.
+- **Temporary Files and Scripts**: When creating temporary files or scripts during development (Oct 28, 2025):
+  - **ALWAYS use Write/Edit tools** instead of bash heredocs (e.g., `cat > file << 'EOF'`)
+  - **Create temp files in `$PROJECT_ROOT/tmp/`** (e.g., `/home/aeon/repos/LCTK/tmp/`)
+  - Example: Scripts for validation, testing, or one-off tasks should be written to `tmp/` directory
+  - Benefits: Better visibility of temp files, easier cleanup, can be version controlled if needed
+  - The `tmp/` directory is gitignored by default
 
 ## Coding Style
 
