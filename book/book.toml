@@ -3,4 +3,5 @@ authors = ["aeon"]
 language = "en"
 multilingual = false
 src = "src"
-title = "LCTK Developer Guide"
+title = "LCTK Documentation"
+description = "LiDAR and Camera Toolkit - User and Developer Guide"

@@ -1,34 +1,28 @@
 # Summary
 
-[Introduction](./introduction.md)
+[Project Status](./project-status.md)
 
-# Architecture & Design
+---
 
-- [System Architecture](./architecture/overview.md)
-  - [Core Libraries](./architecture/core-libraries.md)
-  - [ROS 2 Nodes](./architecture/ros2-nodes.md)
-  - [Communication](./architecture/communication.md)
-  - [Calibration Evaluator](./architecture/calibration-evaluator.md)
-- [Calibration Pipeline](./design/pipeline.md)
-  - [LiDAR-Camera Calibration](./design/lidar-camera.md)
-  - [Multi-LiDAR Calibration](./design/multi-lidar.md)
-- [Workflow](./design/workflow.md)
+# Part 1: User Guide
 
-# Development
+- [Introduction](./user-guide/introduction.md)
+- [Installation](./user-guide/installation.md)
+- [Quick Start Tutorial](./user-guide/quickstart.md)
+- [LiDAR-Camera Calibration](./user-guide/lidar-camera.md)
+- [Multi-LiDAR Calibration](./user-guide/multi-lidar.md)
+- [Configuration](./user-guide/configuration.md)
+- [Troubleshooting](./user-guide/troubleshooting.md)
 
-- [Build System](./development/build.md)
-- [Testing](./development/testing.md)
-- [Contributing](./development/contributing.md)
+---
 
-# Roadmap
+# Part 2: Developer Guide
 
-- [Project Progress](./roadmap/progress.md)
-- [Phase 1: Foundation](./roadmap/phase1.md)
-- [Phase 2: ROS Integration](./roadmap/phase2.md)
-- [Phase 3: Advanced Features](./roadmap/phase3.md)
-
-# Reference
-
-- [API Documentation](./reference/api.md)
-- [Configuration](./reference/configuration.md)
-- [Troubleshooting](./reference/troubleshooting.md)
+- [Architecture Overview](./developer-guide/architecture.md)
+- [Core Libraries](./developer-guide/libraries.md)
+- [ROS 2 Nodes](./developer-guide/ros2-nodes.md)
+- [Build System](./developer-guide/build-system.md)
+- [Testing](./developer-guide/testing.md)
+- [Contributing](./developer-guide/contributing.md)
+- [Advanced Topics](./developer-guide/advanced-topics.md)
+- [Reference](./developer-guide/reference.md)
