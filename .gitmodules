@@ -1,6 +1,3 @@
 [submodule "src/lib/multi-stream-synchronizer"]
 	path = src/rust/multi-stream-synchronizer
 	url = https://github.com/NEWSLabNTU/multi-stream-synchronizer.git
-[submodule "src/ros2_rust_ws"]
-	path = src/ros2_rust_ws
-	url = https://github.com/jerry73204/ros2_rust_ws.git
