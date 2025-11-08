@@ -2,23 +2,26 @@
 resolver = "2"
 rust-version = "1.85.0"  # Minimum supported Rust version (MSRV)
 members = [
-    "src/ros2/*",
-    "src/rust/*",
+    "rust/*",
+    "ros/aruco_generator_node",
+    "ros/aruco_locator_node",
+    "ros/lidar_board_detector",
+    "ros/multi_wayside_node",
 ]
 exclude = [
     # Launch-only package without Cargo.toml
-    "src/ros2/lctk_launch",
-    "src/ros2/lctk_sample_data",
+    "ros/lctk_launch",
+    "ros/lctk_sample_data",
     # Python package without Cargo.toml
-    "src/ros2/extrinsic_solver_node",
-    "src/ros2/advanced_extrinsic_solver",
-    "src/ros2/interactive_solver_controller",
-    "src/ros2/filter_box_tuner",
-    "src/ros2/calibration_evaluator",
-    "src/ros2/calibration_judge",
-    "src/ros2/pointcloud_image_overlay",
+    "ros/extrinsic_solver_node",
+    "ros/advanced_extrinsic_solver",
+    "ros/interactive_solver_controller",
+    "ros/filter_box_tuner",
+    "ros/calibration_evaluator",
+    "ros/calibration_judge",
+    "ros/pointcloud_image_overlay",
     # Interface package without Cargo.toml (CMake-based ROS package)
-    "src/interface/lctk_interfaces",
+    "ros/lctk_interfaces",
 ]
 
 [workspace.dependencies]
@@ -68,16 +71,18 @@ rerun = { version = "0.23.4" }
 newslab-serde-measurements = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }
 newslab-serde-nalgebra = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }
 
-# ROS2 dependencies from workspace
-rclrs = { path = "src/ros2_rust_ws/install/rclrs/share/rclrs/rust" }
-geometry_msgs = { path = "src/ros2_rust_ws/install/geometry_msgs/share/geometry_msgs/rust" }
-sensor_msgs = { path = "src/ros2_rust_ws/install/sensor_msgs/share/sensor_msgs/rust" }
-std_msgs = { path = "src/ros2_rust_ws/install/std_msgs/share/std_msgs/rust" }
-vision_msgs = { path = "src/ros2_rust_ws/install/vision_msgs/share/vision_msgs/rust" }
-visualization_msgs = { path = "src/ros2_rust_ws/install/visualization_msgs/share/visualization_msgs/rust" }
-builtin_interfaces = { path = "src/ros2_rust_ws/install/builtin_interfaces/share/builtin_interfaces/rust" }
-tf2_msgs = { path = "src/ros2_rust_ws/install/tf2_msgs/share/tf2_msgs/rust" }
-lctk_interfaces = { path = "install/lctk_interfaces/share/lctk_interfaces/rust" }
+# ROS2 dependencies - cargo-ros2 will resolve these via ament_index
+# NOTE: lctk_interfaces is NOT in workspace.dependencies because it's a local
+# interface package that must be built first. Packages that need it should
+# declare it directly in their Cargo.toml with lctk_interfaces = "*"
+rclrs = "*"
+geometry_msgs = "*"
+sensor_msgs = "*"
+std_msgs = "*"
+vision_msgs = "*"
+visualization_msgs = "*"
+builtin_interfaces = "*"
+tf2_msgs = "*"
 
 [profile.test-release]
 inherits = "release"
