@@ -92,8 +92,8 @@ impl ImageDetection {
             &self.distortion_coefs,
             &mut rvec,
             &mut tvec,
-            &mut core_cv::no_array(),
-            // EstimateParameters::create()?,
+            &mut core_cv::no_array(), // obj_points
+            aruco::EstimateParameters::create()?, // EstimateParameters (use default)
         )?;
 
         Ok(PoseEstimation {
@@ -395,8 +395,6 @@ impl Detector {
                 &mut ids,
                 &parameters,
                 &mut core_cv::no_array(), // rejected_img_points
-                &mut core_cv::no_array(),
-                &mut core_cv::no_array(),
             )?;
 
             if !ids.is_empty() {
@@ -488,9 +486,7 @@ impl Detector {
             &mut corners_vec,
             &mut ids,
             &parameters,
-            &mut core_cv::no_array(),
-            &mut core_cv::no_array(),
-            &mut core_cv::no_array(),
+            &mut core_cv::no_array(), // rejected_img_points
         )?;
 
         if !ids.is_empty() {
