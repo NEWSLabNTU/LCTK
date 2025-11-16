@@ -14,7 +14,7 @@ geometry_msgs.workspace = true
 hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config", features = ["parallel"] }
 hollow-board-detector = { version = "0.1.0", path = "../../rust/hollow-board-detector", features = ["parallel"] }
 json5 = { workspace = true }
-lctk_interfaces.workspace = true
+lctk_interfaces = "*"
 ndarray = "0.16"
 once_cell = { workspace = true }
 pcd-rs = { workspace = true }
