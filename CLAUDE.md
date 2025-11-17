@@ -422,8 +422,9 @@ make launch_lidar_camera_sample_data  # Plays LiDAR and camera data in loop
 - Don't make Pokemon exception handlings. For example, `try: except Exception: pass`. It creates silent errors. I prefer to throw errors to the user so developers can fix it.
 - If `source /opt/ros/humble/setup.bash` was done earlier and we would like to test Rust code only without ROS, you can run `cargo clippy --all-targets --all-features`.
 - In Rust, initialize struct fields first and then construct the struct. It avoids creating a mutable struct.
-- Fixed colcon-cargo JSON parsing issue by modifying /home/aeon/.local/lib/python3.10/site-packages/colcon_cargo/task/cargo/build.py to use direct subprocess calls with --quiet flag. This resolves "JSONDecodeError: Expecting value: line 1 column 1" errors caused by patch warnings in cargo metadata output.
-- OpenCV environment variables are set automatically in the Makefile to avoid version 0.0.0 issues.
+- **DEPRECATED**: Fixed colcon-cargo JSON parsing issue by modifying /home/aeon/.local/lib/python3.10/site-packages/colcon_cargo/task/cargo/build.py to use direct subprocess calls with --quiet flag. This resolves "JSONDecodeError: Expecting value: line 1 column 1" errors caused by patch warnings in cargo metadata output. (Note: We now use colcon-cargo-ros2 instead of colcon-cargo + colcon-ros-cargo)
+- **Colcon Rust Integration**: Migrated from colcon-cargo + colcon-ros-cargo to colcon-cargo-ros2 for better ROS 2 integration and automatic binding generation. The old packages conflict with colcon-cargo-ros2 and must be uninstalled. The Ansible setup script now checks for these conflicts and installs colcon-cargo-ros2 via `pip install --user colcon-cargo-ros2`.
+- OpenCV environment variables are set automatically to avoid version 0.0.0 issues.
 - Dependencies are now managed through Ansible playbooks in an Autoware-style setup (setup-dev-env.sh)
 - Git ignores build artifacts: ansible_collections/, build/, install/, log/, build_logs/, .cargo/, ros2_rust_ws/{build,install,log}/
 - **Config File Parameters**: All ROS2 nodes now require mandatory config file parameters - no hardcoded defaults:
