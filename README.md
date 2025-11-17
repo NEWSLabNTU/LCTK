@@ -10,15 +10,14 @@ git clone https://github.com/NEWSLabNTU/LCTK.git
 cd LCTK
 
 # Setup development environment
-make setup                # Install system dependencies
-make prepare              # Install ROS dependencies
+./setup-dev-env.sh         # Install system dependencies
 
 # Build the project
-make build
+just build
 
 # Test with sample data
-make launch_lidar_camera_sample_data    # Launch sample data playback
-make launch_lidar_camera_calibration    # Launch calibration pipeline
+just sample-sensor-data start    # Launch sample data playback
+just lidar-camera start          # Launch calibration pipeline
 ```
 
 ## Overview
@@ -107,21 +106,24 @@ graph TB
 ## Installation
 
 ### Prerequisites
-- Ubuntu 22.04 LTS
+- Ubuntu 22.04 LTS (or 24.04 for ROS 2 Jazzy)
 - Internet connection for dependency installation
 
 ### Setup Environment
 
 ```bash
 # Setup system dependencies and development environment
-make setup
+./setup-dev-env.sh
 
-# Install ROS package dependencies
-make prepare
+# For non-interactive installation:
+./setup-dev-env.sh -y
+
+# For minimal installation (skip CUDA and dev tools):
+./setup-dev-env.sh -y --minimal
 ```
 
 The setup process installs:
-- ROS 2 Humble with required packages
+- ROS 2 Humble (on Ubuntu 22.04) or Jazzy (on Ubuntu 24.04)
 - Rust toolchain (stable and nightly)
 - OpenCV 4.5.4+ with development headers
 - GStreamer with multimedia plugins
@@ -133,12 +135,11 @@ The setup process installs:
 
 ```bash
 # Build entire project
-make build
+just build
 
-# Or build incrementally:
-make build_ros2_rust     # Build ROS2 Rust base packages
-make build_interface     # Build interface types
-make build_packages      # Build LCTK nodes and tools
+# Or use colcon directly for more control:
+source install/setup.bash
+colcon build --base-paths ros --symlink-install
 ```
 
 ## Usage
@@ -153,17 +154,49 @@ Test the calibration pipeline with included sample data:
 
 ```bash
 # Launch sample data playback (LiDAR + camera)
-make launch_lidar_camera_sample_data
+just sample-sensor-data start
 
-# Launch calibration pipeline
-make launch_lidar_camera_calibration
+# Launch calibration pipeline (in another terminal)
+just lidar-camera start
 
-# Launch with debug topics and RViz
-make launch_lidar_camera_calibration debug_mode=true rviz=true
+# Launch with debug topics disabled and custom log level
+just debug_mode=false log_level=info lidar-camera start
+
+# Launch RViz for visualization
+just rviz
+
+# Check service status
+just lidar-camera status
+just sample-sensor-data status
+
+# View logs
+just lidar-camera logs -f         # Follow logs
+just sample-sensor-data logs -f
 
 # Stop services when done
-make stop_lidar_camera_calibration
-make stop_lidar_camera_sample_data
+just lidar-camera stop
+just sample-sensor-data stop
+```
+
+### Configuration Variables
+
+You can customize the calibration pipeline behavior using configuration variables:
+
+```bash
+# Available variables (with defaults):
+debug_mode=true                # Enable debug topics
+enable_icp_iteration_debug=true   # Enable ICP iteration debug
+enable_evaluator=true          # Enable calibration evaluator
+enable_overlay=true            # Enable point cloud overlay
+log_level=info                 # ROS log level (debug/info/warn/error)
+rviz_enabled=true             # Launch RViz
+use_best_effort_qos=true      # Use best effort QoS
+use_advanced_solver=false     # Use advanced solver
+camera_topic=/sensing/camera/zedxm/zed_node/left_raw/image_raw_color
+pointcloud_topic=/sensing/lidar/concatenated/pointcloud
+
+# Example usage:
+just debug_mode=true rviz_enabled=true log_level=debug lidar-camera start
 ```
 
 ### Using Your Own Data
@@ -175,17 +208,21 @@ For custom sensor data recorded in ROS bags:
 ros2 bag play your_data.bag
 
 # Launch calibration with rosbag-compatible QoS in another terminal
-make launch_lidar_camera_calibration use_best_effort_qos=false
+just use_best_effort_qos=false lidar-camera start
 
 # With custom topic remapping if your bag uses different topic names
-make launch_lidar_camera_calibration \
-    use_best_effort_qos=false \
-    lidar_topic:=/your/lidar/topic \
-    camera_topic:=/your/camera/topic \
-    camera_info_topic:=/your/camera_info/topic
+just use_best_effort_qos=false \
+     camera_topic=/your/camera/topic \
+     pointcloud_topic=/your/lidar/topic \
+     lidar-camera start
 ```
 
 Default expected topics:
+- `/sensing/lidar/concatenated/pointcloud` (sensor_msgs/PointCloud2)
+- `/sensing/camera/zedxm/zed_node/left_raw/image_raw_color` (sensor_msgs/Image)
+- Camera info is auto-derived following image_pipeline convention
+
+For sample data topics:
 - `/sensing/lidar/top/pointcloud_raw` (sensor_msgs/PointCloud2)
 - `/sensing/camera/front_center/image_raw` (sensor_msgs/Image)
 - `/sensing/camera/front_center/camera_info` (sensor_msgs/CameraInfo)
@@ -194,7 +231,14 @@ Default expected topics:
 
 ```bash
 # Launch two LiDAR calibration pipeline
-make launch_two_lidar_calibration
+just two-lidar start
+
+# Check status and logs
+just two-lidar status
+just two-lidar logs
+
+# Stop when done
+just two-lidar stop
 
 # This uses multi-wayside detection to align two LiDAR sensors
 ```
@@ -203,7 +247,7 @@ make launch_two_lidar_calibration
 
 ```bash
 # Launch RViz for real-time visualization
-make launch_rviz
+just rviz
 
 # View debug topics in RViz when debug_mode=true:
 # - /calibration/.../debug/plane_inliers
@@ -212,19 +256,36 @@ make launch_rviz
 # - /calibration/.../debug/icp_iterations
 ```
 
-### Service Management
-
-LCTK uses systemd services for reliable process management:
+### Advanced Tools
 
 ```bash
-# Check status of all services
-make service_status
+# Run interactive advanced solver controller
+just run-advanced-solver-controller
+```
 
-# View logs from all services
-make service_logs
+### Service Management
 
-# Clean up all services
-make service_cleanup
+LCTK uses systemd user services for reliable process management:
+
+```bash
+# Check status of services
+just lidar-camera status
+just sample-sensor-data status
+just two-lidar status
+
+# View logs from services
+just lidar-camera logs
+just sample-sensor-data logs -f      # Follow logs
+just two-lidar logs --since "5 min ago"
+
+# Restart services
+just lidar-camera restart
+just sample-sensor-data restart
+
+# Stop services
+just lidar-camera stop
+just sample-sensor-data stop
+just two-lidar stop
 ```
 
 ## Customization
@@ -255,7 +316,7 @@ To customize calibration parameters:
 
 ```bash
 # After modifying Rust code in src/
-make build
+just build
 ```
 
 Configuration file changes (JSON5/YAML) do **not** require rebuilding - just restart the nodes.
@@ -268,11 +329,14 @@ Enable detailed debug logging to diagnose calibration issues:
 
 ```bash
 # Launch with debug logging enabled
-RCUTILS_LOGGING_SEVERITY=DEBUG make launch_lidar_camera_calibration debug_mode=true
+just log_level=debug debug_mode=true lidar-camera start
 
 # View debug topics in another terminal
 ros2 topic list | grep debug
 ros2 topic echo /calibration/lidar_board_detector/debug/icp_stats
+
+# Check service logs
+just lidar-camera logs -f
 ```
 
 Debug mode provides:
@@ -303,14 +367,29 @@ Debug mode provides:
        gstreamer1.0-plugins-ugly gstreamer1.0-libav
    ```
 
-3. **ROS dependency issues**
+3. **Service fails immediately (two-lidar)**
    ```bash
-   make prepare  # Reinstall ROS dependencies
+   # Check the status - it will show ROS launch logs
+   just two-lidar status
+
+   # View full logs
+   just two-lidar logs
+
+   # Common issue: missing config files
+   # Verify config files exist in src/ros2/lctk_launch/config/
    ```
 
 4. **Service management issues**
    ```bash
-   make service_cleanup  # Clean up any stuck services
+   # Stop all services
+   just lidar-camera stop
+   just sample-sensor-data stop
+   just two-lidar stop
+
+   # Check systemd service status
+   systemctl --user status lctk-calibration
+   systemctl --user status lctk-lidar-camera-data
+   systemctl --user status lctk-two-lidar
    ```
 
 5. **No detections found**
@@ -348,6 +427,68 @@ Debug mode provides:
    ```
 
    This is a DDS configuration issue, not related to the service implementation. The `lidar_board_detector` uses lock-free arc-swap for optimal performance.
+
+7. **empy version compatibility**
+
+   ROS 2 Humble requires empy < 4.0. If you see errors like `AttributeError: module 'string' has no attribute 'split'`:
+   ```bash
+   # Remove pip-installed empy and use system package
+   pip3 uninstall empy
+   sudo apt-get install python3-empy
+   ```
+
+   The `.envrc` file (if using direnv) will warn you if an incompatible empy version is detected.
+
+## Development
+
+### Using direnv (Optional)
+
+For automatic environment setup when entering the project directory:
+
+```bash
+# Install direnv
+sudo apt install direnv
+
+# Add to your shell config (~/.bashrc or ~/.zshrc)
+eval "$(direnv hook bash)"  # for bash
+eval "$(direnv hook zsh)"   # for zsh
+
+# Allow the .envrc file
+direnv allow .
+
+# Now the ROS environment will be sourced automatically when you cd into LCTK/
+```
+
+The `.envrc` file automatically:
+- Sources the correct ROS distribution based on Ubuntu version
+- Sources the workspace overlay from `install/setup.bash`
+- Sets up OpenCV environment variables
+- Checks for empy version compatibility
+
+### Available Just Commands
+
+```bash
+# View all available commands
+just --list
+
+# View detailed help
+just help
+
+# Build commands
+just build                 # Build all ROS packages
+just clean                 # Clean build artifacts
+just lint                  # Run linters
+just test                  # Run tests
+
+# Service management
+just lidar-camera {start|stop|restart|status|logs}
+just sample-sensor-data {start|stop|restart|status|logs}
+just two-lidar {start|stop|restart|status|logs}
+
+# Tools
+just rviz                              # Launch RViz
+just run-advanced-solver-controller    # Interactive solver controller
+```
 
 ## Contributing
 
