@@ -1,11 +1,45 @@
 ---
-- name: Install colcon extensions for Rust with empy constraint
+# Check for conflicting packages
+- name: Check if colcon-cargo is installed
+  ansible.builtin.shell: pip3 list --user | grep -E '^colcon-cargo\s' || true
+  register: colcon_cargo_check
+  changed_when: false
+
+- name: Check if colcon-ros-cargo is installed
+  ansible.builtin.shell: pip3 list --user | grep -E '^colcon-ros-cargo\s' || true
+  register: colcon_ros_cargo_check
+  changed_when: false
+
+- name: Warn if colcon-cargo is installed
+  ansible.builtin.debug:
+    msg: |
+      WARNING: colcon-cargo is installed and conflicts with colcon-cargo-ros2!
+      Please remove it with: pip3 uninstall colcon-cargo
+      Found: {{ colcon_cargo_check.stdout }}
+  when: colcon_cargo_check.stdout | length > 0
+
+- name: Warn if colcon-ros-cargo is installed
+  ansible.builtin.debug:
+    msg: |
+      WARNING: colcon-ros-cargo is installed and conflicts with colcon-cargo-ros2!
+      Please remove it with: pip3 uninstall colcon-ros-cargo
+      Found: {{ colcon_ros_cargo_check.stdout }}
+  when: colcon_ros_cargo_check.stdout | length > 0
+
+- name: Fail if conflicting packages are found
+  ansible.builtin.fail:
+    msg: |
+      Conflicting colcon packages detected. Please remove them first:
+        pip3 uninstall colcon-cargo colcon-ros-cargo
+      Then re-run this script.
+  when: (colcon_cargo_check.stdout | length > 0) or (colcon_ros_cargo_check.stdout | length > 0)
+
+# Install colcon-cargo-ros2
+- name: Install colcon-cargo-ros2
   ansible.builtin.pip:
     name:
-      - "empy<4"
-      - git+https://github.com/jerry73204/colcon-cargo.git
-      - git+https://github.com/colcon/colcon-ros-cargo.git
-    extra_args: --user --force-reinstall
+      - colcon-cargo-ros2
+    extra_args: --user
     executable: /usr/bin/pip3
     state: present
 
