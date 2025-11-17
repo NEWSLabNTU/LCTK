@@ -12198,7 +12198,27 @@ name = "actuator_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "bond"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "can_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "cob_srvs"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "composition_interfaces"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "control_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "data_tamer_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
@@ -12210,7 +12230,19 @@ name = "example_interfaces"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "ffmpeg_image_transport_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "geographic_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "gps_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "grid_map_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
@@ -12226,7 +12258,35 @@ name = "map_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "moveit_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "nav2_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "nav_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "nmea_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "object_recognition_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "octomap_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "pacmod2_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "pacmod3_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
@@ -12238,6 +12298,18 @@ name = "pendulum_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "plotjuggler_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "point_cloud_interfaces"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "radar_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "rcl_interfaces"
 version = "0.5.0"
 
@@ -12246,7 +12318,19 @@ name = "rmw_dds_common"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "robot_localization"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "ros_gz_interfaces"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "ros_ign_interfaces"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "rosapi_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
@@ -12254,11 +12338,15 @@ name = "rosbag2_interfaces"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "rosbridge_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "rosgraph_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
-name = "service_msgs"
+name = "septentrio_gnss_driver"
 version = "0.5.0"
 
 [[patch.unused]]
@@ -12290,6 +12378,10 @@ name = "theora_image_transport"
 version = "0.5.0"
 
 [[patch.unused]]
+name = "topic_tools_interfaces"
+version = "0.5.0"
+
+[[patch.unused]]
 name = "trajectory_msgs"
 version = "0.5.0"
 
@@ -12298,9 +12390,21 @@ name = "turtlesim"
 version = "0.5.0"
 
 [[patch.unused]]
-name = "type_description_interfaces"
+name = "ublox_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "udp_msgs"
 version = "0.5.0"
 
 [[patch.unused]]
 name = "unique_identifier_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "velodyne_msgs"
+version = "0.5.0"
+
+[[patch.unused]]
+name = "zed_msgs"
 version = "0.5.0"
