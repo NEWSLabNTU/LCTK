@@ -178,8 +178,8 @@ interactive_setup() {
 
     # Optional: Development tools
     INSTALL_DEV_TOOLS="y"
-    printf "${YELLOW}Optional:${NC} Development tools (gdb, valgrind, etc.)\n"
-    printf "Recommended for development and debugging.\n"
+    printf "${YELLOW}Optional:${NC} Development tools (gdb, valgrind, mdbook, etc.)\n"
+    printf "Includes debugging tools, code quality tools, and documentation tools.\n"
     if ask_yes_no "Install development tools?" "y"; then
         INSTALL_DEV_TOOLS="y"
     else
