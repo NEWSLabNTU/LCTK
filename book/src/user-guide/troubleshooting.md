@@ -93,22 +93,7 @@ ros2 topic hz /sensing/lidar/top/pointcloud_raw
    # Add PointCloud2 topic, check if board is visible
    ```
 
-### 3. Synchronization Issues
-
-**Symptoms:** Detections not matching in time
-
-**Check sync status:**
-```bash
-ros2 topic echo /calibration/synchronized_detections
-```
-
-**Fix: Increase sync tolerance:**
-```bash
-# Edit multi_wayside.yaml or use command:
-ros2 param set /synchronizer sync_window_ms 200
-```
-
-### 4. Poor Calibration Accuracy
+### 3. Poor Calibration Accuracy
 
 **Symptoms:** Misaligned point clouds on images, high reprojection error
 
@@ -129,7 +114,7 @@ ros2 param set /synchronizer sync_window_ms 200
    - Update `board_detector.json5` if dimensions changed
    - Check hole positions and diameters
 
-### 5. Performance Issues
+### 4. Performance Issues
 
 **Slow detection (>2 seconds per frame):**
 ```bash
@@ -148,7 +133,7 @@ free -h
 # Restart nodes if memory leak suspected
 ```
 
-### 6. Visualization Issues
+### 5. Visualization Issues
 
 **RViz not showing topics:**
 ```bash

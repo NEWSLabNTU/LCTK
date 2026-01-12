@@ -6,25 +6,29 @@ This guide shows how to calibrate a LiDAR sensor with a camera, computing the tr
 
 ```mermaid
 graph LR
-    A[Camera Images] --> C[ArUco Detector]
-    B[LiDAR Points] --> D[Board Detector]
-    C --> E[Synchronizer]
-    D --> E
-    E --> F[Extrinsic Solver]
-    F --> G[Transform]
+    A[(Camera)] --> C[ArUco Detector]
+    B[(LiDAR)] --> D[Board Detector]
+    C -->|2D corners| F[Extrinsic Solver]
+    D -->|3D pose| F
+    F --> G>Transform]
 
-    style G fill:#90EE90
+    classDef sensor fill:#e0e0e0,stroke:#333,color:#000
+    classDef node fill:#4a90d9,stroke:#333,color:#fff
+    classDef output fill:#2d6a4f,stroke:#333,color:#fff
+
+    class A,B sensor
+    class C,D,F node
+    class G output
 ```
 
 **What happens:**
-1. **ArUco Detector** finds markers on the calibration board in camera images (2D positions)
-2. **Board Detector** finds the hollow board pattern in point clouds (3D position and orientation)
-3. **Synchronizer** matches detections from the same moment in time
-4. **Extrinsic Solver** computes the camera-to-LiDAR transformation using PnP algorithm
+1. **ArUco Detector** finds markers on the calibration board in camera images (2D corners)
+2. **Board Detector** finds the hollow board pattern in point clouds (3D pose)
+3. **Extrinsic Solver** computes the LiDAR-to-camera transformation using PnP algorithm
 
 ## Calibration Target
 
-You need a **1m × 1m board** with:
+You need a **1m x 1m board** with:
 - 4 circular holes (150mm radius) arranged in corners
 - ArUco markers (5x5 dictionary, IDs: 696, 64, 306, 195) printed on the board face
 
@@ -34,11 +38,10 @@ The board must be visible to both sensors simultaneously.
 
 ### 1. Prepare Your Data
 
-Record data with the board visible to both sensors:
+Use the included sample data:
 ```bash
-# Option A: Use sample data
 cd ~/repos/LCTK
-make launch_lidar_camera_sample_data
+just sample-data
 ```
 
 Or record your own:
@@ -47,49 +50,47 @@ Or record your own:
 
 ### 2. Launch Calibration
 
+Run the demo (sample data + calibration):
 ```bash
-make launch_lidar_camera_calibration
+just demo
 ```
 
-Or with custom data:
+Or run calibration separately with your own data:
 ```bash
-ros2 launch lctk_launch lidar_camera_calibration.launch.xml \
-    pcap_file:=/path/to/lidar.pcap \
-    video_file:=/path/to/camera.mp4 \
-    loop:=true
+just lidar-camera
 ```
 
 ### 3. Monitor Progress
 
+Open `http://localhost:8080` to see the web UI.
+
 Check detection rates (should be >1 Hz):
 ```bash
-ros2 topic hz /aruco_detections
-ros2 topic hz /calibration_board_detections
+source install/setup.bash
+ros2 topic hz /calibration/aruco_locator/aruco_detections
+ros2 topic hz /calibration/lidar_board_detector/calibration_board_detections
 ```
 
 View the calibration result:
 ```bash
-ros2 topic echo /calibration_transform
+ros2 topic echo /calibration/extrinsic_solver/extrinsic_transform
 ```
 
 ### 4. Validate Results
 
-Launch the point cloud overlay visualization:
-```bash
-ros2 run pointcloud_image_overlay pointcloud_image_overlay
-```
+The overlay visualization shows point clouds projected onto camera images. Check the `/calibration/pointcloud_overlay` topic to verify alignment.
 
-You should see point clouds accurately overlaid on camera images. If misaligned, check:
+If misaligned, check:
 - Camera intrinsics file is correct
 - Board geometry matches physical target
-- Sufficient detection pairs (>10 recommended)
+- Board is detected by both sensors
 
 ## Configuration
 
-Key parameters in `config/board/board_detector.json5`:
+Key parameters in `ros/lctk_launch/config/board/board_detector.json5`:
 - `plane_ransac_max_iterations`: RANSAC iterations (default: 2000)
 - `plane_ransac_inlier_threshold`: Inlier distance in meters (default: 0.05)
-- `max_icp_iterations`: ICP refinement iterations (default: 10)
+- `max_icp_iterations`: ICP refinement iterations (default: 100)
 
 See [Configuration Guide](./configuration.md) for full details.
 

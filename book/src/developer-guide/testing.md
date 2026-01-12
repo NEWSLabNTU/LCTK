@@ -290,5 +290,4 @@ Before submitting code:
 ## Next Steps
 
 - [Contributing](./contributing.md) - Contribution guidelines
-- [Advanced Topics](./advanced-topics.md) - Performance optimization
-- [Reference](./reference.md) - Testing utilities reference
+- [Architecture](./architecture.md) - System design overview

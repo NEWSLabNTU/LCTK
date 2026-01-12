@@ -1,6 +1,6 @@
-# Quick Start Tutorial
+# Quick Start
 
-This tutorial walks you through your first calibration using included sample data. You'll go from installation to calibration results in ~10 minutes.
+This tutorial walks you through your first calibration using included sample data.
 
 ## Step 1: Install LCTK
 
@@ -9,79 +9,74 @@ cd ~/repos  # or your preferred location
 git clone https://github.com/your-org/LCTK.git
 cd LCTK
 
-# Run interactive setup (installs ROS 2, Rust, dependencies)
-make prepare
+# Run setup (installs ROS 2, Rust, dependencies)
+./setup.sh
 
-# Build the project (takes ~5-10 minutes first time)
-make build
+# Reload shell after setup
+source ~/.bashrc
+
+# Build the project
+just build
 ```
 
-If build succeeds, you'll see `✓ Build complete` at the end.
+## Step 2: Run Demo
 
-## Step 2: Launch Sample Data
-
-Open a new terminal and start the sample data player:
+Launch the demo which plays sample data and runs calibration:
 
 ```bash
-cd ~/repos/LCTK
-make launch_lidar_camera_sample_data
+just demo
 ```
 
-This plays back recorded LiDAR and camera data in a loop. You should see:
-- `[velodyne_driver]: Publishing packet data...`
-- `[gscam_node]: Publishing images...`
-
-Leave this running.
-
-## Step 3: Run Calibration
-
-Open **another terminal** and launch the calibration pipeline:
-
-```bash
-cd ~/repos/LCTK
-make launch_lidar_camera_calibration
-```
+Open `http://localhost:8080` in your browser to see the web UI showing node status.
 
 The system will:
-1. Detect the calibration board in point clouds (LiDAR)
-2. Detect ArUco markers in camera images
-3. Synchronize detections
-4. Compute the camera-to-LiDAR transformation
+1. Play back recorded LiDAR and camera data
+2. Detect the calibration board in point clouds
+3. Detect ArUco markers in camera images
+4. Compute the LiDAR-to-camera transformation
 
-## Step 4: Monitor Progress
+## Step 3: Monitor Progress
 
-In a **third terminal**, check the calibration output:
+In another terminal, check the calibration output:
 
 ```bash
-# Watch for successful calibration
-ros2 topic echo /calibration_transform
+source install/setup.bash
+
+# Watch for calibration transform
+ros2 topic echo /calibration/extrinsic_solver/extrinsic_transform
 
 # Check detection rates (should be >1 Hz)
-ros2 topic hz /aruco_detections
-ros2 topic hz /calibration_board_detections
+ros2 topic hz /calibration/aruco_locator/aruco_detections
+ros2 topic hz /calibration/lidar_board_detector/calibration_board_detections
 ```
 
-When calibration succeeds, you'll see a `TransformStamped` message with the camera-to-LiDAR transformation (translation and rotation).
+When calibration succeeds, you'll see a `TransformStamped` message with the LiDAR-to-camera transformation.
 
-## Step 5: Visualize (Optional)
+## Step 4: Visualize (Optional)
+
+If you have a display, launch RViz:
 
 ```bash
-rviz2
+just rviz
+```
+
+Or enable RViz in the demo:
+
+```bash
+just demo rviz_enabled=true
 ```
 
 In RViz:
 1. Set **Fixed Frame** to `velodyne`
-2. Add → By Topic → `/sensing/lidar/top/pointcloud_raw`
-3. Add → By Topic → `/calibration/debug/final_board_pose` (markers)
-4. You'll see the point cloud and detected board visualization
+2. Add PointCloud2: `/sensing/lidar/top/pointcloud_raw`
+3. Add MarkerArray: `/calibration/lidar_board_detector/debug/final_board_pose`
 
-## What Just Happened?
+## What Happened?
 
 The calibration system:
-- **Detected** a 1m × 1m hollow board with 4 circular holes in the LiDAR point cloud
+- **Detected** a calibration board with circular holes in the LiDAR point cloud
 - **Detected** ArUco markers on the same board in camera images
-- **Matched** these detections in time using timestamps
-- **Solved** the 3D transformation from camera frame to LiDAR frame
+- **Solved** the 3D transformation from LiDAR frame to camera frame
 
 ## Next Steps
 
@@ -90,10 +85,10 @@ The calibration system:
 - **Adjust parameters**: See [Configuration](./configuration.md)
 - **Troubleshoot**: See [Troubleshooting](./troubleshooting.md)
 
-## Common First-Time Issues
+## Common Issues
 
 **"Command not found"**: Run `source install/setup.bash` after building
 
-**"No detections"**: Check that sample data is playing (`ros2 topic list` should show `/sensing/lidar/top/pointcloud_raw`)
+**"No detections"**: Check sample data is playing with `ros2 topic list`
 
-**"Build failed"**: See [Installation](./installation.md) for dependency troubleshooting
+**"Build failed"**: See [Installation](./installation.md) for troubleshooting

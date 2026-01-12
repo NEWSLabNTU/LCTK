@@ -152,4 +152,4 @@ Set to `false` if LiDARs see opposite sides (applies 180° correction).
 
 - Test configuration with [Quick Start](./quickstart.md)
 - Troubleshoot issues: [Troubleshooting](./troubleshooting.md)
-- For developers: Full reference in [Developer Guide](../developer-guide/reference.md)
+- For developers: [Architecture](../developer-guide/architecture.md)

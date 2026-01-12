@@ -25,15 +25,10 @@ cd LCTK
 The setup script installs all dependencies automatically:
 
 ```bash
-# Interactive installation (recommended first time)
-make prepare
-
-# Or non-interactive (for automation)
-./setup-dev-env.sh -y
-
-# Minimal install (no CUDA, no dev tools)
-./setup-dev-env.sh -y --minimal
+./setup.sh
 ```
+
+This runs an interactive setup. Follow the prompts to select optional components (CUDA, dev tools).
 
 **What gets installed:**
 - ROS 2 Humble
@@ -42,32 +37,34 @@ make prepare
 - GStreamer and plugins
 - SFCGAL library
 - Python dependencies
+- colcon-cargo-ros2 for Rust ROS 2 integration
 
 **Time required:** ~15-20 minutes depending on your internet speed.
 
 ### Step 3: Build Project
 
+After setup completes, reload your shell and build:
+
 ```bash
-make build
+source ~/.bashrc
+just build
 ```
 
-This runs a three-pass build process:
-1. ROS 2 Rust foundation (~3 min)
-2. Interface types (~1 min)
-3. LCTK applications (~5 min)
-
-**First build takes ~10 minutes.** Subsequent builds are much faster (~1-2 min).
+**First build takes ~5-10 minutes.** Subsequent builds are much faster (~1-2 min).
 
 ## Verify Installation
 
 Test with sample data:
 
 ```bash
-make launch_lidar_camera_sample_data
+just demo
 ```
 
-In another terminal:
+Open a web browser to `http://localhost:8080` to see the web UI.
+
+In another terminal, check running topics:
 ```bash
+source install/setup.bash
 ros2 topic list
 ```
 
@@ -79,13 +76,14 @@ If you see these topics, installation succeeded!
 
 ## Optional: GPU Acceleration
 
-For CUDA support (NVIDIA GPUs only):
+For CUDA support (NVIDIA GPUs only), select "Install CUDA toolkit" during interactive setup, or run:
 
 ```bash
-# Run setup with CUDA (default on first install)
-./setup-dev-env.sh -y
+./setup.sh cuda
+```
 
-# Verify CUDA installation
+Verify CUDA installation:
+```bash
 nvidia-smi
 ```
 
@@ -111,6 +109,11 @@ source install/setup.bash
 **ROS 2 daemon unresponsive:**
 ```bash
 pkill -9 -f ros2-daemon
+```
+
+**Check setup status:**
+```bash
+./setup.sh status
 ```
 
 For more issues, see [Troubleshooting](./troubleshooting.md).

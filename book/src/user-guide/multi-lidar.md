@@ -6,25 +6,31 @@ This guide shows how to calibrate two or more LiDAR sensors, computing the trans
 
 ```mermaid
 graph LR
-    A[LiDAR 1 Points] --> C[Board Detector 1]
-    B[LiDAR 2 Points] --> D[Board Detector 2]
-    C --> E[Multi-Wayside Node]
-    D --> E
-    E --> F[Transform]
+    A[(LiDAR 1)] --> C[Board Detector 1]
+    B[(LiDAR 2)] --> D[Board Detector 2]
+    C -->|3D pose| E[Multi-Wayside Node]
+    D -->|3D pose| E
+    E --> F>Transform]
 
-    style F fill:#90EE90
+    classDef sensor fill:#e0e0e0,stroke:#333,color:#000
+    classDef node fill:#4a90d9,stroke:#333,color:#fff
+    classDef output fill:#2d6a4f,stroke:#333,color:#fff
+
+    class A,B sensor
+    class C,D,E node
+    class F output
 ```
 
 **What happens:**
 1. Both LiDARs see the **same calibration board** from different angles
 2. Each **Board Detector** finds the board in its point cloud (3D pose)
-3. **Multi-Wayside Node** synchronizes detections and computes the LiDAR-to-LiDAR transformation
+3. **Multi-Wayside Node** computes the LiDAR-to-LiDAR transformation
 
 **Key difference from LiDAR-camera:** No ArUco markers needed, only the hollow board pattern.
 
 ## Calibration Target
 
-You need the same **1m × 1m hollow board**:
+You need the same **1m x 1m hollow board**:
 - 4 circular holes (150mm radius) in corners
 - Board must be visible to **both LiDARs simultaneously**
 
@@ -35,7 +41,7 @@ You need the same **1m × 1m hollow board**:
 Use the included sample data:
 ```bash
 cd ~/repos/LCTK
-make launch_two_lidar_calibration
+just two-lidar
 ```
 
 This plays back data from two LiDARs that both see the calibration board.
@@ -47,15 +53,19 @@ Or record your own:
 
 ### 2. Launch Calibration
 
-The `launch_two_lidar_calibration` command starts:
+The `just two-lidar` command starts:
 - Two Velodyne driver nodes (playing PCAP data)
 - Two board detector nodes (one per LiDAR)
 - Multi-wayside node (computes transformation)
 
 ### 3. Monitor Progress
 
+Open `http://localhost:8080` to see the web UI.
+
 Check that both LiDARs are detecting the board:
 ```bash
+source install/setup.bash
+
 # Should both show >1 Hz
 ros2 topic hz /sensing/lidar/top/board_detections
 ros2 topic hz /sensing/lidar/front/board_detections
@@ -68,9 +78,9 @@ ros2 topic echo /calibration_transform
 
 ### 4. Validate Results
 
-Visualize in RViz:
+If you have a display, visualize in RViz:
 ```bash
-rviz2
+just rviz
 ```
 
 Add both point cloud topics:
@@ -81,12 +91,12 @@ Set Fixed Frame to `velodyne_top`. If calibrated correctly, point clouds from bo
 
 ## Configuration
 
-Key parameters in `config/multi_wayside.yaml`:
-- `same_face_mode: true` — Both LiDARs see the **same side** of the board
-- `sync_tolerance_ms: 100` — Maximum time difference between detections (100ms)
-- `min_detections_for_calibration: 5` — Minimum synchronized pairs needed
+Key parameters in `ros/lctk_launch/config/multi_wayside.yaml`:
+- `same_face_mode: true` - Both LiDARs see the **same side** of the board
+- `sync_tolerance_ms: 100` - Maximum time difference between detections
+- `min_detections_for_calibration: 5` - Minimum synchronized pairs needed
 
-If LiDARs see **opposite sides** of the board, set `same_face_mode: false` to apply 180° correction.
+If LiDARs see **opposite sides** of the board, set `same_face_mode: false` to apply 180 degree correction.
 
 ## Tips for Good Calibration
 

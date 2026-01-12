@@ -13,8 +13,8 @@ cd LCTK
 git checkout -b feature/my-feature
 
 # Setup environment
-make prepare
-make build
+./setup-dev-env.sh -y
+just build
 
 # Make changes, test, commit
 cargo test --workspace
@@ -140,16 +140,16 @@ refactor: simplify ArUco detection pipeline
 **Before committing:**
 ```bash
 # Format
-cargo fmt --all
+just format
 
 # Lint
-cargo clippy --all-targets
+just lint
 
 # Test
-cargo test --workspace
+just test
 
 # Build
-make build
+just build
 ```
 
 ### 4. Pull Request
@@ -205,14 +205,14 @@ Closes #123
 
 ## Building ROS Packages
 
-**Important:** Always use Makefile for ROS packages
+**Use justfile for building:**
 
 ```bash
-# CORRECT
-make build_packages
+# Build all packages
+just build
 
-# WRONG (breaks cargo config)
-colcon build --packages-select my_node
+# Clean and rebuild
+just clean && just build
 ```
 
 See [Build System](./build-system.md) for details.

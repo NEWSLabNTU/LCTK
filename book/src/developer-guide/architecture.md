@@ -1,275 +1,175 @@
-# Architecture Overview
+# Architecture
 
-LCTK is built on a layered architecture that separates algorithm implementations from ROS 2 integration, enabling code reuse and testability.
-
-## System Layers
-
-```mermaid
-graph TB
-    subgraph "Application Layer"
-        L[Launch Files<br/>Workflow Orchestration]
-    end
-
-    subgraph "ROS 2 Node Layer"
-        A[aruco_locator_node]
-        B[lidar_board_detector]
-        C[synchronizer]
-        D[extrinsic_solver]
-        E[multi_wayside_node]
-    end
-
-    subgraph "Core Library Layer"
-        F[aruco-detector]
-        G[hollow-board-detector]
-        H[pnp-solver]
-        I[plane-estimator]
-        J[serde-types]
-    end
-
-    subgraph "External Dependencies"
-        K[ROS 2 Humble / rclrs]
-        M[OpenCV / opencv-rust]
-        N[nalgebra]
-    end
-
-    L --> A & B & C & D & E
-    A --> F
-    B --> G & I
-    D --> H
-    A & B & D & E --> K
-    F --> M
-    G & I --> N
-    H --> M
-```
+LCTK uses a layered architecture that separates algorithms from ROS 2 integration.
 
 ## Design Principles
 
-### 1. Separation of Concerns
+### Separation of Concerns
 
-**Core Libraries** (`src/lib/`)
-- Pure Rust, no ROS dependencies
-- Testable with standard Rust tooling (`cargo test`)
-- Reusable in non-ROS contexts
-- Examples: `aruco-detector`, `hollow-board-detector`, `pnp-solver`
+```
+┌─────────────────────────────────────────────────────┐
+│              ROS 2 Nodes (ros/)                     │
+│   Thin wrappers: topics, services, parameters       │
+├─────────────────────────────────────────────────────┤
+│            Core Libraries (rust/)                   │
+│   Pure Rust: algorithms, no ROS dependencies        │
+└─────────────────────────────────────────────────────┘
+```
 
-**ROS 2 Nodes** (`src/bin/`)
-- Thin wrappers around core libraries
-- Handle ROS communication (topics, services, parameters)
-- Manage node lifecycle
-- Examples: `aruco_locator_node`, `lidar_board_detector`
+**Core libraries** (`rust/`) contain detection and calibration algorithms. They are pure Rust with no ROS dependencies, testable with `cargo test`, and reusable outside ROS.
 
-### 2. Type-Driven Development
+**ROS nodes** (`ros/`) are thin wrappers that handle communication (topics, services) and lifecycle. They delegate actual work to core libraries.
 
-**Serializable Types** (`serde-types`)
-- Shared data structures across libraries
-- JSON5 serialization for config files
-- Type-safe configuration parsing
+This separation enables:
+- Fast iteration with `cargo test` (no ROS setup needed)
+- Algorithm reuse in non-ROS contexts
+- Clear boundaries for testing and maintenance
 
-**ROS Message Types** (`src/interface/`)
-- Custom message definitions for calibration data
-- Generated Rust bindings via rclrs
+### Lock-Free Configuration
 
-### 3. Modularity
+Nodes use `arc-swap` for runtime configuration updates without blocking callbacks:
 
-Each library has a single responsibility:
-- `aruco-detector`: ArUco marker detection in images
-- `hollow-board-detector`: Calibration board detection in point clouds
-- `plane-estimator`: RANSAC plane fitting algorithms
-- `pnp-solver`: Perspective-n-Point problem solving
-
-## Component Architecture
-
-### Core Libraries
-
-**aruco-detector** (`src/lib/aruco-detector/`)
-- Wraps OpenCV ArUco detection
-- Configurable via `aruco-config` types
-- Returns marker corners and IDs
-
-**hollow-board-detector** (`src/lib/hollow-board-detector/`)
-- Multi-stage pipeline: bounding box → RANSAC → ICP
-- Uses `plane-estimator` for initial plane detection
-- PCA-based pose initialization
-- Iterative refinement with ICP
-
-**pnp-solver** (`src/lib/pnp-solver/`)
-- Solves camera pose from 2D-3D correspondences
-- Supports multiple algorithms (SQPNP, IPPE, ITERATIVE)
-- OpenCV wrapper with Rust-friendly API
-
-**plane-estimator** (`src/lib/plane-estimator/`)
-- RANSAC-based plane fitting
-- Point cloud filtering and segmentation
-- Robust outlier rejection
-
-### ROS 2 Nodes
-
-**Node Pattern:**
 ```rust
-pub struct NodeState {
-    // Core algorithm instance
-    detector: ArUcoDetector,
+// Service updates config atomically
+config.store(Arc::new(new_config));
 
-    // ROS publishers
-    detection_publisher: Publisher<Detection2DArray>,
-
-    // Configuration
-    config: Arc<ArcSwap<Config>>,
-}
+// Detection callback reads without locking
+let current = config.load();
 ```
 
-**Concurrency Model:**
-- Lock-free updates using `arc-swap` for configuration
-- Separate threads for detection and publishing
-- Async ROS callbacks
+## LiDAR-Camera Calibration Pipeline
 
-## Communication Architecture
+```mermaid
+flowchart LR
+    subgraph Input
+        CAM[(Camera)]
+        LID[(LiDAR)]
+    end
 
-### Topic Flow (LiDAR-Camera)
+    subgraph Detection
+        ARU[ArUco Detector]
+        BRD[Board Detector]
+    end
 
-```
-Camera → aruco_locator_node → /aruco_detections
-                                      ↓
-                              synchronizer → /synchronized_detections
-                                      ↑                    ↓
-LiDAR → lidar_board_detector → /board_detections    extrinsic_solver
-                                                           ↓
-                                                 /calibration_transform
-```
+    subgraph Calibration
+        EXT[Extrinsic Solver]
+    end
 
-### Message Types
+    subgraph Output
+        OVL[Overlay]
+        TF>Transform]
+    end
 
-**Detection Messages:**
-- `vision_msgs/Detection2DArray`: 2D ArUco marker detections
-- `vision_msgs/Detection3DArray`: 3D board detections
-- `geometry_msgs/TransformStamped`: Calibration results
+    CAM -->|image| ARU
+    LID -->|pointcloud| BRD
 
-**Custom Types:**
-- Synchronization metadata
-- Calibration quality metrics
-- Debug visualization data
+    ARU -->|2D corners| EXT
+    BRD -->|3D pose| EXT
 
-### Services
+    EXT --> TF
+    EXT --> OVL
 
-**Calibration Control:**
-- `/trigger_calibration`: Start/stop calibration
-- `/reset_calibration`: Clear buffered data
+    CAM -->|image| OVL
+    LID -->|pointcloud| OVL
 
-**Configuration:**
-- `/set_roi_bounds`: Adjust detection region dynamically
-- `/save_adjustments`: Persist manual corrections
+    classDef sensor fill:#e0e0e0,stroke:#333,color:#000
+    classDef node fill:#4a90d9,stroke:#333,color:#fff
+    classDef output fill:#2d6a4f,stroke:#333,color:#fff
 
-## Build Architecture
-
-### Three-Pass System
-
-**Pass 1: ROS 2 Rust Foundation**
-```
-ros2_rust_ws/ → rclrs + ros2_interfaces
+    class CAM,LID sensor
+    class ARU,BRD,EXT,OVL node
+    class TF output
 ```
 
-**Pass 2: Interface Types**
-```
-src/interface/ → Custom ROS message types for LCTK
-```
+### Data Flow
 
-**Pass 3: Applications**
-```
-src/lib/ (core libraries) + src/bin/ (ROS nodes)
-```
+1. **Camera** publishes images; **LiDAR** publishes point clouds
+2. **ArUco Detector** finds marker corners in images (2D)
+3. **Board Detector** finds calibration board pose in point clouds (3D)
+4. **Extrinsic Solver** computes LiDAR-to-camera transform using 2D-3D correspondences
+5. **Overlay** projects points onto images using the computed transform
 
-**Why three passes?**
-- `rclrs` generates bindings at build time
-- Interface types depend on `rclrs`
-- LCTK nodes depend on interface types
-- Circular dependencies must be broken
+### Board Detection Pipeline
 
-## Configuration Architecture
-
-**Hierarchy:**
-1. **Default values**: Hardcoded in structs
-2. **Config files**: JSON5 (board patterns, ArUco layouts)
-3. **Launch parameters**: XML launch files
-4. **Runtime parameters**: ROS parameter server
-5. **Services**: Dynamic updates via services
-
-**Config Propagation:**
-```
-Launch file → Node parameters → Core library config
-                              → Runtime updates via services
-```
-
-## Data Flow Patterns
-
-### Detection Pipeline
+The board detector uses a multi-stage approach:
 
 ```
-Sensor Data → Preprocessing → Detection → Validation → Publishing
+Pointcloud → Bounding Box Filter → RANSAC Plane → PCA Initial Pose → ICP Refinement → Pose
 ```
 
-### Calibration Pipeline
+1. **Bounding box** filters points to region of interest
+2. **RANSAC** detects the dominant plane (calibration board surface)
+3. **PCA** computes initial pose from plane inliers
+4. **ICP** refines pose by matching model to observed points
+
+## Configuration Flow
 
 ```
-Multiple Detections → Buffering → Synchronization → Solving → Broadcasting
+Config Files (JSON5)
+        ↓
+Launch Parameters (XML)
+        ↓
+ROS Parameters
+        ↓
+Runtime Services (dynamic updates)
 ```
 
-### Feedback Loop
+Configuration files in `ros/lctk_launch/config/` define:
+- **ArUco pattern**: Marker IDs, positions, dictionary
+- **Board geometry**: Dimensions, hole specifications
+- **Bounding box**: Region of interest for detection
+
+Launch files pass these to nodes as parameters. Some parameters (like bounding box) can be updated at runtime via services.
+
+## Debug Mode
+
+When `debug_mode=true`, nodes publish intermediate results for visualization:
+
+- Filtered point clouds at each pipeline stage
+- RANSAC plane visualization
+- ICP iteration poses
+- Detection statistics
+
+Use RViz or the web UI to visualize these topics during development.
+
+## Project Structure
 
 ```
-Detection → Visualization → Manual Adjustment → Re-calibration
+LCTK/
+├── rust/                    # Core libraries (pure Rust)
+│   ├── aruco-detector/
+│   ├── hollow-board-detector/
+│   ├── plane-estimator/
+│   └── ...
+├── ros/                     # ROS 2 packages
+│   ├── aruco_locator_node/
+│   ├── lidar_board_detector/
+│   ├── extrinsic_solver_node/
+│   ├── lctk_launch/         # Launch files and configs
+│   └── ...
+├── book/                    # This documentation
+└── justfile                 # Build commands
 ```
 
-## Extension Points
+Explore the source code for implementation details. Each library and node has its own README and rustdoc comments.
 
-### Adding New Calibration Targets
+## Extending LCTK
 
-1. Implement detector in `src/lib/`
-2. Create ROS node wrapper in `src/bin/`
-3. Define custom messages in `src/interface/` (if needed)
-4. Add launch file configuration
+### Adding a New Detection Target
 
-### Adding New PnP Solvers
+1. Implement detector algorithm in `rust/`
+2. Create ROS node wrapper in `ros/`
+3. Add configuration files and launch integration
+4. Update extrinsic solver to accept new detection type
 
-1. Extend `pnp-solver` library with new algorithm
-2. Update `extrinsic_solver_node` to expose algorithm choice
-3. Add configuration parameter
+### Adding a New Solver Algorithm
 
-### Adding New Sensors
+1. Add algorithm to the solver library
+2. Expose as a configuration option
+3. Update node parameters
 
-1. Create sensor driver node (or use existing ROS drivers)
-2. Implement detector for sensor-specific features
-3. Add to synchronization pipeline
+## Next Steps
 
-## Performance Considerations
-
-**Real-time Processing:**
-- Target: >10 Hz detection rate
-- Minimize memory allocation in hot paths
-- Use SIMD where applicable (via `nalgebra`)
-
-**Memory Management:**
-- Point cloud downsampling for large datasets
-- Bounded queues for synchronization
-- Zero-copy message passing where possible
-
-**Scalability:**
-- Stateless detection nodes (parallelizable)
-- Distributed processing via ROS 2 multi-machine support
-
-## Key Technologies
-
-| Technology | Purpose | Version |
-|------------|---------|---------|
-| **Rust** | Core implementation | Stable channel |
-| **ROS 2 Humble** | Middleware | Ubuntu 22.04 |
-| **rclrs** | Rust ROS client | 0.5.x |
-| **opencv-rust** | Computer vision | 0.92+ |
-| **nalgebra** | Linear algebra | Latest |
-| **small_gicp** | Point cloud ICP | Latest |
-
-## Next Steps for Developers
-
-- [Core Libraries](./libraries.md) - Detailed library documentation
-- [ROS 2 Nodes](./ros2-nodes.md) - Node implementation patterns
-- [Build System](./build-system.md) - Three-pass build details
+- [Build System](./build-system.md) - How to build the project
+- [Testing](./testing.md) - Testing strategies
 - [Contributing](./contributing.md) - Development workflow
