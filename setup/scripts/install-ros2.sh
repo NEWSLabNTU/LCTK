@@ -55,6 +55,7 @@ sudo apt-get install -y \
     ros-${ROSDISTRO}-interactive-markers \
     ros-${ROSDISTRO}-image-transport \
     ros-${ROSDISTRO}-cv-bridge \
-    ros-${ROSDISTRO}-image-geometry
+    ros-${ROSDISTRO}-image-geometry \
+    ros-${ROSDISTRO}-test-msgs
 
 echo "ROS 2 ${ROSDISTRO} installation complete."
