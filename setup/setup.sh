@@ -158,6 +158,15 @@ interactive_setup() {
     printf "  - Build tools and dependencies\n"
     printf "\n"
 
+    # Optional: Git submodules
+    UPDATE_SUBMODULES="n"
+    printf "${YELLOW}Git Submodules:${NC} Update git submodules\n"
+    printf "${RED}Warning:${NC} This will discard any local changes in submodules.\n"
+    if ask_yes_no "Update git submodules?" "n"; then
+        UPDATE_SUBMODULES="y"
+    fi
+    printf "\n"
+
     # Optional: CUDA
     INSTALL_CUDA="n"
     printf "${YELLOW}Optional:${NC} CUDA toolkit (~2-3 GB)\n"
@@ -179,11 +188,15 @@ interactive_setup() {
     printf "\n"
 
     # Export choices for justfile
+    export UPDATE_SUBMODULES="$UPDATE_SUBMODULES"
     export INSTALL_CUDA="$INSTALL_CUDA"
     export INSTALL_DEV_TOOLS="$INSTALL_DEV_TOOLS"
 
     # Summary
     printf "Installing: Core"
+    if [[ "$UPDATE_SUBMODULES" == "y" ]]; then
+        printf " + Submodules"
+    fi
     if [[ "$INSTALL_CUDA" == "y" ]]; then
         printf " + CUDA"
     fi
@@ -225,6 +238,7 @@ main() {
         if [[ ! -t 0 ]]; then
             # Non-interactive mode (piped input)
             printf "${YELLOW}->>${NC} Non-interactive mode\n"
+            export UPDATE_SUBMODULES="${UPDATE_SUBMODULES:-n}"
             export INSTALL_CUDA="${INSTALL_CUDA:-n}"
             export INSTALL_DEV_TOOLS="${INSTALL_DEV_TOOLS:-y}"
         else

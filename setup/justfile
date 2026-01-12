@@ -32,7 +32,7 @@ default:
     @just --list
 
 # Full setup (runs all steps in order)
-setup: _init system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust _setup-cuda _setup-dev-tools rosdep
+setup: _init _setup-submodules system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust _setup-cuda _setup-dev-tools rosdep-init ros-deps
     @printf "{{green}}========================================{{nc}}\n"
     @printf "{{green}}LCTK development environment setup completed!{{nc}}\n"
     @printf "{{green}}========================================{{nc}}\n"
@@ -41,10 +41,20 @@ setup: _init system-base build-tools ros2 rust python opencv gstreamer geometric
     @printf "1. Reload your shell: {{blue}}source ~/.bashrc{{nc}}\n"
     @printf "2. Source ROS 2:      {{blue}}source /opt/ros/humble/setup.bash{{nc}}\n"
     @printf "3. Build project:     {{blue}}just build{{nc}}\n"
-    @printf "4. Run sample data:   {{blue}}just sample-sensor-data start{{nc}}\n"
+    @printf "4. Run sample data:   {{blue}}just sample-data{{nc}}\n"
 
 # Alias for setup (resume from where it left off due to markers)
 resume: setup
+
+# Conditional submodule update (based on UPDATE_SUBMODULES env var)
+_setup-submodules:
+    #!/usr/bin/env bash
+    if [[ "${UPDATE_SUBMODULES:-n}" == "y" ]]; then
+        just submodules
+    else
+        printf "{{yellow}}-> submodules skipped (user choice){{nc}}\n"
+        printf "{{yellow}}Note:{{nc}} Run 'just submodules' to update later\n"
+    fi
 
 # Conditional CUDA install (based on INSTALL_CUDA env var)
 _setup-cuda:
@@ -67,6 +77,10 @@ _setup-dev-tools:
     fi
 
 # === Individual Setup Steps ===
+
+# Update git submodules (discards local changes)
+submodules: _init
+    @just _run submodules "{{scripts_dir}}/update-submodules.sh"
 
 # Install basic system packages
 system-base: _init
@@ -116,9 +130,13 @@ cuda: _init system-base
 dev-tools: _init system-base
     @just _run dev-tools "{{scripts_dir}}/install-dev-tools.sh"
 
-# Setup rosdep and install ROS dependencies
-rosdep: _init ros2
-    @just _run rosdep "{{scripts_dir}}/setup-rosdep.sh"
+# Initialize rosdep database
+rosdep-init: _init ros2
+    @just _run rosdep-init "{{scripts_dir}}/rosdep-init.sh"
+
+# Install ROS dependencies from package.xml files
+ros-deps: _init rosdep-init
+    @just _run ros-deps "{{scripts_dir}}/install-ros-deps.sh"
 
 # === Utility Recipes ===
 
@@ -156,7 +174,7 @@ status:
     echo "================="
     echo ""
     echo "Core Components:"
-    for step in system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust rosdep; do
+    for step in system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust rosdep-init ros-deps; do
         if [[ -f "{{marker_dir}}/$step" ]]; then
             printf "  {{green}}[done]{{nc}} %s\n" "$step"
         else
@@ -165,7 +183,7 @@ status:
     done
     echo ""
     echo "Optional Components:"
-    for step in cuda dev-tools; do
+    for step in submodules cuda dev-tools; do
         if [[ -f "{{marker_dir}}/$step" ]]; then
             printf "  {{green}}[done]{{nc}} %s\n" "$step"
         else
