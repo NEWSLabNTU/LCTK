@@ -75,6 +75,21 @@ sample-data:
     source install/setup.bash
     play_launch launch lctk_sample_data lidar_camera.launch.xml
 
+# Launch demo (sample data + calibration pipeline)
+demo:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    play_launch launch lctk_launch lidar_camera_demo.launch.xml \
+        debug_mode:={{ debug_mode }} \
+        enable_icp_iteration_debug:={{ enable_icp_iteration_debug }} \
+        enable_judge:={{ enable_evaluator }} \
+        enable_overlay:={{ enable_overlay }} \
+        enable_rviz:={{ rviz_enabled }} \
+        log_level:={{ log_level }} \
+        use_best_effort_qos:={{ use_best_effort_qos }} \
+        use_advanced_solver:={{ use_advanced_solver }}
+
 # Launch RViz for calibration visualization
 rviz:
     #!/usr/bin/env bash
