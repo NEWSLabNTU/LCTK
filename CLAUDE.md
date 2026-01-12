@@ -27,6 +27,7 @@ just
 - **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, etc.)
 - **`ros/`**: ROS 2 nodes (aruco_locator_node, lidar_board_detector, extrinsic_solver, etc.)
 - **`setup/`**: Development environment setup scripts
+- **`book/`**: Documentation (mdbook with mermaid diagrams)
 
 ## Build System
 
@@ -46,6 +47,11 @@ just lint       # Run linting
 just lidar-camera   # Launch calibration
 just sample-data    # Launch sample data
 just rviz           # Launch RViz
+
+# Documentation (run from book/ directory)
+just build          # Build docs
+just serve          # Serve with live reload
+just serve-public   # Serve on 0.0.0.0
 ```
 
 ## Known Issues
