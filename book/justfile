@@ -1,0 +1,29 @@
+# LCTK Documentation
+# Usage: just build, just serve, just clean
+
+set shell := ["bash", "-uc"]
+
+# Default: show available commands
+default:
+    @just --list
+
+# Build the documentation
+build:
+    mdbook build
+
+# Serve documentation with live reload
+serve:
+    mdbook serve --open
+
+# Serve on all interfaces (for remote access)
+serve-public:
+    mdbook serve --hostname 0.0.0.0
+
+# Clean build artifacts
+clean:
+    rm -rf book
+
+# Install mdbook and mermaid preprocessor
+install-deps:
+    cargo install mdbook mdbook-mermaid
+    mdbook-mermaid install .

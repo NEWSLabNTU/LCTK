@@ -1,7 +1,12 @@
 [book]
 authors = ["aeon"]
 language = "en"
-multilingual = false
 src = "src"
 title = "LCTK Documentation"
 description = "LiDAR and Camera Toolkit - User and Developer Guide"
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html]
+additional-js = ["js/mermaid.min.js", "js/mermaid-init.js"]
