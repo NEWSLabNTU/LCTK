@@ -13,8 +13,8 @@ log_level := "info"
 rviz_enabled := "true"
 use_best_effort_qos := "true"
 use_advanced_solver := "false"
-camera_topic := "/sensing/camera/zedxm/zed_node/left_raw/image_raw_color"
-pointcloud_topic := "/sensing/lidar/concatenated/pointcloud"
+camera_topic := "/sensing/camera/front_center/image_raw"
+pointcloud_topic := "/sensing/lidar/top/pointcloud_raw"
 
 # Show available commands
 default:
@@ -35,6 +35,10 @@ build:
 clean:
     rm -rf build install log target
 
+# Format code with rustfmt
+format:
+    cargo +nightly fmt
+
 # Run formatting and linting checks
 lint:
     cargo +nightly fmt --check
@@ -42,7 +46,7 @@ lint:
 
 # Run tests with cargo nextest
 test:
-    cargo nextest run --cargo-profile test-release --no-fail-fast
+    cargo nextest run --config build/ros2_cargo_config.toml --cargo-profile test-release --no-fail-fast
 
 # Launch LiDAR-camera calibration
 lidar-camera:
@@ -68,7 +72,7 @@ two-lidar:
     source install/setup.bash
     play_launch launch lctk_launch two_lidar_calibration.launch.xml
 
-# Launch sample data playback
+# Launch sample data playback only
 sample-data:
     #!/usr/bin/env bash
     set -eo pipefail
