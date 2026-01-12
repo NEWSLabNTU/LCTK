@@ -1,0 +1,5 @@
+# Installation markers
+.markers/
+
+# Temporary files
+*.tmp

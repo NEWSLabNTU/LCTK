@@ -1,0 +1,177 @@
+# LCTK Development Environment Setup
+# Usage: just setup          - Run full setup
+#        just resume         - Resume from last failure
+#        just <step>         - Run specific step
+#        just clean-markers  - Reset all checkpoints
+
+set shell := ["bash", "-uc"]
+set positional-arguments
+
+# Directories
+root_dir := justfile_directory()
+marker_dir := root_dir / ".markers"
+scripts_dir := root_dir / "scripts"
+project_root := root_dir / ".."
+
+# Architecture detection
+arch := `uname -m`
+
+# Export for child scripts
+export PROJECT_ROOT := project_root
+export ARCH := arch
+
+# Colors for output
+green := '\033[0;32m'
+yellow := '\033[0;33m'
+red := '\033[0;31m'
+blue := '\033[0;34m'
+nc := '\033[0m'
+
+# Default recipe - show help
+default:
+    @just --list
+
+# Full setup (runs all steps in order)
+setup: _init system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust _setup-cuda _setup-dev-tools rosdep
+    @printf "{{green}}========================================{{nc}}\n"
+    @printf "{{green}}LCTK development environment setup completed!{{nc}}\n"
+    @printf "{{green}}========================================{{nc}}\n"
+    @printf "\n"
+    @printf "Next steps:\n"
+    @printf "1. Reload your shell: {{blue}}source ~/.bashrc{{nc}}\n"
+    @printf "2. Source ROS 2:      {{blue}}source /opt/ros/humble/setup.bash{{nc}}\n"
+    @printf "3. Build project:     {{blue}}just build{{nc}}\n"
+    @printf "4. Run sample data:   {{blue}}just sample-sensor-data start{{nc}}\n"
+
+# Alias for setup (resume from where it left off due to markers)
+resume: setup
+
+# Conditional CUDA install (based on INSTALL_CUDA env var)
+_setup-cuda:
+    #!/usr/bin/env bash
+    if [[ "${INSTALL_CUDA:-n}" == "y" ]]; then
+        just cuda
+    else
+        printf "{{yellow}}-> cuda skipped (user choice){{nc}}\n"
+        printf "{{yellow}}Note:{{nc}} Run 'just cuda' to install later\n"
+    fi
+
+# Conditional dev tools install (based on INSTALL_DEV_TOOLS env var)
+_setup-dev-tools:
+    #!/usr/bin/env bash
+    if [[ "${INSTALL_DEV_TOOLS:-y}" == "y" ]]; then
+        just dev-tools
+    else
+        printf "{{yellow}}-> dev-tools skipped (user choice){{nc}}\n"
+        printf "{{yellow}}Note:{{nc}} Run 'just dev-tools' to install later\n"
+    fi
+
+# === Individual Setup Steps ===
+
+# Install basic system packages
+system-base: _init
+    @just _run system-base "{{scripts_dir}}/install-system-base.sh"
+
+# Install C++ development and build tools
+build-tools: _init system-base
+    @just _run build-tools "{{scripts_dir}}/install-build-tools.sh"
+
+# Install ROS 2 Humble
+ros2: _init system-base
+    @just _run ros2 "{{scripts_dir}}/install-ros2.sh"
+
+# Install Rust toolchain
+rust: _init system-base
+    @just _run rust "{{scripts_dir}}/install-rust.sh"
+
+# Install Python environment
+python: _init ros2
+    @just _run python "{{scripts_dir}}/install-python.sh"
+
+# Install OpenCV and related libraries
+opencv: _init system-base
+    @just _run opencv "{{scripts_dir}}/install-opencv.sh"
+
+# Install GStreamer for video processing
+gstreamer: _init system-base
+    @just _run gstreamer "{{scripts_dir}}/install-gstreamer.sh"
+
+# Install geometric computation libraries (SFCGAL)
+geometric-libs: _init system-base
+    @just _run geometric-libs "{{scripts_dir}}/install-geometric-libs.sh"
+
+# Install network packet capture libraries
+network-libs: _init system-base
+    @just _run network-libs "{{scripts_dir}}/install-network-libs.sh"
+
+# Install colcon-cargo-ros2 for Rust ROS 2 integration
+colcon-rust: _init ros2 rust
+    @just _run colcon-rust "{{scripts_dir}}/install-colcon-rust.sh"
+
+# Install CUDA toolkit (optional)
+cuda: _init system-base
+    @just _run cuda "{{scripts_dir}}/install-cuda.sh"
+
+# Install development and testing tools (optional)
+dev-tools: _init system-base
+    @just _run dev-tools "{{scripts_dir}}/install-dev-tools.sh"
+
+# Setup rosdep and install ROS dependencies
+rosdep: _init ros2
+    @just _run rosdep "{{scripts_dir}}/setup-rosdep.sh"
+
+# === Utility Recipes ===
+
+# Initialize marker directory
+_init:
+    @mkdir -p "{{marker_dir}}"
+
+# Run a script with marker check
+_run name cmd:
+    #!/usr/bin/env bash
+    if [[ -f "{{marker_dir}}/{{name}}" ]]; then
+        printf "{{green}}[done]{{nc}} {{name}}\n"
+        exit 0
+    fi
+    printf "{{yellow}}->{{nc}} Running {{name}}...\n"
+    set -e
+    {{cmd}}
+    touch "{{marker_dir}}/{{name}}"
+    printf "{{green}}[done]{{nc}} {{name}}\n"
+
+# Clean all markers (force re-run of all steps)
+clean-markers:
+    rm -rf "{{marker_dir}}"
+    @printf "{{yellow}}->{{nc}} Markers cleared. Next 'just setup' will run all steps.\n"
+
+# Clean specific marker
+clean-marker name:
+    rm -f "{{marker_dir}}/{{name}}"
+    @printf "{{yellow}}->{{nc}} Marker '{{name}}' cleared.\n"
+
+# Show setup status
+status:
+    #!/usr/bin/env bash
+    echo "LCTK Setup Status"
+    echo "================="
+    echo ""
+    echo "Core Components:"
+    for step in system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust rosdep; do
+        if [[ -f "{{marker_dir}}/$step" ]]; then
+            printf "  {{green}}[done]{{nc}} %s\n" "$step"
+        else
+            printf "  {{red}}[    ]{{nc}} %s\n" "$step"
+        fi
+    done
+    echo ""
+    echo "Optional Components:"
+    for step in cuda dev-tools; do
+        if [[ -f "{{marker_dir}}/$step" ]]; then
+            printf "  {{green}}[done]{{nc}} %s\n" "$step"
+        else
+            printf "  {{yellow}}[skip]{{nc}} %s (optional)\n" "$step"
+        fi
+    done
+    echo ""
+    echo "To re-run a step: just clean-marker <step> && just <step>"
+    echo "To re-run all:    just clean-markers && just setup"

@@ -12,18 +12,19 @@ LCTK (LiDAR and Camera Toolkit) is a set of libraries and tools for calibrating 
 
 ```bash
 # Set up development environment (interactive)
-make prepare
+./setup.sh
 
-# Or use the setup script directly with options:
-./setup-dev-env.sh -y              # Non-interactive installation
-./setup-dev-env.sh -y --no-cuda    # Skip CUDA installation
-./setup-dev-env.sh -y --minimal    # Minimal installation (no CUDA, no dev tools)
+# Or run specific setup steps:
+./setup.sh status         # Check what's installed
+./setup.sh ros2           # Install only ROS 2
+./setup.sh rust           # Install only Rust
+./setup.sh clean-markers  # Reset all installation markers
 
 # Build the project
-make build
+just build
 
 # Test with sample data
-make launch_lidar_camera_sample_data
+just sample-sensor-data start
 ```
 
 ### Known Issues and Solutions
@@ -42,7 +43,7 @@ pip3 uninstall empy
 sudo apt-get install python3-empy
 ```
 
-The setup-dev-env.sh script handles this automatically by ensuring the system package is used.
+The setup script handles this automatically by ensuring the system package is used.
 
 #### Working Directory Issues
 If Claude Code's working directory becomes invalid or gets lost during a session (showing empty $PWD or directory not found errors):
@@ -53,33 +54,40 @@ If Claude Code's working directory becomes invalid or gets lost during a session
 
 ### Build Commands
 
-The project uses a three-pass build process:
-
 ```bash
-# Build the whole project (runs all three passes)
-make build
-
-# Individual build passes:
-# 1. Build rclrs and common interface types for Rust
-make build_ros2_rust
-
-# 2. Build interface types in this project (after building ROS for Rust)
-make build_interface
-
-# 3. Build the rest of the project
-make build_packages
-
-# To build a single crate:
-make build_interface  # Run at least once
-source install/setup.bash
-cargo build --release --manifest-path src/bin/aruco_locator_node/Cargo.toml
+# Build all ROS packages using colcon and cargo-ros2
+just build
 
 # Clean build artifacts
-make clean
+just clean
 
-# Launch calibration pipelines
-make launch_lidar_camera_calibration
-make launch_two_lidar_calibration
+# Run tests
+just test
+
+# Run linting
+just lint
+```
+
+### Launch Calibration Services
+
+```bash
+# Start LiDAR-camera calibration service
+just lidar-camera start
+
+# Stop calibration service
+just lidar-camera stop
+
+# View calibration logs
+just lidar-camera logs -f
+
+# Start sample data playback
+just sample-sensor-data start
+
+# Launch RViz for visualization
+just rviz
+
+# See all available commands
+just help
 ```
 
 ## Project Structure
@@ -115,10 +123,10 @@ The project is organized into:
    - `lidar-to-lidar-calibration/`: Scripts for LiDAR to LiDAR calibration
    - `record-data/`: Scripts for data recording
 
-4. **Ansible** (`ansible/`): Infrastructure-as-code for environment setup
-   - `playbooks/`: Ansible playbooks for setup automation
-   - `roles/`: Modular Ansible roles for each component
-   - Self-contained configuration and requirements
+4. **Setup** (`setup/`): Development environment setup
+   - `setup.sh`: Interactive setup wrapper script
+   - `justfile`: Setup recipes using just command runner
+   - `scripts/`: Individual component installation scripts
 
 ## Calibration Workflow
 
@@ -231,7 +239,7 @@ The toolkit includes utilities for data recording across multiple sensor devices
 
 The project requires Ubuntu 22.04 LTS and the following dependencies:
 
-### Core Dependencies (installed by setup-dev-env.sh)
+### Core Dependencies (installed by ./setup.sh)
 - ROS 2 Humble
 - Rust toolchain (stable and nightly)
 - OpenCV 4.5.4 or later
@@ -240,53 +248,46 @@ The project requires Ubuntu 22.04 LTS and the following dependencies:
 - SFCGAL library for geometric computations
 - libpcap for network packet capture
 - Python 3.10 with pip, venv, numpy, scipy
+- colcon-cargo-ros2 for Rust ROS 2 integration
 
 ### Optional Dependencies
 - CUDA 11.8 toolkit (for GPU acceleration)
 - Development tools (gdb, valgrind, lcov, etc.)
-- Poetry for Python package management
 
-All dependencies are managed through Ansible playbooks. Run `make prepare` or `./setup-dev-env.sh` to install everything automatically.
-
-The environment setup script is in `setup/setup-env.sh`.
+Run `./setup.sh` to install all dependencies interactively. You can also install individual components with `./setup.sh <component>` (e.g., `./setup.sh ros2`, `./setup.sh rust`).
 
 ### Known Build Issues and Solutions
 
-1. **OpenCV version 0.0.0 issue**: The Makefile now automatically sets `OPENCV_PKGCONFIG_NAME=opencv4` to use the system OpenCV installation instead of the non-existent `/opt/opencv4.6.0` path.
+1. **OpenCV version 0.0.0 issue**: Set `OPENCV_PKGCONFIG_NAME=opencv4` to use the system OpenCV installation. This is done automatically by the setup script.
 
-2. **Ansible configuration errors**:
-   - The ansible.builtin collection is built-in and shouldn't be in ansible-galaxy-requirements.yaml
-   - Ansible needs the ANSIBLE_CONFIG environment variable set to find the correct roles path
-   - The setup script now exports ANSIBLE_CONFIG to ensure roles are found
-   - When Ansible is installed via pipx, pip module needs `executable: /usr/bin/pip3` to install user packages
-
-3. **OpenCV binding generation failure**: If you see errors like "fatal error: 'memory' file not found" when building opencv-rust crates:
+2. **OpenCV binding generation failure**: If you see errors like "fatal error: 'memory' file not found" when building opencv-rust crates:
    - Install C++ development headers: `sudo apt-get install libstdc++-12-dev libclang-dev`
-   - The Makefile already sets the correct OpenCV environment variables
+   - Or run `./setup.sh build-tools` to install all build dependencies
 
-4. **SFCGAL library missing**: If packages like `extrinsic_solver`, `multi_wayside`, or `multi_wayside_node` fail with "SFCGAL/capi/sfcgal_c.h: No such file or directory":
+3. **SFCGAL library missing**: If packages like `extrinsic_solver`, `multi_wayside`, or `multi_wayside_node` fail with "SFCGAL/capi/sfcgal_c.h: No such file or directory":
    - Install SFCGAL: `sudo apt-get install libsfcgal-dev`
-   - Or exclude these packages from the build if not needed
+   - Or run `./setup.sh geometric-libs`
 
-5. **Colcon build aborts**: When one package fails in colcon build, all subsequent packages are aborted. To build other packages:
+4. **Colcon build aborts**: When one package fails in colcon build, all subsequent packages are aborted. To build other packages:
    - Fix the failing package's dependencies first, or
    - Build packages individually using cargo with their manifest paths
 
-6. **gscam node crashes**: If the gscam node fails to play video files:
+5. **gscam node crashes**: If the gscam node fails to play video files:
    - Install required GStreamer plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`
-   - The camera.launch.xml file has been updated to use a simple decodebin pipeline that auto-detects video formats
+   - Or run `./setup.sh gstreamer`
    - If you get "undefined symbol: av_timecode_make_smpte_tc_string2" error:
      * This is a libav/ffmpeg version mismatch issue
      * Try: `sudo apt-get install --reinstall gstreamer1.0-libav libavutil56 libavfilter7`
      * Or use the test pattern launch file: `ros2 launch calib_launch camera_test.launch.xml`
-     * Or if you have NVIDIA GPU, modify the pipeline to use nvcodec decoders
 
-7. **rosdep missing dependencies**: The `libpcap` dependency is correctly specified in package.xml files (not `libpcap-dev`)
-
-8. **rosdep initialization errors**:
+6. **rosdep initialization errors**:
    - `rosdep init` must be run as root (creates /etc/ros/rosdep/sources.list.d/20-default.list)
    - `rosdep update` must be run as a regular user (updates ~/.ros/rosdep/sources.cache)
-   - The Ansible playbooks now check if rosdep is already initialized before attempting to run init
+   - The setup script handles this automatically
+
+7. **Colcon-cargo conflicts**: If you have `colcon-cargo` or `colcon-ros-cargo` installed, they conflict with `colcon-cargo-ros2`:
+   - Remove conflicting packages: `pip3 uninstall colcon-cargo colcon-ros-cargo`
+   - Then run `./setup.sh colcon-rust`
 
 ## ROS 2 Integration
 
@@ -422,11 +423,10 @@ make launch_lidar_camera_sample_data  # Plays LiDAR and camera data in loop
 - Don't make Pokemon exception handlings. For example, `try: except Exception: pass`. It creates silent errors. I prefer to throw errors to the user so developers can fix it.
 - If `source /opt/ros/humble/setup.bash` was done earlier and we would like to test Rust code only without ROS, you can run `cargo clippy --all-targets --all-features`.
 - In Rust, initialize struct fields first and then construct the struct. It avoids creating a mutable struct.
-- **DEPRECATED**: Fixed colcon-cargo JSON parsing issue by modifying /home/aeon/.local/lib/python3.10/site-packages/colcon_cargo/task/cargo/build.py to use direct subprocess calls with --quiet flag. This resolves "JSONDecodeError: Expecting value: line 1 column 1" errors caused by patch warnings in cargo metadata output. (Note: We now use colcon-cargo-ros2 instead of colcon-cargo + colcon-ros-cargo)
-- **Colcon Rust Integration**: Migrated from colcon-cargo + colcon-ros-cargo to colcon-cargo-ros2 for better ROS 2 integration and automatic binding generation. The old packages conflict with colcon-cargo-ros2 and must be uninstalled. The Ansible setup script now checks for these conflicts and installs colcon-cargo-ros2 via `pip install --user colcon-cargo-ros2`.
+- **Colcon Rust Integration**: Using colcon-cargo-ros2 for better ROS 2 integration and automatic binding generation. The old colcon-cargo and colcon-ros-cargo packages conflict with colcon-cargo-ros2 and must be uninstalled. The setup script checks for these conflicts and installs colcon-cargo-ros2 via `pip install --user colcon-cargo-ros2`.
 - OpenCV environment variables are set automatically to avoid version 0.0.0 issues.
-- Dependencies are now managed through Ansible playbooks in an Autoware-style setup (setup-dev-env.sh)
-- Git ignores build artifacts: ansible_collections/, build/, install/, log/, build_logs/, .cargo/, ros2_rust_ws/{build,install,log}/
+- Dependencies are managed through the justfile-based setup system in `setup/` directory.
+- Git ignores build artifacts: build/, install/, log/, build_logs/, .cargo/, ros2_rust_ws/{build,install,log}/, setup/.markers/
 - **Config File Parameters**: All ROS2 nodes now require mandatory config file parameters - no hardcoded defaults:
   - `aruco_locator_node`: Requires `aruco_config_file` parameter (no default path)
   - `lidar_board_detector`: Requires `board_detector_file`, `aruco_pattern_file`, and `bbox_file` parameters
