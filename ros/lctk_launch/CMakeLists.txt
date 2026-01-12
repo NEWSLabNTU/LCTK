@@ -22,6 +22,7 @@ install(FILES
   launch/calibration_judge.launch.xml
   # Refactored calibration launch files
   launch/lidar_camera_calibration.launch.xml
+  launch/lidar_camera_demo.launch.xml
   launch/two_lidar_calibration.launch.xml
   # Visualization launch files
   launch/rviz.launch.xml
