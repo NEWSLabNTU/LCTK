@@ -5,10 +5,6 @@
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
   <license>MIT</license>
 
-  <depend>rclrs</depend>
-  <depend>std_msgs</depend>
-  <depend>sensor_msgs</depend>
-  <depend>std_srvs</depend>
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>libopencv-dev</depend>
