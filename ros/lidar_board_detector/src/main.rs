@@ -318,6 +318,14 @@ impl CalibrationBoardLocatorNode {
         // These can be changed at runtime via `ros2 param set`
         let bbox_params = BBoxParameters::declare(&node, &initial_bbox)?;
         bbox_params.log_values();
+        log_info!(
+            LOGGER_NAME,
+            "Dynamic bbox params available: bbox_center_x, bbox_center_y, bbox_center_z, bbox_rotation_w, bbox_rotation_x, bbox_rotation_y, bbox_rotation_z, bbox_size_x, bbox_size_y, bbox_size_z"
+        );
+        log_info!(
+            LOGGER_NAME,
+            "Change at runtime with: ros2 param set /lidar_board_detector bbox_size_x <value>"
+        );
 
         // Debug mode parameter (optional, defaults to false)
         let debug_param = node
@@ -554,6 +562,8 @@ impl CalibrationBoardLocatorNode {
 
             loop {
                 // Take the latest message (replace with None)
+                // ArcSwap pattern ensures we always process the most recent message
+                // and skip any intermediate messages that arrived during processing
                 let msg_opt = latest_msg_for_processing.swap(Arc::new(None));
 
                 if let Some(msg) = msg_opt.as_ref() {
@@ -1035,6 +1045,29 @@ impl CalibrationBoardLocatorNode {
     ) -> Result<Vec<na::Point3<f64>>> {
         // Read current bbox parameter values (reflects runtime changes)
         let bbox = bbox_params.to_bbox();
+
+        // Log bbox values at INFO level for debugging parameter updates
+        // Use a static to track last logged values and only log when changed
+        use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+        static LAST_SIZE_HASH: AtomicU64 = AtomicU64::new(0);
+
+        let size_hash = (bbox.size_xyz[0].to_bits() ^ bbox.size_xyz[1].to_bits() ^ bbox.size_xyz[2].to_bits())
+            .wrapping_add(bbox.pose.translation.x.to_bits())
+            .wrapping_add(bbox.pose.translation.y.to_bits())
+            .wrapping_add(bbox.pose.translation.z.to_bits());
+        let prev_hash = LAST_SIZE_HASH.swap(size_hash, AtomicOrdering::Relaxed);
+        if size_hash != prev_hash {
+            log_info!(
+                LOGGER_NAME,
+                "BBox UPDATED: center=[{:.2}, {:.2}, {:.2}], size=[{:.2}, {:.2}, {:.2}]",
+                bbox.pose.translation.x,
+                bbox.pose.translation.y,
+                bbox.pose.translation.z,
+                bbox.size_xyz[0],
+                bbox.size_xyz[1],
+                bbox.size_xyz[2]
+            );
+        }
 
         log_debug!(
             LOGGER_NAME,
