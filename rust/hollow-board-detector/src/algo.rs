@@ -369,8 +369,13 @@ pub fn fit_board_icp(
                 let avg_loss =
                     correspondence_losses.iter().sum::<f64>() / correspondings.len() as f64;
 
+                // Filter correspondences by outlier threshold
                 let good_correspondences: Vec<_> = correspondings
                     .iter()
+                    .filter(|(input_point, corresponding_point)| {
+                        let loss = (*input_point - corresponding_point).norm();
+                        loss <= icp_outlier_threshold
+                    })
                     .map(|(input_point, corresponding_point)| (*input_point, *corresponding_point))
                     .collect();
 
@@ -950,8 +955,14 @@ impl<'a> BoardIcpIterator<'a> {
 
         let avg_loss = correspondence_losses.iter().sum::<f64>() / correspondences.len() as f64;
 
+        // Filter correspondences by outlier threshold
+        let outlier_threshold = self.board_detector_config.icp_outlier_threshold;
         let good_correspondences: Vec<_> = correspondences
             .iter()
+            .filter(|(input_point, corresponding_point)| {
+                let loss = (**input_point - *corresponding_point).norm();
+                loss <= outlier_threshold
+            })
             .map(|(input_point, corresponding_point)| (**input_point, *corresponding_point))
             .collect();
 
