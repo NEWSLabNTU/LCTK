@@ -297,95 +297,17 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(response.message)
             return response
 
-        # Check for duplicate/similar board poses
-        new_board_pos = np.array([
-            board_msg.detections[0].results[0].pose.pose.position.x,
-            board_msg.detections[0].results[0].pose.pose.position.y,
-            board_msg.detections[0].results[0].pose.pose.position.z
-        ])
-        
-        new_board_quat = np.array([
-            board_msg.detections[0].results[0].pose.pose.orientation.x,
-            board_msg.detections[0].results[0].pose.pose.orientation.y,
-            board_msg.detections[0].results[0].pose.pose.orientation.z,
-            board_msg.detections[0].results[0].pose.pose.orientation.w
-        ])
-        
-        # Check against all existing poses in buffer
-        duplicate_found = False
-        min_position_distance = 0.1  # 10cm minimum movement
-        min_rotation_distance = 0.087  # ~5 degrees (in quaternion space)
-        
-        for idx, (existing_aruco, existing_board) in enumerate(self.detection_buffer):
-            existing_pos = np.array([
-                existing_board.detections[0].results[0].pose.pose.position.x,
-                existing_board.detections[0].results[0].pose.pose.position.y,
-                existing_board.detections[0].results[0].pose.pose.position.z
-            ])
-            
-            existing_quat = np.array([
-                existing_board.detections[0].results[0].pose.pose.orientation.x,
-                existing_board.detections[0].results[0].pose.pose.orientation.y,
-                existing_board.detections[0].results[0].pose.pose.orientation.z,
-                existing_board.detections[0].results[0].pose.pose.orientation.w
-            ])
-            
-            pos_distance = np.linalg.norm(new_board_pos - existing_pos)
-            # Quaternion distance: min(||q1-q2||, ||q1+q2||) due to double cover
-            quat_dist1 = np.linalg.norm(new_board_quat - existing_quat)
-            quat_dist2 = np.linalg.norm(new_board_quat + existing_quat)
-            rot_distance = min(quat_dist1, quat_dist2)
-            
-            if pos_distance < min_position_distance and rot_distance < min_rotation_distance:
-                duplicate_found = True
-                self.get_logger().warn(
-                    f"Duplicate pose detected! Too similar to pose #{idx+1} in buffer:\n"
-                    f"  Position distance: {pos_distance:.4f}m (threshold: {min_position_distance}m)\n"
-                    f"  Rotation distance: {rot_distance:.4f} (threshold: {min_rotation_distance})\n"
-                    f"  Existing pose: ({existing_pos[0]:.4f}, {existing_pos[1]:.4f}, {existing_pos[2]:.4f})\n"
-                    f"  New pose:      ({new_board_pos[0]:.4f}, {new_board_pos[1]:.4f}, {new_board_pos[2]:.4f})"
-                )
-                break
-        
-        if duplicate_found:
-            response.success = False
-            response.message = (
-                f"Rejected: Board pose too similar to existing pose #{idx+1}. "
-                f"Move board at least {min_position_distance}m or rotate {np.degrees(2*np.arcsin(min_rotation_distance/2)):.1f}° before adding."
-            )
-            response.buffer_size = len(self.detection_buffer)
-            self.get_logger().error(response.message)
-            return response
-
-        # Add to buffer
+        # Add to buffer (no similarity check - allow multiple detections to average out)
         with self.lock:
             self.detection_buffer.append((aruco_msg, board_msg))
             buffer_size = len(self.detection_buffer)
 
-        # Log successful addition with diversity metrics
-        if buffer_size == 1:
-            self.get_logger().info(
-                f"✓ Added detection pair #1 to buffer (initial pose)\n"
-                f"  Board position: ({new_board_pos[0]:.4f}, {new_board_pos[1]:.4f}, {new_board_pos[2]:.4f})"
-            )
-        else:
-            # Calculate distance to nearest existing pose
-            min_dist = float('inf')
-            for existing_aruco, existing_board in self.detection_buffer[:-1]:  # Exclude the one we just added
-                existing_pos = np.array([
-                    existing_board.detections[0].results[0].pose.pose.position.x,
-                    existing_board.detections[0].results[0].pose.pose.position.y,
-                    existing_board.detections[0].results[0].pose.pose.position.z
-                ])
-                dist = np.linalg.norm(new_board_pos - existing_pos)
-                min_dist = min(min_dist, dist)
-            
-            self.get_logger().info(
-                f"✓ Added detection pair #{buffer_size} to buffer\n"
-                f"  Board position: ({new_board_pos[0]:.4f}, {new_board_pos[1]:.4f}, {new_board_pos[2]:.4f})\n"
-                f"  Distance to nearest pose: {min_dist:.4f}m\n"
-                f"  Pose diversity: Good ({'>' if min_dist >= 0.2 else '>='} {min_position_distance}m threshold)"
-            )
+        # Log successful addition
+        board_pos = board_msg.detections[0].results[0].pose.pose.position
+        self.get_logger().info(
+            f"✓ Added detection pair #{buffer_size} to buffer\n"
+            f"  Board position: ({board_pos.x:.4f}, {board_pos.y:.4f}, {board_pos.z:.4f})"
+        )
 
         # Re-solve calibration from entire buffer
         success = self._solve_from_buffer()
