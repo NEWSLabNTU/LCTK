@@ -133,7 +133,7 @@ class AdvancedExtrinsicSolver(Node):
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=10,
+            depth=1,
         )
 
         # Publishers
