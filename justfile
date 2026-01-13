@@ -12,9 +12,9 @@ enable_overlay := "true"
 log_level := "info"
 rviz_enabled := "true"
 use_best_effort_qos := "true"
-use_advanced_solver := "false"
-camera_topic := "/sensing/camera/front_center/image_raw"
-pointcloud_topic := "/sensing/lidar/top/pointcloud_raw"
+use_advanced_solver := "true"
+camera_topic := "/sensing/camera/zedxm/right/color/rect/image"
+pointcloud_topic := "/sensing/lidar/concatenated/pointcloud"
 
 # Show available commands
 default:
