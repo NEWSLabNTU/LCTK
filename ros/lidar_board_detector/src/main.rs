@@ -558,7 +558,6 @@ impl CalibrationBoardLocatorNode {
         // Spawn processing thread that processes the latest message when available
         let processing_thread = std::thread::spawn(move || {
             let mut processed_count: u64 = 0;
-            let mut last_processed_ts: u64 = 0;
 
             loop {
                 // Take the latest message (replace with None)
@@ -568,23 +567,6 @@ impl CalibrationBoardLocatorNode {
 
                 if let Some(msg) = msg_opt.as_ref() {
                     let callback_start = Instant::now();
-
-                    // Convert message timestamp to u64 for comparison
-                    let msg_timestamp_ns = (msg.header.stamp.sec as u64) * 1_000_000_000
-                        + (msg.header.stamp.nanosec as u64);
-
-                    // Skip stale messages
-                    if msg_timestamp_ns <= last_processed_ts {
-                        log_debug!(
-                            LOGGER_NAME,
-                            "Skipping stale message (ts {} <= last {})",
-                            msg_timestamp_ns,
-                            last_processed_ts
-                        );
-                        continue;
-                    }
-
-                    last_processed_ts = msg_timestamp_ns;
                     processed_count += 1;
 
                     log_info!(
