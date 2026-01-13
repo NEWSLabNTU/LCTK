@@ -3,10 +3,10 @@
     // The pose defines the position and orientation of the box center
     "pose": {
         // Translation from origin (x, y, z in meters)
-        "translation": [2.5, 0.0, 0.1],
+        "translation": [2.6, 0.0, 0.35],
         // Rotation as quaternion (w, x, y, z)
         "rotation": [1.0, 0.0, 0.0, 0.0]
     },
     // Size of the bounding box in meters (x, y, z)
-    "size_xyz": [2.5, 4.0, 2.0]
+    "size_xyz": [3.1, 3.94, 2.2]
 }
