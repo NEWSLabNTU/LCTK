@@ -1,9 +1,8 @@
 mod bbox;
-mod services;
 
-use crate::{bbox::BBox, services::BBoxServices};
-use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
+use crate::bbox::BBox;
+use anyhow::{anyhow, Result};
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
     Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Vector3 as GeomVector3,
@@ -15,20 +14,20 @@ use hollow_board_detector::{
     init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
     Detector as BoardDetector,
 };
-use nalgebra::{self as na, Translation3, UnitQuaternion};
+use nalgebra as na;
 use plane_estimator::PlaneModel;
-use rclrs::{PublisherOptions, SubscriptionOptions, *};
+use rclrs::{MandatoryParameter, ParameterRange, PublisherOptions, SubscriptionOptions, *};
 use sensor_msgs::msg::{PointCloud2, PointField};
 use std::{
     f64::consts::FRAC_PI_2,
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
-    thread,
-    time::{Duration, Instant},
+    thread::JoinHandle,
+    time::Instant,
 };
 use std_msgs::msg::{ColorRGBA, Float64, Header, String as StringMsg};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
@@ -62,7 +61,227 @@ struct BoardDebugPublishers {
     pca_eigenvectors: Arc<Publisher<MarkerArray>>,
 }
 
-// Config files are now mandatory parameters - no defaults
+/// ROS parameters for bounding box filter configuration.
+/// These parameters can be changed at runtime via `ros2 param set`.
+///
+/// Example usage:
+/// ```bash
+/// ros2 param set /lidar_board_detector bbox_center_x 2.5
+/// ros2 param set /lidar_board_detector bbox_size_x 1.5
+/// ```
+pub struct BBoxParameters {
+    // Position (center of bounding box)
+    center_x: Arc<MandatoryParameter<f64>>,
+    center_y: Arc<MandatoryParameter<f64>>,
+    center_z: Arc<MandatoryParameter<f64>>,
+    // Rotation (quaternion: w, x, y, z)
+    rotation_w: Arc<MandatoryParameter<f64>>,
+    rotation_x: Arc<MandatoryParameter<f64>>,
+    rotation_y: Arc<MandatoryParameter<f64>>,
+    rotation_z: Arc<MandatoryParameter<f64>>,
+    // Size (dimensions in x, y, z)
+    size_x: Arc<MandatoryParameter<f64>>,
+    size_y: Arc<MandatoryParameter<f64>>,
+    size_z: Arc<MandatoryParameter<f64>>,
+}
+
+impl Clone for BBoxParameters {
+    fn clone(&self) -> Self {
+        Self {
+            center_x: Arc::clone(&self.center_x),
+            center_y: Arc::clone(&self.center_y),
+            center_z: Arc::clone(&self.center_z),
+            rotation_w: Arc::clone(&self.rotation_w),
+            rotation_x: Arc::clone(&self.rotation_x),
+            rotation_y: Arc::clone(&self.rotation_y),
+            rotation_z: Arc::clone(&self.rotation_z),
+            size_x: Arc::clone(&self.size_x),
+            size_y: Arc::clone(&self.size_y),
+            size_z: Arc::clone(&self.size_z),
+        }
+    }
+}
+
+impl BBoxParameters {
+    /// Declare all bbox parameters on the node with defaults from the given BBox.
+    pub fn declare(node: &Node, defaults: &BBox) -> Result<Self> {
+        let translation = &defaults.pose.translation;
+        let quaternion = defaults.pose.rotation.quaternion();
+
+        let center_x = node
+            .declare_parameter::<f64>("bbox_center_x")
+            .default(translation.x)
+            .description("BBox center position X (meters)")
+            .range(ParameterRange {
+                lower: None,
+                upper: None,
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_center_x: {e}"))?;
+
+        let center_y = node
+            .declare_parameter::<f64>("bbox_center_y")
+            .default(translation.y)
+            .description("BBox center position Y (meters)")
+            .range(ParameterRange {
+                lower: None,
+                upper: None,
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_center_y: {e}"))?;
+
+        let center_z = node
+            .declare_parameter::<f64>("bbox_center_z")
+            .default(translation.z)
+            .description("BBox center position Z (meters)")
+            .range(ParameterRange {
+                lower: None,
+                upper: None,
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_center_z: {e}"))?;
+
+        let rotation_w = node
+            .declare_parameter::<f64>("bbox_rotation_w")
+            .default(quaternion.w)
+            .description("BBox rotation quaternion W component")
+            .range(ParameterRange {
+                lower: Some(-1.0),
+                upper: Some(1.0),
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_rotation_w: {e}"))?;
+
+        let rotation_x = node
+            .declare_parameter::<f64>("bbox_rotation_x")
+            .default(quaternion.i)
+            .description("BBox rotation quaternion X component")
+            .range(ParameterRange {
+                lower: Some(-1.0),
+                upper: Some(1.0),
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_rotation_x: {e}"))?;
+
+        let rotation_y = node
+            .declare_parameter::<f64>("bbox_rotation_y")
+            .default(quaternion.j)
+            .description("BBox rotation quaternion Y component")
+            .range(ParameterRange {
+                lower: Some(-1.0),
+                upper: Some(1.0),
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_rotation_y: {e}"))?;
+
+        let rotation_z = node
+            .declare_parameter::<f64>("bbox_rotation_z")
+            .default(quaternion.k)
+            .description("BBox rotation quaternion Z component")
+            .range(ParameterRange {
+                lower: Some(-1.0),
+                upper: Some(1.0),
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_rotation_z: {e}"))?;
+
+        let size_x = node
+            .declare_parameter::<f64>("bbox_size_x")
+            .default(defaults.size_xyz[0])
+            .description("BBox size in X direction (meters)")
+            .range(ParameterRange {
+                lower: Some(0.0),
+                upper: None,
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_size_x: {e}"))?;
+
+        let size_y = node
+            .declare_parameter::<f64>("bbox_size_y")
+            .default(defaults.size_xyz[1])
+            .description("BBox size in Y direction (meters)")
+            .range(ParameterRange {
+                lower: Some(0.0),
+                upper: None,
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_size_y: {e}"))?;
+
+        let size_z = node
+            .declare_parameter::<f64>("bbox_size_z")
+            .default(defaults.size_xyz[2])
+            .description("BBox size in Z direction (meters)")
+            .range(ParameterRange {
+                lower: Some(0.0),
+                upper: None,
+                step: None,
+            })
+            .mandatory()
+            .map_err(|e| anyhow!("Failed to declare bbox_size_z: {e}"))?;
+
+        Ok(Self {
+            center_x: Arc::new(center_x),
+            center_y: Arc::new(center_y),
+            center_z: Arc::new(center_z),
+            rotation_w: Arc::new(rotation_w),
+            rotation_x: Arc::new(rotation_x),
+            rotation_y: Arc::new(rotation_y),
+            rotation_z: Arc::new(rotation_z),
+            size_x: Arc::new(size_x),
+            size_y: Arc::new(size_y),
+            size_z: Arc::new(size_z),
+        })
+    }
+
+    /// Read current parameter values and construct a BBox.
+    /// This method reads the latest values, reflecting any runtime parameter changes.
+    pub fn to_bbox(&self) -> BBox {
+        let translation = na::Translation3::new(
+            self.center_x.get(),
+            self.center_y.get(),
+            self.center_z.get(),
+        );
+
+        let quaternion = na::UnitQuaternion::new_normalize(na::Quaternion::new(
+            self.rotation_w.get(),
+            self.rotation_x.get(),
+            self.rotation_y.get(),
+            self.rotation_z.get(),
+        ));
+
+        let pose = na::Isometry3::from_parts(translation, quaternion);
+        let size_xyz = [self.size_x.get(), self.size_y.get(), self.size_z.get()];
+
+        BBox { pose, size_xyz }
+    }
+
+    /// Log current parameter values.
+    pub fn log_values(&self) {
+        log_info!(
+            LOGGER_NAME,
+            "BBox parameters: center=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3}), size=({:.1}, {:.1}, {:.1})",
+            self.center_x.get(),
+            self.center_y.get(),
+            self.center_z.get(),
+            self.rotation_w.get(),
+            self.rotation_x.get(),
+            self.rotation_y.get(),
+            self.rotation_z.get(),
+            self.size_x.get(),
+            self.size_y.get(),
+            self.size_z.get()
+        );
+    }
+}
 
 pub struct CalibrationBoardLocatorNode {
     _node: Node,
@@ -72,8 +291,10 @@ pub struct CalibrationBoardLocatorNode {
     _board_debug_publishers: Option<BoardDebugPublishers>,
     // ICP iteration debug publishers - grouped into a single struct
     _icp_debug_publishers: Option<IcpDebugPublishers>,
-    // BBox configuration services
-    _bbox_services: BBoxServices,
+    // BBox parameters (dynamically reconfigurable via ROS parameters)
+    _bbox_params: BBoxParameters,
+    // Processing thread that handles point cloud processing
+    _processing_thread: JoinHandle<()>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -88,6 +309,15 @@ impl CalibrationBoardLocatorNode {
             .mandatory()?
             .get();
         let bbox_file_param: Arc<str> = node.declare_parameter("bbox_file").mandatory()?.get();
+
+        // Load initial bbox config from file
+        log_info!(LOGGER_NAME, "Loading bbox config from: {}", bbox_file_param);
+        let initial_bbox = Self::load_bbox_config(&bbox_file_param)?;
+
+        // Declare bbox parameters with defaults from the config file
+        // These can be changed at runtime via `ros2 param set`
+        let bbox_params = BBoxParameters::declare(&node, &initial_bbox)?;
+        bbox_params.log_values();
 
         // Debug mode parameter (optional, defaults to false)
         let debug_param = node
@@ -158,13 +388,6 @@ impl CalibrationBoardLocatorNode {
             aruco_pattern_file_param
         );
         let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
-
-        log_info!(LOGGER_NAME, "Loading bbox config from: {}", bbox_file_param);
-        let bbox = Self::load_bbox_config(&bbox_file_param)?;
-        let bbox = Arc::new(ArcSwap::new(Arc::new(bbox)));
-
-        // Store bbox file path for save service
-        let bbox_file_path = bbox_file_param.to_string();
 
         // Create detector
         let detector = Arc::new(BoardDetector::new(
@@ -293,52 +516,99 @@ impl CalibrationBoardLocatorNode {
             QoSProfile::default() // Reliable for rosbag playback
         };
 
-        // Counter for debugging message processing
+        // Counter for debugging message reception
         let message_counter = Arc::new(AtomicU64::new(0));
         let counter_clone = Arc::clone(&message_counter);
 
-        // Processing flag to prevent callback overload - buffer only one message
-        let processing_flag = Arc::new(AtomicBool::new(false));
-        let processing_flag_clone = Arc::clone(&processing_flag);
-        let dropped_counter = Arc::new(AtomicU64::new(0));
-        let dropped_counter_clone = Arc::clone(&dropped_counter);
+        // Clone bbox params for processing thread
+        let bbox_params_for_callback = bbox_params.clone();
 
-        // Clone bbox for subscription callback
-        let bbox_for_callback = Arc::clone(&bbox);
+        // Use ArcSwap to store only the latest message - subscription callback just updates this
+        // Processing happens in a separate thread to avoid blocking the executor
+        let latest_msg: Arc<ArcSwap<Option<Arc<PointCloud2>>>> =
+            Arc::new(ArcSwap::new(Arc::new(None)));
+        let latest_msg_for_callback = Arc::clone(&latest_msg);
+        let latest_msg_for_processing = Arc::clone(&latest_msg);
 
-        // Create subscription to PointCloud2 with configurable QoS
+        // Create subscription to PointCloud2 - callback just stores the latest message
         let mut pointcloud_options = SubscriptionOptions::new("input_pointcloud");
         pointcloud_options.qos = qos_profile;
         let pointcloud_subscription =
             node.create_subscription(pointcloud_options, move |msg: PointCloud2| {
                 let count = counter_clone.fetch_add(1, Ordering::Relaxed);
-
-                // Skip processing if previous callback is still running (buffer overflow protection)
-                if processing_flag_clone.swap(true, Ordering::Acquire) {
-                    let dropped = dropped_counter_clone.fetch_add(1, Ordering::Relaxed);
-                    log_debug!(
-                        LOGGER_NAME,
-                        "Dropping message #{} (processing busy, total dropped: {})",
-                        count + 1,
-                        dropped + 1
-                    );
-                    return;
-                }
-
-                log_debug!(LOGGER_NAME, "Processing message #{}", count + 1);
-
-                Self::pointcloud_callback(
-                    msg,
-                    &detector,
-                    &detection_publisher_shared,
-                    &bbox_for_callback,
-                    &board_debug_shared,
-                    &icp_debug_shared,
+                log_debug!(
+                    LOGGER_NAME,
+                    "Received msg #{} (ts: {}.{:09})",
+                    count + 1,
+                    msg.header.stamp.sec,
+                    msg.header.stamp.nanosec
                 );
-
-                // Release processing flag
-                processing_flag_clone.store(false, Ordering::Release);
+                // Store the latest message (overwrites any previous unprocessed message)
+                latest_msg_for_callback.store(Arc::new(Some(Arc::new(msg))));
             })?;
+
+        // Spawn processing thread that processes the latest message when available
+        let processing_thread = std::thread::spawn(move || {
+            let mut processed_count: u64 = 0;
+            let mut last_processed_ts: u64 = 0;
+
+            loop {
+                // Take the latest message (replace with None)
+                let msg_opt = latest_msg_for_processing.swap(Arc::new(None));
+
+                if let Some(msg) = msg_opt.as_ref() {
+                    let callback_start = Instant::now();
+
+                    // Convert message timestamp to u64 for comparison
+                    let msg_timestamp_ns = (msg.header.stamp.sec as u64) * 1_000_000_000
+                        + (msg.header.stamp.nanosec as u64);
+
+                    // Skip stale messages
+                    if msg_timestamp_ns <= last_processed_ts {
+                        log_debug!(
+                            LOGGER_NAME,
+                            "Skipping stale message (ts {} <= last {})",
+                            msg_timestamp_ns,
+                            last_processed_ts
+                        );
+                        continue;
+                    }
+
+                    last_processed_ts = msg_timestamp_ns;
+                    processed_count += 1;
+
+                    log_info!(
+                        LOGGER_NAME,
+                        "PROCESS: ts {}.{:09}, count {}",
+                        msg.header.stamp.sec,
+                        msg.header.stamp.nanosec,
+                        processed_count
+                    );
+
+                    // Clone the message for processing (msg is Arc<PointCloud2>)
+                    let msg_clone: PointCloud2 = (**msg).clone();
+
+                    Self::pointcloud_callback(
+                        msg_clone,
+                        &detector,
+                        &detection_publisher_shared,
+                        &bbox_params_for_callback,
+                        &board_debug_shared,
+                        &icp_debug_shared,
+                    );
+
+                    let processing_time = callback_start.elapsed();
+                    log_info!(
+                        LOGGER_NAME,
+                        "DONE: processed in {}ms",
+                        processing_time.as_millis()
+                    );
+                } else {
+                    // No message available, sleep briefly to avoid busy-waiting
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+        });
 
         if enable_debug {
             log_info!(
@@ -358,16 +628,14 @@ impl CalibrationBoardLocatorNode {
             );
         }
 
-        // Create BBox services
-        let bbox_services = BBoxServices::new(&node, Arc::clone(&bbox), bbox_file_path)?;
-
         Ok(Self {
             _node: node,
             _detection_publisher: detection_publisher,
             _pointcloud_subscription: pointcloud_subscription,
             _board_debug_publishers: board_debug_publishers,
             _icp_debug_publishers: icp_debug_publishers,
-            _bbox_services: bbox_services,
+            _bbox_params: bbox_params,
+            _processing_thread: processing_thread,
         })
     }
 
@@ -415,7 +683,7 @@ impl CalibrationBoardLocatorNode {
         msg: PointCloud2,
         detector: &Arc<BoardDetector>,
         publisher: &Publisher<Detection3DArray>,
-        bbox: &Arc<ArcSwap<BBox>>,
+        bbox_params: &BBoxParameters,
         board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
     ) {
@@ -447,7 +715,7 @@ impl CalibrationBoardLocatorNode {
         let result = Self::process_pointcloud(
             &msg,
             detector,
-            bbox,
+            bbox_params,
             board_debug_publishers,
             icp_debug_publishers,
         );
@@ -475,7 +743,7 @@ impl CalibrationBoardLocatorNode {
     fn process_pointcloud(
         msg: &PointCloud2,
         detector: &Arc<BoardDetector>,
-        bbox: &Arc<ArcSwap<BBox>>,
+        bbox_params: &BBoxParameters,
         board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
     ) -> Result<Detection3DArray> {
@@ -511,9 +779,9 @@ impl CalibrationBoardLocatorNode {
             points
         };
 
-        // Stage 1: Filter points by bounding box
+        // Stage 1: Filter points by bounding box (reads current parameter values)
         let active_points =
-            Self::filter_points_by_bbox(&points, bbox, &msg.header, board_debug_publishers)?;
+            Self::filter_points_by_bbox(&points, bbox_params, &msg.header, board_debug_publishers)?;
 
         if active_points.is_empty() {
             log_debug!(
@@ -761,27 +1029,27 @@ impl CalibrationBoardLocatorNode {
     // Stage 1: Bounding box filter
     fn filter_points_by_bbox(
         points: &[na::Point3<f64>],
-        bbox: &Arc<ArcSwap<BBox>>,
+        bbox_params: &BBoxParameters,
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Result<Vec<na::Point3<f64>>> {
-        // Load bbox using lock-free arc-swap
-        let bbox_copy = bbox.load();
+        // Read current bbox parameter values (reflects runtime changes)
+        let bbox = bbox_params.to_bbox();
 
         log_debug!(
             LOGGER_NAME,
             "Bounding box filter: center=[{:.2}, {:.2}, {:.2}], size=[{:.2}, {:.2}, {:.2}]",
-            bbox_copy.pose.translation.x,
-            bbox_copy.pose.translation.y,
-            bbox_copy.pose.translation.z,
-            bbox_copy.size_xyz[0],
-            bbox_copy.size_xyz[1],
-            bbox_copy.size_xyz[2]
+            bbox.pose.translation.x,
+            bbox.pose.translation.y,
+            bbox.pose.translation.z,
+            bbox.size_xyz[0],
+            bbox.size_xyz[1],
+            bbox.size_xyz[2]
         );
 
         // Publish bbox marker for visualization in RViz
         if let Some(debug_pubs) = board_debug_publishers {
-            let bbox_marker = Self::create_bbox_marker(&bbox_copy, header)?;
+            let bbox_marker = Self::create_bbox_marker(&bbox, header)?;
             let marker_array = MarkerArray {
                 markers: vec![bbox_marker],
             };
@@ -792,7 +1060,7 @@ impl CalibrationBoardLocatorNode {
 
         let active_points: Vec<_> = points
             .iter()
-            .filter(|pt| bbox_copy.contains_point(pt))
+            .filter(|pt| bbox.contains_point(pt))
             .cloned()
             .collect();
 
@@ -1010,10 +1278,8 @@ impl CalibrationBoardLocatorNode {
                 }
             }
 
-            // Add small delay between iterations only in debug mode for better visualization
-            if icp_debug_publishers.is_some() {
-                thread::sleep(Duration::from_millis(50));
-            }
+            // Note: Removed 50ms sleep between ICP iterations as it caused severe lag.
+            // The ICP debug visualization now updates at full speed.
 
             // Check termination condition AFTER the step
             if iterator.should_terminate(&state) {
