@@ -33,6 +33,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetBufferStatus.srv"
   "srv/ListDetectionBuffer.srv"
   "srv/RemoveDetectionFromBuffer.srv"
+  "srv/DumpDetections.srv"
+  "srv/LoadDetections.srv"
+  "srv/AdjustTransform.srv"
+  "srv/ResetTransform.srv"
+  "srv/GetPoseInfo.srv"
   DEPENDENCIES builtin_interfaces std_msgs geometry_msgs
 )
 

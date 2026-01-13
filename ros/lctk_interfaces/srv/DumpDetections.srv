@@ -1,0 +1,10 @@
+# DumpDetections.srv
+# Service to save all buffered detections to a JSON file
+
+# Request
+string file_path              # Path to save the detections file
+---
+# Response
+bool success                  # True if detections were saved successfully
+string message               # Success message or error description
+int32 num_detections         # Number of detection pairs saved

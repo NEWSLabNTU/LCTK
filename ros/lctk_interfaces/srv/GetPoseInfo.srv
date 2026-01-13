@@ -1,0 +1,31 @@
+# GetPoseInfo.srv
+# Service to get detailed pose information including solved and adjusted values
+
+# Request (empty)
+---
+# Response
+bool has_pose                 # True if a pose is available
+
+# Solved pose (from PnP)
+float64 solved_x
+float64 solved_y
+float64 solved_z
+float64 solved_roll           # Euler angle in radians
+float64 solved_pitch
+float64 solved_yaw
+
+# Current pose (with manual adjustments)
+float64 current_x
+float64 current_y
+float64 current_z
+float64 current_roll
+float64 current_pitch
+float64 current_yaw
+
+# Manual adjustments (delta from solved)
+float64 adjust_x
+float64 adjust_y
+float64 adjust_z
+float64 adjust_roll
+float64 adjust_pitch
+float64 adjust_yaw

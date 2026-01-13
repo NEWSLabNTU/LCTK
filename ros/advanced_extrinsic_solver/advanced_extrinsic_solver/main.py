@@ -10,6 +10,9 @@ Key Features:
 2. Service-driven workflow for user-controlled data selection
 3. Continuous transform publishing after successful calibration
 4. Enhanced accuracy through aggregated point correspondences
+5. Save/load detections to/from files
+6. Manual transform adjustment
+7. Axis arrow visualization
 
 Workflow:
 1. Play rosbag with calibration data
@@ -22,6 +25,7 @@ Author: LCTK Team
 License: MIT
 """
 
+import json
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -29,20 +33,26 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Quaternion, Transform, TransformStamped, Vector3
+from geometry_msgs.msg import Point, Quaternion, Transform, TransformStamped, Vector3
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
+    AdjustTransform,
     ClearDetectionBuffer,
+    DumpDetections,
     GetBufferStatus,
+    GetPoseInfo,
     ListDetectionBuffer,
+    LoadDetections,
     RemoveDetectionFromBuffer,
+    ResetTransform,
 )
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import Header
+from std_msgs.msg import ColorRGBA, Header
 from vision_msgs.msg import Detection2DArray, Detection3DArray
+from visualization_msgs.msg import Marker, MarkerArray
 
 
 @dataclass
@@ -74,10 +84,14 @@ class AdvancedExtrinsicSolver(Node):
     - add_detection: Add current detection pair to buffer and re-solve
     - clear_buffer: Clear buffer and stop publishing
     - get_status: Query buffer status and calibration state
+    - dump_detections: Save all buffered detections to a file
+    - load_detections: Load detections from a file
+    - adjust_transform: Manually adjust the extrinsic transform
 
     Topics:
     - Subscribes: aruco_detections, calibration_board_detections, camera_info
     - Publishes: extrinsic_transform (continuous at 10Hz when solved)
+    - Publishes: axis_markers (visualization of coordinate axes)
     """
 
     def __init__(self):
@@ -91,6 +105,8 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("debug_mode", True)
         self.declare_parameter("publishing_rate", 10.0)
         self.declare_parameter("min_poses_required", 2)
+        self.declare_parameter("axis_length", 0.3)  # Length of axis arrows in meters
+        self.declare_parameter("axis_diameter", 0.02)  # Diameter of axis arrows
 
         # Get parameters
         self.parent_frame = (
@@ -107,6 +123,12 @@ class AdvancedExtrinsicSolver(Node):
         )
         self.min_poses_required = (
             self.get_parameter("min_poses_required").get_parameter_value().integer_value
+        )
+        self.axis_length = (
+            self.get_parameter("axis_length").get_parameter_value().double_value
+        )
+        self.axis_diameter = (
+            self.get_parameter("axis_diameter").get_parameter_value().double_value
         )
 
         # Load ArUco pattern configuration
@@ -126,6 +148,12 @@ class AdvancedExtrinsicSolver(Node):
         self.last_solve_status = "No calibration performed yet"
         self.total_correspondences = 0
 
+        # Pose state: solved (from PnP) and current (with manual adjustments)
+        self.solved_rvec: Optional[np.ndarray] = None
+        self.solved_tvec: Optional[np.ndarray] = None
+        self.current_rvec: Optional[np.ndarray] = None
+        self.current_tvec: Optional[np.ndarray] = None
+
         # Thread safety
         self.lock = threading.Lock()
 
@@ -139,6 +167,11 @@ class AdvancedExtrinsicSolver(Node):
         # Publishers
         self.transform_publisher = self.create_publisher(
             TransformStamped, "extrinsic_transform", qos_profile
+        )
+
+        # Axis marker publisher for visualization
+        self.axis_marker_publisher = self.create_publisher(
+            MarkerArray, "axis_markers", qos_profile
         )
 
         # Publishing timer (10Hz continuous publishing when enabled)
@@ -209,14 +242,44 @@ class AdvancedExtrinsicSolver(Node):
             self.remove_detection_callback,
         )
 
+        self.dump_detections_service = self.create_service(
+            DumpDetections,
+            "~/dump_detections",
+            self.dump_detections_callback,
+        )
+
+        self.load_detections_service = self.create_service(
+            LoadDetections,
+            "~/load_detections",
+            self.load_detections_callback,
+        )
+
+        self.adjust_transform_service = self.create_service(
+            AdjustTransform,
+            "~/adjust_transform",
+            self.adjust_transform_callback,
+        )
+
+        self.reset_transform_service = self.create_service(
+            ResetTransform,
+            "~/reset_transform",
+            self.reset_transform_callback,
+        )
+
+        self.get_pose_info_service = self.create_service(
+            GetPoseInfo,
+            "~/get_pose_info",
+            self.get_pose_info_callback,
+        )
+
         self.get_logger().info(
             f"Advanced Extrinsic Solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
             f"Minimum poses required: {self.min_poses_required}\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
-            f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled)\n"
+            f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled), axis_markers\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
-            f"Services: ~/add_detection, ~/clear_buffer, ~/get_status, ~/list_buffer, ~/remove_detection"
+            f"Services: ~/add_detection, ~/clear_buffer, ~/get_status, ~/list_buffer, ~/remove_detection, ~/dump_detections, ~/load_detections, ~/adjust_transform, ~/reset_transform, ~/get_pose_info"
         )
 
     def camera_info_callback(self, msg: CameraInfo):
@@ -258,6 +321,60 @@ class AdvancedExtrinsicSolver(Node):
                 # Update timestamp to current time
                 self.last_transform.header.stamp = self.get_clock().now().to_msg()
                 self.transform_publisher.publish(self.last_transform)
+
+                # Also publish axis markers
+                self._publish_axis_markers()
+
+    def _publish_axis_markers(self):
+        """Publish axis arrow markers for transform visualization."""
+        if self.last_transform is None:
+            return
+
+        tf = self.last_transform.transform
+        markers = MarkerArray()
+
+        # Get position
+        pos = np.array([tf.translation.x, tf.translation.y, tf.translation.z])
+
+        # Get rotation matrix from quaternion
+        quat = [tf.rotation.x, tf.rotation.y, tf.rotation.z, tf.rotation.w]
+        rot = R.from_quat(quat)
+        rot_matrix = rot.as_matrix()
+
+        # Colors for X (red), Y (green), Z (blue) axes
+        colors = [
+            ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0),  # X - Red
+            ColorRGBA(r=0.0, g=1.0, b=0.0, a=1.0),  # Y - Green
+            ColorRGBA(r=0.0, g=0.0, b=1.0, a=1.0),  # Z - Blue
+        ]
+
+        for i, (axis_col, color) in enumerate(zip(rot_matrix.T, colors)):
+            marker = Marker()
+            marker.header.frame_id = self.parent_frame
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "extrinsic_axes"
+            marker.id = i
+            marker.type = Marker.ARROW
+            marker.action = Marker.ADD
+
+            # Arrow from origin to axis tip
+            start = Point(x=pos[0], y=pos[1], z=pos[2])
+            end_pos = pos + axis_col * self.axis_length
+            end = Point(x=end_pos[0], y=end_pos[1], z=end_pos[2])
+            marker.points = [start, end]
+
+            # Arrow dimensions
+            marker.scale.x = self.axis_diameter  # Shaft diameter
+            marker.scale.y = self.axis_diameter * 1.5  # Head diameter
+            marker.scale.z = self.axis_length * 0.15  # Head length
+
+            marker.color = color
+            marker.lifetime.sec = 0
+            marker.lifetime.nanosec = 200000000  # 200ms
+
+            markers.markers.append(marker)
+
+        self.axis_marker_publisher.publish(markers)
 
     def add_detection_callback(self, request, response):
         """
@@ -305,7 +422,7 @@ class AdvancedExtrinsicSolver(Node):
         # Log successful addition
         board_pos = board_msg.detections[0].results[0].pose.pose.position
         self.get_logger().info(
-            f"✓ Added detection pair #{buffer_size} to buffer\n"
+            f"Added detection pair #{buffer_size} to buffer\n"
             f"  Board position: ({board_pos.x:.4f}, {board_pos.y:.4f}, {board_pos.z:.4f})"
         )
 
@@ -349,6 +466,10 @@ class AdvancedExtrinsicSolver(Node):
             self.last_transform = None
             self.last_solve_status = "Buffer cleared"
             self.total_correspondences = 0
+            self.solved_rvec = None
+            self.solved_tvec = None
+            self.current_rvec = None
+            self.current_tvec = None
 
         response.success = True
         response.message = f"Cleared {buffer_size} detection pairs from buffer"
@@ -444,12 +565,356 @@ class AdvancedExtrinsicSolver(Node):
                 self.total_correspondences = 0
 
             response.success = True
-            response.message = f"Removed last detection pair. Buffer is now empty."
+            response.message = "Removed last detection pair. Buffer is now empty."
 
         response.buffer_size = new_buffer_size
         self.get_logger().info(response.message)
 
         return response
+
+    def dump_detections_callback(self, request, response):
+        """Service callback: Save all buffered detections and manual adjustments to a JSON file."""
+        file_path = request.file_path
+
+        with self.lock:
+            buffer_size = len(self.detection_buffer)
+
+            if buffer_size == 0 and self.current_rvec is None:
+                response.success = False
+                response.message = "Buffer is empty and no transform available, nothing to save"
+                response.num_detections = 0
+                return response
+
+            # Serialize detections to JSON-compatible format
+            detections_data = []
+            for aruco_msg, board_msg in self.detection_buffer:
+                detection_pair = {
+                    "aruco": self._serialize_detection2d_array(aruco_msg),
+                    "board": self._serialize_detection3d_array(board_msg),
+                }
+                detections_data.append(detection_pair)
+
+            # Serialize manual adjustments (current transform)
+            transform_data = None
+            if self.current_rvec is not None and self.current_tvec is not None:
+                transform_data = {
+                    "rvec": self.current_rvec.flatten().tolist(),
+                    "tvec": self.current_tvec.flatten().tolist(),
+                }
+
+        try:
+            save_data = {
+                "version": 2,  # Bumped version for new format with transform
+                "num_detections": buffer_size,
+                "detections": detections_data,
+            }
+            if transform_data:
+                save_data["transform"] = transform_data
+
+            with open(file_path, 'w') as f:
+                json.dump(save_data, f, indent=2)
+
+            msg_parts = [f"Saved {buffer_size} detection pairs"]
+            if transform_data:
+                msg_parts.append("with manual adjustments")
+            msg_parts.append(f"to {file_path}")
+
+            response.success = True
+            response.message = " ".join(msg_parts)
+            response.num_detections = buffer_size
+            self.get_logger().info(response.message)
+        except Exception as e:
+            response.success = False
+            response.message = f"Failed to save detections: {str(e)}"
+            response.num_detections = 0
+            self.get_logger().error(response.message)
+
+        return response
+
+    def load_detections_callback(self, request, response):
+        """Service callback: Load detections and manual adjustments from a JSON file."""
+        file_path = request.file_path
+        append = request.append
+
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+
+            version = data.get("version", 0)
+            if version not in [1, 2]:
+                response.success = False
+                response.message = "Invalid or unsupported file format"
+                response.num_detections = 0
+                response.buffer_size = len(self.detection_buffer)
+                return response
+
+            loaded_detections = []
+            for detection_pair in data.get("detections", []):
+                aruco_msg = self._deserialize_detection2d_array(detection_pair["aruco"])
+                board_msg = self._deserialize_detection3d_array(detection_pair["board"])
+                loaded_detections.append((aruco_msg, board_msg))
+
+            # Check for saved transform (version 2+)
+            has_transform = "transform" in data and data["transform"] is not None
+            loaded_rvec = None
+            loaded_tvec = None
+            if has_transform:
+                loaded_rvec = np.array(data["transform"]["rvec"], dtype=np.float64).reshape(3, 1)
+                loaded_tvec = np.array(data["transform"]["tvec"], dtype=np.float64).reshape(3, 1)
+
+            with self.lock:
+                if not append:
+                    self.detection_buffer.clear()
+                self.detection_buffer.extend(loaded_detections)
+                buffer_size = len(self.detection_buffer)
+
+                # If we have a saved transform, use it directly instead of re-solving
+                if has_transform:
+                    self.current_rvec = loaded_rvec
+                    self.current_tvec = loaded_tvec
+                    self.last_transform = self._create_transform_message(loaded_rvec, loaded_tvec)
+                    self.publishing_enabled = True
+                    self.last_solve_status = "Loaded from file (with manual adjustments)"
+                    self.get_logger().info("Restored manual transform adjustments from file")
+                elif buffer_size >= self.min_poses_required:
+                    # No saved transform, re-solve from detections
+                    self._solve_from_buffer()
+
+            msg_parts = [f"Loaded {len(loaded_detections)} detection pairs"]
+            if has_transform:
+                msg_parts.append("with manual adjustments")
+            msg_parts.append(f"from {file_path}")
+
+            response.success = True
+            response.message = " ".join(msg_parts)
+            response.num_detections = len(loaded_detections)
+            response.buffer_size = buffer_size
+            self.get_logger().info(response.message)
+
+        except FileNotFoundError:
+            response.success = False
+            response.message = f"File not found: {file_path}"
+            response.num_detections = 0
+            response.buffer_size = len(self.detection_buffer)
+            self.get_logger().error(response.message)
+        except Exception as e:
+            response.success = False
+            response.message = f"Failed to load detections: {str(e)}"
+            response.num_detections = 0
+            response.buffer_size = len(self.detection_buffer)
+            self.get_logger().error(response.message)
+
+        return response
+
+    def adjust_transform_callback(self, request, response):
+        """Service callback: Manually adjust the extrinsic transform."""
+        with self.lock:
+            if self.current_rvec is None or self.current_tvec is None:
+                response.success = False
+                response.message = "No transform available to adjust. Solve calibration first."
+                return response
+
+            # Apply translation adjustment
+            self.current_tvec[0, 0] += request.delta_x
+            self.current_tvec[1, 0] += request.delta_y
+            self.current_tvec[2, 0] += request.delta_z
+
+            # Apply rotation adjustment (as Euler angle deltas in XYZ order)
+            if request.delta_roll != 0 or request.delta_pitch != 0 or request.delta_yaw != 0:
+                # Get current rotation matrix
+                current_rot_matrix, _ = cv2.Rodrigues(self.current_rvec)
+                current_rot = R.from_matrix(current_rot_matrix)
+
+                # Create delta rotation from Euler angles
+                delta_rot = R.from_euler('xyz', [request.delta_roll, request.delta_pitch, request.delta_yaw])
+
+                # Apply delta rotation (delta * current)
+                new_rot = delta_rot * current_rot
+                new_rot_matrix = new_rot.as_matrix()
+
+                # Convert back to Rodrigues vector
+                self.current_rvec, _ = cv2.Rodrigues(new_rot_matrix)
+
+            # Update transform message
+            self.last_transform = self._create_transform_message(self.current_rvec, self.current_tvec)
+
+            # Get updated Euler angles for logging
+            rot_matrix, _ = cv2.Rodrigues(self.current_rvec)
+            euler = R.from_matrix(rot_matrix).as_euler('xyz', degrees=True)
+
+            response.success = True
+            response.message = (
+                f"Transform adjusted: t=({self.current_tvec[0,0]:.4f}, {self.current_tvec[1,0]:.4f}, {self.current_tvec[2,0]:.4f}), "
+                f"rpy=({euler[0]:.2f}, {euler[1]:.2f}, {euler[2]:.2f}) deg"
+            )
+            self.get_logger().info(response.message)
+
+        return response
+
+    def reset_transform_callback(self, request, response):
+        """Service callback: Reset manual adjustments and re-solve from buffered detections."""
+        with self.lock:
+            buffer_size = len(self.detection_buffer)
+
+            if buffer_size < self.min_poses_required:
+                response.success = False
+                response.message = f"Cannot reset: need at least {self.min_poses_required} poses in buffer (have {buffer_size})"
+                return response
+
+        # Re-solve from buffer (this will reset current_rvec/current_tvec to the solved values)
+        success = self._solve_from_buffer()
+
+        if success:
+            response.success = True
+            response.message = f"Reset transform to solved values ({self.total_correspondences} correspondences from {buffer_size} poses)"
+            self.get_logger().info(response.message)
+        else:
+            response.success = False
+            response.message = f"Reset failed: {self.last_solve_status}"
+            self.get_logger().error(response.message)
+
+        return response
+
+    def get_pose_info_callback(self, request, response):
+        """Service callback: Get detailed pose information."""
+        with self.lock:
+            if self.solved_rvec is None or self.current_rvec is None:
+                response.has_pose = False
+                return response
+
+            response.has_pose = True
+
+            # Get solved pose as Euler angles
+            solved_rot_matrix, _ = cv2.Rodrigues(self.solved_rvec)
+            solved_euler = R.from_matrix(solved_rot_matrix).as_euler('xyz')
+            response.solved_x = float(self.solved_tvec[0, 0])
+            response.solved_y = float(self.solved_tvec[1, 0])
+            response.solved_z = float(self.solved_tvec[2, 0])
+            response.solved_roll = float(solved_euler[0])
+            response.solved_pitch = float(solved_euler[1])
+            response.solved_yaw = float(solved_euler[2])
+
+            # Get current pose as Euler angles
+            current_rot_matrix, _ = cv2.Rodrigues(self.current_rvec)
+            current_euler = R.from_matrix(current_rot_matrix).as_euler('xyz')
+            response.current_x = float(self.current_tvec[0, 0])
+            response.current_y = float(self.current_tvec[1, 0])
+            response.current_z = float(self.current_tvec[2, 0])
+            response.current_roll = float(current_euler[0])
+            response.current_pitch = float(current_euler[1])
+            response.current_yaw = float(current_euler[2])
+
+            # Compute adjustments (delta)
+            response.adjust_x = response.current_x - response.solved_x
+            response.adjust_y = response.current_y - response.solved_y
+            response.adjust_z = response.current_z - response.solved_z
+            response.adjust_roll = response.current_roll - response.solved_roll
+            response.adjust_pitch = response.current_pitch - response.solved_pitch
+            response.adjust_yaw = response.current_yaw - response.solved_yaw
+
+        return response
+
+    def _serialize_detection2d_array(self, msg: Detection2DArray) -> dict:
+        """Serialize Detection2DArray to JSON-compatible dict."""
+        return {
+            "header": {
+                "stamp": {"sec": msg.header.stamp.sec, "nanosec": msg.header.stamp.nanosec},
+                "frame_id": msg.header.frame_id,
+            },
+            "detections": [
+                {
+                    "id": d.id if hasattr(d, 'id') else "",
+                    "bbox": {
+                        "center": {"x": d.bbox.center.position.x, "y": d.bbox.center.position.y},
+                        "size_x": d.bbox.size_x,
+                        "size_y": d.bbox.size_y,
+                    },
+                }
+                for d in msg.detections
+            ],
+        }
+
+    def _serialize_detection3d_array(self, msg: Detection3DArray) -> dict:
+        """Serialize Detection3DArray to JSON-compatible dict."""
+        return {
+            "header": {
+                "stamp": {"sec": msg.header.stamp.sec, "nanosec": msg.header.stamp.nanosec},
+                "frame_id": msg.header.frame_id,
+            },
+            "detections": [
+                {
+                    "results": [
+                        {
+                            "pose": {
+                                "position": {
+                                    "x": r.pose.pose.position.x,
+                                    "y": r.pose.pose.position.y,
+                                    "z": r.pose.pose.position.z,
+                                },
+                                "orientation": {
+                                    "x": r.pose.pose.orientation.x,
+                                    "y": r.pose.pose.orientation.y,
+                                    "z": r.pose.pose.orientation.z,
+                                    "w": r.pose.pose.orientation.w,
+                                },
+                            }
+                        }
+                        for r in d.results
+                    ]
+                }
+                for d in msg.detections
+            ],
+        }
+
+    def _deserialize_detection2d_array(self, data: dict) -> Detection2DArray:
+        """Deserialize Detection2DArray from JSON-compatible dict."""
+        from vision_msgs.msg import Detection2D, BoundingBox2D
+
+        msg = Detection2DArray()
+        msg.header.stamp.sec = data["header"]["stamp"]["sec"]
+        msg.header.stamp.nanosec = data["header"]["stamp"]["nanosec"]
+        msg.header.frame_id = data["header"]["frame_id"]
+
+        for d_data in data["detections"]:
+            detection = Detection2D()
+            if "id" in d_data:
+                detection.id = d_data["id"]
+            detection.bbox = BoundingBox2D()
+            detection.bbox.center.position.x = d_data["bbox"]["center"]["x"]
+            detection.bbox.center.position.y = d_data["bbox"]["center"]["y"]
+            detection.bbox.size_x = d_data["bbox"]["size_x"]
+            detection.bbox.size_y = d_data["bbox"]["size_y"]
+            msg.detections.append(detection)
+
+        return msg
+
+    def _deserialize_detection3d_array(self, data: dict) -> Detection3DArray:
+        """Deserialize Detection3DArray from JSON-compatible dict."""
+        from vision_msgs.msg import Detection3D, ObjectHypothesisWithPose
+        from geometry_msgs.msg import PoseWithCovariance, Pose
+
+        msg = Detection3DArray()
+        msg.header.stamp.sec = data["header"]["stamp"]["sec"]
+        msg.header.stamp.nanosec = data["header"]["stamp"]["nanosec"]
+        msg.header.frame_id = data["header"]["frame_id"]
+
+        for d_data in data["detections"]:
+            detection = Detection3D()
+            for r_data in d_data["results"]:
+                result = ObjectHypothesisWithPose()
+                result.pose = PoseWithCovariance()
+                result.pose.pose = Pose()
+                result.pose.pose.position.x = r_data["pose"]["position"]["x"]
+                result.pose.pose.position.y = r_data["pose"]["position"]["y"]
+                result.pose.pose.position.z = r_data["pose"]["position"]["z"]
+                result.pose.pose.orientation.x = r_data["pose"]["orientation"]["x"]
+                result.pose.pose.orientation.y = r_data["pose"]["orientation"]["y"]
+                result.pose.pose.orientation.z = r_data["pose"]["orientation"]["z"]
+                result.pose.pose.orientation.w = r_data["pose"]["orientation"]["w"]
+                detection.results.append(result)
+            msg.detections.append(detection)
+
+        return msg
 
     def _solve_from_buffer(self) -> bool:
         """
@@ -479,9 +944,7 @@ class AdvancedExtrinsicSolver(Node):
 
         self.get_logger().info(
             f"\n{'#'*80}\n"
-            f"{'#'*80}\n"
             f"  SOLVING MULTI-POSE CALIBRATION FROM {buffer_size} BUFFERED POSES\n"
-            f"{'#'*80}\n"
             f"{'#'*80}\n"
         )
 
@@ -495,7 +958,7 @@ class AdvancedExtrinsicSolver(Node):
                 f"Processing Pose #{pose_idx}/{buffer_size}\n"
                 f"{'-'*80}"
             )
-            
+
             # Convert messages to internal format
             aruco_markers = self._detection2d_to_aruco_markers(aruco_msg)
             board_detection = self._detection3d_to_board_detection(
@@ -544,6 +1007,13 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(self.last_solve_status)
             return False
 
+        # Store solved and current rvec/tvec
+        with self.lock:
+            self.solved_rvec = rvec.copy()
+            self.solved_tvec = tvec.copy()
+            self.current_rvec = rvec.copy()
+            self.current_tvec = tvec.copy()
+
         # Convert rvec to rotation matrix for logging
         rotation_matrix, _ = cv2.Rodrigues(rvec)
         euler_angles = R.from_matrix(rotation_matrix).as_euler('xyz', degrees=True)
@@ -560,40 +1030,28 @@ class AdvancedExtrinsicSolver(Node):
 
         self.get_logger().info(
             f"\n{'#'*80}\n"
-            f"{'#'*80}\n"
             f"  CALIBRATION SOLVED SUCCESSFULLY!\n"
             f"{'#'*80}\n"
             f"  Poses: {buffer_size}\n"
             f"  Correspondences: {num_correspondences}\n"
             f"\n"
-            f"  Extrinsic Transform (LiDAR → Camera):\n"
+            f"  Extrinsic Transform (LiDAR -> Camera):\n"
             f"  -------------------------------------\n"
             f"  Translation (m):\n"
             f"    x: {tvec.flatten()[0]:+.6f}\n"
             f"    y: {tvec.flatten()[1]:+.6f}\n"
             f"    z: {tvec.flatten()[2]:+.6f}\n"
             f"\n"
-            f"  Rotation (Rodrigues vector):\n"
-            f"    rx: {rvec.flatten()[0]:+.6f}\n"
-            f"    ry: {rvec.flatten()[1]:+.6f}\n"
-            f"    rz: {rvec.flatten()[2]:+.6f}\n"
-            f"\n"
             f"  Rotation (Euler angles XYZ, degrees):\n"
-            f"    Roll:  {euler_angles[0]:+.3f}°\n"
-            f"    Pitch: {euler_angles[1]:+.3f}°\n"
-            f"    Yaw:   {euler_angles[2]:+.3f}°\n"
-            f"\n"
-            f"  Rotation Matrix:\n"
-            f"    [{rotation_matrix[0,0]:+.6f}, {rotation_matrix[0,1]:+.6f}, {rotation_matrix[0,2]:+.6f}]\n"
-            f"    [{rotation_matrix[1,0]:+.6f}, {rotation_matrix[1,1]:+.6f}, {rotation_matrix[1,2]:+.6f}]\n"
-            f"    [{rotation_matrix[2,0]:+.6f}, {rotation_matrix[2,1]:+.6f}, {rotation_matrix[2,2]:+.6f}]\n"
+            f"    Roll:  {euler_angles[0]:+.3f}\n"
+            f"    Pitch: {euler_angles[1]:+.3f}\n"
+            f"    Yaw:   {euler_angles[2]:+.3f}\n"
             f"\n"
             f"  Quaternion (x, y, z, w):\n"
             f"    ({transform_msg.transform.rotation.x:+.6f}, "
             f"{transform_msg.transform.rotation.y:+.6f}, "
             f"{transform_msg.transform.rotation.z:+.6f}, "
             f"{transform_msg.transform.rotation.w:+.6f})\n"
-            f"{'#'*80}\n"
             f"{'#'*80}\n"
         )
 
@@ -729,29 +1187,10 @@ class AdvancedExtrinsicSolver(Node):
         object_points = []
         image_points = []
 
-        # Enhanced debug logging for board detection
-        self.get_logger().info(
-            f"\n{'='*70}\n"
-            f"Creating Point Correspondences\n"
-            f"{'='*70}\n"
-            f"Board Detection (LiDAR frame):\n"
-            f"  Position (x, y, z): ({board_detection.position[0]:.4f}, "
-            f"{board_detection.position[1]:.4f}, {board_detection.position[2]:.4f}) m\n"
-            f"  Orientation (quat x,y,z,w): ({board_detection.orientation[0]:.4f}, "
-            f"{board_detection.orientation[1]:.4f}, {board_detection.orientation[2]:.4f}, "
-            f"{board_detection.orientation[3]:.4f})\n"
-            f"ArUco Markers Detected: {len(aruco_markers)}"
-        )
-
         board_rotation = (
             R.from_quat(board_detection.orientation).as_matrix().astype(np.float32)
         )
         board_position = np.array(board_detection.position, dtype=np.float32)
-
-        # Log rotation matrix
-        self.get_logger().info(
-            f"Board Rotation Matrix:\n{board_rotation}"
-        )
 
         board_frame_corners = self._compute_multi_marker_corners()
 
@@ -774,40 +1213,11 @@ class AdvancedExtrinsicSolver(Node):
 
             local_corners = np.array(board_frame_corners[marker_id], dtype=np.float32)
             world_corners = (board_rotation @ local_corners.T).T + board_position
-            
+
             image_corners = np.array(marker.corners, dtype=np.float32)
-            
-            # Detailed logging for each marker
-            self.get_logger().info(
-                f"\nMarker ID {marker_id}:\n"
-                f"  Image Corners (pixels):\n"
-                f"    Corner 0: ({image_corners[0][0]:.2f}, {image_corners[0][1]:.2f})\n"
-                f"    Corner 1: ({image_corners[1][0]:.2f}, {image_corners[1][1]:.2f})\n"
-                f"    Corner 2: ({image_corners[2][0]:.2f}, {image_corners[2][1]:.2f})\n"
-                f"    Corner 3: ({image_corners[3][0]:.2f}, {image_corners[3][1]:.2f})\n"
-                f"  Board Frame (local) Corners:\n"
-                f"    Corner 0: ({local_corners[0][0]:.4f}, {local_corners[0][1]:.4f}, {local_corners[0][2]:.4f})\n"
-                f"    Corner 1: ({local_corners[1][0]:.4f}, {local_corners[1][1]:.4f}, {local_corners[1][2]:.4f})\n"
-                f"    Corner 2: ({local_corners[2][0]:.4f}, {local_corners[2][1]:.4f}, {local_corners[2][2]:.4f})\n"
-                f"    Corner 3: ({local_corners[3][0]:.4f}, {local_corners[3][1]:.4f}, {local_corners[3][2]:.4f})\n"
-                f"  World Frame (LiDAR) Corners:\n"
-                f"    Corner 0: ({world_corners[0][0]:.4f}, {world_corners[0][1]:.4f}, {world_corners[0][2]:.4f})\n"
-                f"    Corner 1: ({world_corners[1][0]:.4f}, {world_corners[1][1]:.4f}, {world_corners[1][2]:.4f})\n"
-                f"    Corner 2: ({world_corners[2][0]:.4f}, {world_corners[2][1]:.4f}, {world_corners[2][2]:.4f})\n"
-                f"    Corner 3: ({world_corners[3][0]:.4f}, {world_corners[3][1]:.4f}, {world_corners[3][2]:.4f})"
-            )
-            
+
             object_points.extend(world_corners)
             image_points.extend(image_corners)
-
-        if len(object_points) == 0:
-            self.get_logger().error("No valid marker correspondences found")
-        else:
-            self.get_logger().info(
-                f"\n{'='*70}\n"
-                f"Total Correspondences Created: {len(object_points)} points\n"
-                f"{'='*70}\n"
-            )
 
         return np.array(object_points, dtype=np.float32), np.array(
             image_points, dtype=np.float32
@@ -825,8 +1235,7 @@ class AdvancedExtrinsicSolver(Node):
         dist_coeffs = np.zeros(5, dtype=np.float32)
 
         self.get_logger().info(
-            f"Solving PnP with {len(object_points)} correspondences\n"
-            f"Camera matrix K:\n{K}"
+            f"Solving PnP with {len(object_points)} correspondences"
         )
 
         try:
@@ -835,14 +1244,13 @@ class AdvancedExtrinsicSolver(Node):
                 image_points,
                 K,
                 dist_coeffs,
-                flags=cv2.SOLVEPNP_ITERATIVE,
+                flags=cv2.SOLVEPNP_SQPNP,
             )
 
             if success:
                 self.get_logger().info(
                     f"PnP solved successfully!\n"
-                    f"Rotation vector: {rvec.flatten()}\n"
-                    f"Translation vector: {tvec.flatten()}"
+                    f"Translation: {tvec.flatten()}"
                 )
                 return True, rvec, tvec
             else:

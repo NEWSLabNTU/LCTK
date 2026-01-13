@@ -1,0 +1,12 @@
+# LoadDetections.srv
+# Service to load detections from a JSON file into the buffer
+
+# Request
+string file_path              # Path to the detections file to load
+bool append                   # If true, append to existing buffer; if false, replace buffer
+---
+# Response
+bool success                  # True if detections were loaded successfully
+string message               # Success message or error description
+int32 num_detections         # Number of detection pairs loaded
+int32 buffer_size            # Current buffer size after loading

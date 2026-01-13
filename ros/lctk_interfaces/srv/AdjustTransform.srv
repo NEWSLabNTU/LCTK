@@ -1,0 +1,14 @@
+# AdjustTransform.srv
+# Service to manually adjust the extrinsic transform
+
+# Request
+float64 delta_x              # Translation adjustment in x (meters)
+float64 delta_y              # Translation adjustment in y (meters)
+float64 delta_z              # Translation adjustment in z (meters)
+float64 delta_roll           # Rotation adjustment around x axis (radians)
+float64 delta_pitch          # Rotation adjustment around y axis (radians)
+float64 delta_yaw            # Rotation adjustment around z axis (radians)
+---
+# Response
+bool success                  # True if adjustment was applied
+string message               # Success message or error description

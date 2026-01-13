@@ -1,0 +1,8 @@
+# ResetTransform.srv
+# Service to reset manual adjustments and re-solve from buffered detections
+
+# Request (empty - just triggers reset)
+---
+# Response
+bool success                  # True if reset was successful
+string message               # Success message or error description
