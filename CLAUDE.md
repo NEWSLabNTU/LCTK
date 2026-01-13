@@ -71,6 +71,13 @@ just serve-public   # Serve on 0.0.0.0
    pkill -9 -f ros2-daemon
    ```
 
+4. **Text file busy during build**: If build fails with "Text file busy (os error 26)", kill running nodes and clean:
+   ```bash
+   pkill -9 -f "<node_name>"
+   rm -rf build/<package> install/<package>
+   just build
+   ```
+
 ## Coding Guidelines
 
 - Use named parameters in format strings: `println!("{e}")` not `println!("{}", e)`
@@ -86,3 +93,98 @@ just serve-public   # Serve on 0.0.0.0
 - Camera info topics auto-derived from image topics (image_pipeline convention)
 - All nodes require explicit config file parameters (no hardcoded defaults)
 - Workspace dependencies defined in root Cargo.toml
+
+## rclrs Patterns
+
+### Dynamic Parameters
+Use `MandatoryParameter<T>` wrapped in `Arc` for runtime-configurable parameters:
+```rust
+let param: Arc<MandatoryParameter<f64>> = Arc::new(
+    node.declare_parameter::<f64>("param_name")
+        .default(1.0)
+        .mandatory()?
+);
+// Read current value (reflects runtime changes via `ros2 param set`)
+let value = param.get();
+```
+
+### High-Frequency Sensor Data with Slow Processing
+The rclrs executor queues ALL messages internally, regardless of QoS KEEP_LAST settings. For slow processing (e.g., ICP taking 600ms+ with 10Hz input), use `ArcSwap` to decouple reception from processing:
+```rust
+use arc_swap::ArcSwap;
+
+// Store latest message
+let latest_msg: Arc<ArcSwap<Option<Arc<SensorMsg>>>> = Arc::new(ArcSwap::new(Arc::new(None)));
+
+// Subscription callback - lightweight, just stores latest
+let msg_for_callback = Arc::clone(&latest_msg);
+node.create_subscription(opts, move |msg| {
+    msg_for_callback.store(Arc::new(Some(Arc::new(msg))));
+})?;
+
+// Processing thread - takes latest, skips stale
+let msg_for_processing = Arc::clone(&latest_msg);
+std::thread::spawn(move || loop {
+    let msg_opt = msg_for_processing.swap(Arc::new(None));
+    if let Some(msg) = msg_opt.as_ref() {
+        process(msg);  // Slow processing here
+    } else {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+});
+```
+This ensures always processing the latest data, not stale queued messages.
+
+## Calibration Workflow
+
+### Advanced Extrinsic Solver
+
+The `advanced_extrinsic_solver` node provides multi-pose calibration with manual adjustment capabilities.
+
+**Services** (under `~/calibration/advanced_extrinsic_solver/advanced_extrinsic_solver/`):
+- `add_detection` - Add current ArUco + board detection pair to buffer
+- `clear_buffer` - Clear all buffered detections
+- `get_status` - Get buffer size, correspondences, solve status
+- `list_buffer` - List all buffered detection pairs
+- `remove_detection` - Remove detection by index
+- `dump_detections` - Save detections + transform to JSON file
+- `load_detections` - Load detections + transform from JSON file
+- `adjust_transform` - Manual x/y/z/roll/pitch/yaw adjustment
+- `reset_transform` - Reset manual adjustments (re-solve from buffer)
+- `get_pose_info` - Get solved pose, current pose, and adjustment delta
+
+**Detection File Format** (version 2):
+```json
+{
+  "version": 2,
+  "num_detections": 5,
+  "detections": [...],
+  "transform": {
+    "rvec": [rx, ry, rz],
+    "tvec": [tx, ty, tz]
+  }
+}
+```
+
+### Interactive Solver Controller
+
+Rich TUI for controlling the advanced_extrinsic_solver. Run via:
+```bash
+ros2 run interactive_solver_controller interactive_solver_controller
+```
+
+**Key Bindings:**
+```
+Buffer:     Space (Add)  Backspace (Delete)  c (Clear)
+File:       p (Save ~/detections.json)  o (Load)
+Transform:  q/a (X)  w/s (Y)  e/d (Z)  r/f (Roll)  t/g (Pitch)  y/b (Yaw)
+Step Size:  ] (Increase)  [ (Decrease)
+Reset:      0 (Re-solve from buffer)
+Exit:       ESC
+```
+
+**Display Panels:**
+- Buffer Status: Detection count, correspondences, publishing status
+- Pose Information: Three columns showing Solved (PnP), Adjustment (delta), Current (final)
+- Step Size: Current translation (mm) and rotation (deg) step sizes
+- Key Bindings: Quick reference for all controls
