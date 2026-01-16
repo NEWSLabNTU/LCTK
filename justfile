@@ -42,7 +42,7 @@ format:
 # Run formatting and linting checks
 lint:
     cargo +nightly fmt --check
-    cargo clippy --all-targets --
+    cargo clippy --config build/ros2_cargo_config.toml --all-targets --
 
 # Run tests with cargo nextest
 test:
