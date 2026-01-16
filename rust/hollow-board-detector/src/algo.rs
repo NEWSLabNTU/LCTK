@@ -13,7 +13,6 @@ use hollow_board_config::{BoardModel, BoardShape};
 use log::{debug, warn};
 use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
 use newslab_geom_algo::{self, centroid_of_points};
-use noisy_float::prelude::*;
 use plane_estimator::{PlaneEstimator, PlaneModel};
 use sample_consensus::Consensus;
 use std::{
@@ -68,7 +67,7 @@ fn voxel_downsample_sequential(
 
         for &point in points {
             let key = compute_voxel_key(point, voxel_size);
-            voxel_map.entry(key).or_insert_with(Vec::new).push(point);
+            voxel_map.entry(key).or_default().push(point);
         }
 
         voxel_map
@@ -102,11 +101,11 @@ fn voxel_downsample_parallel(
 
     if use_centroid {
         // Parallel insertion into DashMap
-        let voxel_map = DashMap::new();
+        let voxel_map: DashMap<VoxelKey, Vec<Point3<f64>>> = DashMap::new();
 
         points.par_iter().for_each(|&point| {
             let key = compute_voxel_key(point, voxel_size);
-            voxel_map.entry(key).or_insert_with(Vec::new).push(point);
+            voxel_map.entry(key).or_default().push(point);
         });
 
         // Parallel centroid computation
@@ -218,6 +217,7 @@ pub fn fit_plane_ransac<'a>(
 }
 
 /// Estimates the board pose from a point set using ICP algorithm.
+#[allow(unused_assignments)]
 pub fn fit_board_icp(
     board_detector: &Config,
     aruco_detector: &MultiArucoPattern,
@@ -273,7 +273,7 @@ pub fn fit_board_icp(
 
                 let primary_rotation =
                     UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
-                        .unwrap_or_else(|| UnitQuaternion::identity());
+                        .unwrap_or_else(UnitQuaternion::identity);
 
                 let rotated_board_x = primary_rotation * Vector3::x_axis();
 
@@ -286,10 +286,9 @@ pub fn fit_board_icp(
 
                     let secondary_rotation =
                         UnitQuaternion::rotation_between(&rotated_board_x, &target_direction)
-                            .unwrap_or_else(|| UnitQuaternion::identity());
+                            .unwrap_or_else(UnitQuaternion::identity);
 
-                    let final_rotation = secondary_rotation * primary_rotation;
-                    final_rotation
+                    secondary_rotation * primary_rotation
                 } else {
                     primary_rotation
                 }
@@ -327,7 +326,7 @@ pub fn fit_board_icp(
         };
 
         let (inlier_points, icp_losses, pose) = {
-            let mut inlier_points = downsampled_points;
+            let inlier_points = downsampled_points;
             let mut losses: Vec<f64> = vec![];
             let mut termination_count = 0;
             let mut pose = init_pose;
@@ -362,8 +361,7 @@ pub fn fit_board_icp(
                 let correspondence_losses: Vec<_> = correspondings
                     .iter()
                     .map(|(input_point, corresponding_point)| {
-                        let loss = (*input_point - corresponding_point).norm();
-                        loss
+                        (*input_point - corresponding_point).norm()
                     })
                     .collect();
                 let avg_loss =
@@ -385,45 +383,12 @@ pub fn fit_board_icp(
                     Vec<Point3<f64>>,
                 ) = good_correspondences.into_iter().unzip();
 
-                if good_inlier_points.len() >= 3 {
-                    if let Some(in_centroid_arr) =
-                        centroid_of_points(good_inlier_points.iter().map(|p| {
-                            let a: [f64; 3] = (*p).into();
-                            a
-                        }))
-                    {
-                        let in_centroid: Point3<f64> = in_centroid_arr.into();
-                    }
-                    if let Some(mod_centroid_arr) =
-                        centroid_of_points(good_corresponding_points.iter().map(|p| {
-                            let a: [f64; 3] = (*p).into();
-                            a
-                        }))
-                    {
-                        let mod_centroid: Point3<f64> = mod_centroid_arr.into();
-                    }
-                }
-
                 if good_inlier_points.len() < 3 {
                     convergence_reason = format!(
                         "Insufficient points for Kabsch: {}",
                         good_inlier_points.len()
                     );
-                    let stats = IcpStatistics {
-                        iterations: step,
-                        final_loss: losses.last().copied().unwrap_or(0.0),
-                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                        successful: false,
-                        initial_loss: if initial_loss_captured {
-                            initial_loss
-                        } else {
-                            0.0
-                        },
-                        convergence_reason: convergence_reason.clone(),
-                    };
-                    // Store final values in outer scope variables
                     final_corresponding_points = good_corresponding_points;
-                    final_icp_stats = stats;
                     break;
                 }
 
@@ -435,21 +400,7 @@ pub fn fit_board_icp(
                         Some(iso) => iso.inverse(),
                         None => {
                             convergence_reason = "Kabsch algorithm failed".to_string();
-                            let stats = IcpStatistics {
-                                iterations: step,
-                                final_loss: losses.last().copied().unwrap_or(0.0),
-                                min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                                successful: false,
-                                initial_loss: if initial_loss_captured {
-                                    initial_loss
-                                } else {
-                                    0.0
-                                },
-                                convergence_reason: convergence_reason.clone(),
-                            };
-                            // Store final values in outer scope variables
                             final_corresponding_points = good_corresponding_points;
-                            final_icp_stats = stats;
                             break;
                         }
                     }
@@ -492,21 +443,7 @@ pub fn fit_board_icp(
                         "Insufficient good correspondences: {} < {}",
                         good_correspondences_len, icp_min_inlier_points
                     );
-                    let stats = IcpStatistics {
-                        iterations: step,
-                        final_loss: losses.last().copied().unwrap_or(0.0),
-                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                        successful: false,
-                        initial_loss: if initial_loss_captured {
-                            initial_loss
-                        } else {
-                            0.0
-                        },
-                        convergence_reason: convergence_reason.clone(),
-                    };
-                    // Store final values in outer scope variables
                     final_corresponding_points = good_corresponding_points;
-                    final_icp_stats = stats;
                     break;
                 }
 
@@ -546,41 +483,13 @@ pub fn fit_board_icp(
                     } else {
                         "Converged (good fit)".to_string()
                     };
-                    let stats = IcpStatistics {
-                        iterations: step,
-                        final_loss: losses.last().copied().unwrap_or(0.0),
-                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                        successful: true,
-                        initial_loss: if initial_loss_captured {
-                            initial_loss
-                        } else {
-                            0.0
-                        },
-                        convergence_reason: convergence_reason.clone(),
-                    };
-                    // Store final values in outer scope variables
                     final_corresponding_points = good_corresponding_points;
-                    final_icp_stats = stats;
                     break;
                 }
 
                 if step == max_icp_iterations {
                     convergence_reason = format!("Max iterations reached: {}", max_icp_iterations);
-                    let stats = IcpStatistics {
-                        iterations: step,
-                        final_loss: losses.last().copied().unwrap_or(0.0),
-                        min_loss: losses.iter().copied().fold(f64::INFINITY, f64::min),
-                        successful: false,
-                        initial_loss: if initial_loss_captured {
-                            initial_loss
-                        } else {
-                            0.0
-                        },
-                        convergence_reason: convergence_reason.clone(),
-                    };
-                    // Store final values in outer scope variables
                     final_corresponding_points = good_corresponding_points;
-                    final_icp_stats = stats;
                     break;
                 }
             }
@@ -647,7 +556,7 @@ pub fn fit_board_icp(
 
                 let mut covariance = nalgebra::Matrix3::<f64>::zeros();
                 for point in plane_inlier_points.iter() {
-                    let p: Point3<f64> = (*point.borrow()).into();
+                    let p: Point3<f64> = *point.borrow();
                     let diff = p - mean;
                     covariance += diff * diff.transpose();
                 }
@@ -693,7 +602,7 @@ pub fn fit_board_icp(
             } else {
                 let board_z_axis = Vector3::z_axis();
                 UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
-                    .unwrap_or_else(|| UnitQuaternion::identity())
+                    .unwrap_or_else(UnitQuaternion::identity)
             }
         };
 
@@ -723,7 +632,7 @@ pub fn fit_board_icp_with_iterator<'a>(
     aruco_detector: &MultiArucoPattern,
     plane_model: &PlaneModel,
     plane_inlier_points: &[impl Borrow<Point3<f64>>],
-    mut progress_cb: Option<&'a mut dyn FnMut(&BoardModel)>,
+    progress_cb: Option<&'a mut dyn FnMut(&BoardModel)>,
 ) -> Result<FitBoardIcp> {
     let init_pose = {
         let inlier_centroid: Point3<f64> =
@@ -744,7 +653,7 @@ pub fn fit_board_icp_with_iterator<'a>(
                 let mean = inlier_centroid;
                 let mut covariance = nalgebra::Matrix3::<f64>::zeros();
                 for point in plane_inlier_points.iter() {
-                    let p: Point3<f64> = (*point.borrow()).into();
+                    let p: Point3<f64> = *point.borrow();
                     let diff = p - mean;
                     covariance += diff * diff.transpose();
                 }
@@ -789,7 +698,7 @@ pub fn fit_board_icp_with_iterator<'a>(
             } else {
                 let board_z_axis = Vector3::z_axis();
                 UnitQuaternion::rotation_between(&board_z_axis, &plane_normal)
-                    .unwrap_or_else(|| UnitQuaternion::identity())
+                    .unwrap_or_else(UnitQuaternion::identity)
             }
         };
 
@@ -1032,7 +941,7 @@ impl<'a> BoardIcpIterator<'a> {
 
         let damped_pose = Isometry3::from_parts(damped_translation, damped_rotation);
 
-        let new_state = BoardIcpState {
+        BoardIcpState {
             iteration: current_state.iteration + 1,
             board_pose: damped_pose,
             inlier_points: current_state.inlier_points.clone(),
@@ -1042,9 +951,7 @@ impl<'a> BoardIcpIterator<'a> {
             total_correspondences,
             good_correspondences: good_correspondences_len,
             termination_count,
-        };
-
-        new_state
+        }
     }
 
     /// Check if algorithm should terminate
@@ -1149,9 +1056,9 @@ impl<'a> BoardIcpIterator<'a> {
         let u_t = u.transpose();
 
         // Compute the determinant to check for reflection
-        let d = (&v * &u_t).determinant();
+        let d = (v * u_t).determinant();
         let correction = nalgebra::Matrix3::from_diagonal(&Vector3::new(1.0, 1.0, d.signum()));
-        let rotation_matrix = &v * correction * u_t;
+        let rotation_matrix = v * correction * u_t;
 
         // Convert to unit quaternion (convert dynamic matrix to fixed 3x3)
         let rotation_matrix_3x3 = rotation_matrix.fixed_view::<3, 3>(0, 0).into_owned();

@@ -157,11 +157,14 @@ fn calculate_bounding_box(corners: &[Point2D]) -> BoundingBox2D {
 struct CameraCalibration {
     camera_matrix: [f64; 9], // 3x3 matrix in row-major order
     distortion_coeffs: Vec<f64>,
+    #[allow(dead_code)]
     width: i32,
+    #[allow(dead_code)]
     height: i32,
 }
 
 /// ArUco detection ROS 2 node
+#[allow(dead_code)]
 pub struct ArucoLocatorNode {
     _camera_info_subscription: Subscription<CameraInfo>,
     _image_subscription: Subscription<ImageMsg>,
@@ -239,7 +242,7 @@ impl ArucoLocatorNode {
 
         // First create image subscription to get the resolved topic name
         let mut image_options = SubscriptionOptions::new(image_topic);
-        image_options.qos = qos_profile.clone();
+        image_options.qos = qos_profile;
 
         // Create a temporary subscription to get resolved topic name
         let temp_image_subscription = node.create_subscription(image_options, |_: ImageMsg| {})?;
@@ -284,7 +287,7 @@ impl ArucoLocatorNode {
         let camera_calibration_camera_info = Arc::clone(&camera_calibration);
         let config_file_for_callback = aruco_config_file.clone();
         let mut camera_info_options = SubscriptionOptions::new(&camera_info_topic);
-        camera_info_options.qos = qos_profile.clone();
+        camera_info_options.qos = qos_profile;
         let camera_info_subscription =
             node.create_subscription(camera_info_options, move |msg: CameraInfo| {
                 Self::camera_info_callback(
@@ -304,7 +307,7 @@ impl ArucoLocatorNode {
         let aruco_pattern_image = Arc::clone(&aruco_pattern);
 
         let mut image_options = SubscriptionOptions::new(image_topic);
-        image_options.qos = qos_profile.clone();
+        image_options.qos = qos_profile;
         let image_subscription =
             node.create_subscription(image_options, move |msg: ImageMsg| {
                 Self::image_callback(
@@ -422,7 +425,7 @@ impl ArucoLocatorNode {
             .map_err(|_| anyhow!("Camera matrix must have 9 elements"))?;
 
         // Extract distortion coefficients as vector
-        let distortion_coeffs: Vec<f64> = camera_info.d.iter().map(|&x| x as f64).collect();
+        let distortion_coeffs: Vec<f64> = camera_info.d.to_vec();
 
         let calibration = CameraCalibration {
             camera_matrix,
@@ -909,7 +912,7 @@ impl ArucoLocatorNode {
         let mut data = vec![0u8; data_size];
 
         unsafe {
-            let mat_data = bgr_mat.ptr(0)? as *const u8;
+            let mat_data = bgr_mat.ptr(0)?;
             std::ptr::copy_nonoverlapping(mat_data, data.as_mut_ptr(), data_size);
         }
 

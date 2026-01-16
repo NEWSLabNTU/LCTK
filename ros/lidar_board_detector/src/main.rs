@@ -1,8 +1,8 @@
 mod bbox;
 
-use arc_swap::ArcSwap;
 use crate::bbox::BBox;
 use anyhow::{anyhow, Result};
+use arc_swap::ArcSwap;
 use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
     Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Vector3 as GeomVector3,
@@ -58,6 +58,7 @@ struct BoardDebugPublishers {
     board_marker_icp: Arc<Publisher<MarkerArray>>,
     initial_board_marker: Arc<Publisher<MarkerArray>>,
     icp_stats: Arc<Publisher<StringMsg>>,
+    #[allow(dead_code)]
     pca_eigenvectors: Arc<Publisher<MarkerArray>>,
 }
 
@@ -1033,10 +1034,11 @@ impl CalibrationBoardLocatorNode {
         use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
         static LAST_SIZE_HASH: AtomicU64 = AtomicU64::new(0);
 
-        let size_hash = (bbox.size_xyz[0].to_bits() ^ bbox.size_xyz[1].to_bits() ^ bbox.size_xyz[2].to_bits())
-            .wrapping_add(bbox.pose.translation.x.to_bits())
-            .wrapping_add(bbox.pose.translation.y.to_bits())
-            .wrapping_add(bbox.pose.translation.z.to_bits());
+        let size_hash =
+            (bbox.size_xyz[0].to_bits() ^ bbox.size_xyz[1].to_bits() ^ bbox.size_xyz[2].to_bits())
+                .wrapping_add(bbox.pose.translation.x.to_bits())
+                .wrapping_add(bbox.pose.translation.y.to_bits())
+                .wrapping_add(bbox.pose.translation.z.to_bits());
         let prev_hash = LAST_SIZE_HASH.swap(size_hash, AtomicOrdering::Relaxed);
         if size_hash != prev_hash {
             log_info!(
@@ -1118,8 +1120,8 @@ impl CalibrationBoardLocatorNode {
                 return Ok(None);
             }
             Err(e) => {
-                log_warn!(LOGGER_NAME, "Plane fitting error: {}", e);
-                return Err(e.into());
+                log_warn!(LOGGER_NAME, "Plane fitting error: {e}");
+                return Err(e);
             }
         };
 
@@ -1242,7 +1244,7 @@ impl CalibrationBoardLocatorNode {
         }
 
         // Note: plane_inlier_points are already downsampled (if enabled) in process_pointcloud()
-        let icp_points: Vec<na::Point3<f64>> = plane_inlier_points.iter().cloned().collect();
+        let icp_points: Vec<na::Point3<f64>> = plane_inlier_points.to_vec();
 
         log_info!(LOGGER_NAME, "Starting ICP with {} points", icp_points.len());
 
@@ -1799,16 +1801,19 @@ impl CalibrationBoardLocatorNode {
         Ok(marker)
     }
 
+    #[allow(dead_code)]
     fn create_board_marker(board_detection: &BoardDetection, header: &Header) -> Result<Marker> {
         // Use the pose returned by algo.rs (embedded in board_detection.board_model.pose)
         let board_model = &board_detection.board_model;
 
-        let mut marker = Marker::default();
-        marker.header = header.clone();
-        marker.ns = "board".to_string();
-        marker.id = 0;
-        marker.type_ = 1; // CUBE to approximate board plane
-        marker.action = 0; // ADD
+        let mut marker = Marker {
+            header: header.clone(),
+            ns: "board".to_string(),
+            id: 0,
+            type_: 1,  // CUBE to approximate board plane
+            action: 0, // ADD
+            ..Default::default()
+        };
 
         // Position from pose
         marker.pose.position.x = board_model.pose.translation.x;
@@ -1842,6 +1847,7 @@ impl CalibrationBoardLocatorNode {
     }
 
     /// Create board visualization markers with customizable colors and namespaces
+    #[allow(clippy::too_many_arguments)]
     fn create_board_visualization(
         board_model: &hollow_board_config::BoardModel,
         header: &Header,
@@ -1895,7 +1901,7 @@ impl CalibrationBoardLocatorNode {
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
                 let rot = base_rotation * rot_after_x;
                 let q = rot.quaternion();
-                let len = (board_model.board_shape.board_width.as_meters() * 0.5) as f64;
+                let len = board_model.board_shape.board_width.as_meters() * 0.5;
 
                 Marker {
                     header: header.clone(),
@@ -2254,30 +2260,29 @@ impl CalibrationBoardLocatorNode {
         };
 
         // Generate board model points (corners and hole centers for visualization)
-        let mut points = Vec::new();
-
-        // Add board corners
-        points.push(board_model.top_corner());
-        points.push(board_model.bottom_corner());
-        points.push(board_model.left_corner());
-        points.push(board_model.right_corner());
-
-        // Add hole centers
-        points.push(board_model.left_circle_center());
-        points.push(board_model.right_circle_center());
-        points.push(board_model.top_circle_center());
-
-        // Add marker corners for more detail
-        points.push(board_model.marker_bottom_corner());
-        points.push(board_model.marker_top_corner());
-        points.push(board_model.marker_left_corner());
-        points.push(board_model.marker_right_corner());
-        points.push(board_model.marker_center());
+        let points = vec![
+            // Board corners
+            board_model.top_corner(),
+            board_model.bottom_corner(),
+            board_model.left_corner(),
+            board_model.right_corner(),
+            // Hole centers
+            board_model.left_circle_center(),
+            board_model.right_circle_center(),
+            board_model.top_circle_center(),
+            // Marker corners for more detail
+            board_model.marker_bottom_corner(),
+            board_model.marker_top_corner(),
+            board_model.marker_left_corner(),
+            board_model.marker_right_corner(),
+            board_model.marker_center(),
+        ];
 
         Self::create_debug_pointcloud(&points, header)
     }
 
     /// Create arrow markers for raw PCA eigenvectors before any orientation constraints
+    #[allow(dead_code)]
     fn create_pca_eigenvector_markers(
         centroid: &na::Vector3<f64>,
         v1: &na::Vector3<f64>,

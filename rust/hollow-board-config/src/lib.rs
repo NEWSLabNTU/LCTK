@@ -673,7 +673,7 @@ mod tests {
         println!("origin: ({:.6}, {:.6})", origin_x, origin_y);
 
         // Expected corners for bottom marker (696) at (0,0)
-        let bottom_corners = vec![
+        let bottom_corners = [
             (origin_x, origin_y + marker_size, 0.0), // right
             (origin_x + marker_size, origin_y + marker_size, 0.0), // top
             (origin_x + marker_size, origin_y, 0.0), // left
@@ -681,7 +681,7 @@ mod tests {
         ];
 
         // Expected corners for left marker (64) at (0,1)
-        let left_corners = vec![
+        let left_corners = [
             (origin_x + square_size, origin_y + marker_size, 0.0), // right
             (
                 origin_x + square_size + marker_size,
@@ -693,7 +693,7 @@ mod tests {
         ];
 
         // Expected corners for right marker (306) at (1,0)
-        let right_corners = vec![
+        let right_corners = [
             (origin_x, origin_y + square_size + marker_size, 0.0), // right
             (
                 origin_x + marker_size,
@@ -705,7 +705,7 @@ mod tests {
         ];
 
         // Expected corners for top marker (195) at (1,1)
-        let top_corners = vec![
+        let top_corners = [
             (
                 origin_x + square_size,
                 origin_y + square_size + marker_size,

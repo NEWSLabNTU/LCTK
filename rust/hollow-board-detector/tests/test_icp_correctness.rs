@@ -1,7 +1,7 @@
 use hollow_board_config::BoardShape;
 use hollow_board_detector::{algo::BoardIcpIterator, config::Config, detection::BoardModelParams};
 use measurements::Length;
-use nalgebra::{Isometry3, Point3, Rotation3, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
 
 fn create_test_config() -> Config {
     Config {

@@ -221,7 +221,7 @@ fn test_iterator_termination_reason() {
     let initial_pose = Isometry3::identity();
     let initial_points = create_test_points();
 
-    let mut state_converged = iterator.initial_state(initial_pose.clone(), initial_points.clone());
+    let mut state_converged = iterator.initial_state(initial_pose, initial_points.clone());
     state_converged.termination_count = 101; // Must be > 100 to trigger convergence
 
     let reason_converged = iterator.termination_reason(&state_converged);
