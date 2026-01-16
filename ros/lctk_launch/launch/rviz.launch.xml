@@ -32,6 +32,7 @@
           name="rviz2"
           namespace="$(var namespace)" if="$(var use_namespace)"
           output="screen"
+          respawn="true"
           args="-d $(var rviz_config)"/>
 
     <node pkg="rviz2"
@@ -39,5 +40,6 @@
           name="rviz2"
           output="screen"
           unless="$(var use_namespace)"
+          respawn="true"
           args="-d $(var rviz_config)"/>
 </launch>
