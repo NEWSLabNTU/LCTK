@@ -33,7 +33,4 @@ pip3 install --user \
     "setuptools>=45" \
     wheel
 
-echo "Installing ros2systemd for ROS 2 service management..."
-pip3 install --user ros2systemd
-
 echo "Python environment installation complete."
