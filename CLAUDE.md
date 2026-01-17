@@ -25,7 +25,13 @@ just
 ## Project Structure
 
 - **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, etc.)
-- **`ros/`**: ROS 2 nodes (aruco_locator_node, lidar_board_detector, extrinsic_solver, etc.)
+- **`ros/`**: ROS 2 packages
+  - `lctk_launch/` - Unified launch system with config-driven calibration pipeline
+  - `aruco_locator_node/` - ArUco marker detection from camera images
+  - `lidar_board_detector/` - Calibration board detection from point clouds
+  - `advanced_extrinsic_solver/` - Multi-pose LiDAR-camera calibration solver
+  - `lidar_to_lidar_solver/` - LiDAR-to-LiDAR calibration solver
+  - `lctk_sample_data/` - Sample data playback for testing
 - **`setup/`**: Development environment setup scripts
 - **`book/`**: Documentation (mdbook with mermaid diagrams)
 
@@ -53,9 +59,12 @@ just clean      # Clean build artifacts
 just test       # Run tests
 just lint       # Run linting
 
-just lidar-camera   # Launch calibration
-just sample-data    # Launch sample data
+just lidar-camera   # Launch calibration (legacy XML launch)
+just sample-data    # Launch sample data playback
 just rviz           # Launch RViz
+
+# Config-driven calibration (preferred)
+just calibrate /path/to/config.yaml
 
 # Documentation (run from book/ directory)
 just build          # Build docs
@@ -86,6 +95,16 @@ just serve-public   # Serve on 0.0.0.0
    rm -rf build/<package> install/<package>
    just build
    ```
+
+5. **Killing play_launch leaves orphan processes**: When killing play_launch with `pkill`, child processes become orphans. Kill the entire process group instead:
+   ```bash
+   # Find the play_launch process group ID (PGID)
+   ps -o pid,pgid,cmd | grep play_launch
+
+   # Kill the entire process group (note the negative sign before PGID)
+   kill -9 -<PGID>
+   ```
+   Alternatively, run play_launch in its own process group and use Ctrl+C for clean shutdown.
 
 ## Coding Guidelines
 
@@ -145,6 +164,54 @@ std::thread::spawn(move || loop {
 This ensures always processing the latest data, not stale queued messages.
 
 ## Calibration Workflow
+
+### Config-Driven Calibration (Preferred)
+
+The unified calibration interface uses YAML configuration files to define sensors and calibration pairs. This automatically generates the required nodes.
+
+**Usage:**
+```bash
+# With sample data
+just sample-data                    # Terminal 1: Start data playback
+just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/sample_data.yaml  # Terminal 2
+
+# Or with ros2 launch directly
+ros2 launch lctk_launch calibrate.launch.py config_file:=/path/to/config.yaml
+```
+
+**Configuration Format:**
+```yaml
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
+      frame_id: velodyne_top
+  cameras:
+    front_center:
+      image_topic: /sensing/camera/front_center/image_raw
+      frame_id: camera_front_center
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+
+calibration_pairs:
+  - devices: [top_lidar, front_center]
+    marker: calibration_board
+```
+
+**Generated Nodes:**
+- `lidar_board_detector` - One per unique (lidar, marker) pair
+- `aruco_locator_node` - One per camera
+- `advanced_extrinsic_solver` - One per lidar-camera pair
+- `lidar_to_lidar_solver` - One per lidar-lidar pair
+
+**Example Configs:**
+- `config/examples/sample_data.yaml` - Single lidar + camera (matches `just sample-data`)
+- `config/examples/vehicle.yaml` - Multi-sensor vehicle setup
 
 ### LiDAR-to-LiDAR Calibration
 
