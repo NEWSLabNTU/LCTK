@@ -57,8 +57,7 @@ lidar-camera:
     set -eo pipefail
     source install/setup.bash
     play_launch launch \
-        --web-ui \
-        --web-ui-addr 0.0.0.0 \
+        --web-addr 0.0.0.0:8000 \
         lctk_launch lidar_camera_calibration.launch.xml \
         debug_mode:={{ debug_mode }} \
         enable_icp_iteration_debug:={{ enable_icp_iteration_debug }} \
@@ -78,8 +77,7 @@ two-lidar:
     set -eo pipefail
     source install/setup.bash
     play_launch launch \
-        --web-ui \
-        --web-ui-addr 0.0.0.0 \
+        --web-addr 0.0.0.0:8000 \
         lctk_launch two_lidar_calibration.launch.xml
 
 # Launch sample data playback only
@@ -88,8 +86,6 @@ sample-data:
     set -eo pipefail
     source install/setup.bash
     play_launch launch \
-        --web-ui \
-        --web-ui-addr 0.0.0.0 \
         lctk_sample_data lidar_camera.launch.xml
 
 # Launch demo (sample data + calibration pipeline)
@@ -98,8 +94,7 @@ demo:
     set -eo pipefail
     source install/setup.bash
     play_launch launch \
-        --web-ui \
-        --web-ui-addr 0.0.0.0 \
+        --web-addr 0.0.0.0:8000 \
         lctk_launch lidar_camera_demo.launch.xml \
         debug_mode:={{ debug_mode }} \
         enable_icp_iteration_debug:={{ enable_icp_iteration_debug }} \
@@ -116,9 +111,7 @@ rviz:
     set -eo pipefail
     source install/setup.bash
     play_launch launch \
-        --web-ui \
-        --web-ui-addr 0.0.0.0 \
-        lctk_launch rviz.launch.xml
+        --web-addr 0.0.0.0:8000 \
 
 # Launch interactive advanced solver controller
 advanced-solver-controller:

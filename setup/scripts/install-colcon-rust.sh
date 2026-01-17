@@ -21,7 +21,7 @@ echo "Installing colcon-cargo-ros2..."
 pip3 install --user colcon-cargo-ros2
 
 echo "Installing play_launch..."
-pip3 install --user play_launch
+pip3 install --user 'play_launch>=0.5.0'
 
 # Remove pip-installed empy if present (can conflict with system package)
 echo "Removing pip-installed empy if present..."
