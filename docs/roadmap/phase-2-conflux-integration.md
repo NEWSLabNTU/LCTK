@@ -58,79 +58,48 @@ Integrate the `conflux` message synchronization library into LCTK's calibration 
 
 ## Implementation Tasks
 
-### Task 1: Verify rclrs Compatibility
+### Task 1: Verify rclrs Compatibility ✅ DONE
 
 **Goal**: Determine if conflux's rclrs (main) and LCTK's rclrs (0.6.0) can coexist.
 
-**Steps**:
-1. Check conflux's rclrs commit for API differences vs 0.6.0
-2. Test building conflux within LCTK workspace
-3. Document any breaking changes or required patches
+**Resolution**: Use separate workspaces. LCTK stays on crates.io rclrs 0.6.0, conflux uses git rclrs with DynamicMessage support. Communication happens via wire-compatible ROS2 topics.
 
-**Decision Point**:
-- If compatible: Proceed with integration
-- If incompatible: Either upgrade LCTK to main branch rclrs, or pin conflux to 0.6.0
+**Changes Made**:
+- Added `ros/conflux` and `external/rclrs` to LCTK's workspace exclude list
+- Added `test-release` profile to external/rclrs
 
-### Task 2: Implement Dynamic Publishing in conflux_node
+### Task 2: Implement Dynamic Publishing in conflux_node ✅ DONE
 
 **Goal**: Enable conflux_node to republish synchronized messages.
 
-**Files to modify**:
-- `ros/conflux/conflux_node/src/config.rs`
-- `ros/conflux/conflux_node/src/node.rs`
-- `ros/conflux/crates/conflux-ros2/src/lib.rs` (if needed)
+**Implementation** (see Phase 2a for details):
+- Created `ros2_message.rs` - wrapper owning DynamicMessage
+- Created `ros2_sync_state.rs` - sync state with move semantics
+- Created `ros2_publisher.rs` - dynamic publisher manager
+- Created `ros2_sync_node.rs` - complete sync runner
+- Updated `subscriber.rs` - added `create_ros2_subscription()`
+- Updated `config.rs` - changed output from `topic` to `suffix`
+- Updated `node.rs` - uses new Ros2SyncRunner
 
-**Config Changes**:
+**Config format**:
 ```yaml
-# Before (single unused output)
-output:
-  topic: /synchronized
-
-# After (per-input derived outputs)
 inputs:
-  - topic: /aruco_detections
-    type: vision_msgs/msg/Detection2DArray
-    # Output: /aruco_detections_sync (auto-derived)
-  - topic: /board_detections
-    type: vision_msgs/msg/Detection3DArray
-    # Output: /board_detections_sync (auto-derived)
+  - topic: /input_topic
+    type: some_msgs/msg/SomeType
 
 output:
-  suffix: _sync  # Applied to each input topic
+  suffix: _sync  # Output: /input_topic_sync
 ```
 
-**Node Changes**:
-1. Create dynamic publisher for each input topic at startup
-2. Store publishers in a HashMap keyed by input topic
-3. In `handle_synchronized_group()`:
-   - For each message in the synchronized group
-   - Look up corresponding publisher
-   - Publish the message data
+### Task 3: ~~Add vision_msgs Support~~ NOT NEEDED
 
-**Technical Approach for Publishing**:
-```rust
-// Option A: Raw publishing (if rclrs supports)
-publisher.publish_raw(&msg.data)?;
+Conflux uses `DynamicMessage` with runtime type introspection. It works with **any** message type that has `header.stamp` - no special handling needed.
 
-// Option B: DynamicMessage reconstruction
-let dynamic_msg = DynamicMessage::from_serialized(&msg.data, type_support)?;
-publisher.publish(dynamic_msg)?;
-```
-
-### Task 3: Add vision_msgs Support to conflux
-
-**Goal**: Ensure conflux can handle `Detection2DArray` and `Detection3DArray`.
-
-**Steps**:
-1. Add `vision_msgs` dependency to conflux workspace
-2. Verify timestamp extraction works for Detection messages
-3. Test with sample detection data
-
-### Task 4: Create Calibration Sync Configuration
+### Task 4: Create Calibration Sync Configuration ✅ DONE
 
 **Goal**: Provide ready-to-use config for LCTK calibration.
 
-**File**: `ros/conflux/conflux_node/config/examples/lctk_calibration.yaml`
+**File**: `ros/lctk_launch/config/detection_sync.yaml`
 
 ```yaml
 # LCTK Calibration Board Detection Synchronization
@@ -162,48 +131,42 @@ qos:
   history_depth: 1
 ```
 
-### Task 5: Update advanced_extrinsic_solver
+**Output topics**:
+- `/calibration/aruco_locator/aruco_detections_sync`
+- `/calibration/lidar_board_detector/calibration_board_detections_sync`
 
-**Goal**: Subscribe to synchronized topics instead of raw topics.
+### Task 5: ~~Update advanced_extrinsic_solver~~ → Launch File Remapping
+
+**Original Goal**: Modify solver code to subscribe to synchronized topics.
+
+**Simpler Approach**: No code changes needed. The extrinsic solvers simply subscribe to input topics and process messages on demand. We remap topics in the launch file so they receive pre-synchronized messages transparently.
+
+**How it works**:
+1. conflux_node subscribes to original detection topics
+2. conflux_node publishes synchronized messages to `*_sync` topics
+3. Launch file remaps solver subscriptions to `*_sync` topics
+4. Solvers receive pre-synchronized data without knowing about conflux
+
+### Task 6: Update Launch Files ✅ DONE
+
+**Goal**: Integrate conflux_node into calibration launch with topic remapping.
+
+**Files modified**:
+- `ros/lctk_launch/launch/extrinsic_calibration.launch.xml`
+- `ros/lctk_launch/launch/lidar_camera_calibration.launch.xml`
 
 **Changes**:
-1. Add parameter `use_synchronized_input` (default: false for backward compat)
-2. When enabled, subscribe to `*_sync` topics
-3. Remove independent caching - use synchronized pairs directly
+- Added `use_synchronized_input` argument (default: false for backward compatibility)
+- When enabled, launches conflux_node with detection_sync.yaml config
+- Solver nodes conditionally remap to `*_sync` topics
 
-**Modified subscription logic**:
-```python
-if self.use_synchronized_input:
-    # Subscribe to synchronized topics
-    self.aruco_subscription = self.create_subscription(
-        Detection2DArray,
-        "aruco_detections_sync",  # Synchronized
-        self.synced_aruco_callback,
-        qos_profile
-    )
-    # Similar for board detections
-else:
-    # Original behavior (cache latest independently)
-    ...
-```
+**Usage**:
+```bash
+# Without synchronization (default, backward compatible)
+ros2 launch lctk_launch lidar_camera_calibration.launch.xml
 
-### Task 6: Update Launch Files
-
-**Goal**: Integrate conflux_node into calibration launch.
-
-**File**: `ros/lctk_launch/launch/lidar_camera_calibration.launch.xml`
-
-**Add**:
-```xml
-<!-- Message Synchronizer -->
-<node pkg="conflux_node"
-      exec="conflux_node"
-      name="detection_sync"
-      namespace="$(var namespace)"
-      output="screen">
-    <param name="config_file"
-           value="$(find-pkg-share conflux_node)/config/examples/lctk_calibration.yaml"/>
-</node>
+# With synchronization
+ros2 launch lctk_launch lidar_camera_calibration.launch.xml use_synchronized_input:=true
 ```
 
 ### Task 7: Integration Testing
@@ -216,36 +179,48 @@ else:
 3. **Staleness**: Verify old messages are dropped appropriately
 4. **Calibration accuracy**: Compare calibration results with/without sync
 
+### Task 8: Add Timestamp Validation to Extrinsic Solvers (Future)
+
+**Goal**: Add optional timestamp checking in extrinsic solvers to warn about desynchronized inputs.
+
+**Note**: This is a future enhancement, not required for initial integration. The solvers will work correctly with synchronized inputs from conflux. This task adds defensive validation to detect if timestamps are unexpectedly far apart.
+
+**Scope**:
+- Add timestamp difference check when processing detection pairs
+- Log warning if timestamps differ by more than expected window
+- No pairing logic - just validation
+
 ## Dependencies
 
 ```
-Task 1 (rclrs compat) ──┬──► Task 2 (publishing)
-                        │
-                        └──► Task 3 (vision_msgs)
-                                    │
-                                    ▼
-                        Task 4 (config) ──► Task 5 (solver) ──► Task 6 (launch)
-                                                                      │
-                                                                      ▼
-                                                              Task 7 (testing)
+Task 1 (rclrs compat) ✅
+        │
+        ▼
+Task 2 (publishing) ✅
+        │
+        ▼
+Task 4 (config) ✅ ──► Task 6 (launch) ✅ ──► Task 7 (testing)
+                                                    │
+                                                    ▼
+                                            Task 8 (timestamp validation) [Future]
 ```
 
 ## Risk Mitigation
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| rclrs incompatibility | High | Test early; have fallback to upgrade or pin version |
-| Dynamic publishing not supported | Medium | Implement DynamicMessage reconstruction |
-| Performance overhead | Low | Benchmark sync latency; use high_frequency preset |
-| Message type changes | Low | Use dynamic introspection, no hardcoded types |
+| Risk | Impact | Mitigation | Status |
+|------|--------|------------|--------|
+| rclrs incompatibility | High | Separate workspaces, wire-compatible topics | ✅ Resolved |
+| Dynamic publishing not supported | Medium | Implemented move semantics for DynamicMessage | ✅ Resolved |
+| Performance overhead | Low | Benchmark sync latency; use high_frequency preset | To verify |
+| Message type changes | Low | Use dynamic introspection, no hardcoded types | ✅ Resolved |
 
 ## Success Criteria
 
-1. conflux_node builds within LCTK workspace
-2. Synchronized detection messages publish correctly
-3. Timestamp difference between paired messages < window_size
-4. advanced_extrinsic_solver works with synchronized input
-5. Calibration accuracy maintained or improved
+1. ✅ conflux_node builds (in separate workspace with git rclrs)
+2. ✅ Config and launch files created for synchronized input
+3. ⏳ Synchronized detection messages publish to `*_sync` topics (needs testing)
+4. ⏳ Timestamp difference between paired messages < window_size (needs testing)
+5. ⏳ Calibration workflow functions correctly end-to-end (needs testing)
 
 ## Future Enhancements
 
