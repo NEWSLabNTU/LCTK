@@ -35,6 +35,15 @@ just
 - ROS interface bindings are auto-generated at `build/<pkg>/rosidl_cargo/`
 - Uses `rclrs` v0.6.0 from crates.io (requires `ros-humble-test-msgs`)
 - Launch commands use `play_launch` for foreground execution
+- **Always use `just build`** - never run raw `colcon build` commands. The justfile uses specific flags:
+  ```bash
+  colcon build \
+      --base-paths ros \
+      --symlink-install \
+      --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      --cargo-args --profile=test-release
+  ```
+- To build a single package, use: `just build` with `--packages-select <pkg>` appended manually if needed, but prefer building all packages
 
 ## Key Commands
 
@@ -136,6 +145,10 @@ std::thread::spawn(move || loop {
 This ensures always processing the latest data, not stale queued messages.
 
 ## Calibration Workflow
+
+### LiDAR-to-LiDAR Calibration
+
+The `lidar_to_lidar_solver` Python node replaces the deprecated `multi_wayside_node` for two-LiDAR calibration. It subscribes to Detection3DArray messages from two `lidar_board_detector` nodes and computes the transform between frames. **Note: This pipeline is not yet tested.**
 
 ### Advanced Extrinsic Solver
 
