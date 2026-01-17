@@ -20,6 +20,7 @@ exclude = [
     "ros/calibration_judge",
     "ros/pointcloud_image_overlay",
     "ros/lidar_to_lidar_solver",
+    "ros/calibration_orchestrator",
     # Interface package without Cargo.toml (CMake-based ROS package)
     "ros/lctk_interfaces",
 ]
