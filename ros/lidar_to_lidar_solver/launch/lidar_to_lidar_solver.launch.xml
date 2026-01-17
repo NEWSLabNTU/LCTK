@@ -1,0 +1,93 @@
+<?xml version="1.0"?>
+<!--
+    Launch file for LiDAR-to-LiDAR extrinsic calibration solver.
+
+    This node subscribes to board detection messages from two lidar_board_detector
+    nodes and computes the transform between the two LiDAR frames.
+
+    Usage:
+    ros2 launch lidar_to_lidar_solver lidar_to_lidar_solver.launch.xml \
+        lidar1_detections_topic:=/lidar1/board_detections \
+        lidar2_detections_topic:=/lidar2/board_detections
+
+    The node publishes:
+    - /lidar_to_lidar_transform (geometry_msgs/TransformStamped)
+    - TF transform from lidar1_frame to lidar2_frame (if publish_tf is true)
+-->
+<launch>
+    <!-- Topic arguments -->
+    <arg name="lidar1_detections_topic"
+         default="/sensing/lidar/top/calibration_board_detections"
+         description="Detection3DArray topic from first LiDAR's board detector"/>
+
+    <arg name="lidar2_detections_topic"
+         default="/sensing/lidar/front/calibration_board_detections"
+         description="Detection3DArray topic from second LiDAR's board detector"/>
+
+    <!-- Frame arguments -->
+    <arg name="lidar1_frame"
+         default="lidar_top"
+         description="TF frame ID for the first LiDAR"/>
+
+    <arg name="lidar2_frame"
+         default="lidar_front"
+         description="TF frame ID for the second LiDAR"/>
+
+    <!-- Synchronization arguments -->
+    <arg name="sync_mode"
+         default="approximate"
+         description="Synchronization mode: 'exact' or 'approximate'"/>
+
+    <arg name="sync_tolerance_ms"
+         default="100.0"
+         description="Maximum timestamp difference for approximate sync (ms)"/>
+
+    <arg name="sync_queue_size"
+         default="10"
+         description="Message queue size for synchronization"/>
+
+    <arg name="max_message_age_ms"
+         default="500.0"
+         description="Maximum message age before considering stale (ms)"/>
+
+    <!-- Calibration arguments -->
+    <arg name="same_face_mode"
+         default="true"
+         description="True if both LiDARs see the same face of the board"/>
+
+    <!-- Output arguments -->
+    <arg name="publish_tf"
+         default="true"
+         description="Whether to publish transform to TF"/>
+
+    <arg name="publish_rate_hz"
+         default="10.0"
+         description="Rate at which to republish TF transform"/>
+
+    <!-- Node -->
+    <node pkg="lidar_to_lidar_solver"
+          exec="lidar_to_lidar_solver"
+          name="lidar_to_lidar_solver"
+          output="screen">
+        <!-- Topics -->
+        <param name="lidar1_detections_topic" value="$(var lidar1_detections_topic)"/>
+        <param name="lidar2_detections_topic" value="$(var lidar2_detections_topic)"/>
+
+        <!-- Frames -->
+        <param name="lidar1_frame" value="$(var lidar1_frame)"/>
+        <param name="lidar2_frame" value="$(var lidar2_frame)"/>
+
+        <!-- Synchronization -->
+        <param name="sync_mode" value="$(var sync_mode)"/>
+        <param name="sync_tolerance_ms" value="$(var sync_tolerance_ms)"/>
+        <param name="sync_queue_size" value="$(var sync_queue_size)"/>
+        <param name="max_message_age_ms" value="$(var max_message_age_ms)"/>
+
+        <!-- Calibration -->
+        <param name="same_face_mode" value="$(var same_face_mode)"/>
+
+        <!-- Output -->
+        <param name="publish_tf" value="$(var publish_tf)"/>
+        <param name="publish_rate_hz" value="$(var publish_rate_hz)"/>
+    </node>
+</launch>
