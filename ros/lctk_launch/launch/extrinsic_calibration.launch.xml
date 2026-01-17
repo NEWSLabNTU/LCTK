@@ -28,6 +28,10 @@
          default="/calibration/lidar_board_detector/board_detections"
          description="Input board detections topic"/>
 
+    <arg name="use_synchronized_input"
+         default="false"
+         description="Use conflux to synchronize ArUco and board detections by timestamp"/>
+
 
     <arg name="namespace"
          default="calibration"
@@ -57,41 +61,100 @@
          default="false"
          description="Use advanced extrinsic solver (buffered multi-pose) instead of educational solver"/>
 
-    <!-- Educational Extrinsic Solver Node (default) -->
-    <node pkg="extrinsic_solver_node"
-          exec="extrinsic_solver_node"
-          name="extrinsic_solver_node"
-          namespace="$(var namespace)/extrinsic_solver"
+    <!-- Detection Synchronizer (conflux) - only when use_synchronized_input is true -->
+    <node pkg="conflux-node"
+          exec="conflux-node"
+          name="detection_sync"
+          namespace="$(var namespace)"
           output="screen"
-          args="--ros-args --log-level $(var log_level)"
-          unless="$(var use_advanced_solver)">
-        <param name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <param name="solver_method" value="$(var solver_method)"/>
-        <param name="min_detections_required" value="$(var min_detections_required)"/>
-        <param name="max_solver_iterations" value="1000"/>
-        <param name="convergence_threshold" value="1e-6"/>
-        <param name="debug_mode" value="$(var debug_mode)"/>
-        <param name="camera_topic" value="$(var camera_topic)"/>
-        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
-        <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
+          if="$(var use_synchronized_input)">
+        <param name="config_file"
+               value="$(find-pkg-share lctk_launch)/config/detection_sync.yaml"/>
     </node>
 
-    <!-- Advanced Extrinsic Solver Node (optional, service-driven multi-pose) -->
-    <node pkg="advanced_extrinsic_solver"
-          exec="advanced_extrinsic_solver"
-          name="advanced_extrinsic_solver"
-          namespace="$(var namespace)/advanced_extrinsic_solver"
-          output="screen"
-          args="--ros-args --log-level $(var log_level)"
-          if="$(var use_advanced_solver)">
-        <param name="aruco_config_file" value="$(var aruco_config_file)"/>
-        <param name="debug_mode" value="$(var debug_mode)"/>
-        <param name="camera_topic" value="$(var camera_topic)"/>
-        <param name="parent_frame" value="lidar"/>
-        <param name="child_frame" value="camera"/>
-        <param name="publishing_rate" value="10.0"/>
-        <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
-        <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
-        <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
-    </node>
+    <!-- =================================================================== -->
+    <!-- Educational Extrinsic Solver Node (without synchronization)        -->
+    <!-- =================================================================== -->
+    <group unless="$(var use_advanced_solver)">
+        <!-- Without sync: subscribe to raw detection topics -->
+        <node pkg="extrinsic_solver_node"
+              exec="extrinsic_solver_node"
+              name="extrinsic_solver_node"
+              namespace="$(var namespace)/extrinsic_solver"
+              output="screen"
+              args="--ros-args --log-level $(var log_level)"
+              unless="$(var use_synchronized_input)">
+            <param name="aruco_config_file" value="$(var aruco_config_file)"/>
+            <param name="solver_method" value="$(var solver_method)"/>
+            <param name="min_detections_required" value="$(var min_detections_required)"/>
+            <param name="max_solver_iterations" value="1000"/>
+            <param name="convergence_threshold" value="1e-6"/>
+            <param name="debug_mode" value="$(var debug_mode)"/>
+            <param name="camera_topic" value="$(var camera_topic)"/>
+            <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
+            <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
+        </node>
+
+        <!-- With sync: subscribe to synchronized detection topics -->
+        <node pkg="extrinsic_solver_node"
+              exec="extrinsic_solver_node"
+              name="extrinsic_solver_node"
+              namespace="$(var namespace)/extrinsic_solver"
+              output="screen"
+              args="--ros-args --log-level $(var log_level)"
+              if="$(var use_synchronized_input)">
+            <param name="aruco_config_file" value="$(var aruco_config_file)"/>
+            <param name="solver_method" value="$(var solver_method)"/>
+            <param name="min_detections_required" value="$(var min_detections_required)"/>
+            <param name="max_solver_iterations" value="1000"/>
+            <param name="convergence_threshold" value="1e-6"/>
+            <param name="debug_mode" value="$(var debug_mode)"/>
+            <param name="camera_topic" value="$(var camera_topic)"/>
+            <remap from="aruco_detections" to="$(var aruco_detections_topic)_sync"/>
+            <remap from="calibration_board_detections" to="$(var board_detections_topic)_sync"/>
+        </node>
+    </group>
+
+    <!-- =================================================================== -->
+    <!-- Advanced Extrinsic Solver Node (service-driven multi-pose)         -->
+    <!-- =================================================================== -->
+    <group if="$(var use_advanced_solver)">
+        <!-- Without sync: subscribe to raw detection topics -->
+        <node pkg="advanced_extrinsic_solver"
+              exec="advanced_extrinsic_solver"
+              name="advanced_extrinsic_solver"
+              namespace="$(var namespace)/advanced_extrinsic_solver"
+              output="screen"
+              args="--ros-args --log-level $(var log_level)"
+              unless="$(var use_synchronized_input)">
+            <param name="aruco_config_file" value="$(var aruco_config_file)"/>
+            <param name="debug_mode" value="$(var debug_mode)"/>
+            <param name="camera_topic" value="$(var camera_topic)"/>
+            <param name="parent_frame" value="lidar"/>
+            <param name="child_frame" value="camera"/>
+            <param name="publishing_rate" value="10.0"/>
+            <remap from="aruco_detections" to="$(var aruco_detections_topic)"/>
+            <remap from="calibration_board_detections" to="$(var board_detections_topic)"/>
+            <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
+        </node>
+
+        <!-- With sync: subscribe to synchronized detection topics -->
+        <node pkg="advanced_extrinsic_solver"
+              exec="advanced_extrinsic_solver"
+              name="advanced_extrinsic_solver"
+              namespace="$(var namespace)/advanced_extrinsic_solver"
+              output="screen"
+              args="--ros-args --log-level $(var log_level)"
+              if="$(var use_synchronized_input)">
+            <param name="aruco_config_file" value="$(var aruco_config_file)"/>
+            <param name="debug_mode" value="$(var debug_mode)"/>
+            <param name="camera_topic" value="$(var camera_topic)"/>
+            <param name="parent_frame" value="lidar"/>
+            <param name="child_frame" value="camera"/>
+            <param name="publishing_rate" value="10.0"/>
+            <remap from="aruco_detections" to="$(var aruco_detections_topic)_sync"/>
+            <remap from="calibration_board_detections" to="$(var board_detections_topic)_sync"/>
+            <remap from="extrinsic_transform" to="/$(var namespace)/extrinsic_solver/extrinsic_transform"/>
+        </node>
+    </group>
 </launch>

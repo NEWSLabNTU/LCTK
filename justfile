@@ -13,6 +13,7 @@ log_level := "info"
 rviz_enabled := "true"
 use_best_effort_qos := "true"
 use_advanced_solver := "true"
+use_synchronized_input := "false"
 camera_topic := "/sensing/camera/zedxm/right/color/rect/image"
 pointcloud_topic := "/sensing/lidar/concatenated/pointcloud"
 
@@ -21,12 +22,14 @@ default:
     @just --list
 
 # Build all ROS packages using colcon and cargo-ros2
+# Note: ros/conflux is built separately (it uses git rclrs with DynamicMessage support)
 build:
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
     colcon build \
         --base-paths ros \
+        --ignore-paths ros/conflux \
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         --cargo-args --profile=test-release
@@ -65,6 +68,7 @@ lidar-camera:
         log_level:={{ log_level }} \
         use_best_effort_qos:={{ use_best_effort_qos }} \
         use_advanced_solver:={{ use_advanced_solver }} \
+        use_synchronized_input:={{ use_synchronized_input }} \
         camera_topic:={{ camera_topic }} \
         pointcloud_topic:={{ pointcloud_topic }}
 
