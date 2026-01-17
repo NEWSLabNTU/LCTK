@@ -6,7 +6,6 @@ members = [
     "ros/aruco_generator_node",
     "ros/aruco_locator_node",
     "ros/lidar_board_detector",
-    "ros/multi_wayside_node",
 ]
 exclude = [
     # Launch-only package without Cargo.toml
