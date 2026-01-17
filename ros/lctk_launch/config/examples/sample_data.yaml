@@ -1,0 +1,39 @@
+# LCTK Sample Data Calibration Configuration
+#
+# This configuration matches the sensor setup used by:
+#   just sample-data  (or ros2 launch lctk_sample_data lidar_camera.launch.xml)
+#
+# Usage:
+#   # Terminal 1: Start sample data playback
+#   just sample-data
+#
+#   # Terminal 2: Start calibration pipeline
+#   ros2 launch lctk_launch calibrate.launch.py \
+#       config_file:=$(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/sample_data.yaml
+#
+# This generates:
+# - 1 lidar_board_detector node
+# - 1 aruco_locator_node node
+# - 1 lidar-camera solver node
+
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
+      frame_id: velodyne_top
+
+  cameras:
+    front_center:
+      image_topic: /sensing/camera/front_center/image_raw
+      frame_id: camera_front_center
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+
+calibration_pairs:
+  - devices: [top_lidar, front_center]
+    marker: calibration_board

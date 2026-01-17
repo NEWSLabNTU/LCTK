@@ -5,12 +5,37 @@ Parses YAML configuration files describing devices, markers, and calibration
 relationships, then derives the required nodes and their connections.
 """
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
+
+
+def resolve_package_path(path: str) -> str:
+    """
+    Resolve ROS2 package path substitutions like $(find-pkg-share package_name).
+
+    Args:
+        path: Path string that may contain $(find-pkg-share ...) substitutions
+
+    Returns:
+        Resolved absolute path string
+    """
+    # Pattern to match $(find-pkg-share package_name)
+    pattern = r'\$\(find-pkg-share\s+([^)]+)\)'
+
+    def replace_func(match):
+        package_name = match.group(1).strip()
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            return get_package_share_directory(package_name)
+        except Exception as e:
+            raise ValueError(f"Failed to find package '{package_name}': {e}")
+
+    return re.sub(pattern, replace_func, path)
 
 
 class DeviceType(Enum):
@@ -48,6 +73,7 @@ class Marker:
     marker_type: MarkerType
     board_config: str  # Path to board configuration file
     aruco_config: Optional[str] = None  # Path to ArUco pattern config (optional)
+    bbox_config: Optional[str] = None  # Path to bounding box filter config (optional)
 
 
 @dataclass
@@ -70,6 +96,7 @@ class LidarBoardDetectorNode:
     pointcloud_topic: str
     board_config: str
     aruco_config: Optional[str]
+    bbox_config: Optional[str]
     output_topic: str  # Detection output topic
 
 
@@ -100,6 +127,7 @@ class LidarCameraSolverNode:
     board_detections_topic: str
     aruco_detections_topic: str
     camera_topic: str  # For camera_info derivation
+    aruco_config: str  # Path to ArUco pattern config (required for solver)
     output_topic: str
 
 
@@ -178,11 +206,21 @@ class CalibrationConfigParser:
         """Parse marker definitions."""
         for name, config in markers_config.items():
             marker_type = MarkerType(config["type"])
+            # Resolve package paths in config file paths
+            board_config = resolve_package_path(config["board_config"])
+            aruco_config = config.get("aruco_config")
+            if aruco_config:
+                aruco_config = resolve_package_path(aruco_config)
+            bbox_config = config.get("bbox_config")
+            if bbox_config:
+                bbox_config = resolve_package_path(bbox_config)
+
             self.markers[name] = Marker(
                 name=name,
                 marker_type=marker_type,
-                board_config=config["board_config"],
-                aruco_config=config.get("aruco_config"),
+                board_config=board_config,
+                aruco_config=aruco_config,
+                bbox_config=bbox_config,
             )
 
     def _parse_calibration_pairs(self, pairs_config: list) -> None:
@@ -265,6 +303,7 @@ class CalibrationConfigParser:
                     pointcloud_topic=lidar.pointcloud_topic,
                     board_config=marker.board_config,
                     aruco_config=marker.aruco_config,
+                    bbox_config=marker.bbox_config,
                     output_topic=output_topic,
                 )
             )
@@ -329,6 +368,7 @@ class CalibrationConfigParser:
         """Add a lidar-camera solver node to the config."""
         lidar = self.lidars[lidar_name]
         camera = self.cameras[camera_name]
+        marker = self.markers[marker_name]
 
         node_name = f"solver_{lidar_name}_{camera_name}"
         namespace = f"calibration/{lidar_name}_{camera_name}"
@@ -337,6 +377,9 @@ class CalibrationConfigParser:
         board_topic = f"/calibration/{lidar_name}_{marker_name}/board_detections"
         aruco_topic = f"/calibration/{camera_name}/aruco_detections"
         output_topic = f"/{namespace}/extrinsic_transform"
+
+        if marker.aruco_config is None:
+            raise ValueError(f"ArUco config required for lidar-camera solver with marker {marker_name}")
 
         config.lidar_camera_solvers.append(
             LidarCameraSolverNode(
@@ -350,6 +393,7 @@ class CalibrationConfigParser:
                 board_detections_topic=board_topic,
                 aruco_detections_topic=aruco_topic,
                 camera_topic=camera.image_topic,
+                aruco_config=marker.aruco_config,
                 output_topic=output_topic,
             )
         )

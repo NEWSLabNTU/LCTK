@@ -1,12 +1,17 @@
 <?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>lctk_launch</name>
   <version>0.1.0</version>
-  <description>Launch file package for LCTK (LiDAR and Camera Toolkit) nodes and pipelines</description>
+  <description>Launch files and configurations for LCTK calibration pipelines</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
   <license>MIT</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+  <!-- Build dependencies -->
+  <depend>rclpy</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+  <depend>python3-yaml</depend>
 
   <!-- GStreamer dependencies for video playback -->
   <exec_depend>gstreamer1.0-plugins-base</exec_depend>
@@ -15,14 +20,22 @@
   <exec_depend>gstreamer1.0-plugins-ugly</exec_depend>
   <exec_depend>gstreamer1.0-libav</exec_depend>
 
+  <!-- Calibration packages -->
   <exec_depend>gscam</exec_depend>
   <exec_depend>aruco_locator_node</exec_depend>
   <exec_depend>lidar_board_detector</exec_depend>
   <exec_depend>extrinsic_solver_node</exec_depend>
+  <exec_depend>advanced_extrinsic_solver</exec_depend>
+  <exec_depend>lidar_to_lidar_solver</exec_depend>
   <exec_depend>pointcloud_image_overlay</exec_depend>
-  <exec_depend>calibration_evaluator</exec_depend>
+  <exec_depend>calibration_judge</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
-    <build_type>ament_cmake</build_type>
+    <build_type>ament_python</build_type>
   </export>
 </package>

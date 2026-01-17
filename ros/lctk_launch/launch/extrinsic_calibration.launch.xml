@@ -2,9 +2,12 @@
 <!--
     Launch file for extrinsic calibration computation.
 
-    This launch file starts the extrinsic solver node that directly consumes
+    This launch file starts the extrinsic solver node that consumes
     detections from image and point cloud processing pipelines to compute
-    the extrinsic calibration between sensors without timestamp synchronization.
+    the extrinsic calibration between sensors.
+
+    When use_synchronized_input is enabled, a conflux synchronizer node
+    pairs detection messages by timestamp before feeding to the solver.
 
     Input topics:
     - ArUco detections from image processing
@@ -25,7 +28,7 @@
          description="Input ArUco detections topic"/>
 
     <arg name="board_detections_topic"
-         default="/calibration/lidar_board_detector/board_detections"
+         default="/calibration/lidar_board_detector/calibration_board_detections"
          description="Input board detections topic"/>
 
     <arg name="use_synchronized_input"

@@ -1,6 +1,6 @@
-# Example Multi-Sensor Calibration Configuration
+# Example Multi-Sensor Vehicle Calibration Configuration
 #
-# This configuration describes a vehicle with:
+# This configuration demonstrates a vehicle with:
 # - 2 LiDARs (L1 front, L2 rear) on the roof
 # - 4 cameras (C1-C4) on the four corners
 # - 3 calibration markers (M1 front, M2 rear, M3 side)
@@ -45,15 +45,18 @@ markers:
   M1:
     type: hollow_board
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
-    aruco_config: $(find-pkg-share lctk_launch)/config/board/aruco_pattern.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
   M2:
     type: hollow_board
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
-    aruco_config: $(find-pkg-share lctk_launch)/config/board/aruco_pattern.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
   M3:
     type: hollow_board
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
-    aruco_config: $(find-pkg-share lctk_launch)/config/board/aruco_pattern.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
 
 calibration_pairs:
   # Front calibrations using M1

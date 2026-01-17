@@ -5,13 +5,14 @@ This launch file reads a YAML configuration describing the sensor arrangement
 and calibration pairs, then dynamically generates the required nodes.
 
 Usage:
-    ros2 launch calibration_orchestrator multi_sensor_calibration.launch.py \
-        config_file:=/path/to/calibration_config.yaml
+    ros2 launch lctk_launch calibrate.launch.py config_file:=/path/to/config.yaml
 
 The config file describes:
 - Devices (lidars and cameras with their topics and frame IDs)
 - Markers (calibration boards with their configuration files)
 - Calibration pairs (which devices to calibrate together using which marker)
+
+See config/examples/ for example configurations.
 """
 
 from launch import LaunchDescription
@@ -22,17 +23,7 @@ from launch_ros.actions import Node
 
 def generate_nodes(context, *args, **kwargs) -> list:
     """Generate nodes based on the configuration file."""
-    # Import here to avoid issues during launch file loading
-    import os
-    import sys
-
-    # Add package to path for import
-    from ament_index_python.packages import get_package_share_directory
-
-    pkg_share = get_package_share_directory("calibration_orchestrator")
-    sys.path.insert(0, os.path.join(pkg_share, ".."))
-
-    from calibration_orchestrator.config_parser import parse_config
+    from lctk_launch.config_parser import parse_config
 
     # Get launch arguments
     config_file = LaunchConfiguration("config_file").perform(context)
@@ -73,6 +64,8 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
         if detector.aruco_config:
             params["aruco_pattern_file"] = detector.aruco_config
+        if detector.bbox_config:
+            params["bbox_file"] = detector.bbox_config
 
         nodes.append(
             Node(
@@ -139,6 +132,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "parent_frame": solver.parent_frame,
                         "child_frame": solver.child_frame,
                         "camera_topic": solver.camera_topic,
+                        "aruco_config_file": solver.aruco_config,
                         "debug_mode": debug_mode == "true",
                         "publishing_rate": 10.0,
                     }

@@ -110,8 +110,22 @@ rviz:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
+    ros2 run rviz2 rviz2
+
+# Launch config-driven calibration pipeline
+# Usage: just calibrate /path/to/config.yaml
+# Example: just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/sample_data.yaml
+calibrate config_file:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
+        lctk_launch calibrate.launch.py \
+        config_file:={{ config_file }} \
+        debug_mode:={{ debug_mode }} \
+        log_level:={{ log_level }} \
+        use_best_effort_qos:={{ use_best_effort_qos }}
 
 # Launch interactive advanced solver controller
 advanced-solver-controller:
