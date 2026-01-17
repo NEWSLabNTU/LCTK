@@ -494,7 +494,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "measurements",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
+ "newslab-serde-measurements",
  "noisy_float",
  "opencv",
  "serde",
@@ -1230,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "builtin_interfaces"
-version = "1.2.2"
+version = "1.2.1"
 dependencies = [
  "rosidl_runtime_rs",
 ]
@@ -2143,19 +2143,6 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
-version = "5.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
-dependencies = [
- "cfg-if",
- "hashbrown 0.14.5",
- "lock_api",
- "once_cell",
- "parking_lot_core",
-]
-
-[[package]]
-name = "dashmap"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
@@ -2193,17 +2180,6 @@ checksum = "ececcb659e7ba858fb4f10388c250a7252eb0a27373f1a72b8748afdd248e587"
 dependencies = [
  "powerfmt",
  "serde_core",
-]
-
-[[package]]
-name = "derivative"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -2944,21 +2920,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "filter-expr"
-version = "0.3.1"
-source = "git+https://github.com/NEWSLabNTU/point-cloud-filter.git?tag=v0.3.1#92609ba690e7e01063a9403feccfcb5f353274d9"
-dependencies = [
- "anyhow",
- "itertools 0.11.0",
- "nalgebra 0.32.6",
- "noisy_float",
- "once_cell",
- "pest",
- "pest_derive",
- "serde",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3218,22 +3179,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generic-point-filter"
-version = "0.3.1"
-source = "git+https://github.com/NEWSLabNTU/point-cloud-filter.git?tag=v0.3.1#92609ba690e7e01063a9403feccfcb5f353274d9"
-dependencies = [
- "anyhow",
- "itertools 0.10.5",
- "nalgebra 0.32.6",
- "newslab-serde-nalgebra 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?rev=v0.1.0)",
- "noisy_float",
- "num",
- "range-point-filter",
- "serde",
- "static-point-filter",
-]
-
-[[package]]
 name = "geo"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3285,7 +3230,7 @@ dependencies = [
 
 [[package]]
 name = "geometry_msgs"
-version = "4.9.0"
+version = "4.2.4"
 dependencies = [
  "rosidl_runtime_rs",
  "std_msgs",
@@ -3685,8 +3630,8 @@ dependencies = [
  "aruco-config",
  "measurements",
  "nalgebra 0.32.6",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
- "newslab-serde-nalgebra 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
+ "newslab-serde-measurements",
+ "newslab-serde-nalgebra",
  "rayon",
  "serde",
 ]
@@ -3702,7 +3647,7 @@ dependencies = [
  "aruco-config",
  "clap",
  "criterion",
- "dashmap 6.1.0",
+ "dashmap",
  "env_logger",
  "hollow-board-config",
  "itertools 0.11.0",
@@ -4950,33 +4895,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "multi_wayside_node"
-version = "0.1.0"
-dependencies = [
- "aruco-config",
- "builtin_interfaces",
- "eyre",
- "generic-point-filter",
- "geometry_msgs",
- "hollow-board-config",
- "hollow-board-detector",
- "itertools 0.11.0",
- "json5",
- "measurements",
- "nalgebra 0.32.6",
- "noisy_float",
- "once_cell",
- "pcd-rs",
- "rclrs",
- "sensor_msgs",
- "serde",
- "std_msgs",
- "tempfile",
- "vision_msgs",
- "visualization_msgs",
-]
-
-[[package]]
 name = "naga"
 version = "24.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5000,29 +4918,13 @@ dependencies = [
 
 [[package]]
 name = "nalgebra"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb2d0de08694bed883320212c18ee3008576bfe8c306f4c3c4a58b4876998be"
-dependencies = [
- "approx",
- "matrixmultiply",
- "nalgebra-macros 0.1.0",
- "num-complex",
- "num-rational",
- "num-traits",
- "simba 0.7.3",
- "typenum",
-]
-
-[[package]]
-name = "nalgebra"
 version = "0.32.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b5c17de023a86f59ed79891b2e5d5a94c705dbe904a5b5c9c952ea6221b03e4"
 dependencies = [
  "approx",
  "matrixmultiply",
- "nalgebra-macros 0.2.2",
+ "nalgebra-macros",
  "num-complex",
  "num-rational",
  "num-traits",
@@ -5039,23 +4941,12 @@ checksum = "26aecdf64b707efd1310e3544d709c5c0ac61c13756046aaaba41be5c4f66a3b"
 dependencies = [
  "approx",
  "matrixmultiply",
- "nalgebra-macros 0.2.2",
+ "nalgebra-macros",
  "num-complex",
  "num-rational",
  "num-traits",
  "simba 0.9.1",
  "typenum",
-]
-
-[[package]]
-name = "nalgebra-macros"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01fcc0b8149b4632adc89ac3b7b31a12fb6099a0317a4eb2ebff574ef7de7218"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -5200,36 +5091,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "newslab-serde-measurements"
-version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?rev=v0.1.0#a54833aa5f270ab384ba3dca2d7c3fa3eda7716b"
-dependencies = [
- "measurements",
- "nalgebra 0.32.6",
- "num",
- "serde",
-]
-
-[[package]]
 name = "newslab-serde-nalgebra"
 version = "0.1.0"
 source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0#a15a03c9587a1dee428104df9e55049972e4b7b3"
 dependencies = [
  "measurements",
  "nalgebra 0.32.6",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?tag=v0.2.0)",
- "num",
- "serde",
-]
-
-[[package]]
-name = "newslab-serde-nalgebra"
-version = "0.1.0"
-source = "git+https://github.com/NEWSLabNTU/newslab-serde.git?rev=v0.1.0#a54833aa5f270ab384ba3dca2d7c3fa3eda7716b"
-dependencies = [
- "measurements",
- "nalgebra 0.32.6",
- "newslab-serde-measurements 0.1.0 (git+https://github.com/NEWSLabNTU/newslab-serde.git?rev=v0.1.0)",
+ "newslab-serde-measurements",
  "num",
  "serde",
 ]
@@ -6707,21 +6575,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
  "rand_core 0.9.3",
-]
-
-[[package]]
-name = "range-point-filter"
-version = "0.3.1"
-source = "git+https://github.com/NEWSLabNTU/point-cloud-filter.git?tag=v0.3.1#92609ba690e7e01063a9403feccfcb5f353274d9"
-dependencies = [
- "anyhow",
- "filter-expr",
- "itertools 0.11.0",
- "nalgebra 0.30.1",
- "nalgebra 0.32.6",
- "noisy_float",
- "serde",
- "serde-loader",
 ]
 
 [[package]]
@@ -9046,7 +8899,7 @@ dependencies = [
 
 [[package]]
 name = "sensor_msgs"
-version = "4.9.0"
+version = "4.2.4"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -9068,18 +8921,6 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde-loader"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e439e95e1add0a4290bf4150ebf8b9ffe697d37330c9215155e61e2a68cb650b"
-dependencies = [
- "anyhow",
- "derivative",
- "json5",
- "serde",
 ]
 
 [[package]]
@@ -9259,19 +9100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2a4719bff48cee6b39d12c020eeb490953ad2443b7055bd0b21fca26bd8c28b"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "simba"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3fd720c48c53cace224ae62bef1bbff363a70c68c4802a78b5cc6159618176"
-dependencies = [
- "approx",
- "num-complex",
- "num-traits",
- "paste",
- "wide",
 ]
 
 [[package]]
@@ -9539,18 +9367,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "static-point-filter"
-version = "0.3.1"
-source = "git+https://github.com/NEWSLabNTU/point-cloud-filter.git?tag=v0.3.1#92609ba690e7e01063a9403feccfcb5f353274d9"
-dependencies = [
- "dashmap 5.5.3",
- "nalgebra 0.32.6",
- "noisy_float",
- "serde",
- "serde-loader",
-]
-
-[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9558,7 +9374,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "std_msgs"
-version = "4.9.0"
+version = "4.2.4"
 dependencies = [
  "builtin_interfaces",
  "rosidl_runtime_rs",
@@ -10602,7 +10418,7 @@ dependencies = [
 
 [[package]]
 name = "visualization_msgs"
-version = "4.9.0"
+version = "4.2.4"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -12183,19 +11999,19 @@ dependencies = [
 
 [[patch.unused]]
 name = "action_msgs"
-version = "1.2.2"
+version = "1.2.1"
 
 [[patch.unused]]
 name = "composition_interfaces"
-version = "1.2.2"
+version = "1.2.1"
 
 [[patch.unused]]
 name = "lifecycle_msgs"
-version = "1.2.2"
+version = "1.2.1"
 
 [[patch.unused]]
 name = "rcl_interfaces"
-version = "1.2.2"
+version = "1.2.1"
 
 [[patch.unused]]
 name = "rmw_dds_common"
@@ -12203,15 +12019,15 @@ version = "1.6.0"
 
 [[patch.unused]]
 name = "rosgraph_msgs"
-version = "1.2.2"
+version = "1.2.1"
 
 [[patch.unused]]
 name = "statistics_msgs"
-version = "1.2.2"
+version = "1.2.1"
 
 [[patch.unused]]
 name = "tf2_msgs"
-version = "0.25.17"
+version = "0.25.12"
 
 [[patch.unused]]
 name = "unique_identifier_msgs"
