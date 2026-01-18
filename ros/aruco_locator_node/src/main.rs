@@ -275,9 +275,14 @@ impl ArucoLocatorNode {
         };
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
 
-        // Create overlay publisher if debug is enabled
+        // Create overlay publisher if debug is enabled (BEST_EFFORT QoS for image streaming)
         let overlay_publisher = if debug_overlay_enabled {
-            Some(node.create_publisher("image_with_detections")?)
+            let mut overlay_pub_opts = PublisherOptions::new("image_with_detections");
+            overlay_pub_opts.qos = QoSProfile {
+                history: QoSHistoryPolicy::KeepLast { depth: 1 },
+                ..QoSProfile::sensor_data_default() // BEST_EFFORT
+            };
+            Some(node.create_publisher(overlay_pub_opts)?)
         } else {
             None
         };
