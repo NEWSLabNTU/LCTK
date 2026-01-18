@@ -292,7 +292,7 @@ class CalibrationConfigParser:
 
             node_name = f"board_detector_{lidar_name}_{marker_name}"
             namespace = f"calibration/{lidar_name}_{marker_name}"
-            output_topic = f"/{namespace}/board_detections"
+            output_topic = f"/{namespace}/calibration_board_detections"
 
             config.lidar_board_detectors.append(
                 LidarBoardDetectorNode(
@@ -373,8 +373,8 @@ class CalibrationConfigParser:
         node_name = f"solver_{lidar_name}_{camera_name}"
         namespace = f"calibration/{lidar_name}_{camera_name}"
 
-        # Find the board detector output topic
-        board_topic = f"/calibration/{lidar_name}_{marker_name}/board_detections"
+        # Find the board detector output topic (matches lidar_board_detector's publisher)
+        board_topic = f"/calibration/{lidar_name}_{marker_name}/calibration_board_detections"
         aruco_topic = f"/calibration/{camera_name}/aruco_detections"
         output_topic = f"/{namespace}/extrinsic_transform"
 
@@ -408,9 +408,9 @@ class CalibrationConfigParser:
         node_name = f"solver_{lidar1_name}_{lidar2_name}"
         namespace = f"calibration/{lidar1_name}_{lidar2_name}"
 
-        # Find the board detector output topics
-        lidar1_topic = f"/calibration/{lidar1_name}_{marker_name}/board_detections"
-        lidar2_topic = f"/calibration/{lidar2_name}_{marker_name}/board_detections"
+        # Find the board detector output topics (matches lidar_board_detector's publisher)
+        lidar1_topic = f"/calibration/{lidar1_name}_{marker_name}/calibration_board_detections"
+        lidar2_topic = f"/calibration/{lidar2_name}_{marker_name}/calibration_board_detections"
         output_topic = f"/{namespace}/lidar_to_lidar_transform"
 
         config.lidar_lidar_solvers.append(
