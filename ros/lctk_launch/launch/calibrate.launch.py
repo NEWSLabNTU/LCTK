@@ -12,6 +12,12 @@ The config file describes:
 - Markers (calibration boards with their configuration files)
 - Calibration pairs (which devices to calibrate together using which marker)
 
+Modes:
+- offline: For processing recorded data (rosbags). Uses RELIABLE QoS to avoid
+  message drops. Synchronizer attempts perfect timestamp matches.
+- realtime: For live data processing. Uses BEST_EFFORT QoS with no buffering
+  for lowest latency.
+
 See config/examples/ for example configurations.
 """
 
@@ -32,8 +38,24 @@ def generate_nodes(context, *args, **kwargs) -> list:
     config_file = LaunchConfiguration("config_file").perform(context)
     debug_mode = LaunchConfiguration("debug_mode").perform(context)
     log_level = LaunchConfiguration("log_level").perform(context)
-    use_best_effort_qos = LaunchConfiguration("use_best_effort_qos").perform(context)
+    mode = LaunchConfiguration("mode").perform(context)
     use_advanced_solver = LaunchConfiguration("use_advanced_solver").perform(context) == "true"
+
+    # Derive settings from mode
+    # - offline: RELIABLE QoS, exact sync matching, larger queues
+    # - realtime: BEST_EFFORT QoS, approximate sync, minimal buffering
+    is_realtime = mode == "realtime"
+    use_best_effort_qos = is_realtime
+
+    # Synchronization settings based on mode
+    if is_realtime:
+        sync_mode = "approximate"
+        sync_tolerance_ms = 50.0  # 50ms tolerance for real-time
+        sync_queue_size = 2       # Minimal buffering
+    else:
+        sync_mode = "exact"
+        sync_tolerance_ms = 10.0  # Tight tolerance for offline (fallback if exact fails)
+        sync_queue_size = 20      # Larger queue for rosbag playback
 
     # Parse configuration
     pipeline = parse_config(config_file)
@@ -43,7 +65,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # Log pipeline summary
     nodes.append(
         LogInfo(
-            msg=f"Calibration Pipeline: "
+            msg=f"Calibration Pipeline ({mode} mode): "
             f"{len(pipeline.lidar_board_detectors)} board detectors, "
             f"{len(pipeline.aruco_locators)} aruco locators, "
             f"{len(pipeline.lidar_camera_solvers)} lidar-camera solvers, "
@@ -63,7 +85,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "board_detector_file": detector.board_config,
             "enable_debug": debug_mode == "true",
             "enable_icp_iteration_debug": debug_mode == "true",
-            "use_best_effort_qos": use_best_effort_qos == "true",
+            "use_best_effort_qos": use_best_effort_qos,
         }
 
         if detector.aruco_config:
@@ -105,7 +127,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "aruco_config_file": locator.aruco_config,
                         "debug_mode": debug_mode == "true",
                         "debug_overlay_enabled": debug_mode == "true",
-                        "use_best_effort_qos": use_best_effort_qos == "true",
+                        "use_best_effort_qos": use_best_effort_qos,
                     }
                 ],
                 remappings=[
@@ -141,6 +163,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                             "aruco_config_file": solver.aruco_config,
                             "debug_mode": debug_mode == "true",
                             "publishing_rate": 10.0,
+                            "use_best_effort_qos": use_best_effort_qos,
                         }
                     ],
                     remappings=[
@@ -167,6 +190,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                             "camera_topic": solver.camera_topic,
                             "aruco_config_file": solver.aruco_config,
                             "debug_mode": debug_mode == "true",
+                            "use_best_effort_qos": use_best_effort_qos,
                         }
                     ],
                     remappings=[
@@ -199,9 +223,11 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "lidar2_detections_topic": solver.lidar2_detections_topic,
                         "lidar1_frame": solver.lidar1_frame,
                         "lidar2_frame": solver.lidar2_frame,
-                        "sync_mode": "approximate",
-                        "sync_tolerance_ms": 100.0,
+                        "sync_mode": sync_mode,
+                        "sync_tolerance_ms": sync_tolerance_ms,
+                        "sync_queue_size": sync_queue_size,
                         "publish_tf": True,
+                        "use_best_effort_qos": use_best_effort_qos,
                     }
                 ],
             )
@@ -230,9 +256,9 @@ def generate_launch_description() -> LaunchDescription:
                 description="ROS log level (debug, info, warn, error, fatal)",
             ),
             DeclareLaunchArgument(
-                "use_best_effort_qos",
-                default_value="true",
-                description="Use best effort QoS for sensor input topics",
+                "mode",
+                default_value="offline",
+                description="Processing mode: 'offline' (RELIABLE QoS, perfect sync) or 'realtime' (BEST_EFFORT QoS, no buffering)",
             ),
             DeclareLaunchArgument(
                 "enable_rviz",

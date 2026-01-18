@@ -7,6 +7,7 @@ This combines:
 Usage:
     ros2 launch lctk_launch demo.launch.py
     ros2 launch lctk_launch demo.launch.py debug_mode:=true enable_rviz:=true
+    ros2 launch lctk_launch demo.launch.py mode:=realtime  # For live data
 """
 
 from launch import LaunchDescription
@@ -30,10 +31,10 @@ def generate_launch_description():
         description="ROS log level (debug, info, warn, error, fatal)",
     )
 
-    use_best_effort_qos_arg = DeclareLaunchArgument(
-        "use_best_effort_qos",
-        default_value="true",
-        description="Use best effort QoS for sensor input topics",
+    mode_arg = DeclareLaunchArgument(
+        "mode",
+        default_value="offline",
+        description="Processing mode: 'offline' (RELIABLE QoS) or 'realtime' (BEST_EFFORT QoS)",
     )
 
     enable_rviz_arg = DeclareLaunchArgument(
@@ -70,7 +71,7 @@ def generate_launch_description():
             ),
             "debug_mode": LaunchConfiguration("debug_mode"),
             "log_level": LaunchConfiguration("log_level"),
-            "use_best_effort_qos": LaunchConfiguration("use_best_effort_qos"),
+            "mode": LaunchConfiguration("mode"),
             "enable_rviz": LaunchConfiguration("enable_rviz"),
             "use_advanced_solver": LaunchConfiguration("use_advanced_solver"),
         }.items(),
@@ -79,7 +80,7 @@ def generate_launch_description():
     return LaunchDescription([
         debug_mode_arg,
         log_level_arg,
-        use_best_effort_qos_arg,
+        mode_arg,
         enable_rviz_arg,
         use_advanced_solver_arg,
         sample_data_launch,
