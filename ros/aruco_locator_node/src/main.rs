@@ -363,10 +363,12 @@ impl ArucoLocatorNode {
             }
         };
 
-        // Store camera calibration data for undistortion
+        // Store camera calibration data for undistortion (only log once)
         match Self::store_camera_calibration(&camera_info, Arc::clone(&camera_calibration)) {
             Ok(_) => {
-                log_info!(LOGGER_NAME, "Camera calibration stored for undistortion");
+                if !already_initialized {
+                    log_info!(LOGGER_NAME, "Camera calibration stored for undistortion");
+                }
             }
             Err(e) => {
                 log_error!(LOGGER_NAME, "Failed to store camera calibration: {e}");

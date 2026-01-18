@@ -570,7 +570,7 @@ impl CalibrationBoardLocatorNode {
                     let callback_start = Instant::now();
                     processed_count += 1;
 
-                    log_info!(
+                    log_debug!(
                         LOGGER_NAME,
                         "PROCESS: ts {}.{:09}, count {}",
                         msg.header.stamp.sec,
@@ -591,7 +591,7 @@ impl CalibrationBoardLocatorNode {
                     );
 
                     let processing_time = callback_start.elapsed();
-                    log_info!(
+                    log_debug!(
                         LOGGER_NAME,
                         "DONE: processed in {}ms",
                         processing_time.as_millis()
@@ -790,7 +790,7 @@ impl CalibrationBoardLocatorNode {
         // Stage 2: RANSAC plane detection (or skip if configured)
         let (plane_model, plane_inlier_points) = if detector.config().skip_ransac {
             // Skip RANSAC and use all bbox-filtered points directly
-            log_info!(
+            log_debug!(
                 LOGGER_NAME,
                 "RANSAC skipped (skip_ransac=true), using all {} bbox-filtered points for ICP",
                 active_points.len()
@@ -836,7 +836,7 @@ impl CalibrationBoardLocatorNode {
         };
 
         // Stage 3a: Voxel downsampling (optional preprocessing)
-        log_info!(
+        log_debug!(
             LOGGER_NAME,
             "Plane inlier points before voxel downsampling: {} points",
             plane_inlier_points.len()
@@ -853,7 +853,7 @@ impl CalibrationBoardLocatorNode {
 
             let reduction_pct =
                 (1.0 - downsampled.len() as f64 / plane_inlier_points.len() as f64) * 100.0;
-            log_info!(
+            log_debug!(
                 LOGGER_NAME,
                 "Voxel downsampling: {} → {} points ({:.1}% reduction)",
                 plane_inlier_points.len(),
@@ -885,7 +885,7 @@ impl CalibrationBoardLocatorNode {
             plane_inlier_points.clone()
         };
 
-        log_info!(
+        log_debug!(
             LOGGER_NAME,
             "Points for ICP: {} points",
             downsampled_points.len()
@@ -1165,7 +1165,7 @@ impl CalibrationBoardLocatorNode {
         icp_debug_publishers: &Option<IcpDebugPublishers>,
         board_debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Option<BoardDetection> {
-        log_info!(LOGGER_NAME, "Starting ICP board pose refinement");
+        log_debug!(LOGGER_NAME, "Starting ICP board pose refinement");
 
         // Check if we have enough inlier points
         if plane_inlier_points.is_empty() {
@@ -1246,7 +1246,7 @@ impl CalibrationBoardLocatorNode {
         // Note: plane_inlier_points are already downsampled (if enabled) in process_pointcloud()
         let icp_points: Vec<na::Point3<f64>> = plane_inlier_points.to_vec();
 
-        log_info!(LOGGER_NAME, "Starting ICP with {} points", icp_points.len());
+        log_debug!(LOGGER_NAME, "Starting ICP with {} points", icp_points.len());
 
         // Step 4: Create BoardIcpIterator
         let mut iterator = BoardIcpIterator::new(
@@ -1301,7 +1301,7 @@ impl CalibrationBoardLocatorNode {
             // Check termination condition AFTER the step
             if iterator.should_terminate(&state) {
                 let reason = iterator.termination_reason(&state);
-                log_info!(LOGGER_NAME, "ICP iteration terminated: {}", reason);
+                log_debug!(LOGGER_NAME, "ICP iteration terminated: {}", reason);
                 break;
             }
         }
@@ -1509,7 +1509,7 @@ impl CalibrationBoardLocatorNode {
 
         let pose = na::Isometry3::from_parts(na::Translation3::from(corner_position), rotation);
 
-        log_info!(
+        log_debug!(
             LOGGER_NAME,
             "Initial pose from plane: centroid=({:.3}, {:.3}, {:.3}), corner=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
             inlier_centroid.x,
@@ -1641,7 +1641,7 @@ impl CalibrationBoardLocatorNode {
             normal,
         };
 
-        log_info!(
+        log_debug!(
             LOGGER_NAME,
             "Computed plane from {} points using PCA: normal=[{:.3}, {:.3}, {:.3}], center=[{:.3}, {:.3}, {:.3}]",
             points.len(),
