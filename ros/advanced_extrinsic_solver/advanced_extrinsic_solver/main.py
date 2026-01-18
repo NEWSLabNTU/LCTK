@@ -107,6 +107,7 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("min_poses_required", 2)
         self.declare_parameter("axis_length", 0.3)  # Length of axis arrows in meters
         self.declare_parameter("axis_diameter", 0.02)  # Diameter of axis arrows
+        self.declare_parameter("use_best_effort_qos", True)
 
         # Get parameters
         self.parent_frame = (
@@ -129,6 +130,9 @@ class AdvancedExtrinsicSolver(Node):
         )
         self.axis_diameter = (
             self.get_parameter("axis_diameter").get_parameter_value().double_value
+        )
+        use_best_effort_qos = (
+            self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
         )
 
         # Load ArUco pattern configuration
@@ -157,11 +161,17 @@ class AdvancedExtrinsicSolver(Node):
         # Thread safety
         self.lock = threading.Lock()
 
-        # QoS profile
+        # QoS profile configuration based on mode:
+        # - BEST_EFFORT (realtime): Low latency, may drop messages
+        # - RELIABLE (offline): No message drops, suitable for rosbag playback
+        reliability = ReliabilityPolicy.BEST_EFFORT if use_best_effort_qos else ReliabilityPolicy.RELIABLE
         qos_profile = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
+        )
+        self.get_logger().info(
+            f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
         )
 
         # Publishers
