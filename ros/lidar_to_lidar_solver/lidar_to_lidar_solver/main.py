@@ -65,6 +65,7 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_rate_hz", 10.0)
         self.declare_parameter("max_message_age_ms", 500.0)
+        self.declare_parameter("use_best_effort_qos", True)
 
         # Get parameters
         lidar1_topic = self.get_parameter("lidar1_detections_topic").value
@@ -78,16 +79,23 @@ class LidarToLidarSolver(Node):
         self.publish_tf = self.get_parameter("publish_tf").value
         publish_rate_hz = self.get_parameter("publish_rate_hz").value
         self.max_message_age_ms = self.get_parameter("max_message_age_ms").value
+        use_best_effort_qos = self.get_parameter("use_best_effort_qos").value
 
         # State
         self.current_transform: Optional[TransformStamped] = None
         self.stats = SyncStatistics()
 
-        # QoS profile for sensor data
+        # QoS profile configuration based on mode:
+        # - BEST_EFFORT (realtime): Low latency, may drop messages
+        # - RELIABLE (offline): No message drops, suitable for rosbag playback
+        reliability = ReliabilityPolicy.BEST_EFFORT if use_best_effort_qos else ReliabilityPolicy.RELIABLE
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
             depth=sync_queue_size,
+        )
+        self.get_logger().info(
+            f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
         )
 
         # Create message_filters subscribers
