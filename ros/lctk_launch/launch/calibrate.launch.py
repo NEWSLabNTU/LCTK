@@ -33,6 +33,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
     debug_mode = LaunchConfiguration("debug_mode").perform(context)
     log_level = LaunchConfiguration("log_level").perform(context)
     use_best_effort_qos = LaunchConfiguration("use_best_effort_qos").perform(context)
+    use_advanced_solver = LaunchConfiguration("use_advanced_solver").perform(context) == "true"
 
     # Parse configuration
     pipeline = parse_config(config_file)
@@ -116,37 +117,65 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
     # Generate lidar-camera solver nodes
     for solver in pipeline.lidar_camera_solvers:
+        solver_type = "advanced" if use_advanced_solver else "standard"
         nodes.append(
-            LogInfo(msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name})")
+            LogInfo(msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name}) [{solver_type}]")
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
 
-        nodes.append(
-            Node(
-                package="advanced_extrinsic_solver",
-                executable="advanced_extrinsic_solver",
-                name="advanced_extrinsic_solver",
-                namespace=solver.namespace,
-                output="screen",
-                arguments=node_args,
-                parameters=[
-                    {
-                        "parent_frame": solver.parent_frame,
-                        "child_frame": solver.child_frame,
-                        "camera_topic": solver.camera_topic,
-                        "aruco_config_file": solver.aruco_config,
-                        "debug_mode": debug_mode == "true",
-                        "publishing_rate": 10.0,
-                    }
-                ],
-                remappings=[
-                    ("aruco_detections", solver.aruco_detections_topic),
-                    ("calibration_board_detections", solver.board_detections_topic),
-                    ("extrinsic_transform", solver.output_topic),
-                ],
+        if use_advanced_solver:
+            nodes.append(
+                Node(
+                    package="advanced_extrinsic_solver",
+                    executable="advanced_extrinsic_solver",
+                    name="advanced_extrinsic_solver",
+                    namespace=solver.namespace,
+                    output="screen",
+                    arguments=node_args,
+                    parameters=[
+                        {
+                            "parent_frame": solver.parent_frame,
+                            "child_frame": solver.child_frame,
+                            "camera_topic": solver.camera_topic,
+                            "aruco_config_file": solver.aruco_config,
+                            "debug_mode": debug_mode == "true",
+                            "publishing_rate": 10.0,
+                        }
+                    ],
+                    remappings=[
+                        ("aruco_detections", solver.aruco_detections_topic),
+                        ("calibration_board_detections", solver.board_detections_topic),
+                        ("extrinsic_transform", solver.output_topic),
+                    ],
+                )
             )
-        )
+        else:
+            # Standard solver - publishes transform on each detection pair
+            nodes.append(
+                Node(
+                    package="extrinsic_solver_node",
+                    executable="extrinsic_solver_node",
+                    name="extrinsic_solver",
+                    namespace=solver.namespace,
+                    output="screen",
+                    arguments=node_args,
+                    parameters=[
+                        {
+                            "parent_frame": solver.parent_frame,
+                            "child_frame": solver.child_frame,
+                            "camera_topic": solver.camera_topic,
+                            "aruco_config_file": solver.aruco_config,
+                            "debug_mode": debug_mode == "true",
+                        }
+                    ],
+                    remappings=[
+                        ("aruco_detections", solver.aruco_detections_topic),
+                        ("calibration_board_detections", solver.board_detections_topic),
+                        ("extrinsic_transform", solver.output_topic),
+                    ],
+                )
+            )
 
     # Generate lidar-lidar solver nodes
     for solver in pipeline.lidar_lidar_solvers:
@@ -209,6 +238,11 @@ def generate_launch_description() -> LaunchDescription:
                 "enable_rviz",
                 default_value="true",
                 description="Launch RViz for calibration visualization",
+            ),
+            DeclareLaunchArgument(
+                "use_advanced_solver",
+                default_value="false",
+                description="Use advanced multi-pose solver (requires manual detection buffering) vs standard solver (auto-publishes)",
             ),
             # Dynamic node generation
             OpaqueFunction(function=generate_nodes),

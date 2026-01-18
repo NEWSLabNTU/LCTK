@@ -42,6 +42,12 @@ def generate_launch_description():
         description="Launch RViz for calibration visualization",
     )
 
+    use_advanced_solver_arg = DeclareLaunchArgument(
+        "use_advanced_solver",
+        default_value="false",
+        description="Use advanced multi-pose solver vs standard solver",
+    )
+
     # Sample data playback
     sample_data_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
@@ -66,6 +72,7 @@ def generate_launch_description():
             "log_level": LaunchConfiguration("log_level"),
             "use_best_effort_qos": LaunchConfiguration("use_best_effort_qos"),
             "enable_rviz": LaunchConfiguration("enable_rviz"),
+            "use_advanced_solver": LaunchConfiguration("use_advanced_solver"),
         }.items(),
     )
 
@@ -74,6 +81,7 @@ def generate_launch_description():
         log_level_arg,
         use_best_effort_qos_arg,
         enable_rviz_arg,
+        use_advanced_solver_arg,
         sample_data_launch,
         calibration_launch,
     ])
