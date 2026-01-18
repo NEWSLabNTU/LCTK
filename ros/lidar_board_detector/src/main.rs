@@ -913,8 +913,6 @@ impl CalibrationBoardLocatorNode {
 
         let mut detections = Vec::new();
         if let Some(det) = detection {
-            log_warn!(LOGGER_NAME, "Board detection successful");
-
             // Log ICP result to service logs
             let final_loss = det
                 .icp_losses
@@ -991,7 +989,7 @@ impl CalibrationBoardLocatorNode {
             let detection_3d = Self::convert_board_detection_to_detection3d(&det, &msg.header)?;
             detections.push(detection_3d);
         } else {
-            log_warn!(LOGGER_NAME, "Detection returned None - board not found");
+            log_debug!(LOGGER_NAME, "Detection returned None - board not found");
 
             // Publish empty marker array to ensure topic is active for debugging
             if let Some(debug_pubs) = board_debug_publishers {
@@ -1403,7 +1401,7 @@ impl CalibrationBoardLocatorNode {
                 },
             })
         } else {
-            log_warn!(
+            log_debug!(
                 LOGGER_NAME,
                 "Board detection failed: final_loss={:.6}, inliers={}, threshold={:.6}, min_inliers={}",
                 state.avg_loss,
