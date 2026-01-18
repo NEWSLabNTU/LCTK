@@ -11,9 +11,9 @@ Usage:
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
 from launch.launch_description_sources import AnyLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -47,6 +47,14 @@ def generate_launch_description():
         "use_advanced_solver",
         default_value="false",
         description="Use advanced multi-pose solver vs standard solver",
+    )
+
+    # Debug: Log the mode and derived QoS setting
+    # This helps diagnose if the parameter is being passed correctly
+    mode_log = LogInfo(
+        msg=["Demo launch: mode=", LaunchConfiguration("mode"),
+             ", use_sensor_data_qos=",
+             PythonExpression(["'true' if '", LaunchConfiguration("mode"), "' == 'realtime' else 'false'"])]
     )
 
     # Sample data playback
@@ -91,6 +99,7 @@ def generate_launch_description():
         mode_arg,
         enable_rviz_arg,
         use_advanced_solver_arg,
+        mode_log,  # Debug logging of mode and QoS settings
         sample_data_launch,
         calibration_launch,
     ])

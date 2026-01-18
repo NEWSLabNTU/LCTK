@@ -369,6 +369,17 @@ impl ArucoLocatorNode {
         // Check if detector is already initialized (lock-free read)
         let already_initialized = detector_state.load().is_some();
 
+        // Debug: Log when camera_info is received (only log first time for clarity)
+        if !already_initialized {
+            log_info!(
+                LOGGER_NAME,
+                "Received camera_info: {}x{}, frame_id={}",
+                camera_info.width,
+                camera_info.height,
+                camera_info.header.frame_id
+            );
+        }
+
         let aruco_pattern = match Self::load_aruco_pattern(aruco_config_file) {
             Ok(pattern) => pattern,
             Err(e) => {
@@ -590,6 +601,17 @@ impl ArucoLocatorNode {
                 Some(detector) => Arc::clone(detector),
                 None => {
                     // Detector not initialized yet, skip this frame
+                    // Log periodically to indicate waiting for camera_info
+                    static mut NO_DETECTOR_COUNT: u32 = 0;
+                    unsafe {
+                        NO_DETECTOR_COUNT += 1;
+                        if NO_DETECTOR_COUNT % 60 == 1 {
+                            log_warn!(
+                                LOGGER_NAME,
+                                "Received image but detector not initialized yet - waiting for camera_info"
+                            );
+                        }
+                    }
                     return;
                 }
             }
