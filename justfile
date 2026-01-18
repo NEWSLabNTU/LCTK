@@ -95,15 +95,11 @@ demo:
     source install/setup.bash
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch lidar_camera_demo.launch.xml \
+        lctk_launch demo.launch.py \
         debug_mode:={{ debug_mode }} \
-        enable_icp_iteration_debug:={{ enable_icp_iteration_debug }} \
-        enable_judge:={{ enable_evaluator }} \
-        enable_overlay:={{ enable_overlay }} \
-        enable_rviz:={{ rviz_enabled }} \
         log_level:={{ log_level }} \
         use_best_effort_qos:={{ use_best_effort_qos }} \
-        use_advanced_solver:={{ use_advanced_solver }}
+        enable_rviz:={{ rviz_enabled }}
 
 # Launch RViz for calibration visualization
 rviz:
