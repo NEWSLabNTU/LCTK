@@ -60,6 +60,10 @@
          default="camera_front_center"
          description="Frame ID for the image messages"/>
 
+    <arg name="use_sensor_data_qos"
+         default="false"
+         description="Use sensor data QoS (BEST_EFFORT) for camera topics. Set true for realtime mode."/>
+
     <!-- Common Arguments -->
 
     <!-- Velodyne driver node -->
@@ -125,6 +129,7 @@
         <param name="reopen_on_eof" value="true"/>
         <param name="use_gst_timestamps" value="false"/>
         <param name="image_encoding" value="rgb8"/>
+        <param name="use_sensor_data_qos" value="$(var use_sensor_data_qos)"/>
         <!-- Remap topics to remove extra 'camera' level -->
         <remap from="camera/image_raw" to="image_raw"/>
         <remap from="camera/camera_info" to="camera_info"/>

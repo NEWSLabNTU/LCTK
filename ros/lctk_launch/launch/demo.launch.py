@@ -50,12 +50,20 @@ def generate_launch_description():
     )
 
     # Sample data playback
+    # In realtime mode, use BEST_EFFORT QoS for camera topics to match the subscriber
     sample_data_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             PathJoinSubstitution(
                 [FindPackageShare("lctk_sample_data"), "launch", "lidar_camera.launch.xml"]
             )
         ),
+        launch_arguments={
+            # use_sensor_data_qos=True in realtime mode (BEST_EFFORT), False in offline (RELIABLE)
+            # Note: XML launch files expect string "true"/"false" for boolean params
+            "use_sensor_data_qos": PythonExpression(
+                ["'true' if '", LaunchConfiguration("mode"), "' == 'realtime' else 'false'"]
+            ),
+        }.items(),
     )
 
     # Config-driven calibration pipeline using sample_data.yaml
