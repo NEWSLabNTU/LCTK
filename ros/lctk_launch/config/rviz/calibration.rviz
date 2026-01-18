@@ -63,7 +63,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /calibration/aruco_locator/image_with_detections
+        Value: /calibration/front_center/image_with_detections
       Value: true
     - Class: rviz_common/Group
       Displays:
@@ -97,7 +97,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Best Effort
-            Value: /calibration/lidar_board_detector/debug/all_points
+            Value: /calibration/top_lidar_calibration_board/debug/all_points
           Use Fixed Frame: true
           Use rainbow: true
           Value: false
@@ -113,7 +113,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/bbox_marker
+                Value: /calibration/top_lidar_calibration_board/debug/bbox_marker
               Value: true
             - Alpha: 1
               Autocompute Intensity Bounds: true
@@ -145,7 +145,7 @@ Visualization Manager:
                 Filter size: 10
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/filtered_points
+                Value: /calibration/top_lidar_calibration_board/debug/filtered_points
               Use Fixed Frame: true
               Use rainbow: true
               Value: true
@@ -163,7 +163,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/plane_marker
+                Value: /calibration/top_lidar_calibration_board/debug/plane_marker
               Value: true
             - Alpha: 1
               Autocompute Intensity Bounds: true
@@ -195,7 +195,7 @@ Visualization Manager:
                 Filter size: 10
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/plane_inliers
+                Value: /calibration/top_lidar_calibration_board/debug/plane_inliers
               Use Fixed Frame: true
               Use rainbow: true
               Value: true
@@ -231,7 +231,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Best Effort
-            Value: /calibration/lidar_board_detector/debug/downsampled_points
+            Value: /calibration/top_lidar_calibration_board/debug/downsampled_points
           Use Fixed Frame: true
           Use rainbow: true
           Value: false
@@ -247,7 +247,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/pca_eigenvectors
+                Value: /calibration/top_lidar_calibration_board/debug/pca_eigenvectors
               Value: false
             - Class: rviz_default_plugins/MarkerArray
               Enabled: false
@@ -259,7 +259,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/initial_board_marker
+                Value: /calibration/top_lidar_calibration_board/debug/initial_board_marker
               Value: false
             - Class: rviz_default_plugins/MarkerArray
               Enabled: true
@@ -271,7 +271,7 @@ Visualization Manager:
                 Durability Policy: Volatile
                 History Policy: Keep Last
                 Reliability Policy: Best Effort
-                Value: /calibration/lidar_board_detector/debug/final_board_pose
+                Value: /calibration/top_lidar_calibration_board/debug/final_board_pose
               Value: true
             - Class: rviz_default_plugins/MarkerArray
               Enabled: false
