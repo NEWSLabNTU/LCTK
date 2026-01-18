@@ -12,6 +12,7 @@
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>vision_msgs</depend>
+  <depend>conflux_py</depend>
   <depend>python3-opencv</depend>
   <depend>python3-numpy</depend>
   <depend>python3-yaml</depend>

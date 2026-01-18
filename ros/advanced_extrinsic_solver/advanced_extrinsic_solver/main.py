@@ -33,7 +33,8 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Point, Quaternion, Transform, TransformStamped, Vector3
+from conflux_py import ROS2Synchronizer, SyncGroup
+from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
     AdjustTransform,
@@ -141,9 +142,9 @@ class AdvancedExtrinsicSolver(Node):
         # Detection buffer for multi-pose calibration
         self.detection_buffer: List[Tuple[Detection2DArray, Detection3DArray]] = []
 
-        # Latest detections (cached for service calls)
-        self.latest_aruco_detection: Optional[Detection2DArray] = None
-        self.latest_board_detection: Optional[Detection3DArray] = None
+        # Latest synchronized detection pair (cached for service calls)
+        # Uses conflux_py for time synchronization
+        self.latest_sync_pair: Optional[Tuple[Detection2DArray, Detection3DArray]] = None
         self.camera_info: Optional[CameraInfo] = None
 
         # Calibration state
@@ -189,17 +190,17 @@ class AdvancedExtrinsicSolver(Node):
             1.0 / publishing_rate, self._publishing_timer_callback
         )
 
-        # Subscribers
-        self.aruco_subscription = self.create_subscription(
-            Detection2DArray, "aruco_detections", self.aruco_callback, qos_profile
+        # Create synchronizer for ArUco and board detections
+        # This ensures we only cache detection pairs that are time-synchronized
+        self.sync = ROS2Synchronizer(
+            self, window_size_ms=50, buffer_size=64, qos=qos_profile
         )
+        self.sync.add_subscription(Detection2DArray, "aruco_detections")
+        self.sync.add_subscription(Detection3DArray, "calibration_board_detections")
 
-        self.board_subscription = self.create_subscription(
-            Detection3DArray,
-            "calibration_board_detections",
-            self.board_callback,
-            qos_profile,
-        )
+        @self.sync.on_synchronized
+        def on_sync(group: SyncGroup):
+            self._handle_synchronized_detections(group)
 
         # Derive camera_info topic from camera_topic parameter
         camera_topic = (
@@ -285,6 +286,7 @@ class AdvancedExtrinsicSolver(Node):
         self.get_logger().info(
             f"Advanced Extrinsic Solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
+            f"Using conflux_py for time-synchronized detection pairs\n"
             f"Minimum poses required: {self.min_poses_required}\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled), axis_markers\n"
@@ -298,31 +300,44 @@ class AdvancedExtrinsicSolver(Node):
             self.camera_info = msg
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
 
-    def aruco_callback(self, msg: Detection2DArray):
-        """Cache ArUco detections without solving."""
+    def _handle_synchronized_detections(self, group: SyncGroup):
+        """
+        Handle synchronized ArUco and board detections.
+
+        This callback is invoked by conflux_py when both ArUco and board
+        detections are available within the time window. The synchronized
+        pair is cached for use by the add_detection service.
+        """
+        # Debug: log available keys in the sync group
+        available_keys = group.topics()
+        self.get_logger().debug(f"SyncGroup keys: {available_keys}")
+
+        # Safely get messages with error handling
+        aruco_msg = group.get("aruco_detections")
+        board_msg = group.get("calibration_board_detections")
+
+        if aruco_msg is None or board_msg is None:
+            self.get_logger().warn(
+                f"Incomplete sync group received. Available keys: {available_keys}, "
+                f"aruco={aruco_msg is not None}, board={board_msg is not None}"
+            )
+            return
+
         self.get_logger().debug(
-            f"ArUco detection: {len(msg.detections)} markers at "
-            f"t={msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
+            f"Synchronized detection pair at t={group.timestamp:.6f}s: "
+            f"{len(aruco_msg.detections)} ArUco markers, "
+            f"{len(board_msg.detections)} boards"
         )
 
-        if msg.detections:
+        # Only cache non-empty detection pairs
+        if aruco_msg.detections and board_msg.detections:
             with self.lock:
-                self.latest_aruco_detection = msg
+                self.latest_sync_pair = (aruco_msg, board_msg)
         else:
-            self.get_logger().debug("Ignoring empty ArUco detection")
-
-    def board_callback(self, msg: Detection3DArray):
-        """Cache board detections without solving."""
-        self.get_logger().debug(
-            f"Board detection: {len(msg.detections)} boards at "
-            f"t={msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
-        )
-
-        if msg.detections:
-            with self.lock:
-                self.latest_board_detection = msg
-        else:
-            self.get_logger().warn("Received empty board detection")
+            if not aruco_msg.detections:
+                self.get_logger().debug("Ignoring sync group with empty ArUco detection")
+            if not board_msg.detections:
+                self.get_logger().warn("Ignoring sync group with empty board detection")
 
     def _publishing_timer_callback(self):
         """Continuously publish the last solved transform when enabled."""
@@ -388,14 +403,14 @@ class AdvancedExtrinsicSolver(Node):
 
     def add_detection_callback(self, request, response):
         """
-        Service callback: Add latest detection pair to buffer and re-solve.
+        Service callback: Add latest synchronized detection pair to buffer and re-solve.
 
         This triggers a complete re-solve using all buffered detections,
         potentially improving calibration accuracy with more data.
+        Note: Only synchronized detection pairs (from conflux_py) are used.
         """
         with self.lock:
-            aruco_msg = self.latest_aruco_detection
-            board_msg = self.latest_board_detection
+            sync_pair = self.latest_sync_pair
 
         # Validate prerequisites
         if not self.camera_info:
@@ -405,21 +420,18 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(response.message)
             return response
 
-        if not aruco_msg or not board_msg:
+        if not sync_pair:
             response.success = False
-            missing = []
-            if not aruco_msg:
-                missing.append("ArUco")
-            if not board_msg:
-                missing.append("Board")
-            response.message = f"Missing detections: {', '.join(missing)}"
+            response.message = "No synchronized detection pair available. Waiting for time-synchronized ArUco and board detections."
             response.buffer_size = len(self.detection_buffer)
             self.get_logger().error(response.message)
             return response
 
+        aruco_msg, board_msg = sync_pair
+
         if not aruco_msg.detections or not board_msg.detections:
             response.success = False
-            response.message = "Empty detection messages"
+            response.message = "Empty detection messages in synchronized pair"
             response.buffer_size = len(self.detection_buffer)
             self.get_logger().error(response.message)
             return response
@@ -472,6 +484,7 @@ class AdvancedExtrinsicSolver(Node):
         with self.lock:
             buffer_size = len(self.detection_buffer)
             self.detection_buffer.clear()
+            self.latest_sync_pair = None
             self.publishing_enabled = False
             self.last_transform = None
             self.last_solve_status = "Buffer cleared"
