@@ -47,15 +47,18 @@ def generate_nodes(context, *args, **kwargs) -> list:
     is_realtime = mode == "realtime"
     use_best_effort_qos = is_realtime
 
-    # Synchronization settings based on mode
+    # Synchronization settings based on mode (used by Conflux synchronizer)
+    # - sync_tolerance_ms: Time window for grouping messages (0 = infinite window)
+    # - sync_queue_size: Buffer size per stream
+    # - sync_drop_policy: "reject_new" (preserve data) or "drop_oldest" (prefer latest)
     if is_realtime:
-        sync_mode = "approximate"
-        sync_tolerance_ms = 50.0  # 50ms tolerance for real-time
-        sync_queue_size = 2       # Minimal buffering
+        sync_tolerance_ms = 50.0      # 50ms tolerance for real-time
+        sync_queue_size = 2           # Minimal buffering
+        sync_drop_policy = "drop_oldest"  # Always process latest data
     else:
-        sync_mode = "exact"
-        sync_tolerance_ms = 10.0  # Tight tolerance for offline (fallback if exact fails)
-        sync_queue_size = 20      # Larger queue for rosbag playback
+        sync_tolerance_ms = 0.0       # Infinite window for offline (no time-based dropping)
+        sync_queue_size = 100         # Large queue for rosbag playback
+        sync_drop_policy = "reject_new"   # Preserve all data
 
     # Parse configuration
     pipeline = parse_config(config_file)
@@ -164,6 +167,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
                             "debug_mode": debug_mode == "true",
                             "publishing_rate": 10.0,
                             "use_best_effort_qos": use_best_effort_qos,
+                            "sync_tolerance_ms": sync_tolerance_ms,
+                            "sync_queue_size": sync_queue_size,
+                            "sync_drop_policy": sync_drop_policy,
                         }
                     ],
                     remappings=[
@@ -191,6 +197,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
                             "aruco_config_file": solver.aruco_config,
                             "debug_mode": debug_mode == "true",
                             "use_best_effort_qos": use_best_effort_qos,
+                            "sync_tolerance_ms": sync_tolerance_ms,
+                            "sync_queue_size": sync_queue_size,
+                            "sync_drop_policy": sync_drop_policy,
                         }
                     ],
                     remappings=[
@@ -223,9 +232,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "lidar2_detections_topic": solver.lidar2_detections_topic,
                         "lidar1_frame": solver.lidar1_frame,
                         "lidar2_frame": solver.lidar2_frame,
-                        "sync_mode": sync_mode,
                         "sync_tolerance_ms": sync_tolerance_ms,
                         "sync_queue_size": sync_queue_size,
+                        "sync_drop_policy": sync_drop_policy,
                         "publish_tf": True,
                         "use_best_effort_qos": use_best_effort_qos,
                     }

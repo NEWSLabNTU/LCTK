@@ -33,7 +33,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import rclpy
-from conflux_py import ROS2Synchronizer, SyncGroup
+from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
@@ -109,6 +109,9 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("axis_length", 0.3)  # Length of axis arrows in meters
         self.declare_parameter("axis_diameter", 0.02)  # Diameter of axis arrows
         self.declare_parameter("use_best_effort_qos", True)
+        self.declare_parameter("sync_tolerance_ms", 50.0)
+        self.declare_parameter("sync_queue_size", 10)
+        self.declare_parameter("sync_drop_policy", "reject_new")  # reject_new or drop_oldest
 
         # Get parameters
         self.parent_frame = (
@@ -134,6 +137,18 @@ class AdvancedExtrinsicSolver(Node):
         )
         use_best_effort_qos = (
             self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
+        )
+        sync_tolerance_ms = (
+            self.get_parameter("sync_tolerance_ms").get_parameter_value().double_value
+        )
+        sync_queue_size = (
+            self.get_parameter("sync_queue_size").get_parameter_value().integer_value
+        )
+        sync_drop_policy_str = (
+            self.get_parameter("sync_drop_policy").get_parameter_value().string_value
+        )
+        sync_drop_policy = (
+            DropPolicy.DROP_OLDEST if sync_drop_policy_str == "drop_oldest" else DropPolicy.REJECT_NEW
         )
 
         # Load ArUco pattern configuration
@@ -192,8 +207,15 @@ class AdvancedExtrinsicSolver(Node):
 
         # Create synchronizer for ArUco and board detections
         # This ensures we only cache detection pairs that are time-synchronized
+        self.get_logger().info(
+            f"Using Conflux synchronization (window={int(sync_tolerance_ms)}ms, buffer={sync_queue_size})"
+        )
         self.sync = ROS2Synchronizer(
-            self, window_size_ms=50, buffer_size=64, qos=qos_profile
+            self,
+            window_size_ms=int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None,
+            buffer_size=sync_queue_size,
+            drop_policy=sync_drop_policy,
+            qos=qos_profile,
         )
         self.sync.add_subscription(Detection2DArray, "aruco_detections")
         self.sync.add_subscription(Detection3DArray, "calibration_board_detections")
@@ -1357,6 +1379,26 @@ def main(args=None):
         # Handle RCLError and other exceptions gracefully
         node.get_logger().error(f"Error during spin: {e}")
     finally:
+        # Log final synchronization statistics
+        try:
+            stats = node.sync.statistics
+            node.get_logger().info(
+                f"Final sync statistics: "
+                f"received={stats.total_received()}, "
+                f"rejected={stats.total_rejected()}, "
+                f"groups={stats.groups_synchronized}, "
+                f"rejection_rate={stats.rejection_rate():.1%}"
+            )
+            for topic in stats.messages_received:
+                topic_rate = stats.rejection_rate(topic)
+                node.get_logger().info(
+                    f"  {topic}: received={stats.messages_received[topic]}, "
+                    f"rejected={stats.messages_rejected[topic]}, "
+                    f"rejection_rate={topic_rate:.1%}"
+                )
+        except Exception:
+            pass  # Ignore errors during statistics logging
+
         try:
             node.destroy_node()
         except Exception:

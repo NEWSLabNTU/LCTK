@@ -20,7 +20,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import rclpy
-from conflux_py import ROS2Synchronizer, SyncGroup
+from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Transform, TransformStamped, Quaternion, Vector3
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -58,6 +58,7 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("lidar2_frame", "lidar2")
         self.declare_parameter("sync_tolerance_ms", 100.0)
         self.declare_parameter("sync_queue_size", 10)
+        self.declare_parameter("sync_drop_policy", "reject_new")  # reject_new or drop_oldest
         self.declare_parameter("same_face_mode", True)
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_rate_hz", 10.0)
@@ -71,6 +72,10 @@ class LidarToLidarSolver(Node):
         self.lidar2_frame = self.get_parameter("lidar2_frame").value
         sync_tolerance_ms = self.get_parameter("sync_tolerance_ms").value
         sync_queue_size = self.get_parameter("sync_queue_size").value
+        sync_drop_policy_str = self.get_parameter("sync_drop_policy").value
+        sync_drop_policy = (
+            DropPolicy.DROP_OLDEST if sync_drop_policy_str == "drop_oldest" else DropPolicy.REJECT_NEW
+        )
         self.same_face_mode = self.get_parameter("same_face_mode").value
         self.publish_tf = self.get_parameter("publish_tf").value
         publish_rate_hz = self.get_parameter("publish_rate_hz").value
@@ -95,13 +100,17 @@ class LidarToLidarSolver(Node):
         )
 
         # Create Conflux synchronizer
+        # window_size_ms=0 means infinite window (no time-based dropping)
+        window_ms = int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None
         self.get_logger().info(
-            f"Using Conflux synchronization (window={int(sync_tolerance_ms)}ms, buffer={sync_queue_size})"
+            f"Using Conflux synchronization (window={'infinite' if window_ms is None else f'{window_ms}ms'}, "
+            f"buffer={sync_queue_size}, policy={sync_drop_policy_str})"
         )
         self.sync = ROS2Synchronizer(
             self,
-            window_size_ms=int(sync_tolerance_ms),
+            window_size_ms=window_ms,
             buffer_size=sync_queue_size,
+            drop_policy=sync_drop_policy,
             qos=qos,
         )
 
@@ -315,7 +324,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        # Log final statistics
+        # Log final node statistics
         stats = node.stats
         node.get_logger().info(
             f"Final statistics: "
@@ -327,6 +336,26 @@ def main(args=None):
                 f"Last transform: t={stats.last_translation}, "
                 f"rpy_deg={stats.last_rotation_rpy_deg}"
             )
+
+        # Log synchronizer statistics
+        try:
+            sync_stats = node.sync.statistics
+            node.get_logger().info(
+                f"Sync statistics: "
+                f"received={sync_stats.total_received()}, "
+                f"rejected={sync_stats.total_rejected()}, "
+                f"groups={sync_stats.groups_synchronized}, "
+                f"rejection_rate={sync_stats.rejection_rate():.1%}"
+            )
+            for topic in sync_stats.messages_received:
+                topic_rate = sync_stats.rejection_rate(topic)
+                node.get_logger().info(
+                    f"  {topic}: received={sync_stats.messages_received[topic]}, "
+                    f"rejected={sync_stats.messages_rejected[topic]}, "
+                    f"rejection_rate={topic_rate:.1%}"
+                )
+        except Exception:
+            pass  # Ignore errors during statistics logging
 
         node.destroy_node()
         rclpy.shutdown()
