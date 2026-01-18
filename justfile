@@ -12,7 +12,7 @@ enable_overlay := "true"
 log_level := "info"
 rviz_enabled := "true"
 use_best_effort_qos := "true"
-use_advanced_solver := "true"
+use_advanced_solver := "false"
 use_synchronized_input := "false"
 camera_topic := "/sensing/camera/zedxm/right/color/rect/image"
 pointcloud_topic := "/sensing/lidar/concatenated/pointcloud"
@@ -99,7 +99,8 @@ demo:
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         use_best_effort_qos:={{ use_best_effort_qos }} \
-        enable_rviz:={{ rviz_enabled }}
+        enable_rviz:={{ rviz_enabled }} \
+        use_advanced_solver:={{ use_advanced_solver }}
 
 # Launch RViz for calibration visualization
 rviz:
