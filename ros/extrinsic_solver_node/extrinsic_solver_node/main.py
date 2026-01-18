@@ -99,6 +99,7 @@ class EducationalExtrinsicSolver(Node):
         self.declare_parameter("camera_topic", "")
         self.declare_parameter("aruco_config_file", "")
         self.declare_parameter("debug_mode", True)
+        self.declare_parameter("use_best_effort_qos", True)
 
         # Get parameters with simple error handling
         self.parent_frame = (
@@ -109,6 +110,9 @@ class EducationalExtrinsicSolver(Node):
         )
         aruco_config_file = (
             self.get_parameter("aruco_config_file").get_parameter_value().string_value
+        )
+        use_best_effort_qos = (
+            self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value
         )
 
         # Load ArUco pattern configuration
@@ -123,13 +127,17 @@ class EducationalExtrinsicSolver(Node):
         # Thread safety for simple caching
         self.lock = threading.Lock()
 
-        # QoS profile for best-effort communication with depth=1
-        # This ensures we always match the most recent detections by timestamp
-        # without accumulating stale data
+        # QoS profile configuration based on mode:
+        # - BEST_EFFORT (realtime): Low latency, may drop messages
+        # - RELIABLE (offline): No message drops, suitable for rosbag playback
+        reliability = ReliabilityPolicy.BEST_EFFORT if use_best_effort_qos else ReliabilityPolicy.RELIABLE
         qos_profile = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
+        )
+        self.get_logger().info(
+            f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
         )
 
         # Publishers - only essential output
@@ -813,17 +821,40 @@ def main(args=None):
     Educational note: This is the standard ROS2 node entry point.
     It initializes ROS2, creates the node, and handles shutdown.
     """
+    import time
+
     rclpy.init(args=args)
 
     node = EducationalExtrinsicSolver()
 
+    # Brief delay to allow DDS discovery to complete before spinning
+    # This helps avoid race conditions with entity creation
+    time.sleep(0.1)
+
     try:
-        rclpy.spin(node)
+        # Use explicit executor for better control
+        executor = rclpy.executors.SingleThreadedExecutor()
+        executor.add_node(node)
+
+        try:
+            executor.spin()
+        finally:
+            executor.shutdown()
     except KeyboardInterrupt:
         node.get_logger().info("Shutting down educational extrinsic solver")
+    except Exception as e:
+        # Handle RCLError and other exceptions gracefully
+        node.get_logger().error(f"Error during spin: {e}")
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass  # Ignore errors during cleanup
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass  # Ignore errors if context is already invalid
 
 
 if __name__ == "__main__":
