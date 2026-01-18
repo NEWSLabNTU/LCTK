@@ -18,7 +18,6 @@ Author: LCTK Educational Team
 License: MIT
 """
 
-import json
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -26,15 +25,15 @@ from typing import Dict, List, Optional, Tuple
 import cv2  # OpenCV for computer vision tasks
 import numpy as np  # Ubuntu 22.04 default (1.x)
 import rclpy
-from geometry_msgs.msg import Quaternion, Transform, TransformStamped, Vector3
+from conflux_py import ROS2Synchronizer, SyncGroup
+from geometry_msgs.msg import Quaternion, TransformStamped, Vector3
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R  # Quaternion operations
 from sensor_msgs.msg import CameraInfo
 # ROS2 message types
 from std_msgs.msg import Header
-from vision_msgs.msg import (Detection2D, Detection2DArray, Detection3D,
-                             Detection3DArray)
+from vision_msgs.msg import Detection2DArray, Detection3D, Detection3DArray
 
 
 @dataclass
@@ -118,14 +117,9 @@ class EducationalExtrinsicSolver(Node):
         # Load ArUco pattern configuration
         self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
 
-        # Educational note: Cache latest detections for processing
-        # We use simple variables instead of complex synchronization
-        self.latest_aruco_detection: Optional[Detection2DArray] = None
-        self.latest_board_detection: Optional[Detection3DArray] = None
+        # Camera info is cached separately (doesn't need time synchronization)
         self.camera_info: Optional[CameraInfo] = None
-
-        # Thread safety for simple caching
-        self.lock = threading.Lock()
+        self.camera_info_lock = threading.Lock()
 
         # QoS profile configuration based on mode:
         # - BEST_EFFORT (realtime): Low latency, may drop messages
@@ -145,17 +139,18 @@ class EducationalExtrinsicSolver(Node):
             TransformStamped, "extrinsic_transform", qos_profile
         )
 
-        # Subscribers
-        self.aruco_subscription = self.create_subscription(
-            Detection2DArray, "aruco_detections", self.aruco_callback, qos_profile
+        # Create synchronizer for ArUco and board detections
+        # Educational note: conflux_py synchronizes messages from multiple topics
+        # within a configurable time window, ensuring matched detection pairs
+        self.sync = ROS2Synchronizer(
+            self, window_size_ms=50, buffer_size=64, qos=qos_profile
         )
+        self.sync.add_subscription(Detection2DArray, "aruco_detections")
+        self.sync.add_subscription(Detection3DArray, "calibration_board_detections")
 
-        self.board_subscription = self.create_subscription(
-            Detection3DArray,
-            "calibration_board_detections",
-            self.board_callback,
-            qos_profile,
-        )
+        @self.sync.on_synchronized
+        def on_sync(group: SyncGroup):
+            self._handle_synchronized_detections(group)
 
         # Derive camera_info topic from camera_topic parameter (image_pipeline convention)
         camera_topic = (
@@ -184,6 +179,7 @@ class EducationalExtrinsicSolver(Node):
         self.get_logger().info(
             f"Educational Extrinsic Solver initialized\n"
             f"Educational Mode: Simplified PnP calibration using OpenCV\n"
+            f"Using conflux_py for time-synchronized detection pairs\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
@@ -198,87 +194,57 @@ class EducationalExtrinsicSolver(Node):
         needed for PnP solving. This includes the camera matrix K and
         distortion coefficients.
         """
-        with self.lock:
+        with self.camera_info_lock:
             self.camera_info = msg
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
 
-    def aruco_callback(self, msg: Detection2DArray):
+    def _handle_synchronized_detections(self, group: SyncGroup):
         """
-        Handle ArUco detection messages.
+        Handle synchronized ArUco and board detections.
 
-        Educational note: ArUco markers provide precise 2D corner detections
-        that correspond to known 3D marker geometry. These 2D-3D correspondences
-        are essential for solving the PnP problem.
+        Educational note: This callback is invoked by conflux_py when it has
+        received messages from all subscribed topics within the time window.
+        This ensures that ArUco and board detections are from the same moment.
         """
+        # Debug: log available keys in the sync group
+        available_keys = group.topics()
+        self.get_logger().debug(f"SyncGroup keys: {available_keys}")
+
+        # Safely get messages with error handling
+        aruco_msg = group.get("aruco_detections")
+        board_msg = group.get("calibration_board_detections")
+
+        if aruco_msg is None or board_msg is None:
+            self.get_logger().warn(
+                f"Incomplete sync group received. Available keys: {available_keys}, "
+                f"aruco={aruco_msg is not None}, board={board_msg is not None}"
+            )
+            return
+
         self.get_logger().debug(
-            f"ArUco detection: {len(msg.detections)} markers at "
-            f"t={msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
+            f"Synchronized detection pair at t={group.timestamp:.6f}s: "
+            f"{len(aruco_msg.detections)} ArUco markers, "
+            f"{len(board_msg.detections)} boards"
         )
 
-        # Only cache non-empty detections
-        if msg.detections:
-            with self.lock:
-                self.latest_aruco_detection = msg
+        # Skip if either detection is empty
+        if not aruco_msg.detections:
+            self.get_logger().debug("Ignoring empty ArUco detection in sync group")
+            return
+        if not board_msg.detections:
+            self.get_logger().warn("Received empty board detection in sync group")
+            return
 
-            # Try to process if we have both detection types
-            self._try_solve_calibration()
-        else:
-            self.get_logger().debug("Ignoring empty ArUco detection")
-
-    def board_callback(self, msg: Detection3DArray):
-        """
-        Handle board detection messages.
-
-        Educational note: Board detections provide the 3D pose of the
-        calibration board in LiDAR coordinates. This pose is used to
-        transform marker coordinates from local to world space.
-        """
-        self.get_logger().debug(
-            f"Board detection: {len(msg.detections)} boards at "
-            f"t={msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}"
+        self.get_logger().info(
+            f"Processing synchronized detection pair: "
+            f"{len(aruco_msg.detections)} ArUco markers, "
+            f"{len(board_msg.detections)} boards"
         )
 
-        # Only cache non-empty detections
-        if msg.detections:
-            with self.lock:
-                self.latest_board_detection = msg
-
-            # Try to process if we have both detection types
-            self._try_solve_calibration()
-        else:
-            self.get_logger().warn("Received empty board detection")
-
-    def _try_solve_calibration(self):
-        """
-        Attempt to solve calibration if both detection types are available.
-
-        Educational note: We need both ArUco (2D) and board (3D) detections
-        to create the point correspondences required for PnP solving.
-        """
-        with self.lock:
-            aruco_msg = self.latest_aruco_detection
-            board_msg = self.latest_board_detection
-
-        # Check if we have both detection types
-        if aruco_msg and board_msg:
-            self.get_logger().info(
-                f"Processing detection pair: {len(aruco_msg.detections)} ArUco markers, "
-                f"{len(board_msg.detections)} boards"
-            )
-
-            try:
-                self._solve_extrinsic_calibration(aruco_msg, board_msg)
-            except Exception as e:
-                self.get_logger().error(f"Calibration failed: {e}")
-        else:
-            missing = []
-            if not aruco_msg:
-                missing.append("ArUco")
-            if not board_msg:
-                missing.append("Board")
-            self.get_logger().debug(
-                f"Waiting for detections: missing {', '.join(missing)}"
-            )
+        try:
+            self._solve_extrinsic_calibration(aruco_msg, board_msg)
+        except Exception as e:
+            self.get_logger().error(f"Calibration failed: {e}")
 
     def _solve_extrinsic_calibration(
         self, aruco_msg: Detection2DArray, board_msg: Detection3DArray
