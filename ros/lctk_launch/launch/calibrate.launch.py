@@ -16,9 +16,12 @@ See config/examples/ for example configurations.
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
+from launch.conditions import IfCondition
+from launch.launch_description_sources import AnyLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_nodes(context, *args, **kwargs) -> list:
@@ -202,7 +205,21 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="true",
                 description="Use best effort QoS for sensor input topics",
             ),
+            DeclareLaunchArgument(
+                "enable_rviz",
+                default_value="true",
+                description="Launch RViz for calibration visualization",
+            ),
             # Dynamic node generation
             OpaqueFunction(function=generate_nodes),
+            # RViz visualization (optional)
+            IncludeLaunchDescription(
+                AnyLaunchDescriptionSource(
+                    PathJoinSubstitution(
+                        [FindPackageShare("lctk_launch"), "launch", "rviz.launch.xml"]
+                    )
+                ),
+                condition=IfCondition(LaunchConfiguration("enable_rviz")),
+            ),
         ]
     )

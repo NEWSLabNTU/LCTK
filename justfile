@@ -125,7 +125,8 @@ calibrate config_file:
         config_file:={{ config_file }} \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        use_best_effort_qos:={{ use_best_effort_qos }}
+        use_best_effort_qos:={{ use_best_effort_qos }} \
+        enable_rviz:={{ rviz_enabled }}
 
 # Launch interactive advanced solver controller
 advanced-solver-controller:
