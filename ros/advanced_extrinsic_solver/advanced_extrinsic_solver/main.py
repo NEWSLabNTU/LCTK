@@ -1309,17 +1309,40 @@ class AdvancedExtrinsicSolver(Node):
 
 def main(args=None):
     """Main function to run the advanced extrinsic solver node."""
+    import time
+
     rclpy.init(args=args)
 
     node = AdvancedExtrinsicSolver()
 
+    # Brief delay to allow DDS discovery to complete before spinning
+    # This helps avoid race conditions with entity creation
+    time.sleep(0.1)
+
     try:
-        rclpy.spin(node)
+        # Use explicit executor for better control
+        executor = rclpy.executors.SingleThreadedExecutor()
+        executor.add_node(node)
+
+        try:
+            executor.spin()
+        finally:
+            executor.shutdown()
     except KeyboardInterrupt:
         node.get_logger().info("Shutting down advanced extrinsic solver")
+    except Exception as e:
+        # Handle RCLError and other exceptions gracefully
+        node.get_logger().error(f"Error during spin: {e}")
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass  # Ignore errors during cleanup
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass  # Ignore errors if context is already invalid
 
 
 if __name__ == "__main__":
