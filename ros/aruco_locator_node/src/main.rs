@@ -267,11 +267,20 @@ impl ArucoLocatorNode {
             camera_info_topic
         );
 
-        // Create detection publisher with BEST_EFFORT QoS for timestamp-based matching
+        // Create detection publisher with QoS matching the mode
+        // - BEST_EFFORT (realtime): Low latency, may drop messages
+        // - RELIABLE (offline): No message drops, suitable for rosbag playback
         let mut detection_pub_opts = PublisherOptions::new("aruco_detections");
-        detection_pub_opts.qos = QoSProfile {
-            history: QoSHistoryPolicy::KeepLast { depth: 1 },
-            ..QoSProfile::sensor_data_default() // BEST_EFFORT
+        detection_pub_opts.qos = if use_best_effort_qos {
+            QoSProfile {
+                history: QoSHistoryPolicy::KeepLast { depth: 1 },
+                ..QoSProfile::sensor_data_default() // BEST_EFFORT
+            }
+        } else {
+            QoSProfile {
+                history: QoSHistoryPolicy::KeepLast { depth: 10 },
+                ..QoSProfile::default() // RELIABLE
+            }
         };
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
 
