@@ -6,7 +6,7 @@ A lightweight ROS 2 node that computes the transform between two LiDAR frames
 by observing the same calibration board from both sensors.
 
 The node subscribes to Detection3DArray messages from two lidar_board_detector
-nodes, synchronizes them by timestamp, and computes the relative transform.
+nodes, uses Conflux for synchronization, and computes the relative transform.
 
 Transform computation:
     T_lidar2_to_lidar1 = pose1 * pose2.inverse()
@@ -15,18 +15,16 @@ Where pose1 and pose2 are the board poses as seen from LiDAR 1 and LiDAR 2
 respectively.
 """
 
-import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
 import rclpy
+from conflux_py import ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Transform, TransformStamped, Quaternion, Vector3
-from message_filters import ApproximateTimeSynchronizer, Subscriber, TimeSynchronizer
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from scipy.spatial.transform import Rotation
-from std_msgs.msg import Header
 from tf2_ros import TransformBroadcaster
 from vision_msgs.msg import Detection3DArray
 
@@ -58,7 +56,6 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("lidar2_detections_topic", "lidar2/board_detections")
         self.declare_parameter("lidar1_frame", "lidar1")
         self.declare_parameter("lidar2_frame", "lidar2")
-        self.declare_parameter("sync_mode", "approximate")  # "exact" or "approximate"
         self.declare_parameter("sync_tolerance_ms", 100.0)
         self.declare_parameter("sync_queue_size", 10)
         self.declare_parameter("same_face_mode", True)
@@ -68,11 +65,10 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("use_best_effort_qos", True)
 
         # Get parameters
-        lidar1_topic = self.get_parameter("lidar1_detections_topic").value
-        lidar2_topic = self.get_parameter("lidar2_detections_topic").value
+        self.lidar1_topic = self.get_parameter("lidar1_detections_topic").value
+        self.lidar2_topic = self.get_parameter("lidar2_detections_topic").value
         self.lidar1_frame = self.get_parameter("lidar1_frame").value
         self.lidar2_frame = self.get_parameter("lidar2_frame").value
-        sync_mode = self.get_parameter("sync_mode").value
         sync_tolerance_ms = self.get_parameter("sync_tolerance_ms").value
         sync_queue_size = self.get_parameter("sync_queue_size").value
         self.same_face_mode = self.get_parameter("same_face_mode").value
@@ -98,28 +94,25 @@ class LidarToLidarSolver(Node):
             f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
         )
 
-        # Create message_filters subscribers
-        self.lidar1_sub = Subscriber(self, Detection3DArray, lidar1_topic, qos_profile=qos)
-        self.lidar2_sub = Subscriber(self, Detection3DArray, lidar2_topic, qos_profile=qos)
+        # Create Conflux synchronizer
+        self.get_logger().info(
+            f"Using Conflux synchronization (window={int(sync_tolerance_ms)}ms, buffer={sync_queue_size})"
+        )
+        self.sync = ROS2Synchronizer(
+            self,
+            window_size_ms=int(sync_tolerance_ms),
+            buffer_size=sync_queue_size,
+            qos=qos,
+        )
 
-        # Create synchronizer based on mode
-        if sync_mode == "exact":
-            self.get_logger().info("Using ExactTime synchronization")
-            self.sync = TimeSynchronizer(
-                [self.lidar1_sub, self.lidar2_sub],
-                queue_size=sync_queue_size,
-            )
-        else:
-            self.get_logger().info(
-                f"Using ApproximateTime synchronization (tolerance={sync_tolerance_ms}ms)"
-            )
-            self.sync = ApproximateTimeSynchronizer(
-                [self.lidar1_sub, self.lidar2_sub],
-                queue_size=sync_queue_size,
-                slop=sync_tolerance_ms / 1000.0,  # Convert to seconds
-            )
+        # Add subscriptions for both lidar detection topics
+        self.sync.add_subscription(Detection3DArray, self.lidar1_topic)
+        self.sync.add_subscription(Detection3DArray, self.lidar2_topic)
 
-        self.sync.registerCallback(self.sync_callback)
+        # Register synchronization callback
+        @self.sync.on_synchronized
+        def sync_callback(group: SyncGroup):
+            self._handle_sync_group(group)
 
         # TF broadcaster
         if self.publish_tf:
@@ -137,15 +130,19 @@ class LidarToLidarSolver(Node):
             )
 
         # Log configuration
-        self.get_logger().info(f"LiDAR 1 topic: {lidar1_topic}")
-        self.get_logger().info(f"LiDAR 2 topic: {lidar2_topic}")
+        self.get_logger().info(f"LiDAR 1 topic: {self.lidar1_topic}")
+        self.get_logger().info(f"LiDAR 2 topic: {self.lidar2_topic}")
         self.get_logger().info(f"LiDAR 1 frame: {self.lidar1_frame}")
         self.get_logger().info(f"LiDAR 2 frame: {self.lidar2_frame}")
         self.get_logger().info(f"Same face mode: {self.same_face_mode}")
         self.get_logger().info("LidarToLidarSolver initialized")
 
-    def sync_callback(self, msg1: Detection3DArray, msg2: Detection3DArray):
-        """Called when synchronized detection pairs are received."""
+    def _handle_sync_group(self, group: SyncGroup):
+        """Called when synchronized detection pairs are received from Conflux."""
+        # Extract messages from synchronized group
+        msg1: Detection3DArray = group[self.lidar1_topic]
+        msg2: Detection3DArray = group[self.lidar2_topic]
+
         # Check for valid detections
         if not msg1.detections or not msg2.detections:
             self.get_logger().debug("Received empty detections, skipping")
