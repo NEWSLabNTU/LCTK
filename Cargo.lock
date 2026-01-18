@@ -12169,10 +12169,6 @@ name = "action_msgs"
 version = "1.2.1"
 
 [[patch.unused]]
-name = "composition_interfaces"
-version = "1.2.1"
-
-[[patch.unused]]
 name = "lifecycle_msgs"
 version = "1.2.1"
 
@@ -12191,10 +12187,6 @@ version = "1.2.1"
 [[patch.unused]]
 name = "statistics_msgs"
 version = "1.2.1"
-
-[[patch.unused]]
-name = "tf2_msgs"
-version = "0.25.12"
 
 [[patch.unused]]
 name = "unique_identifier_msgs"
