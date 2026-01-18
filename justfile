@@ -11,7 +11,10 @@ enable_evaluator := "true"
 enable_overlay := "true"
 log_level := "info"
 rviz_enabled := "true"
-use_best_effort_qos := "true"
+# Processing mode: "offline" (RELIABLE QoS, perfect sync) or "realtime" (BEST_EFFORT QoS, no buffering)
+mode := "offline"
+# Derived from mode for legacy XML launch files
+use_best_effort_qos := if mode == "realtime" { "true" } else { "false" }
 use_advanced_solver := "false"
 use_synchronized_input := "false"
 camera_topic := "/sensing/camera/zedxm/right/color/rect/image"
@@ -98,7 +101,7 @@ demo:
         lctk_launch demo.launch.py \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        use_best_effort_qos:={{ use_best_effort_qos }} \
+        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
         use_advanced_solver:={{ use_advanced_solver }}
 
@@ -122,7 +125,7 @@ calibrate config_file:
         config_file:={{ config_file }} \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        use_best_effort_qos:={{ use_best_effort_qos }} \
+        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }}
 
 # Launch interactive advanced solver controller
