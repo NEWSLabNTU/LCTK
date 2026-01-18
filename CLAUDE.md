@@ -60,11 +60,18 @@ just test       # Run tests
 just lint       # Run linting
 
 just lidar-camera   # Launch calibration (legacy XML launch)
+just demo           # Launch demo (sample data + calibration pipeline)
 just sample-data    # Launch sample data playback
 just rviz           # Launch RViz
 
 # Config-driven calibration (preferred)
 just calibrate /path/to/config.yaml
+
+# Justfile variables (override with just var=value command)
+just demo mode=realtime              # Use realtime mode (BEST_EFFORT QoS, no buffering)
+just demo mode=offline               # Use offline mode (RELIABLE QoS, default)
+just demo use_advanced_solver=true   # Use multi-pose buffered solver
+just demo debug_mode=false           # Disable debug output
 
 # Documentation (run from book/ directory)
 just build          # Build docs
@@ -108,6 +115,7 @@ just serve-public   # Serve on 0.0.0.0
 
 ## Coding Guidelines
 
+- **Temporary files**: Create temporary files and scripts in `$project/tmp/` directory, not `/tmp/`
 - Use named parameters in format strings: `println!("{e}")` not `println!("{}", e)`
 - Clone Arc variables in local scope before moving to closures
 - Use `just build` to rebuild ROS2 packages (not `cargo build` directly)
@@ -165,6 +173,56 @@ This ensures always processing the latest data, not stale queued messages.
 
 ## Calibration Workflow
 
+### Processing Modes
+
+The calibration pipeline supports two processing modes controlled by the `mode` parameter:
+
+| Mode | QoS | Sync Window | Buffer Size | Drop Policy | Use Case |
+|------|-----|-------------|-------------|-------------|----------|
+| `offline` (default) | RELIABLE | infinite | 100 | reject_new | Processing recorded rosbags. No time-based dropping, preserves all data. |
+| `realtime` | BEST_EFFORT | 50ms | 2 | drop_oldest | Live sensor data. Low latency, always processes latest. |
+
+**Settings derived from mode:**
+- **QoS Reliability**: RELIABLE (offline) vs BEST_EFFORT (realtime)
+- **Sync Window**: Infinite (offline) vs 50ms tolerance (realtime)
+  - Infinite window: Messages are matched regardless of timestamp difference
+  - Finite window: Messages outside the time window are dropped
+- **Buffer Size**: Large buffer (offline) vs minimal buffering (realtime)
+- **Drop Policy**:
+  - `reject_new`: When buffer is full, reject new messages (preserves older data)
+  - `drop_oldest`: When buffer is full, drop oldest message (always accepts new data)
+
+**Usage:**
+```bash
+just demo mode=offline    # For rosbag playback (default)
+just demo mode=realtime   # For live sensors
+```
+
+### Performance Profiling Results
+
+Profiling conducted on sample data (2026-01-18):
+
+**Throughput Comparison:**
+| Metric | Offline | Realtime | Notes |
+|--------|---------|----------|-------|
+| Board detections | 190 | 127 | RELIABLE QoS captures all messages |
+| Transform messages | 378 | 274 | Higher throughput in offline mode |
+| QoS warnings | 0 | 0 | Both modes have compatible QoS |
+
+**Latency Comparison (median):**
+| Component | Offline | Realtime | Notes |
+|-----------|---------|----------|-------|
+| Board detection | 99.9 ms | 103.5 ms | ICP is the bottleneck |
+| Solver | 38.2 ms | 50.1 ms | PnP computation |
+
+**Key Insights:**
+- Board detection (ICP) is the processing bottleneck at ~100ms per frame
+- Offline mode achieves ~50% higher throughput due to RELIABLE QoS
+- ICP quality is consistent across modes (loss: 0.026-0.029)
+- Realtime mode has higher latency variance due to message skipping
+
+**Profiling scripts:** `tmp/profile_modes.sh`, `tmp/analyze_logs.py`, `tmp/profile_latency.py`
+
 ### Config-Driven Calibration (Preferred)
 
 The unified calibration interface uses YAML configuration files to define sensors and calibration pairs. This automatically generates the required nodes.
@@ -206,8 +264,38 @@ calibration_pairs:
 **Generated Nodes:**
 - `lidar_board_detector` - One per unique (lidar, marker) pair
 - `aruco_locator_node` - One per camera
-- `advanced_extrinsic_solver` - One per lidar-camera pair
+- LiDAR-camera solver (one per pair) - selected by `use_advanced_solver` argument:
+  - `extrinsic_solver_node` (default) - Auto-publishes transform on each detection pair
+  - `advanced_extrinsic_solver` - Multi-pose buffered solver with manual control
 - `lidar_to_lidar_solver` - One per lidar-lidar pair
+
+**Synchronizer Parameters (Conflux):**
+
+All solver nodes use the Conflux synchronizer with these parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `sync_tolerance_ms` | float | mode-dependent | Time window in ms. 0 = infinite window (no time-based dropping) |
+| `sync_queue_size` | int | mode-dependent | Buffer size per stream |
+| `sync_drop_policy` | string | "reject_new" | Buffer overflow policy: "reject_new" or "drop_oldest" |
+
+**Drop Policies:**
+- `reject_new`: Preserves existing buffered data. Good for offline processing where you don't want to lose any data.
+- `drop_oldest`: Always accepts new data by evicting oldest. Good for realtime where latest data matters most.
+
+**Statistics Logging:**
+
+All solver nodes log synchronization statistics on shutdown:
+```
+[INFO] Final sync statistics: received=1200, rejected=0, groups=580, rejection_rate=0.0%
+[INFO]   aruco_detections: received=800, rejected=0, rejection_rate=0.0%
+[INFO]   calibration_board_detections: received=400, rejected=0, rejection_rate=0.0%
+```
+
+Buffer overflow warnings are rate-limited and logged automatically:
+```
+[WARN] Buffer overflow on '/topic': 15/100 messages rejected (15.0%), policy=REJECT_NEW, buffer_size=64
+```
 
 **Example Configs:**
 - `config/examples/sample_data.yaml` - Single lidar + camera (matches `just sample-data`)
@@ -217,9 +305,15 @@ calibration_pairs:
 
 The `lidar_to_lidar_solver` Python node replaces the deprecated `multi_wayside_node` for two-LiDAR calibration. It subscribes to Detection3DArray messages from two `lidar_board_detector` nodes and computes the transform between frames. **Note: This pipeline is not yet tested.**
 
+### Standard Extrinsic Solver (Default)
+
+The `extrinsic_solver_node` automatically publishes transforms whenever it receives a synchronized ArUco detection and board detection pair. No manual intervention required - transforms are published continuously to `/calibration/<lidar>_<camera>/extrinsic_transform`.
+
+Use this for quick calibration verification or when you want real-time transform updates.
+
 ### Advanced Extrinsic Solver
 
-The `advanced_extrinsic_solver` node provides multi-pose calibration with manual adjustment capabilities.
+The `advanced_extrinsic_solver` node provides multi-pose calibration with manual adjustment capabilities. Enable with `use_advanced_solver=true`.
 
 **Services** (under `~/calibration/advanced_extrinsic_solver/advanced_extrinsic_solver/`):
 - `add_detection` - Add current ArUco + board detection pair to buffer
