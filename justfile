@@ -48,11 +48,11 @@ format:
 # Run formatting and linting checks
 lint:
     cargo +nightly fmt --check
-    cargo clippy --config build/ros2_cargo_config.toml --all-targets --
+    cargo clippy --all-targets --
 
 # Run tests with cargo nextest
 test:
-    cargo nextest run --config build/ros2_cargo_config.toml --cargo-profile test-release --no-fail-fast
+    cargo nextest run --cargo-profile test-release --no-fail-fast
 
 # Launch LiDAR-camera calibration
 lidar-camera:
