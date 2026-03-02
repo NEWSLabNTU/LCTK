@@ -23,7 +23,7 @@ exclude = [
     "ros/calibration_orchestrator",
     # Interface package without Cargo.toml (CMake-based ROS package)
     "ros/lctk_interfaces",
-    # Conflux has its own workspace with different rclrs dependency
+    # Conflux has its own workspace
     "ros/conflux",
 ]
 
@@ -78,7 +78,7 @@ newslab-serde-nalgebra = { git = "https://github.com/NEWSLabNTU/newslab-serde.gi
 # NOTE: lctk_interfaces is NOT in workspace.dependencies because it's a local
 # interface package that must be built first. Packages that need it should
 # declare it directly in their Cargo.toml with lctk_interfaces = "*"
-rclrs = "*"
+rclrs = "0.7"
 geometry_msgs = "*"
 sensor_msgs = "*"
 std_msgs = "*"

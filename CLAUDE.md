@@ -39,7 +39,7 @@ just
 
 - Uses `colcon-cargo-ros2` for Rust ROS 2 integration
 - ROS interface bindings are auto-generated at `build/<pkg>/rosidl_cargo/`
-- Uses `rclrs` v0.6.0 from crates.io (requires `ros-humble-test-msgs`)
+- Uses `rclrs` v0.7 from crates.io (requires `ros-humble-test-msgs`)
 - Launch commands use `play_launch` for foreground execution
 - **Always use `just build`** - never run raw `colcon build` commands. The justfile uses specific flags:
   ```bash
