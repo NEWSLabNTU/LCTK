@@ -37,6 +37,10 @@ build:
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         --cargo-args --profile=test-release
 
+# Set up development environment (install all dependencies)
+setup *args:
+    ./setup.sh {{ args }}
+
 # Clean all build artifacts
 clean:
     rm -rf build install log target
