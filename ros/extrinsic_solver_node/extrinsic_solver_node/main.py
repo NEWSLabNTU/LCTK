@@ -31,6 +31,7 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R  # Quaternion operations
 from sensor_msgs.msg import CameraInfo
+
 # ROS2 message types
 from std_msgs.msg import Header
 from vision_msgs.msg import Detection2DArray, Detection3D, Detection3DArray
@@ -101,7 +102,9 @@ class EducationalExtrinsicSolver(Node):
         self.declare_parameter("use_best_effort_qos", True)
         self.declare_parameter("sync_tolerance_ms", 50.0)
         self.declare_parameter("sync_queue_size", 10)
-        self.declare_parameter("sync_drop_policy", "reject_new")  # reject_new or drop_oldest
+        self.declare_parameter(
+            "sync_drop_policy", "reject_new"
+        )  # reject_new or drop_oldest
 
         # Get parameters with simple error handling
         self.parent_frame = (
@@ -126,7 +129,9 @@ class EducationalExtrinsicSolver(Node):
             self.get_parameter("sync_drop_policy").get_parameter_value().string_value
         )
         sync_drop_policy = (
-            DropPolicy.DROP_OLDEST if sync_drop_policy_str == "drop_oldest" else DropPolicy.REJECT_NEW
+            DropPolicy.DROP_OLDEST
+            if sync_drop_policy_str == "drop_oldest"
+            else DropPolicy.REJECT_NEW
         )
 
         # Load ArUco pattern configuration
@@ -139,7 +144,11 @@ class EducationalExtrinsicSolver(Node):
         # QoS profile configuration based on mode:
         # - BEST_EFFORT (realtime): Low latency, may drop messages
         # - RELIABLE (offline): No message drops, suitable for rosbag playback
-        reliability = ReliabilityPolicy.BEST_EFFORT if use_best_effort_qos else ReliabilityPolicy.RELIABLE
+        reliability = (
+            ReliabilityPolicy.BEST_EFFORT
+            if use_best_effort_qos
+            else ReliabilityPolicy.RELIABLE
+        )
         qos_profile = QoSProfile(
             reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
@@ -489,9 +498,9 @@ class EducationalExtrinsicSolver(Node):
         marker_border = (square_size - marker_size) / 2.0
 
         self.get_logger().debug(
-            f"Board geometry: square_size={square_size*1000:.1f}mm, "
-            f"marker_size={marker_size*1000:.1f}mm, "
-            f"marker_border={marker_border*1000:.1f}mm"
+            f"Board geometry: square_size={square_size * 1000:.1f}mm, "
+            f"marker_size={marker_size * 1000:.1f}mm, "
+            f"marker_border={marker_border * 1000:.1f}mm"
         )
 
         # Helper function to create corners for a marker at given base position

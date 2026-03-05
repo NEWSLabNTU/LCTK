@@ -12,12 +12,9 @@ License: MIT
 import math
 import os
 import sys
-import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
 
-import numpy as np
 import rclpy
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
@@ -32,7 +29,7 @@ from lctk_interfaces.srv import (
     ResetTransform,
 )
 from rclpy.node import Node
-from rich.console import Console, Group
+from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -43,6 +40,7 @@ from rich.text import Text
 try:
     import termios
     import tty
+
     HAS_TERMIOS = True
 except ImportError:
     HAS_TERMIOS = False
@@ -51,6 +49,7 @@ except ImportError:
 @dataclass
 class PoseData:
     """Pose data with translation and rotation."""
+
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
@@ -62,6 +61,7 @@ class PoseData:
 @dataclass
 class DisplayState:
     """State for the TUI display."""
+
     num_detections: int = 0
     total_correspondences: int = 0
     is_publishing: bool = False
@@ -161,16 +161,28 @@ class InteractiveSolverController(Node):
         if resp and resp.has_pose:
             self.state.has_pose = True
             self.state.solved_pose = PoseData(
-                resp.solved_x, resp.solved_y, resp.solved_z,
-                resp.solved_roll, resp.solved_pitch, resp.solved_yaw
+                resp.solved_x,
+                resp.solved_y,
+                resp.solved_z,
+                resp.solved_roll,
+                resp.solved_pitch,
+                resp.solved_yaw,
             )
             self.state.current_pose = PoseData(
-                resp.current_x, resp.current_y, resp.current_z,
-                resp.current_roll, resp.current_pitch, resp.current_yaw
+                resp.current_x,
+                resp.current_y,
+                resp.current_z,
+                resp.current_roll,
+                resp.current_pitch,
+                resp.current_yaw,
             )
             self.state.adjustment = PoseData(
-                resp.adjust_x, resp.adjust_y, resp.adjust_z,
-                resp.adjust_roll, resp.adjust_pitch, resp.adjust_yaw
+                resp.adjust_x,
+                resp.adjust_y,
+                resp.adjust_z,
+                resp.adjust_roll,
+                resp.adjust_pitch,
+                resp.adjust_yaw,
             )
         else:
             self.state.has_pose = False
@@ -275,20 +287,28 @@ def create_pose_table(title: str, pose: PoseData, style: str = "cyan") -> Table:
     table.add_column(width=8)
     table.add_column(width=12, justify="right")
 
-    table.add_row("X:", f"[{style}]{pose.x*1000:+.2f} mm[/]")
-    table.add_row("Y:", f"[{style}]{pose.y*1000:+.2f} mm[/]")
-    table.add_row("Z:", f"[{style}]{pose.z*1000:+.2f} mm[/]")
+    table.add_row("X:", f"[{style}]{pose.x * 1000:+.2f} mm[/]")
+    table.add_row("Y:", f"[{style}]{pose.y * 1000:+.2f} mm[/]")
+    table.add_row("Z:", f"[{style}]{pose.z * 1000:+.2f} mm[/]")
     table.add_row("Roll:", f"[{style}]{math.degrees(pose.roll):+.2f}°[/]")
     table.add_row("Pitch:", f"[{style}]{math.degrees(pose.pitch):+.2f}°[/]")
     table.add_row("Yaw:", f"[{style}]{math.degrees(pose.yaw):+.2f}°[/]")
 
-    return Panel(table, title=f"[bold]{title}[/]", border_style=style.split()[0] if ' ' in style else style)
+    return Panel(
+        table,
+        title=f"[bold]{title}[/]",
+        border_style=style.split()[0] if " " in style else style,
+    )
 
 
 def create_poses_panel(state: DisplayState) -> Panel:
     """Create poses panel with all three poses."""
     if not state.has_pose:
-        return Panel("[dim]No pose computed yet[/]", title="[bold]Poses[/]", border_style="yellow")
+        return Panel(
+            "[dim]No pose computed yet[/]",
+            title="[bold]Poses[/]",
+            border_style="yellow",
+        )
 
     # Create three columns
     layout = Layout()
@@ -298,7 +318,9 @@ def create_poses_panel(state: DisplayState) -> Panel:
         Layout(name="current"),
     )
 
-    layout["solved"].update(create_pose_table("Solved (PnP)", state.solved_pose, "blue"))
+    layout["solved"].update(
+        create_pose_table("Solved (PnP)", state.solved_pose, "blue")
+    )
     layout["adjust"].update(create_pose_table("Adjustment", state.adjustment, "yellow"))
     layout["current"].update(create_pose_table("Current", state.current_pose, "green"))
 
@@ -309,7 +331,7 @@ def create_step_panel(state: DisplayState) -> Panel:
     """Create step size panel."""
     text = Text()
     text.append("Translation: ", style="bold")
-    text.append(f"{state.translation_step*1000:.1f} mm", style="cyan")
+    text.append(f"{state.translation_step * 1000:.1f} mm", style="cyan")
     text.append("  |  ", style="dim")
     text.append("Rotation: ", style="bold")
     text.append(f"{math.degrees(state.rotation_step):.2f}°", style="cyan")
@@ -326,48 +348,26 @@ def create_keybindings_panel() -> Panel:
 
     # Row 1
     table.add_row(
-        "[yellow]Space[/]", "Add detection",
-        "[yellow]Backspace[/]", "Delete last"
+        "[yellow]Space[/]", "Add detection", "[yellow]Backspace[/]", "Delete last"
     )
     # Row 2
-    table.add_row(
-        "[yellow]c[/]", "Clear buffer",
-        "[yellow]0[/]", "Reset adjustments"
-    )
+    table.add_row("[yellow]c[/]", "Clear buffer", "[yellow]0[/]", "Reset adjustments")
     # Row 3
-    table.add_row(
-        "[yellow]p[/]", "Save to file",
-        "[yellow]o[/]", "Load from file"
-    )
+    table.add_row("[yellow]p[/]", "Save to file", "[yellow]o[/]", "Load from file")
     # Row 4 - separator
     table.add_row("", "", "", "")
     # Row 5
-    table.add_row(
-        "[cyan]q/a[/]", "+/- X",
-        "[cyan]r/f[/]", "+/- Roll"
-    )
+    table.add_row("[cyan]q/a[/]", "+/- X", "[cyan]r/f[/]", "+/- Roll")
     # Row 6
-    table.add_row(
-        "[cyan]w/s[/]", "+/- Y",
-        "[cyan]t/g[/]", "+/- Pitch"
-    )
+    table.add_row("[cyan]w/s[/]", "+/- Y", "[cyan]t/g[/]", "+/- Pitch")
     # Row 7
-    table.add_row(
-        "[cyan]e/d[/]", "+/- Z",
-        "[cyan]y/b[/]", "+/- Yaw"
-    )
+    table.add_row("[cyan]e/d[/]", "+/- Z", "[cyan]y/b[/]", "+/- Yaw")
     # Row 8 - separator
     table.add_row("", "", "", "")
     # Row 9
-    table.add_row(
-        "[magenta]][/]", "Step +",
-        "[magenta][[][/]", "Step -"
-    )
+    table.add_row("[magenta]][/]", "Step +", "[magenta][[][/]", "Step -")
     # Row 10
-    table.add_row(
-        "[red]ESC[/]", "Exit",
-        "", ""
-    )
+    table.add_row("[red]ESC[/]", "Exit", "", "")
 
     return Panel(table, title="[bold]Key Bindings[/]", border_style="green")
 
@@ -436,13 +436,13 @@ def read_key() -> str:
         ch = sys.stdin.read(1)
 
         # Handle escape sequences
-        if ch == '\x1b':
+        if ch == "\x1b":
             tty.setraw(fd)
             ch2 = sys.stdin.read(1)
-            if ch2 == '[':
+            if ch2 == "[":
                 sys.stdin.read(1)  # Consume arrow key
                 return ""
-            elif ch2 == '' or ch2 == '\x1b':
+            elif ch2 == "" or ch2 == "\x1b":
                 return "ESC"
             return ""
         return ch
@@ -472,7 +472,12 @@ def main(args=None):
 
     running = True
     try:
-        with Live(create_layout(node.state), console=console, refresh_per_second=4, screen=True) as live:
+        with Live(
+            create_layout(node.state),
+            console=console,
+            refresh_per_second=4,
+            screen=True,
+        ) as live:
             while running and rclpy.ok():
                 key = read_key()
 
@@ -507,12 +512,16 @@ def main(args=None):
                 elif key == "]":
                     node.state.translation_step *= 2.0
                     node.state.rotation_step *= 2.0
-                    node.set_message(f"Step: {node.state.translation_step*1000:.1f}mm / {math.degrees(node.state.rotation_step):.2f}°")
+                    node.set_message(
+                        f"Step: {node.state.translation_step * 1000:.1f}mm / {math.degrees(node.state.rotation_step):.2f}°"
+                    )
 
                 elif key == "[":
                     node.state.translation_step /= 2.0
                     node.state.rotation_step /= 2.0
-                    node.set_message(f"Step: {node.state.translation_step*1000:.1f}mm / {math.degrees(node.state.rotation_step):.2f}°")
+                    node.set_message(
+                        f"Step: {node.state.translation_step * 1000:.1f}mm / {math.degrees(node.state.rotation_step):.2f}°"
+                    )
 
                 # Translation adjustments
                 elif key == "q":

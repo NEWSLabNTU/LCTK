@@ -58,7 +58,9 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("lidar2_frame", "lidar2")
         self.declare_parameter("sync_tolerance_ms", 100.0)
         self.declare_parameter("sync_queue_size", 10)
-        self.declare_parameter("sync_drop_policy", "reject_new")  # reject_new or drop_oldest
+        self.declare_parameter(
+            "sync_drop_policy", "reject_new"
+        )  # reject_new or drop_oldest
         self.declare_parameter("same_face_mode", True)
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_rate_hz", 10.0)
@@ -74,7 +76,9 @@ class LidarToLidarSolver(Node):
         sync_queue_size = self.get_parameter("sync_queue_size").value
         sync_drop_policy_str = self.get_parameter("sync_drop_policy").value
         sync_drop_policy = (
-            DropPolicy.DROP_OLDEST if sync_drop_policy_str == "drop_oldest" else DropPolicy.REJECT_NEW
+            DropPolicy.DROP_OLDEST
+            if sync_drop_policy_str == "drop_oldest"
+            else DropPolicy.REJECT_NEW
         )
         self.same_face_mode = self.get_parameter("same_face_mode").value
         self.publish_tf = self.get_parameter("publish_tf").value
@@ -89,7 +93,11 @@ class LidarToLidarSolver(Node):
         # QoS profile configuration based on mode:
         # - BEST_EFFORT (realtime): Low latency, may drop messages
         # - RELIABLE (offline): No message drops, suitable for rosbag playback
-        reliability = ReliabilityPolicy.BEST_EFFORT if use_best_effort_qos else ReliabilityPolicy.RELIABLE
+        reliability = (
+            ReliabilityPolicy.BEST_EFFORT
+            if use_best_effort_qos
+            else ReliabilityPolicy.RELIABLE
+        )
         qos = QoSProfile(
             reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,

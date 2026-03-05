@@ -111,7 +111,9 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("use_best_effort_qos", True)
         self.declare_parameter("sync_tolerance_ms", 50.0)
         self.declare_parameter("sync_queue_size", 10)
-        self.declare_parameter("sync_drop_policy", "reject_new")  # reject_new or drop_oldest
+        self.declare_parameter(
+            "sync_drop_policy", "reject_new"
+        )  # reject_new or drop_oldest
 
         # Get parameters
         self.parent_frame = (
@@ -148,7 +150,9 @@ class AdvancedExtrinsicSolver(Node):
             self.get_parameter("sync_drop_policy").get_parameter_value().string_value
         )
         sync_drop_policy = (
-            DropPolicy.DROP_OLDEST if sync_drop_policy_str == "drop_oldest" else DropPolicy.REJECT_NEW
+            DropPolicy.DROP_OLDEST
+            if sync_drop_policy_str == "drop_oldest"
+            else DropPolicy.REJECT_NEW
         )
 
         # Load ArUco pattern configuration
@@ -159,7 +163,9 @@ class AdvancedExtrinsicSolver(Node):
 
         # Latest synchronized detection pair (cached for service calls)
         # Uses conflux_py for time synchronization
-        self.latest_sync_pair: Optional[Tuple[Detection2DArray, Detection3DArray]] = None
+        self.latest_sync_pair: Optional[Tuple[Detection2DArray, Detection3DArray]] = (
+            None
+        )
         self.camera_info: Optional[CameraInfo] = None
 
         # Calibration state
@@ -180,7 +186,11 @@ class AdvancedExtrinsicSolver(Node):
         # QoS profile configuration based on mode:
         # - BEST_EFFORT (realtime): Low latency, may drop messages
         # - RELIABLE (offline): No message drops, suitable for rosbag playback
-        reliability = ReliabilityPolicy.BEST_EFFORT if use_best_effort_qos else ReliabilityPolicy.RELIABLE
+        reliability = (
+            ReliabilityPolicy.BEST_EFFORT
+            if use_best_effort_qos
+            else ReliabilityPolicy.RELIABLE
+        )
         qos_profile = QoSProfile(
             reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
@@ -357,7 +367,9 @@ class AdvancedExtrinsicSolver(Node):
                 self.latest_sync_pair = (aruco_msg, board_msg)
         else:
             if not aruco_msg.detections:
-                self.get_logger().debug("Ignoring sync group with empty ArUco detection")
+                self.get_logger().debug(
+                    "Ignoring sync group with empty ArUco detection"
+                )
             if not board_msg.detections:
                 self.get_logger().warn("Ignoring sync group with empty board detection")
 
@@ -626,7 +638,9 @@ class AdvancedExtrinsicSolver(Node):
 
             if buffer_size == 0 and self.current_rvec is None:
                 response.success = False
-                response.message = "Buffer is empty and no transform available, nothing to save"
+                response.message = (
+                    "Buffer is empty and no transform available, nothing to save"
+                )
                 response.num_detections = 0
                 return response
 
@@ -656,7 +670,7 @@ class AdvancedExtrinsicSolver(Node):
             if transform_data:
                 save_data["transform"] = transform_data
 
-            with open(file_path, 'w') as f:
+            with open(file_path, "w") as f:
                 json.dump(save_data, f, indent=2)
 
             msg_parts = [f"Saved {buffer_size} detection pairs"]
@@ -682,7 +696,7 @@ class AdvancedExtrinsicSolver(Node):
         append = request.append
 
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 data = json.load(f)
 
             version = data.get("version", 0)
@@ -704,8 +718,12 @@ class AdvancedExtrinsicSolver(Node):
             loaded_rvec = None
             loaded_tvec = None
             if has_transform:
-                loaded_rvec = np.array(data["transform"]["rvec"], dtype=np.float64).reshape(3, 1)
-                loaded_tvec = np.array(data["transform"]["tvec"], dtype=np.float64).reshape(3, 1)
+                loaded_rvec = np.array(
+                    data["transform"]["rvec"], dtype=np.float64
+                ).reshape(3, 1)
+                loaded_tvec = np.array(
+                    data["transform"]["tvec"], dtype=np.float64
+                ).reshape(3, 1)
 
             with self.lock:
                 if not append:
@@ -717,10 +735,16 @@ class AdvancedExtrinsicSolver(Node):
                 if has_transform:
                     self.current_rvec = loaded_rvec
                     self.current_tvec = loaded_tvec
-                    self.last_transform = self._create_transform_message(loaded_rvec, loaded_tvec)
+                    self.last_transform = self._create_transform_message(
+                        loaded_rvec, loaded_tvec
+                    )
                     self.publishing_enabled = True
-                    self.last_solve_status = "Loaded from file (with manual adjustments)"
-                    self.get_logger().info("Restored manual transform adjustments from file")
+                    self.last_solve_status = (
+                        "Loaded from file (with manual adjustments)"
+                    )
+                    self.get_logger().info(
+                        "Restored manual transform adjustments from file"
+                    )
                 elif buffer_size >= self.min_poses_required:
                     # No saved transform, re-solve from detections
                     self._solve_from_buffer()
@@ -756,7 +780,9 @@ class AdvancedExtrinsicSolver(Node):
         with self.lock:
             if self.current_rvec is None or self.current_tvec is None:
                 response.success = False
-                response.message = "No transform available to adjust. Solve calibration first."
+                response.message = (
+                    "No transform available to adjust. Solve calibration first."
+                )
                 return response
 
             # Apply translation adjustment
@@ -765,13 +791,19 @@ class AdvancedExtrinsicSolver(Node):
             self.current_tvec[2, 0] += request.delta_z
 
             # Apply rotation adjustment (as Euler angle deltas in XYZ order)
-            if request.delta_roll != 0 or request.delta_pitch != 0 or request.delta_yaw != 0:
+            if (
+                request.delta_roll != 0
+                or request.delta_pitch != 0
+                or request.delta_yaw != 0
+            ):
                 # Get current rotation matrix
                 current_rot_matrix, _ = cv2.Rodrigues(self.current_rvec)
                 current_rot = R.from_matrix(current_rot_matrix)
 
                 # Create delta rotation from Euler angles
-                delta_rot = R.from_euler('xyz', [request.delta_roll, request.delta_pitch, request.delta_yaw])
+                delta_rot = R.from_euler(
+                    "xyz", [request.delta_roll, request.delta_pitch, request.delta_yaw]
+                )
 
                 # Apply delta rotation (delta * current)
                 new_rot = delta_rot * current_rot
@@ -781,15 +813,17 @@ class AdvancedExtrinsicSolver(Node):
                 self.current_rvec, _ = cv2.Rodrigues(new_rot_matrix)
 
             # Update transform message
-            self.last_transform = self._create_transform_message(self.current_rvec, self.current_tvec)
+            self.last_transform = self._create_transform_message(
+                self.current_rvec, self.current_tvec
+            )
 
             # Get updated Euler angles for logging
             rot_matrix, _ = cv2.Rodrigues(self.current_rvec)
-            euler = R.from_matrix(rot_matrix).as_euler('xyz', degrees=True)
+            euler = R.from_matrix(rot_matrix).as_euler("xyz", degrees=True)
 
             response.success = True
             response.message = (
-                f"Transform adjusted: t=({self.current_tvec[0,0]:.4f}, {self.current_tvec[1,0]:.4f}, {self.current_tvec[2,0]:.4f}), "
+                f"Transform adjusted: t=({self.current_tvec[0, 0]:.4f}, {self.current_tvec[1, 0]:.4f}, {self.current_tvec[2, 0]:.4f}), "
                 f"rpy=({euler[0]:.2f}, {euler[1]:.2f}, {euler[2]:.2f}) deg"
             )
             self.get_logger().info(response.message)
@@ -831,7 +865,7 @@ class AdvancedExtrinsicSolver(Node):
 
             # Get solved pose as Euler angles
             solved_rot_matrix, _ = cv2.Rodrigues(self.solved_rvec)
-            solved_euler = R.from_matrix(solved_rot_matrix).as_euler('xyz')
+            solved_euler = R.from_matrix(solved_rot_matrix).as_euler("xyz")
             response.solved_x = float(self.solved_tvec[0, 0])
             response.solved_y = float(self.solved_tvec[1, 0])
             response.solved_z = float(self.solved_tvec[2, 0])
@@ -841,7 +875,7 @@ class AdvancedExtrinsicSolver(Node):
 
             # Get current pose as Euler angles
             current_rot_matrix, _ = cv2.Rodrigues(self.current_rvec)
-            current_euler = R.from_matrix(current_rot_matrix).as_euler('xyz')
+            current_euler = R.from_matrix(current_rot_matrix).as_euler("xyz")
             response.current_x = float(self.current_tvec[0, 0])
             response.current_y = float(self.current_tvec[1, 0])
             response.current_z = float(self.current_tvec[2, 0])
@@ -863,14 +897,20 @@ class AdvancedExtrinsicSolver(Node):
         """Serialize Detection2DArray to JSON-compatible dict."""
         return {
             "header": {
-                "stamp": {"sec": msg.header.stamp.sec, "nanosec": msg.header.stamp.nanosec},
+                "stamp": {
+                    "sec": msg.header.stamp.sec,
+                    "nanosec": msg.header.stamp.nanosec,
+                },
                 "frame_id": msg.header.frame_id,
             },
             "detections": [
                 {
-                    "id": d.id if hasattr(d, 'id') else "",
+                    "id": d.id if hasattr(d, "id") else "",
                     "bbox": {
-                        "center": {"x": d.bbox.center.position.x, "y": d.bbox.center.position.y},
+                        "center": {
+                            "x": d.bbox.center.position.x,
+                            "y": d.bbox.center.position.y,
+                        },
                         "size_x": d.bbox.size_x,
                         "size_y": d.bbox.size_y,
                     },
@@ -883,7 +923,10 @@ class AdvancedExtrinsicSolver(Node):
         """Serialize Detection3DArray to JSON-compatible dict."""
         return {
             "header": {
-                "stamp": {"sec": msg.header.stamp.sec, "nanosec": msg.header.stamp.nanosec},
+                "stamp": {
+                    "sec": msg.header.stamp.sec,
+                    "nanosec": msg.header.stamp.nanosec,
+                },
                 "frame_id": msg.header.frame_id,
             },
             "detections": [
@@ -988,9 +1031,9 @@ class AdvancedExtrinsicSolver(Node):
             return False
 
         self.get_logger().info(
-            f"\n{'#'*80}\n"
+            f"\n{'#' * 80}\n"
             f"  SOLVING MULTI-POSE CALIBRATION FROM {buffer_size} BUFFERED POSES\n"
-            f"{'#'*80}\n"
+            f"{'#' * 80}\n"
         )
 
         # Accumulate all correspondences from buffer
@@ -999,9 +1042,7 @@ class AdvancedExtrinsicSolver(Node):
 
         for pose_idx, (aruco_msg, board_msg) in enumerate(self.detection_buffer, 1):
             self.get_logger().info(
-                f"\n{'-'*80}\n"
-                f"Processing Pose #{pose_idx}/{buffer_size}\n"
-                f"{'-'*80}"
+                f"\n{'-' * 80}\nProcessing Pose #{pose_idx}/{buffer_size}\n{'-' * 80}"
             )
 
             # Convert messages to internal format
@@ -1041,9 +1082,9 @@ class AdvancedExtrinsicSolver(Node):
 
         # Solve PnP
         self.get_logger().info(
-            f"\n{'='*80}\n"
+            f"\n{'=' * 80}\n"
             f"Solving PnP with {num_correspondences} total correspondences...\n"
-            f"{'='*80}"
+            f"{'=' * 80}"
         )
         success, rvec, tvec = self._solve_pnp(all_object_points, all_image_points)
 
@@ -1061,7 +1102,7 @@ class AdvancedExtrinsicSolver(Node):
 
         # Convert rvec to rotation matrix for logging
         rotation_matrix, _ = cv2.Rodrigues(rvec)
-        euler_angles = R.from_matrix(rotation_matrix).as_euler('xyz', degrees=True)
+        euler_angles = R.from_matrix(rotation_matrix).as_euler("xyz", degrees=True)
 
         # Create transform message
         transform_msg = self._create_transform_message(rvec, tvec)
@@ -1074,9 +1115,9 @@ class AdvancedExtrinsicSolver(Node):
             self.last_solve_status = "Calibration successful"
 
         self.get_logger().info(
-            f"\n{'#'*80}\n"
+            f"\n{'#' * 80}\n"
             f"  CALIBRATION SOLVED SUCCESSFULLY!\n"
-            f"{'#'*80}\n"
+            f"{'#' * 80}\n"
             f"  Poses: {buffer_size}\n"
             f"  Correspondences: {num_correspondences}\n"
             f"\n"
@@ -1097,7 +1138,7 @@ class AdvancedExtrinsicSolver(Node):
             f"{transform_msg.transform.rotation.y:+.6f}, "
             f"{transform_msg.transform.rotation.z:+.6f}, "
             f"{transform_msg.transform.rotation.w:+.6f})\n"
-            f"{'#'*80}\n"
+            f"{'#' * 80}\n"
         )
 
         return True
@@ -1193,9 +1234,9 @@ class AdvancedExtrinsicSolver(Node):
         marker_border = (square_size - marker_size) / 2.0
 
         self.get_logger().debug(
-            f"Board geometry: square_size={square_size*1000:.1f}mm, "
-            f"marker_size={marker_size*1000:.1f}mm, "
-            f"marker_border={marker_border*1000:.1f}mm"
+            f"Board geometry: square_size={square_size * 1000:.1f}mm, "
+            f"marker_size={marker_size * 1000:.1f}mm, "
+            f"marker_border={marker_border * 1000:.1f}mm"
         )
 
         def make_corners(
@@ -1279,9 +1320,7 @@ class AdvancedExtrinsicSolver(Node):
         K = np.array(self.camera_info.k, dtype=np.float32).reshape(3, 3)
         dist_coeffs = np.zeros(5, dtype=np.float32)
 
-        self.get_logger().info(
-            f"Solving PnP with {len(object_points)} correspondences"
-        )
+        self.get_logger().info(f"Solving PnP with {len(object_points)} correspondences")
 
         try:
             success, rvec, tvec = cv2.solvePnP(
@@ -1294,8 +1333,7 @@ class AdvancedExtrinsicSolver(Node):
 
             if success:
                 self.get_logger().info(
-                    f"PnP solved successfully!\n"
-                    f"Translation: {tvec.flatten()}"
+                    f"PnP solved successfully!\nTranslation: {tvec.flatten()}"
                 )
                 return True, rvec, tvec
             else:

@@ -5,8 +5,6 @@ import curses
 import math
 import signal
 import sys
-import threading
-from typing import Optional
 
 import numpy as np
 import rclpy
