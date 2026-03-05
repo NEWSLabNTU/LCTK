@@ -22,7 +22,12 @@ See config/examples/ for example configurations.
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    LogInfo,
+    OpaqueFunction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -39,7 +44,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
     debug_mode = LaunchConfiguration("debug_mode").perform(context)
     log_level = LaunchConfiguration("log_level").perform(context)
     mode = LaunchConfiguration("mode").perform(context)
-    use_advanced_solver = LaunchConfiguration("use_advanced_solver").perform(context) == "true"
+    use_advanced_solver = (
+        LaunchConfiguration("use_advanced_solver").perform(context) == "true"
+    )
     enable_overlay = LaunchConfiguration("enable_overlay").perform(context) == "true"
     enable_judge = LaunchConfiguration("enable_judge").perform(context) == "true"
 
@@ -54,13 +61,13 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # - sync_queue_size: Buffer size per stream
     # - sync_drop_policy: "reject_new" (preserve data) or "drop_oldest" (prefer latest)
     if is_realtime:
-        sync_tolerance_ms = 50.0      # 50ms tolerance for real-time
-        sync_queue_size = 2           # Minimal buffering
+        sync_tolerance_ms = 50.0  # 50ms tolerance for real-time
+        sync_queue_size = 2  # Minimal buffering
         sync_drop_policy = "drop_oldest"  # Always process latest data
     else:
-        sync_tolerance_ms = 0.0       # Infinite window for offline (no time-based dropping)
-        sync_queue_size = 100         # Large queue for rosbag playback
-        sync_drop_policy = "reject_new"   # Preserve all data
+        sync_tolerance_ms = 0.0  # Infinite window for offline (no time-based dropping)
+        sync_queue_size = 100  # Large queue for rosbag playback
+        sync_drop_policy = "reject_new"  # Preserve all data
 
     # Parse configuration
     pipeline = parse_config(config_file)
@@ -88,7 +95,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # Generate lidar_board_detector nodes
     for detector in pipeline.lidar_board_detectors:
         nodes.append(
-            LogInfo(msg=f"  Board detector: {detector.node_name} ({detector.lidar_name} -> {detector.marker_name})")
+            LogInfo(
+                msg=f"  Board detector: {detector.node_name} ({detector.lidar_name} -> {detector.marker_name})"
+            )
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
@@ -122,7 +131,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
     # Generate aruco_locator_node nodes
     for locator in pipeline.aruco_locators:
-        nodes.append(LogInfo(msg=f"  ArUco locator: {locator.node_name} ({locator.camera_name})"))
+        nodes.append(
+            LogInfo(msg=f"  ArUco locator: {locator.node_name} ({locator.camera_name})")
+        )
 
         node_args = ["--ros-args", "--log-level", log_level]
 
@@ -153,7 +164,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
     for solver in pipeline.lidar_camera_solvers:
         solver_type = "advanced" if use_advanced_solver else "standard"
         nodes.append(
-            LogInfo(msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name}) [{solver_type}]")
+            LogInfo(
+                msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name}) [{solver_type}]"
+            )
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
@@ -222,7 +235,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # Generate lidar-lidar solver nodes
     for solver in pipeline.lidar_lidar_solvers:
         nodes.append(
-            LogInfo(msg=f"  LiDAR-LiDAR solver: {solver.node_name} ({solver.lidar1_name} <-> {solver.lidar2_name})")
+            LogInfo(
+                msg=f"  LiDAR-LiDAR solver: {solver.node_name} ({solver.lidar1_name} <-> {solver.lidar2_name})"
+            )
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
@@ -252,14 +267,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
         )
 
     # Spawn TF tree broadcaster — subscribes to tree-edge solver topics
-    import json
-
     plan = pipeline.calibration_plan
 
     # Collect output topics for tree edges only
-    tree_edge_set = {
-        (e.parent, e.child) for e in plan.tree_edges
-    }
+    tree_edge_set = {(e.parent, e.child) for e in plan.tree_edges}
 
     tf_topics = []
     for solver in pipeline.lidar_camera_solvers:
@@ -275,9 +286,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
     if tf_topics:
         nodes.append(
-            LogInfo(
-                msg=f"  TF tree broadcaster: {len(tf_topics)} tree edge(s)"
-            )
+            LogInfo(msg=f"  TF tree broadcaster: {len(tf_topics)} tree edge(s)")
         )
         nodes.append(
             Node(
@@ -286,13 +295,15 @@ def generate_nodes(context, *args, **kwargs) -> list:
                 name="tf_tree_broadcaster",
                 namespace="calibration",
                 output="screen",
-                parameters=[{"topics": json.dumps(tf_topics)}],
+                parameters=[{"topics": tf_topics}],
             )
         )
 
     # Generate overlay nodes (one per lidar-camera solver)
     if enable_overlay and pipeline.lidar_camera_solvers:
-        nodes.append(LogInfo(msg=f"  Overlay nodes: {len(pipeline.lidar_camera_solvers)}"))
+        nodes.append(
+            LogInfo(msg=f"  Overlay nodes: {len(pipeline.lidar_camera_solvers)}")
+        )
         for solver in pipeline.lidar_camera_solvers:
             # Look up the lidar's pointcloud topic
             lidar = pipeline.lidars[solver.lidar_name]
@@ -315,13 +326,19 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
     # Generate judge nodes (one per lidar-camera solver)
     if enable_judge and pipeline.lidar_camera_solvers:
-        nodes.append(LogInfo(msg=f"  Judge nodes: {len(pipeline.lidar_camera_solvers)}"))
+        nodes.append(
+            LogInfo(msg=f"  Judge nodes: {len(pipeline.lidar_camera_solvers)}")
+        )
         for solver in pipeline.lidar_camera_solvers:
             nodes.append(
                 IncludeLaunchDescription(
                     AnyLaunchDescriptionSource(
                         PathJoinSubstitution(
-                            [FindPackageShare("lctk_launch"), "launch", "calibration_judge.launch.xml"]
+                            [
+                                FindPackageShare("lctk_launch"),
+                                "launch",
+                                "calibration_judge.launch.xml",
+                            ]
                         )
                     ),
                     launch_arguments={

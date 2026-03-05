@@ -11,9 +11,13 @@ Usage:
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import AnyLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import (
+    LaunchConfiguration,
+    PathJoinSubstitution,
+    PythonExpression,
+)
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -52,9 +56,18 @@ def generate_launch_description():
     # Debug: Log the mode and derived QoS setting
     # This helps diagnose if the parameter is being passed correctly
     mode_log = LogInfo(
-        msg=["Demo launch: mode=", LaunchConfiguration("mode"),
-             ", use_sensor_data_qos=",
-             PythonExpression(["'true' if '", LaunchConfiguration("mode"), "' == 'realtime' else 'false'"])]
+        msg=[
+            "Demo launch: mode=",
+            LaunchConfiguration("mode"),
+            ", use_sensor_data_qos=",
+            PythonExpression(
+                [
+                    "'true' if '",
+                    LaunchConfiguration("mode"),
+                    "' == 'realtime' else 'false'",
+                ]
+            ),
+        ]
     )
 
     # Sample data playback
@@ -62,14 +75,22 @@ def generate_launch_description():
     sample_data_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             PathJoinSubstitution(
-                [FindPackageShare("lctk_sample_data"), "launch", "lidar_camera.launch.xml"]
+                [
+                    FindPackageShare("lctk_sample_data"),
+                    "launch",
+                    "lidar_camera.launch.xml",
+                ]
             )
         ),
         launch_arguments={
             # use_sensor_data_qos=True in realtime mode (BEST_EFFORT), False in offline (RELIABLE)
             # Note: XML launch files expect string "true"/"false" for boolean params
             "use_sensor_data_qos": PythonExpression(
-                ["'true' if '", LaunchConfiguration("mode"), "' == 'realtime' else 'false'"]
+                [
+                    "'true' if '",
+                    LaunchConfiguration("mode"),
+                    "' == 'realtime' else 'false'",
+                ]
             ),
         }.items(),
     )
@@ -83,7 +104,12 @@ def generate_launch_description():
         ),
         launch_arguments={
             "config_file": PathJoinSubstitution(
-                [FindPackageShare("lctk_launch"), "config", "examples", "sample_data.yaml"]
+                [
+                    FindPackageShare("lctk_launch"),
+                    "config",
+                    "examples",
+                    "sample_data.yaml",
+                ]
             ),
             "debug_mode": LaunchConfiguration("debug_mode"),
             "log_level": LaunchConfiguration("log_level"),
@@ -93,13 +119,15 @@ def generate_launch_description():
         }.items(),
     )
 
-    return LaunchDescription([
-        debug_mode_arg,
-        log_level_arg,
-        mode_arg,
-        enable_rviz_arg,
-        use_advanced_solver_arg,
-        mode_log,  # Debug logging of mode and QoS settings
-        sample_data_launch,
-        calibration_launch,
-    ])
+    return LaunchDescription(
+        [
+            debug_mode_arg,
+            log_level_arg,
+            mode_arg,
+            enable_rviz_arg,
+            use_advanced_solver_arg,
+            mode_log,  # Debug logging of mode and QoS settings
+            sample_data_launch,
+            calibration_launch,
+        ]
+    )

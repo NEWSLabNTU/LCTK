@@ -127,7 +127,9 @@ def compute_plan(
         raise ValueError("No calibration pairs defined")
 
     # Build weighted edges and classify
-    weighted_edges: list[tuple[int, str, str, str, str]] = []  # (weight, d1, d2, marker, edge_type)
+    weighted_edges: list[
+        tuple[int, str, str, str, str]
+    ] = []  # (weight, d1, d2, marker, edge_type)
     for d1, d2, marker in pairs:
         if d1 not in all_devices:
             raise ValueError(f"Unknown device in pair: {d1}")
@@ -174,7 +176,9 @@ def compute_plan(
         )
 
     # Root the MST at reference_frame via BFS → directed parent-child tree
-    adjacency: dict[str, list[tuple[str, str, str]]] = defaultdict(list)  # node → [(neighbor, marker, edge_type)]
+    adjacency: dict[str, list[tuple[str, str, str]]] = defaultdict(
+        list
+    )  # node → [(neighbor, marker, edge_type)]
     for d1, d2, marker, edge_type in mst_edges:
         adjacency[d1].append((d2, marker, edge_type))
         adjacency[d2].append((d1, marker, edge_type))
@@ -321,7 +325,9 @@ def format_plan(
             connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
             marker, _ = edge_info.get((parent_map[node], node), ("?", "?"))
             arrow_label = f"{parent_map[node]}-{node} via {marker}"
-            lines.append(f"  {prefix}{connector}{_format_node(node)}   \u2190 {arrow_label}")
+            lines.append(
+                f"  {prefix}{connector}{_format_node(node)}   \u2190 {arrow_label}"
+            )
 
         children = plan.tree.get(node, [])
         for i, child in enumerate(children):

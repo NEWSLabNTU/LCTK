@@ -33,12 +33,13 @@ def resolve_package_path(path: str) -> str:
         Resolved absolute path string
     """
     # Pattern to match $(find-pkg-share package_name)
-    pattern = r'\$\(find-pkg-share\s+([^)]+)\)'
+    pattern = r"\$\(find-pkg-share\s+([^)]+)\)"
 
     def replace_func(match):
         package_name = match.group(1).strip()
         try:
             from ament_index_python.packages import get_package_share_directory
+
             return get_package_share_directory(package_name)
         except Exception as e:
             raise ValueError(f"Failed to find package '{package_name}': {e}")
@@ -232,10 +233,7 @@ class CalibrationConfigParser:
 
     def _run_planner(self, pipeline: PipelineConfig) -> None:
         """Run the calibration planner and attach results to pipeline."""
-        pairs = [
-            (p.device1, p.device2, p.marker)
-            for p in self.calibration_pairs
-        ]
+        pairs = [(p.device1, p.device2, p.marker) for p in self.calibration_pairs]
         assert self._reference_frame is not None  # validated in parse()
         plan = compute_plan(
             pairs=pairs,
@@ -314,10 +312,17 @@ class CalibrationConfigParser:
             d1_is_camera = pair.device1 in self.cameras
             d2_is_camera = pair.device2 in self.cameras
 
-            valid_pair = (d1_is_lidar and d2_is_camera) or (d1_is_camera and d2_is_lidar) or (d1_is_lidar and d2_is_lidar)
+            valid_pair = (
+                (d1_is_lidar and d2_is_camera)
+                or (d1_is_camera and d2_is_lidar)
+                or (d1_is_lidar and d2_is_lidar)
+            )
 
             if not valid_pair:
-                raise ValueError(f"Invalid device pair type: {pair.device1}, {pair.device2}. " "Supported: lidar-camera, lidar-lidar")
+                raise ValueError(
+                    f"Invalid device pair type: {pair.device1}, {pair.device2}. "
+                    "Supported: lidar-camera, lidar-lidar"
+                )
 
     def _get_device_type(self, device_name: str) -> DeviceType:
         """Get the type of a device by name."""
@@ -412,16 +417,26 @@ class CalibrationConfigParser:
             d2_type = self._get_device_type(pair.device2)
 
             if d1_type == DeviceType.LIDAR and d2_type == DeviceType.CAMERA:
-                self._add_lidar_camera_solver(config, pair.device1, pair.device2, pair.marker)
+                self._add_lidar_camera_solver(
+                    config, pair.device1, pair.device2, pair.marker
+                )
             elif d1_type == DeviceType.CAMERA and d2_type == DeviceType.LIDAR:
-                self._add_lidar_camera_solver(config, pair.device2, pair.device1, pair.marker)
+                self._add_lidar_camera_solver(
+                    config, pair.device2, pair.device1, pair.marker
+                )
             elif d1_type == DeviceType.LIDAR and d2_type == DeviceType.LIDAR:
-                self._add_lidar_lidar_solver(config, pair.device1, pair.device2, pair.marker)
+                self._add_lidar_lidar_solver(
+                    config, pair.device1, pair.device2, pair.marker
+                )
 
         return config
 
     def _add_lidar_camera_solver(
-        self, config: PipelineConfig, lidar_name: str, camera_name: str, marker_name: str
+        self,
+        config: PipelineConfig,
+        lidar_name: str,
+        camera_name: str,
+        marker_name: str,
     ) -> None:
         """Add a lidar-camera solver node to the config."""
         lidar = self.lidars[lidar_name]
@@ -432,12 +447,16 @@ class CalibrationConfigParser:
         namespace = f"calibration/{lidar_name}_{camera_name}"
 
         # Find the board detector output topic (matches lidar_board_detector's publisher)
-        board_topic = f"/calibration/{lidar_name}_{marker_name}/calibration_board_detections"
+        board_topic = (
+            f"/calibration/{lidar_name}_{marker_name}/calibration_board_detections"
+        )
         aruco_topic = f"/calibration/{camera_name}/aruco_detections"
         output_topic = f"/{namespace}/extrinsic_transform"
 
         if marker.aruco_config is None:
-            raise ValueError(f"ArUco config required for lidar-camera solver with marker {marker_name}")
+            raise ValueError(
+                f"ArUco config required for lidar-camera solver with marker {marker_name}"
+            )
 
         config.lidar_camera_solvers.append(
             LidarCameraSolverNode(
@@ -457,7 +476,11 @@ class CalibrationConfigParser:
         )
 
     def _add_lidar_lidar_solver(
-        self, config: PipelineConfig, lidar1_name: str, lidar2_name: str, marker_name: str
+        self,
+        config: PipelineConfig,
+        lidar1_name: str,
+        lidar2_name: str,
+        marker_name: str,
     ) -> None:
         """Add a lidar-lidar solver node to the config."""
         lidar1 = self.lidars[lidar1_name]
@@ -467,8 +490,12 @@ class CalibrationConfigParser:
         namespace = f"calibration/{lidar1_name}_{lidar2_name}"
 
         # Find the board detector output topics (matches lidar_board_detector's publisher)
-        lidar1_topic = f"/calibration/{lidar1_name}_{marker_name}/calibration_board_detections"
-        lidar2_topic = f"/calibration/{lidar2_name}_{marker_name}/calibration_board_detections"
+        lidar1_topic = (
+            f"/calibration/{lidar1_name}_{marker_name}/calibration_board_detections"
+        )
+        lidar2_topic = (
+            f"/calibration/{lidar2_name}_{marker_name}/calibration_board_detections"
+        )
         output_topic = f"/{namespace}/lidar_to_lidar_transform"
 
         config.lidar_lidar_solvers.append(

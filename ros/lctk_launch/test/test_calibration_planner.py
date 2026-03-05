@@ -14,7 +14,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lctk_launch.calibration_planner import (
-    CalibrationPlan,
     _find_chain,
     compute_plan,
     format_plan,
@@ -600,9 +599,7 @@ def test_format_deep_nesting_indentation():
         ("L2", "L4", "M3"),
         ("L3", "C1", "M4"),
     ]
-    plan = compute_plan(
-        pairs, {"L1", "L2", "L3", "L4"}, {"C1"}, "L1"
-    )
+    plan = compute_plan(pairs, {"L1", "L2", "L3", "L4"}, {"C1"}, "L1")
     text = format_plan(plan)
 
     # │ continuation line from L3's subtree (L3 is not-last under L2)

@@ -10,8 +10,6 @@ Usage:
         --ros-args -p topics:='["/cal/L1_C1/extrinsic_transform", ...]'
 """
 
-import json
-
 import rclpy
 from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
@@ -25,10 +23,9 @@ class TfTreeBroadcaster(Node):
     def __init__(self):
         super().__init__("tf_tree_broadcaster")
 
-        # Declare parameter: JSON-encoded list of topics
-        self.declare_parameter("topics", "[]")
-        topics_json = self.get_parameter("topics").get_parameter_value().string_value
-        topics = json.loads(topics_json)
+        # Declare parameter: list of transform topics to subscribe to
+        self.declare_parameter("topics", rclpy.Parameter.Type.STRING_ARRAY)
+        topics = self.get_parameter("topics").get_parameter_value().string_array_value
 
         if not topics:
             self.get_logger().warn("No topics configured — nothing to broadcast")
@@ -59,8 +56,10 @@ class TfTreeBroadcaster(Node):
 
     def _make_callback(self, topic: str):
         """Create a subscription callback bound to a specific topic."""
+
         def callback(msg: TransformStamped) -> None:
             self._on_transform(topic, msg)
+
         return callback
 
     def _on_transform(self, topic: str, msg: TransformStamped) -> None:

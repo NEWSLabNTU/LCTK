@@ -26,9 +26,12 @@ except ImportError as e:
 
 def test_sample_data_config():
     """Test parsing the sample_data.yaml config."""
-    config_path = Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
+    config_path = (
+        Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
+    )
     if not config_path.exists():
         import pytest
+
         pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
@@ -52,6 +55,7 @@ def test_vehicle_config():
     config_path = Path(__file__).parent.parent / "config" / "examples" / "vehicle.yaml"
     if not config_path.exists():
         import pytest
+
         pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
@@ -66,9 +70,12 @@ def test_vehicle_config():
 
 def test_two_lidar_config():
     """Test parsing the two_lidar.yaml config."""
-    config_path = Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    config_path = (
+        Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    )
     if not config_path.exists():
         import pytest
+
         pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
@@ -104,9 +111,12 @@ def test_sample_data_node_parity():
     The config-driven path should produce equivalent nodes (possibly different
     namespaces, but same count and correct topic wiring).
     """
-    config_path = Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
+    config_path = (
+        Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
+    )
     if not config_path.exists():
         import pytest
+
         pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
@@ -140,8 +150,14 @@ def test_sample_data_node_parity():
     # Device dicts populated
     assert len(pipeline.lidars) == 1
     assert len(pipeline.cameras) == 1
-    assert pipeline.lidars["top_lidar"].pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
-    assert pipeline.cameras["front_center"].image_topic == "/sensing/camera/front_center/image_raw"
+    assert (
+        pipeline.lidars["top_lidar"].pointcloud_topic
+        == "/sensing/lidar/top/pointcloud_raw"
+    )
+    assert (
+        pipeline.cameras["front_center"].image_topic
+        == "/sensing/camera/front_center/image_raw"
+    )
 
 
 def test_two_lidar_node_parity():
@@ -152,9 +168,12 @@ def test_two_lidar_node_parity():
     - 1 lidar-lidar solver
     - 0 aruco locators (no cameras)
     """
-    config_path = Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    config_path = (
+        Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    )
     if not config_path.exists():
         import pytest
+
         pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
@@ -177,8 +196,14 @@ def test_two_lidar_node_parity():
 
     # Correct topic wiring: solver subscribes to detector output topics
     detector_by_lidar = {d.lidar_name: d for d in pipeline.lidar_board_detectors}
-    assert solver.lidar1_detections_topic == detector_by_lidar[solver.lidar1_name].output_topic
-    assert solver.lidar2_detections_topic == detector_by_lidar[solver.lidar2_name].output_topic
+    assert (
+        solver.lidar1_detections_topic
+        == detector_by_lidar[solver.lidar1_name].output_topic
+    )
+    assert (
+        solver.lidar2_detections_topic
+        == detector_by_lidar[solver.lidar2_name].output_topic
+    )
 
     # 0 lidar-camera solvers
     assert len(pipeline.lidar_camera_solvers) == 0
