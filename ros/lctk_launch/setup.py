@@ -48,6 +48,8 @@ setup(
     license="MIT",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": [],
+        "console_scripts": [
+            "tf_tree_broadcaster = lctk_launch.tf_tree_broadcaster:main",
+        ],
     },
 )

@@ -28,39 +28,11 @@ def test_sample_data_config():
     """Test parsing the sample_data.yaml config."""
     config_path = Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
     if not config_path.exists():
-        print(f"Config file not found: {config_path}")
-        return False
+        import pytest
+        pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
-
-    print("=== Pipeline Configuration (sample_data.yaml) ===")
-    print()
-    print("LiDAR Board Detectors:")
-    for d in pipeline.lidar_board_detectors:
-        print(f"  - {d.node_name}: {d.lidar_name} -> {d.marker_name}")
-        print(f"    Input: {d.pointcloud_topic}")
-        print(f"    Output: {d.output_topic}")
-    print()
-    print("ArUco Locators:")
-    for l in pipeline.aruco_locators:
-        print(f"  - {l.node_name}: {l.camera_name}")
-        print(f"    Input: {l.image_topic}")
-        print(f"    Output: {l.output_topic}")
-    print()
-    print("LiDAR-Camera Solvers:")
-    for s in pipeline.lidar_camera_solvers:
-        print(f"  - {s.node_name}: {s.lidar_name} <-> {s.camera_name}")
-        print(f"    Board: {s.board_detections_topic}")
-        print(f"    ArUco: {s.aruco_detections_topic}")
-        print(f"    Output: {s.output_topic}")
-    print()
-    print("LiDAR-LiDAR Solvers:")
-    for s in pipeline.lidar_lidar_solvers:
-        print(f"  - {s.node_name}: {s.lidar1_name} <-> {s.lidar2_name}")
-        print(f"    L1 detections: {s.lidar1_detections_topic}")
-        print(f"    L2 detections: {s.lidar2_detections_topic}")
-        print(f"    Output: {s.output_topic}")
 
     # Basic assertions
     assert len(pipeline.lidar_board_detectors) == 1, "Expected 1 board detector"
@@ -68,37 +40,170 @@ def test_sample_data_config():
     assert len(pipeline.lidar_camera_solvers) == 1, "Expected 1 lidar-camera solver"
     assert len(pipeline.lidar_lidar_solvers) == 0, "Expected 0 lidar-lidar solvers"
 
-    print()
-    print("All assertions passed!")
-    return True
+    # Calibration plan assertions
+    assert pipeline.calibration_plan is not None, "Expected calibration plan"
+    assert pipeline.calibration_plan.reference_frame == "top_lidar"
+    assert len(pipeline.calibration_plan.tree_edges) == 1
+    assert len(pipeline.calibration_plan.validation_edges) == 0
 
 
 def test_vehicle_config():
     """Test parsing the vehicle.yaml config (multi-sensor)."""
     config_path = Path(__file__).parent.parent / "config" / "examples" / "vehicle.yaml"
     if not config_path.exists():
-        print(f"Config file not found: {config_path}")
-        return False
+        import pytest
+        pytest.skip(f"Config file not found: {config_path}")
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
 
-    print("=== Pipeline Configuration (vehicle.yaml) ===")
-    print()
-    print(f"LiDAR Board Detectors: {len(pipeline.lidar_board_detectors)}")
-    print(f"ArUco Locators: {len(pipeline.aruco_locators)}")
-    print(f"LiDAR-Camera Solvers: {len(pipeline.lidar_camera_solvers)}")
-    print(f"LiDAR-LiDAR Solvers: {len(pipeline.lidar_lidar_solvers)}")
+    # Calibration plan assertions
+    assert pipeline.calibration_plan is not None, "Expected calibration plan"
+    assert pipeline.calibration_plan.reference_frame == "L1"
+    assert len(pipeline.calibration_plan.tree_edges) == 5
+    assert len(pipeline.calibration_plan.validation_edges) == 0
 
-    print()
-    print("Vehicle config parsed successfully!")
-    return True
+
+def test_two_lidar_config():
+    """Test parsing the two_lidar.yaml config."""
+    config_path = Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    if not config_path.exists():
+        import pytest
+        pytest.skip(f"Config file not found: {config_path}")
+
+    parser = CalibrationConfigParser(str(config_path))
+    pipeline = parser.parse()
+
+    # Basic assertions
+    assert len(pipeline.lidar_board_detectors) == 2, "Expected 2 board detectors"
+    assert len(pipeline.aruco_locators) == 0, "Expected 0 aruco locators"
+    assert len(pipeline.lidar_camera_solvers) == 0, "Expected 0 lidar-camera solvers"
+    assert len(pipeline.lidar_lidar_solvers) == 1, "Expected 1 lidar-lidar solver"
+
+    # Device dicts populated
+    assert len(pipeline.lidars) == 2
+    assert "top_lidar" in pipeline.lidars
+    assert "front_lidar" in pipeline.lidars
+    assert len(pipeline.cameras) == 0
+
+    # Calibration plan assertions
+    assert pipeline.calibration_plan is not None
+    assert pipeline.calibration_plan.reference_frame == "top_lidar"
+    assert len(pipeline.calibration_plan.tree_edges) == 1
+    assert len(pipeline.calibration_plan.validation_edges) == 0
+
+
+def test_sample_data_node_parity():
+    """Verify sample_data.yaml produces nodes matching what the XML would generate.
+
+    The XML path (lidar_camera_calibration.launch.xml) produced:
+    - 1 aruco_locator in calibration/aruco_locator namespace
+    - 1 lidar_board_detector in calibration/lidar_board_detector namespace
+    - 1 extrinsic_solver in calibration/extrinsic_solver namespace
+
+    The config-driven path should produce equivalent nodes (possibly different
+    namespaces, but same count and correct topic wiring).
+    """
+    config_path = Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
+    if not config_path.exists():
+        import pytest
+        pytest.skip(f"Config file not found: {config_path}")
+
+    parser = CalibrationConfigParser(str(config_path))
+    pipeline = parser.parse()
+
+    # 1 aruco locator
+    assert len(pipeline.aruco_locators) == 1
+    locator = pipeline.aruco_locators[0]
+    assert locator.camera_name == "front_center"
+    assert locator.image_topic == "/sensing/camera/front_center/image_raw"
+
+    # 1 board detector
+    assert len(pipeline.lidar_board_detectors) == 1
+    detector = pipeline.lidar_board_detectors[0]
+    assert detector.lidar_name == "top_lidar"
+    assert detector.pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
+
+    # 1 lidar-camera solver
+    assert len(pipeline.lidar_camera_solvers) == 1
+    solver = pipeline.lidar_camera_solvers[0]
+    assert solver.lidar_name == "top_lidar"
+    assert solver.camera_name == "front_center"
+    assert solver.parent_frame == "velodyne_top"
+    assert solver.child_frame == "camera_front_center"
+
+    # Correct topic wiring: solver subscribes to detector/locator output topics
+    assert solver.board_detections_topic == detector.output_topic
+    assert solver.aruco_detections_topic == locator.output_topic
+    assert solver.camera_topic == locator.image_topic
+
+    # Device dicts populated
+    assert len(pipeline.lidars) == 1
+    assert len(pipeline.cameras) == 1
+    assert pipeline.lidars["top_lidar"].pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
+    assert pipeline.cameras["front_center"].image_topic == "/sensing/camera/front_center/image_raw"
+
+
+def test_two_lidar_node_parity():
+    """Verify two_lidar.yaml produces correct nodes for two-lidar calibration.
+
+    Expected:
+    - 2 lidar_board_detectors (one per lidar)
+    - 1 lidar-lidar solver
+    - 0 aruco locators (no cameras)
+    """
+    config_path = Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    if not config_path.exists():
+        import pytest
+        pytest.skip(f"Config file not found: {config_path}")
+
+    parser = CalibrationConfigParser(str(config_path))
+    pipeline = parser.parse()
+
+    # 2 board detectors
+    assert len(pipeline.lidar_board_detectors) == 2
+    detector_names = {d.lidar_name for d in pipeline.lidar_board_detectors}
+    assert detector_names == {"top_lidar", "front_lidar"}
+
+    # 0 aruco locators
+    assert len(pipeline.aruco_locators) == 0
+
+    # 1 lidar-lidar solver
+    assert len(pipeline.lidar_lidar_solvers) == 1
+    solver = pipeline.lidar_lidar_solvers[0]
+    assert {solver.lidar1_name, solver.lidar2_name} == {"top_lidar", "front_lidar"}
+    assert solver.lidar1_frame == "velodyne_top"
+    assert solver.lidar2_frame == "velodyne_front"
+
+    # Correct topic wiring: solver subscribes to detector output topics
+    detector_by_lidar = {d.lidar_name: d for d in pipeline.lidar_board_detectors}
+    assert solver.lidar1_detections_topic == detector_by_lidar[solver.lidar1_name].output_topic
+    assert solver.lidar2_detections_topic == detector_by_lidar[solver.lidar2_name].output_topic
+
+    # 0 lidar-camera solvers
+    assert len(pipeline.lidar_camera_solvers) == 0
 
 
 if __name__ == "__main__":
-    success = True
-    success = test_sample_data_config() and success
-    print()
-    success = test_vehicle_config() and success
+    import inspect
 
-    sys.exit(0 if success else 1)
+    tests = [
+        obj
+        for name, obj in sorted(globals().items())
+        if name.startswith("test_") and inspect.isfunction(obj)
+    ]
+
+    passed = 0
+    failed = 0
+    for test in tests:
+        try:
+            test()
+            print(f"  PASS: {test.__name__}")
+            passed += 1
+        except Exception as e:
+            print(f"  FAIL: {test.__name__}: {e}")
+            failed += 1
+
+    print()
+    print(f"{passed} passed, {failed} failed")
+    sys.exit(0 if failed == 0 else 1)

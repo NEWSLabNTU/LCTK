@@ -1,0 +1,30 @@
+# Two-LiDAR Calibration Configuration
+#
+# This configuration calibrates two LiDARs by detecting the same calibration
+# board in both point clouds and computing the transform between them.
+#
+# Usage:
+#   just two-lidar
+#
+# This generates:
+# - 2 lidar_board_detector nodes (one per lidar)
+# - 1 lidar-to-lidar solver node
+# - 0 aruco locator nodes (no cameras)
+
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
+      frame_id: velodyne_top
+    front_lidar:
+      pointcloud_topic: /sensing/lidar/front/pointcloud_raw
+      frame_id: velodyne_front
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    pairs:
+      - [top_lidar, front_lidar]

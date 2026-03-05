@@ -29,6 +29,7 @@
   <exec_depend>lidar_to_lidar_solver</exec_depend>
   <exec_depend>pointcloud_image_overlay</exec_depend>
   <exec_depend>calibration_judge</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

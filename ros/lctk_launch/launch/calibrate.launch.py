@@ -40,6 +40,8 @@ def generate_nodes(context, *args, **kwargs) -> list:
     log_level = LaunchConfiguration("log_level").perform(context)
     mode = LaunchConfiguration("mode").perform(context)
     use_advanced_solver = LaunchConfiguration("use_advanced_solver").perform(context) == "true"
+    enable_overlay = LaunchConfiguration("enable_overlay").perform(context) == "true"
+    enable_judge = LaunchConfiguration("enable_judge").perform(context) == "true"
 
     # Derive settings from mode
     # - offline: RELIABLE QoS, exact sync matching, larger queues
@@ -64,6 +66,13 @@ def generate_nodes(context, *args, **kwargs) -> list:
     pipeline = parse_config(config_file)
 
     nodes = []
+
+    # Log calibration plan (always present — planner runs on every config)
+    assert pipeline.calibration_plan_text is not None
+    assert pipeline.calibration_plan is not None
+    for line in pipeline.calibration_plan_text.split("\n"):
+        nodes.append(LogInfo(msg=line))
+    nodes.append(LogInfo(msg=""))
 
     # Log pipeline summary
     nodes.append(
@@ -242,6 +251,87 @@ def generate_nodes(context, *args, **kwargs) -> list:
             )
         )
 
+    # Spawn TF tree broadcaster — subscribes to tree-edge solver topics
+    import json
+
+    plan = pipeline.calibration_plan
+
+    # Collect output topics for tree edges only
+    tree_edge_set = {
+        (e.parent, e.child) for e in plan.tree_edges
+    }
+
+    tf_topics = []
+    for solver in pipeline.lidar_camera_solvers:
+        key1 = (solver.lidar_name, solver.camera_name)
+        key2 = (solver.camera_name, solver.lidar_name)
+        if key1 in tree_edge_set or key2 in tree_edge_set:
+            tf_topics.append(solver.output_topic)
+    for solver in pipeline.lidar_lidar_solvers:
+        key1 = (solver.lidar1_name, solver.lidar2_name)
+        key2 = (solver.lidar2_name, solver.lidar1_name)
+        if key1 in tree_edge_set or key2 in tree_edge_set:
+            tf_topics.append(solver.output_topic)
+
+    if tf_topics:
+        nodes.append(
+            LogInfo(
+                msg=f"  TF tree broadcaster: {len(tf_topics)} tree edge(s)"
+            )
+        )
+        nodes.append(
+            Node(
+                package="lctk_launch",
+                executable="tf_tree_broadcaster",
+                name="tf_tree_broadcaster",
+                namespace="calibration",
+                output="screen",
+                parameters=[{"topics": json.dumps(tf_topics)}],
+            )
+        )
+
+    # Generate overlay nodes (one per lidar-camera solver)
+    if enable_overlay and pipeline.lidar_camera_solvers:
+        nodes.append(LogInfo(msg=f"  Overlay nodes: {len(pipeline.lidar_camera_solvers)}"))
+        for solver in pipeline.lidar_camera_solvers:
+            # Look up the lidar's pointcloud topic
+            lidar = pipeline.lidars[solver.lidar_name]
+            node_args = ["--ros-args", "--log-level", log_level]
+            nodes.append(
+                Node(
+                    package="pointcloud_image_overlay",
+                    executable="overlay_node",
+                    name="pointcloud_image_overlay",
+                    namespace=solver.namespace,
+                    output="screen",
+                    arguments=node_args,
+                    parameters=[{"use_best_effort_qos": use_best_effort_qos}],
+                    remappings=[
+                        ("image", solver.camera_topic),
+                        ("pointcloud", lidar.pointcloud_topic),
+                    ],
+                )
+            )
+
+    # Generate judge nodes (one per lidar-camera solver)
+    if enable_judge and pipeline.lidar_camera_solvers:
+        nodes.append(LogInfo(msg=f"  Judge nodes: {len(pipeline.lidar_camera_solvers)}"))
+        for solver in pipeline.lidar_camera_solvers:
+            nodes.append(
+                IncludeLaunchDescription(
+                    AnyLaunchDescriptionSource(
+                        PathJoinSubstitution(
+                            [FindPackageShare("lctk_launch"), "launch", "calibration_judge.launch.xml"]
+                        )
+                    ),
+                    launch_arguments={
+                        "transform_topic": solver.output_topic,
+                        "namespace": solver.namespace,
+                        "log_level": log_level,
+                    }.items(),
+                )
+            )
+
     return nodes
 
 
@@ -278,6 +368,16 @@ def generate_launch_description() -> LaunchDescription:
                 "use_advanced_solver",
                 default_value="false",
                 description="Use advanced multi-pose solver (requires manual detection buffering) vs standard solver (auto-publishes)",
+            ),
+            DeclareLaunchArgument(
+                "enable_overlay",
+                default_value="false",
+                description="Enable pointcloud-image overlay visualization (one per lidar-camera pair)",
+            ),
+            DeclareLaunchArgument(
+                "enable_judge",
+                default_value="false",
+                description="Enable calibration quality judge (ground truth comparison, one per lidar-camera pair)",
             ),
             # Dynamic node generation
             OpaqueFunction(function=generate_nodes),

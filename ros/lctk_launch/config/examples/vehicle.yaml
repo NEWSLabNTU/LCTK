@@ -5,18 +5,12 @@
 # - 4 cameras (C1-C4) on the four corners
 # - 3 calibration markers (M1 front, M2 rear, M3 side)
 #
-# Calibration pairs:
-# - L1 & C1 via M1 (front marker)
-# - L1 & C2 via M1 (front marker)
-# - L2 & C3 via M2 (rear marker)
-# - L2 & C4 via M2 (rear marker)
-# - L1 & L2 via M3 (side marker)
-#
 # This generates:
 # - 4 lidar_board_detector nodes: (L1,M1), (L1,M3), (L2,M2), (L2,M3)
 # - 4 aruco_locator_node nodes: C1, C2, C3, C4
 # - 4 lidar-camera solvers: L1-C1, L1-C2, L2-C3, L2-C4
 # - 1 lidar-lidar solver: L1-L2
+# - 1 tf_tree_broadcaster
 
 devices:
   lidars:
@@ -41,36 +35,35 @@ devices:
       image_topic: /sensing/camera/rear_right/image
       frame_id: camera_rear_right
 
+# Root of the TF tree (defaults to first lidar)
+reference_frame: L1
+
 markers:
+  # Front marker — placed in front of the vehicle
   M1:
     type: hollow_board
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
     aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
     bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    pairs:
+      - [L1, C1]
+      - [L1, C2]
+
+  # Rear marker — placed behind the vehicle
   M2:
     type: hollow_board
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
     aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
     bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    pairs:
+      - [L2, C3]
+      - [L2, C4]
+
+  # Side marker — visible to both lidars
   M3:
     type: hollow_board
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
     aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
     bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
-
-calibration_pairs:
-  # Front calibrations using M1
-  - devices: [L1, C1]
-    marker: M1
-  - devices: [L1, C2]
-    marker: M1
-
-  # Rear calibrations using M2
-  - devices: [L2, C3]
-    marker: M2
-  - devices: [L2, C4]
-    marker: M2
-
-  # LiDAR-to-LiDAR calibration using M3 (side marker)
-  - devices: [L1, L2]
-    marker: M3
+    pairs:
+      - [L1, L2]

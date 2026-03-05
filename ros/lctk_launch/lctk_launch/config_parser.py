@@ -3,7 +3,13 @@ Configuration parser for multi-sensor calibration pipeline.
 
 Parses YAML configuration files describing devices, markers, and calibration
 relationships, then derives the required nodes and their connections.
+
+Calibration pairs are defined within marker definitions via `pairs` keys.
+The planner computes a spanning tree for TF broadcasting and identifies
+validation edges.
 """
+
+from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
@@ -12,6 +18,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
+
+from lctk_launch.calibration_planner import CalibrationPlan, compute_plan, format_plan
 
 
 def resolve_package_path(path: str) -> str:
@@ -155,6 +163,10 @@ class PipelineConfig:
     aruco_locators: List[ArucoLocatorNode] = field(default_factory=list)
     lidar_camera_solvers: List[LidarCameraSolverNode] = field(default_factory=list)
     lidar_lidar_solvers: List[LidarLidarSolverNode] = field(default_factory=list)
+    lidars: Dict[str, LidarDevice] = field(default_factory=dict)
+    cameras: Dict[str, CameraDevice] = field(default_factory=dict)
+    calibration_plan: Optional[CalibrationPlan] = None  # Set by planner
+    calibration_plan_text: Optional[str] = None  # Formatted ASCII plan for display
 
 
 class CalibrationConfigParser:
@@ -171,6 +183,7 @@ class CalibrationConfigParser:
         self.cameras: Dict[str, CameraDevice] = {}
         self.markers: Dict[str, Marker] = {}
         self.calibration_pairs: List[CalibrationPair] = []
+        self._reference_frame: Optional[str] = None
 
     def parse(self) -> PipelineConfig:
         """Parse configuration file and derive pipeline configuration."""
@@ -178,11 +191,68 @@ class CalibrationConfigParser:
             raw_config = yaml.safe_load(f)
 
         self._parse_devices(raw_config.get("devices", {}))
-        self._parse_markers(raw_config.get("markers", {}))
-        self._parse_calibration_pairs(raw_config.get("calibration_pairs", []))
+
+        markers_config = raw_config.get("markers", {})
+        self._parse_markers(markers_config)
+        self._parse_marker_pairs(markers_config)
+
+        self._reference_frame = raw_config.get("reference_frame")
+        if self._reference_frame is None:
+            # Default to first lidar
+            if self.lidars:
+                self._reference_frame = next(iter(self.lidars))
+            else:
+                raise ValueError(
+                    "reference_frame must be specified when no lidars are defined"
+                )
+
         self._validate()
 
-        return self._derive_pipeline()
+        pipeline = self._derive_pipeline()
+        self._run_planner(pipeline)
+
+        return pipeline
+
+    def _parse_marker_pairs(self, markers_config: dict) -> None:
+        """Extract calibration pairs from marker definitions (new format)."""
+        for marker_name, config in markers_config.items():
+            for pair in config.get("pairs", []):
+                if len(pair) != 2:
+                    raise ValueError(
+                        f"Marker {marker_name}: each pair must have exactly "
+                        f"2 devices, got {len(pair)}: {pair}"
+                    )
+                self.calibration_pairs.append(
+                    CalibrationPair(
+                        device1=pair[0],
+                        device2=pair[1],
+                        marker=marker_name,
+                    )
+                )
+
+    def _run_planner(self, pipeline: PipelineConfig) -> None:
+        """Run the calibration planner and attach results to pipeline."""
+        pairs = [
+            (p.device1, p.device2, p.marker)
+            for p in self.calibration_pairs
+        ]
+        assert self._reference_frame is not None  # validated in parse()
+        plan = compute_plan(
+            pairs=pairs,
+            lidars=set(self.lidars.keys()),
+            cameras=set(self.cameras.keys()),
+            reference_frame=self._reference_frame,
+        )
+
+        # Build device → frame_id map for display
+        device_frame_ids: Dict[str, str] = {}
+        for name, lidar in self.lidars.items():
+            device_frame_ids[name] = lidar.frame_id
+        for name, camera in self.cameras.items():
+            device_frame_ids[name] = camera.frame_id
+
+        pipeline.calibration_plan = plan
+        pipeline.calibration_plan_text = format_plan(plan, device_frame_ids)
 
     def _parse_devices(self, devices_config: dict) -> None:
         """Parse device definitions."""
@@ -223,21 +293,6 @@ class CalibrationConfigParser:
                 bbox_config=bbox_config,
             )
 
-    def _parse_calibration_pairs(self, pairs_config: list) -> None:
-        """Parse calibration pair definitions."""
-        for pair in pairs_config:
-            devices = pair["devices"]
-            if len(devices) != 2:
-                raise ValueError(f"Calibration pair must have exactly 2 devices: {devices}")
-
-            self.calibration_pairs.append(
-                CalibrationPair(
-                    device1=devices[0],
-                    device2=devices[1],
-                    marker=pair["marker"],
-                )
-            )
-
     def _validate(self) -> None:
         """Validate configuration consistency."""
         all_devices = set(self.lidars.keys()) | set(self.cameras.keys())
@@ -275,7 +330,10 @@ class CalibrationConfigParser:
 
     def _derive_pipeline(self) -> PipelineConfig:
         """Derive the complete pipeline configuration from parsed config."""
-        config = PipelineConfig()
+        config = PipelineConfig(
+            lidars=dict(self.lidars),
+            cameras=dict(self.cameras),
+        )
 
         # Collect unique (lidar, marker) pairs for board detectors
         lidar_marker_pairs: Set[Tuple[str, str]] = set()

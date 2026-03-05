@@ -6,19 +6,13 @@ set shell := ["bash", "-uc"]
 
 # Default configuration values
 debug_mode := "true"
-enable_icp_iteration_debug := "true"
-enable_evaluator := "true"
-enable_overlay := "true"
 log_level := "info"
 rviz_enabled := "true"
 # Processing mode: "offline" (RELIABLE QoS, perfect sync) or "realtime" (BEST_EFFORT QoS, no buffering)
 mode := "offline"
-# Derived from mode for legacy XML launch files
-use_best_effort_qos := if mode == "realtime" { "true" } else { "false" }
 use_advanced_solver := "false"
-use_synchronized_input := "false"
-camera_topic := "/sensing/camera/zedxm/right/color/rect/image"
-pointcloud_topic := "/sensing/lidar/concatenated/pointcloud"
+enable_overlay := "true"
+enable_judge := "true"
 
 # Show available commands
 default:
@@ -45,47 +39,57 @@ setup *args:
 clean:
     rm -rf build install log target
 
-# Format code with rustfmt
+# Format code (Rust + Python)
 format:
     cargo +nightly fmt
+    ruff format ros/
 
-# Run formatting and linting checks
+# Run formatting and linting checks (Rust + Python)
 lint:
     cargo +nightly fmt --check
     cargo clippy --all-targets --
+    ruff check ros/
+    ruff format --check ros/
 
-# Run tests with cargo nextest
+# Run all tests (Rust + Python)
 test:
+    #!/usr/bin/env bash
+    set -eo pipefail
     cargo nextest run --cargo-profile test-release --no-fail-fast
+    source install/setup.bash
+    pytest ros/lctk_launch/test/ -v --no-header
 
-# Launch LiDAR-camera calibration
+# Launch LiDAR-camera calibration (config-driven)
 lidar-camera:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
+    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/sample_data.yaml
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch lidar_camera_calibration.launch.xml \
+        lctk_launch calibrate.launch.py \
+        config_file:=$CONFIG \
         debug_mode:={{ debug_mode }} \
-        enable_icp_iteration_debug:={{ enable_icp_iteration_debug }} \
-        enable_evaluator:={{ enable_evaluator }} \
-        enable_overlay:={{ enable_overlay }} \
-        enable_rviz:={{ rviz_enabled }} \
         log_level:={{ log_level }} \
-        use_best_effort_qos:={{ use_best_effort_qos }} \
+        mode:={{ mode }} \
+        enable_rviz:={{ rviz_enabled }} \
         use_advanced_solver:={{ use_advanced_solver }} \
-        use_synchronized_input:={{ use_synchronized_input }} \
-        camera_topic:={{ camera_topic }} \
-        pointcloud_topic:={{ pointcloud_topic }}
+        enable_overlay:={{ enable_overlay }} \
+        enable_judge:={{ enable_judge }}
 
-# Launch two-LiDAR calibration
+# Launch two-LiDAR calibration (config-driven)
 two-lidar:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
+    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/two_lidar.yaml
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch two_lidar_calibration.launch.xml
+        lctk_launch calibrate.launch.py \
+        config_file:=$CONFIG \
+        debug_mode:={{ debug_mode }} \
+        log_level:={{ log_level }} \
+        mode:={{ mode }}
 
 # Launch sample data playback only
 sample-data:
@@ -130,7 +134,10 @@ calibrate config_file:
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
-        enable_rviz:={{ rviz_enabled }}
+        enable_rviz:={{ rviz_enabled }} \
+        use_advanced_solver:={{ use_advanced_solver }} \
+        enable_overlay:={{ enable_overlay }} \
+        enable_judge:={{ enable_judge }}
 
 # Launch interactive advanced solver controller
 advanced-solver-controller:
