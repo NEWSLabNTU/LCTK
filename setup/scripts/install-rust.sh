@@ -40,7 +40,7 @@ fi
 # Install cargo-nextest for testing
 echo "Installing cargo-nextest..."
 if ! command -v cargo-nextest &> /dev/null; then
-    cargo install cargo-nextest
+    cargo install --locked cargo-nextest
 fi
 
 echo "Rust toolchain installation complete."
