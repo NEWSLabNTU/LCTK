@@ -16,7 +16,7 @@ cd "$PROJECT_ROOT"
 # - rclrs: Rust ROS 2 client library (installed via cargo)
 # - ament_python: Not a real rosdep key
 # - calibration_evaluator: Local package
-SKIP_KEYS="rclrs ament_python calibration_evaluator"
+SKIP_KEYS="rclrs ament_python calibration_evaluator ament_cargo"
 
 # Install dependencies from ros/ directory
 if [[ -d "$PROJECT_ROOT/ros" ]]; then
