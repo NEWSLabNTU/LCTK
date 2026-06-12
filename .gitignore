@@ -68,3 +68,6 @@ env/
 
 # Setup markers
 setup/.markers/
+
+# Play log
+/play_log

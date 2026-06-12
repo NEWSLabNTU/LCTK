@@ -516,14 +516,15 @@ impl ArucoLocatorNode {
             anyhow!("process_image called without camera calibration - this is a bug")
         })?;
 
-        // Undistort image - fail if undistortion fails
-        let processed_mat = Self::undistort_image(&mat, calibration)?;
-        log_debug!(LOGGER_NAME, "Image undistorted for ArUco detection");
+        // detect_markers() undistorts internally — pass original distorted image to avoid
+        // double undistortion (which would displace detected corners vs the display image)
+        let detection_result = detector.detect_markers(&mat)?;
+        log_debug!(LOGGER_NAME, "Image processed for ArUco detection");
 
-        // Detect ArUco markers on processed (undistorted) image
-        let detection_result = detector.detect_markers(&processed_mat)?;
+        // Undistort once for overlay display, matching what detect_markers used internally
+        let undistorted_for_display = Self::undistort_image(&mat, calibration)?;
 
-        Ok((detection_result, processed_mat))
+        Ok((detection_result, undistorted_for_display))
     }
 
     /// Convert ROS Image message to OpenCV Mat with proper encoding handling

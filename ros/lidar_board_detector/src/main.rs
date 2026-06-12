@@ -11,7 +11,8 @@ use hollow_board_config::{BoardModel, BoardShape};
 use hollow_board_detector::{
     algo::{fit_plane_ransac, voxel_downsample, BoardIcpIterator},
     detection::{BoardIcpState, BoardModelParams, IcpStatistics, PlaneRansacData},
-    init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
+    config::SensorUpAxis, init_logging, Config as BoardDetectorConfig,
+    Detection as BoardDetection,
     Detector as BoardDetector,
 };
 use nalgebra as na;
@@ -496,21 +497,21 @@ impl CalibrationBoardLocatorNode {
             icp_debug_qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 };
 
             let mut iteration_pose_opts =
-                PublisherOptions::new("/calibration/icp_debug/iteration_pose");
+                PublisherOptions::new("debug/icp/iteration_pose");
             iteration_pose_opts.qos = icp_debug_qos;
 
             let mut board_points_opts =
-                PublisherOptions::new("/calibration/icp_debug/board_points");
+                PublisherOptions::new("debug/icp/board_points");
             board_points_opts.qos = icp_debug_qos;
 
             let mut correspondences_opts =
-                PublisherOptions::new("/calibration/icp_debug/correspondences");
+                PublisherOptions::new("debug/icp/correspondences");
             correspondences_opts.qos = icp_debug_qos;
 
-            let mut loss_opts = PublisherOptions::new("/calibration/icp_debug/loss");
+            let mut loss_opts = PublisherOptions::new("debug/icp/loss");
             loss_opts.qos = icp_debug_qos;
 
-            let mut stats_opts = PublisherOptions::new("/calibration/icp_debug/stats");
+            let mut stats_opts = PublisherOptions::new("debug/icp/stats");
             stats_opts.qos = icp_debug_qos;
 
             Some(IcpDebugPublishers {
@@ -626,7 +627,7 @@ impl CalibrationBoardLocatorNode {
         if enable_icp_iteration_debug {
             log_info!(
                 LOGGER_NAME,
-                "ICP iteration debug topics: /calibration/icp_debug/iteration_pose, /calibration/icp_debug/board_points, /calibration/icp_debug/correspondences, /calibration/icp_debug/loss, /calibration/icp_debug/stats"
+                "ICP iteration debug topics: debug/icp/iteration_pose, debug/icp/board_points, debug/icp/correspondences, debug/icp/loss, debug/icp/stats"
             );
         }
 
@@ -1211,6 +1212,8 @@ impl CalibrationBoardLocatorNode {
             plane_model,
             plane_inlier_points,
             board_width.as_meters(),
+            &config.sensor_up_axis,
+            config.initial_inplane_rotation_deg,
             header,
             board_debug_publishers,
         )?;
@@ -1418,15 +1421,33 @@ impl CalibrationBoardLocatorNode {
                 config.icp_good_fit_threshold,
                 config.icp_min_inlier_points
             );
+            if let Some(debug_pubs) = board_debug_publishers {
+                let stats_msg = StringMsg {
+                    data: format!(
+                        "ICP Stats - Iterations: {}, Initial Loss: inf, Final Loss: {:.6}, Min Loss: {:.6}, Successful: false, Convergence: {}",
+                        state.iteration,
+                        state.avg_loss,
+                        state.avg_loss,
+                        iterator.termination_reason(&state)
+                    ),
+                };
+                let _ = debug_pubs.icp_stats.publish(stats_msg);
+            }
             None
         }
     }
 
-    /// Compute initial board pose using plane normal alignment (from wayside-portal)
+    /// Compute initial board pose using plane normal alignment.
+    ///
+    /// The board's local frame: Z = board normal (toward sensor), Y ≈ world "up" projected
+    /// onto the board plane, X = cross(Y, Z). `sensor_up_axis` selects which world axis
+    /// is "up" — must match the LiDAR's coordinate convention.
     fn compute_initial_pose_from_plane(
         plane_model: &PlaneModel,
         plane_inlier_points: &[na::Point3<f64>],
         board_width_meters: f64,
+        sensor_up_axis: &SensorUpAxis,
+        initial_inplane_rotation_deg: f64,
         _header: &Header,
         _debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Option<na::Isometry3<f64>> {
@@ -1471,37 +1492,59 @@ impl CalibrationBoardLocatorNode {
             plane_normal.z
         );
 
-        // Step 3: Let the xy-plane projections of board normal and plane normal overlap
-        // This decreases the chance of falling into local minimum
+        // Step 3: Build initial rotation from plane geometry.
+        //
+        // Board local frame: Z → plane_normal (toward sensor),
+        //                    Y → world "up" projected onto board plane,
+        //                    X → cross(Y, Z)
+        //
+        // This avoids the hardcoded XY projection that breaks when the sensor's
+        // up axis is not Z (e.g. Seyond LiDAR: X=up, Z=forward).
         let rotation = {
-            // Create lifting rotation: -90° around Y-axis, then -45° around Z-axis
-            let lifting_rotation = na::UnitQuaternion::from_euler_angles(0.0, -FRAC_PI_2, 0.0)
-                * na::UnitQuaternion::from_euler_angles(0.0, 0.0, -std::f64::consts::FRAC_PI_4);
+            let board_z = plane_normal;
+            let up = sensor_up_axis.as_vector();
 
-            let lifted_normal = lifting_rotation * na::Vector3::z_axis();
+            // Project world "up" onto the board plane (remove component along board_z)
+            let up_projected = up - up.dot(&board_z) * board_z;
+
+            let board_y = if up_projected.norm() > 1e-6 {
+                up_projected.normalize()
+            } else {
+                // "up" is parallel to the board normal — pick an arbitrary perpendicular
+                let alt = if board_z.x.abs() < 0.9 {
+                    na::Vector3::x()
+                } else {
+                    na::Vector3::y()
+                };
+                (alt - alt.dot(&board_z) * board_z).normalize()
+            };
+
+            let board_x = board_y.cross(&board_z);
 
             log_debug!(
                 LOGGER_NAME,
-                "Lifted normal: ({:.3}, {:.3}, {:.3})",
-                lifted_normal.x,
-                lifted_normal.y,
-                lifted_normal.z
+                "Board axes — X: ({:.3},{:.3},{:.3}), Y: ({:.3},{:.3},{:.3}), Z: ({:.3},{:.3},{:.3})",
+                board_x.x, board_x.y, board_x.z,
+                board_y.x, board_y.y, board_y.z,
+                board_z.x, board_z.y, board_z.z,
             );
 
-            // Create planar rotation to align lifted normal with plane normal's XY projection
-            let planar_rotation = {
-                let planar_plane_normal = na::Vector3::new(plane_normal.x, plane_normal.y, 0.0);
-                na::UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
-                    .unwrap_or_else(|| {
-                        if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
-                            na::UnitQuaternion::identity()
-                        } else {
-                            na::UnitQuaternion::from_euler_angles(0.0, 0.0, std::f64::consts::PI)
-                        }
-                    })
-            };
+            let base_rotation = na::UnitQuaternion::from_matrix(&na::Matrix3::from_columns(&[
+                board_x, board_y, board_z,
+            ]));
 
-            planar_rotation * lifting_rotation
+            // Apply configurable in-plane rotation offset around the board normal.
+            // Corrects a fixed rotational bias visible in RViz (set via initial_inplane_rotation_deg).
+            if initial_inplane_rotation_deg.abs() > 1e-6 {
+                let angle_rad = initial_inplane_rotation_deg.to_radians();
+                let offset = na::UnitQuaternion::from_axis_angle(
+                    &na::Unit::new_normalize(board_z),
+                    angle_rad,
+                );
+                offset * base_rotation
+            } else {
+                base_rotation
+            }
         };
 
         // Step 4: Create initial pose with board center at inlier centroid

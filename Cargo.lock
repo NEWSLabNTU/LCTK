@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "builtin_interfaces"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "rosidl_runtime_rs",
 ]
@@ -3277,7 +3277,7 @@ dependencies = [
 
 [[package]]
 name = "geometry_msgs"
-version = "4.2.4"
+version = "4.9.1"
 dependencies = [
  "rosidl_runtime_rs",
  "std_msgs",
@@ -9064,7 +9064,7 @@ dependencies = [
 
 [[package]]
 name = "sensor_msgs"
-version = "4.2.4"
+version = "4.9.1"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -9540,7 +9540,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "std_msgs"
-version = "4.2.4"
+version = "4.9.1"
 dependencies = [
  "builtin_interfaces",
  "rosidl_runtime_rs",
@@ -10585,7 +10585,7 @@ dependencies = [
 
 [[package]]
 name = "visualization_msgs"
-version = "4.2.4"
+version = "4.9.1"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -12187,15 +12187,15 @@ dependencies = [
 
 [[patch.unused]]
 name = "action_msgs"
-version = "1.2.1"
+version = "1.2.2"
 
 [[patch.unused]]
 name = "lifecycle_msgs"
-version = "1.2.1"
+version = "1.2.2"
 
 [[patch.unused]]
 name = "rcl_interfaces"
-version = "1.2.1"
+version = "1.2.2"
 
 [[patch.unused]]
 name = "rmw_dds_common"
@@ -12203,11 +12203,11 @@ version = "1.6.0"
 
 [[patch.unused]]
 name = "rosgraph_msgs"
-version = "1.2.1"
+version = "1.2.2"
 
 [[patch.unused]]
 name = "statistics_msgs"
-version = "1.2.1"
+version = "1.2.2"
 
 [[patch.unused]]
 name = "unique_identifier_msgs"

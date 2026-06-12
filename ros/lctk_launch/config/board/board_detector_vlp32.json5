@@ -26,14 +26,14 @@
     // damping factor for pose updates (increased for better convergence)
     "icp_damping_factor": 1.0,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
-    "icp_min_inlier_points": 1000,  // Lowered from 1500 to avoid stopping when points are good
+    "icp_min_inlier_points": 100,  // VLP32 at ~10m yields ~270-300 pts on board; 1000 kills ICP at iter 1
 
     // ========================================
     // Voxel Downsampling (Performance Optimization)
     // ========================================
     // Reduces point cloud density while preserving geometry
     // Recommended for large point clouds (>10K points) to improve ICP speed
-    "voxel_downsample_enabled": true,       // Default: disabled (preserve current behavior)
+    "voxel_downsample_enabled": false,       // Default: disabled (preserve current behavior)
     "voxel_downsample_size": 0.015,           // 3cm voxels for aggressive downsampling
                                               // 0.015m: conservative (60-70% reduction)
                                               // 0.02m: balanced (70-80% reduction)
@@ -61,7 +61,7 @@
     // Controls in-plane board rotation during initial pose estimation.
     // Seyond LiDAR: X=up, Z=forward → "x"
     // Standard ROS sensors (Velodyne, etc.): Z=up → "z"
-    "sensor_up_axis": "x",
+    "sensor_up_axis": "z",
 
     // Extra in-plane rotation applied to initial board pose (degrees, default: 0).
     // Corrects a fixed rotational offset visible in RViz after plane detection.

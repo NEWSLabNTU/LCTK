@@ -64,7 +64,7 @@ lidar-camera:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/sample_data.yaml
+    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/seyond_left.yaml
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
@@ -82,14 +82,17 @@ two-lidar:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/two_lidar.yaml
+    SHARE=$(ros2 pkg prefix lctk_launch --share)
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$CONFIG \
+        config_file:=$SHARE/config/examples/two_lidar.yaml \
+        rviz_config:=$SHARE/config/rviz/two_lidar_calibration.rviz \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }}
+        mode:={{ mode }} \
+        enable_rviz:={{ rviz_enabled }} \
+        use_advanced_solver:={{ use_advanced_solver }}
 
 # Launch sample data playback only
 sample-data:
@@ -145,3 +148,9 @@ advanced-solver-controller:
     set -eo pipefail
     source install/setup.bash
     ros2 run interactive_solver_controller interactive_solver_controller
+
+republish:
+    ros2 run image_transport republish compressed raw \
+      --ros-args \
+      -r in/compressed:=/camera/left/image_raw/compressed \
+      -r out:=/camera/left/image_raw

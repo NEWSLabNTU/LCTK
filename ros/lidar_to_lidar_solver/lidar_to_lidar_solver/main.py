@@ -15,6 +15,7 @@ Where pose1 and pose2 are the board poses as seen from LiDAR 1 and LiDAR 2
 respectively.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -89,6 +90,8 @@ class LidarToLidarSolver(Node):
         # State
         self.current_transform: Optional[TransformStamped] = None
         self.stats = SyncStatistics()
+        self._msg_received = {self.lidar1_topic: 0, self.lidar2_topic: 0}
+        self._last_transform_time: Optional[float] = None
 
         # QoS profile configuration based on mode:
         # - BEST_EFFORT (realtime): Low latency, may drop messages
@@ -126,6 +129,19 @@ class LidarToLidarSolver(Node):
         self.sync.add_subscription(Detection3DArray, self.lidar1_topic)
         self.sync.add_subscription(Detection3DArray, self.lidar2_topic)
 
+        # Parallel count-only subscriptions to track receipt independent of Conflux
+        def make_counter(topic):
+            def cb(msg):
+                self._msg_received[topic] += 1
+                self.get_logger().debug(
+                    f"RX {topic.split('/')[-2]} #{self._msg_received[topic]} "
+                    f"stamp={msg.header.stamp.sec}.{msg.header.stamp.nanosec // 1_000_000:03d}ms"
+                )
+            return cb
+
+        self.create_subscription(Detection3DArray, self.lidar1_topic, make_counter(self.lidar1_topic), qos)
+        self.create_subscription(Detection3DArray, self.lidar2_topic, make_counter(self.lidar2_topic), qos)
+
         # Register synchronization callback
         @self.sync.on_synchronized
         def sync_callback(group: SyncGroup):
@@ -146,6 +162,9 @@ class LidarToLidarSolver(Node):
                 1.0 / publish_rate_hz, self.publish_timer_callback
             )
 
+        # Periodic debug stats (every 10s)
+        self.create_timer(10.0, self._log_stats)
+
         # Log configuration
         self.get_logger().info(f"LiDAR 1 topic: {self.lidar1_topic}")
         self.get_logger().info(f"LiDAR 2 topic: {self.lidar2_topic}")
@@ -154,11 +173,74 @@ class LidarToLidarSolver(Node):
         self.get_logger().info(f"Same face mode: {self.same_face_mode}")
         self.get_logger().info("LidarToLidarSolver initialized")
 
+    def _log_stats(self):
+        """Periodic diagnostics: receipt counts, Conflux queue state, transform staleness."""
+
+        now_wall = time.monotonic()
+        lidar1_short = self.lidar1_topic.split('/')[-2]
+        lidar2_short = self.lidar2_topic.split('/')[-2]
+        rx1 = self._msg_received[self.lidar1_topic]
+        rx2 = self._msg_received[self.lidar2_topic]
+
+        try:
+            s = self.sync.statistics
+            total_rx = s.total_received()
+            total_rej = s.total_rejected()
+            groups = s.groups_synchronized
+            rej_pct = s.rejection_rate() * 100.0
+            per_topic = []
+            for t in s.messages_received:
+                short = t.split('/')[-2] if '/' in t else t
+                per_topic.append(
+                    f"{short}: rx={s.messages_received[t]} rej={s.messages_rejected[t]}"
+                )
+            conflux_str = (
+                f"Conflux: total_rx={total_rx} rej={total_rej} ({rej_pct:.1f}%) groups={groups} | "
+                + " | ".join(per_topic)
+            )
+        except Exception as e:
+            conflux_str = f"Conflux stats unavailable: {e}"
+
+        stale_str = ""
+        if self._last_transform_time is not None:
+            gap = now_wall - self._last_transform_time
+            stale_str = f" | last_transform={gap:.1f}s ago"
+            if gap > 5.0:
+                stale_str += " *** STALE ***"
+        else:
+            stale_str = " | no transform yet"
+
+        self.get_logger().info(
+            f"[STATS] node_rx: {lidar1_short}={rx1} {lidar2_short}={rx2}"
+            f" | pairs={self.stats.synced_pairs}{stale_str}"
+        )
+        self.get_logger().info(f"[STATS] {conflux_str}")
+
     def _handle_sync_group(self, group: SyncGroup):
         """Called when synchronized detection pairs are received from Conflux."""
-        # Extract messages from synchronized group
-        msg1: Detection3DArray = group[self.lidar1_topic]
-        msg2: Detection3DArray = group[self.lidar2_topic]
+
+        available = group.topics()
+        self.get_logger().info(
+            f"Sync group formed: topics={available} "
+            f"node_rx=[{self.lidar1_topic.split('/')[-2]}={self._msg_received[self.lidar1_topic]}, "
+            f"{self.lidar2_topic.split('/')[-2]}={self._msg_received[self.lidar2_topic]}]"
+        )
+
+        # Extract messages — use exact topic key from group to handle any name resolution
+        msg1 = group.get(self.lidar1_topic)
+        msg2 = group.get(self.lidar2_topic)
+        if msg1 is None or msg2 is None:
+            # Fallback: match by substring
+            for t in available:
+                if msg1 is None and self.lidar1_topic.strip('/') in t.strip('/'):
+                    msg1 = group[t]
+                elif msg2 is None and self.lidar2_topic.strip('/') in t.strip('/'):
+                    msg2 = group[t]
+        if msg1 is None or msg2 is None:
+            self.get_logger().error(f"Could not map topics. group={available}")
+            return
+        msg1: Detection3DArray = msg1
+        msg2: Detection3DArray = msg2
 
         # Check for valid detections
         if not msg1.detections or not msg2.detections:
@@ -173,7 +255,7 @@ class LidarToLidarSolver(Node):
         age1_ms = (now - msg1_time).nanoseconds / 1e6
         age2_ms = (now - msg2_time).nanoseconds / 1e6
 
-        if age1_ms > self.max_message_age_ms or age2_ms > self.max_message_age_ms:
+        if self.max_message_age_ms > 0 and (age1_ms > self.max_message_age_ms or age2_ms > self.max_message_age_ms):
             self.stats.dropped_stale += 1
             self.get_logger().debug(
                 f"Dropped stale messages: age1={age1_ms:.1f}ms, age2={age2_ms:.1f}ms"
@@ -206,8 +288,10 @@ class LidarToLidarSolver(Node):
         transform_stamped.transform = transform
 
         # Update state
+
         self.current_transform = transform_stamped
         self.stats.synced_pairs += 1
+        self._last_transform_time = time.monotonic()
 
         # Store for logging
         t = transform.translation
@@ -231,7 +315,9 @@ class LidarToLidarSolver(Node):
             f"Calibration #{self.stats.synced_pairs}: "
             f"t=[{t.x:.4f}, {t.y:.4f}, {t.z:.4f}] "
             f"rpy=[{rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}] deg "
-            f"(dt={self.stats.last_timestamp_diff_ms:.1f}ms)"
+            f"dt={self.stats.last_timestamp_diff_ms:.0f}ms "
+            f"stamps: {self.lidar1_topic.split('/')[-2]}={msg1.header.stamp.sec}.{msg1.header.stamp.nanosec // 1_000_000:03d}s "
+            f"{self.lidar2_topic.split('/')[-2]}={msg2.header.stamp.sec}.{msg2.header.stamp.nanosec // 1_000_000:03d}s"
         )
 
     def compute_transform(self, pose1, pose2) -> Optional[Transform]:
