@@ -238,7 +238,7 @@ class EducationalOverlayNode(Node):
         # Subscribe to plane inliers from board detector for visualization
         self.inlier_pointcloud_subscription = self.create_subscription(
             PointCloud2,
-            "/calibration/lidar_board_detector/debug/plane_inliers",
+            "plane_inliers",
             self.on_inlier_pointcloud_received,
             qos,
         )
@@ -260,7 +260,7 @@ class EducationalOverlayNode(Node):
         # Educational highlight: Real-time calibration from solver instead of static file
         self.extrinsic_subscription = self.create_subscription(
             TransformStamped,
-            "/calibration/extrinsic_solver/extrinsic_transform",  # Live calibration output
+            "extrinsic_transform",
             self.on_extrinsic_received,
             qos,
         )

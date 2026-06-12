@@ -261,11 +261,12 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "lidar2_detections_topic": solver.lidar2_detections_topic,
                         "lidar1_frame": solver.lidar1_frame,
                         "lidar2_frame": solver.lidar2_frame,
-                        "sync_tolerance_ms": sync_tolerance_ms,
-                        "sync_queue_size": sync_queue_size,
-                        "sync_drop_policy": sync_drop_policy,
+                        "sync_tolerance_ms": 0.0,
+                        "sync_queue_size": 100,
+                        "sync_drop_policy": "drop_oldest",
                         "publish_tf": True,
                         "use_best_effort_qos": use_best_effort_qos,
+                        "max_message_age_ms": 0.0,
                     }
                 ],
             )
@@ -325,6 +326,8 @@ def generate_nodes(context, *args, **kwargs) -> list:
                     remappings=[
                         ("image", solver.camera_topic),
                         ("pointcloud", lidar.pointcloud_topic),
+                        ("plane_inliers", f"/calibration/{solver.lidar_name}_{solver.marker_name}/debug/plane_inliers"),
+                        ("extrinsic_transform", solver.output_topic),
                     ],
                 )
             )
@@ -387,6 +390,13 @@ def generate_launch_description() -> LaunchDescription:
                 description="Launch RViz for calibration visualization",
             ),
             DeclareLaunchArgument(
+                "rviz_config",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("lctk_launch"), "config", "rviz", "calibration.rviz"]
+                ),
+                description="Path to RViz config file. Override for different setups, e.g. two_lidar_calibration.rviz",
+            ),
+            DeclareLaunchArgument(
                 "use_advanced_solver",
                 default_value="false",
                 description="Use advanced multi-pose solver (requires manual detection buffering) vs standard solver (auto-publishes)",
@@ -410,6 +420,7 @@ def generate_launch_description() -> LaunchDescription:
                         [FindPackageShare("lctk_launch"), "launch", "rviz.launch.xml"]
                     )
                 ),
+                launch_arguments={"rviz_config": LaunchConfiguration("rviz_config")}.items(),
                 condition=IfCondition(LaunchConfiguration("enable_rviz")),
             ),
         ]

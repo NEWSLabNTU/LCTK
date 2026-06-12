@@ -1,0 +1,70 @@
+{
+    // ========================================
+    // RANSAC Plane Fitting Parameters
+    // ========================================
+    // max number of RANSAC steps
+    "plane_ransac_max_iterations": 2000,
+    // the loss threshold that a point is considered an inlier (5cm - reasonable for calibration)
+    "plane_ransac_inlier_threshold": 0.05,
+    // skip RANSAC and use all bbox-filtered points directly for ICP (for testing/debugging)
+    "skip_ransac": true,
+
+    // ========================================
+    // ICP Algorithm Parameters
+    // ========================================
+    // max number of ICP iterations (increased for observing convergence behavior)
+    "max_icp_iterations": 100,
+    // pose weight is amount of pose change per iteration
+    // the ICP terminates if pose weight is below this threshold several times
+    "icp_pose_weight_threshold": 1e-4,
+    // the maximum accepted ICP loss (balanced for stability)
+    "icp_rejection_threshold": 0.005,  // early-stop when loss < this; keep low so ICP runs fully
+    // good fit threshold for convergence detection (tightened for accuracy)
+    "icp_good_fit_threshold": 0.03,  // accept detection when final loss < this
+    // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
+    "icp_outlier_threshold": 0.050,  // Effectively disabled - keep all correspondences
+    // damping factor for pose updates (increased for better convergence)
+    "icp_damping_factor": 1.0,  // Increased from 0.35 to 0.6
+    // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
+    "icp_min_inlier_points": 100,  // VLP32 at ~10m yields ~270-300 pts on board; 1000 kills ICP at iter 1
+
+    // ========================================
+    // Voxel Downsampling (Performance Optimization)
+    // ========================================
+    // Reduces point cloud density while preserving geometry
+    // Recommended for large point clouds (>10K points) to improve ICP speed
+    "voxel_downsample_enabled": false,       // Default: disabled (preserve current behavior)
+    "voxel_downsample_size": 0.015,           // 3cm voxels for aggressive downsampling
+                                              // 0.015m: conservative (60-70% reduction)
+                                              // 0.02m: balanced (70-80% reduction)
+                                              // 0.03m: aggressive (85-90% reduction)
+    "voxel_downsample_use_centroid": false,  // Use first point in voxel (preserves plane geometry)
+                                              // true: better edge preservation, but moves points off plane
+                                              // false: faster, preserves RANSAC plane inlier positions
+    "voxel_parallel_threshold": 50000,       // Use parallel for >50K points (requires 'parallel' feature)
+
+    // ========================================
+    // Board Geometry Parameters
+    // ========================================
+    // the length of border margin
+    "board_width": "1000mm",    // mm
+    // the radius of circle holes
+    "hole_radius": "150mm",     // mm
+    // suppose the center of board is (0, 0)
+    // the center of hole will be at (+/- shift, +/- shift)
+    "hole_center_shift": "200mm", // mm
+
+    // ========================================
+    // Sensor Coordinate Convention
+    // ========================================
+    // Axis pointing "up" in the sensor frame: "x", "y", or "z" (default: "z").
+    // Controls in-plane board rotation during initial pose estimation.
+    // Seyond LiDAR: X=up, Z=forward → "x"
+    // Standard ROS sensors (Velodyne, etc.): Z=up → "z"
+    "sensor_up_axis": "z",
+
+    // Extra in-plane rotation applied to initial board pose (degrees, default: 0).
+    // Corrects a fixed rotational offset visible in RViz after plane detection.
+    // Positive = CCW when viewed from sensor. Try 45, -45, 90, -90 to fix alignment.
+    "initial_inplane_rotation_deg": 45.0
+}

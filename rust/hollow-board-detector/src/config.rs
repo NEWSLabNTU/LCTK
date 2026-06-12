@@ -1,5 +1,29 @@
 use hollow_board_config::BoardShape;
+use nalgebra as na;
 use serde::{Deserialize, Serialize};
+
+/// Axis that points "up" in the sensor's coordinate frame.
+/// Used to resolve the board's in-plane rotation during initial pose estimation.
+/// Default is Z (standard ROS convention). Set to X for sensors like Seyond
+/// where X is up and Z is forward.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SensorUpAxis {
+    #[default]
+    Z,
+    X,
+    Y,
+}
+
+impl SensorUpAxis {
+    pub fn as_vector(&self) -> na::Vector3<f64> {
+        match self {
+            SensorUpAxis::X => na::Vector3::x(),
+            SensorUpAxis::Y => na::Vector3::y(),
+            SensorUpAxis::Z => na::Vector3::z(),
+        }
+    }
+}
 
 fn default_voxel_size() -> f64 {
     0.02
@@ -50,6 +74,18 @@ pub struct Config {
     /// Only used if 'parallel' feature is enabled
     #[serde(default = "default_parallel_threshold")]
     pub voxel_parallel_threshold: usize,
+
+    /// Axis that points "up" in the sensor frame (default: z).
+    /// Controls how the board's in-plane rotation is estimated from the plane normal.
+    /// Set to "x" for Seyond LiDAR (X=up, Z=forward).
+    #[serde(default)]
+    pub sensor_up_axis: SensorUpAxis,
+
+    /// Extra rotation around the board normal applied to the initial pose (degrees, default: 0).
+    /// Use this to correct a fixed in-plane rotational offset visible in RViz.
+    /// Positive = counter-clockwise when viewed from sensor. Try ±45 or ±90.
+    #[serde(default)]
+    pub initial_inplane_rotation_deg: f64,
 
     #[serde(flatten)]
     pub board_shape: BoardShape,

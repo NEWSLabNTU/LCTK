@@ -70,6 +70,8 @@ class LidarDevice:
     name: str
     pointcloud_topic: str
     frame_id: str
+    board_config_override: Optional[str] = None  # Per-lidar board_config, overrides marker's
+    bbox_config_override: Optional[str] = None   # Per-lidar bbox_config, overrides marker's
 
 
 @dataclass
@@ -276,10 +278,18 @@ class CalibrationConfigParser:
         """Parse device definitions."""
         # Parse LiDARs
         for name, config in devices_config.get("lidars", {}).items():
+            board_config_override = config.get("board_config")
+            if board_config_override:
+                board_config_override = resolve_package_path(board_config_override)
+            bbox_config_override = config.get("bbox_config")
+            if bbox_config_override:
+                bbox_config_override = resolve_package_path(bbox_config_override)
             self.lidars[name] = LidarDevice(
                 name=name,
                 pointcloud_topic=config["pointcloud_topic"],
                 frame_id=config["frame_id"],
+                board_config_override=board_config_override,
+                bbox_config_override=bbox_config_override,
             )
 
         # Parse cameras
@@ -397,6 +407,10 @@ class CalibrationConfigParser:
             namespace = f"calibration/{lidar_name}_{marker_name}"
             output_topic = f"/{namespace}/calibration_board_detections"
 
+            # Per-lidar overrides take precedence over marker-level configs
+            board_config = lidar.board_config_override or marker.board_config
+            bbox_config = lidar.bbox_config_override or marker.bbox_config
+
             config.lidar_board_detectors.append(
                 LidarBoardDetectorNode(
                     node_name=node_name,
@@ -404,9 +418,9 @@ class CalibrationConfigParser:
                     lidar_name=lidar_name,
                     marker_name=marker_name,
                     pointcloud_topic=lidar.pointcloud_topic,
-                    board_config=marker.board_config,
+                    board_config=board_config,
                     aruco_config=marker.aruco_config,
-                    bbox_config=marker.bbox_config,
+                    bbox_config=bbox_config,
                     output_topic=output_topic,
                 )
             )
