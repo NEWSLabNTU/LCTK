@@ -256,9 +256,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "lidar2_detections_topic": solver.lidar2_detections_topic,
                         "lidar1_frame": solver.lidar1_frame,
                         "lidar2_frame": solver.lidar2_frame,
+                        # Manual nearest-timestamp sync (no Conflux). 0 = accept any
+                        # nearest lidar1 match; raise to bound max pairing dt if needed.
                         "sync_tolerance_ms": 0.0,
-                        "sync_queue_size": 100,
-                        "sync_drop_policy": "drop_oldest",
+                        "sync_queue_size": 20,
                         "publish_tf": True,
                         "use_best_effort_qos": use_best_effort_qos,
                         "max_message_age_ms": 0.0,

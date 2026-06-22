@@ -293,6 +293,9 @@ class EducationalOverlayNode(Node):
 
         # Convert ROS transform to OpenCV rvec and tvec for projectPoints
         self.extrinsic_rvec, self.extrinsic_tvec = transform_to_rvec_tvec(msg)
+        # self.extrinsic_rvec = np.array([-0.506223279, -0.50280546, -1.6])
+        # self.extrinsic_tvec = np.array([1.93833247, -1.33525032,  0.77690338])
+        
 
         # Educational logging (every 10th message to avoid spam)
         if self.message_counts["extrinsics"] % 10 == 0:
