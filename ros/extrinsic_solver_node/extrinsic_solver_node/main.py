@@ -215,7 +215,7 @@ class EducationalExtrinsicSolver(Node):
         self.get_logger().info(
             f"Educational Extrinsic Solver initialized\n"
             f"Educational Mode: Simplified PnP calibration using OpenCV\n"
-            f"Using conflux_py for time-synchronized detection pairs\n"
+            f"Using manual nearest-timestamp matching for detection pairs\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
