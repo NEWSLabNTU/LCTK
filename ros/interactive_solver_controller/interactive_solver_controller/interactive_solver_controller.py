@@ -9,6 +9,7 @@ Author: LCTK Team
 License: MIT
 """
 
+import argparse
 import math
 import os
 import sys
@@ -29,6 +30,7 @@ from lctk_interfaces.srv import (
     ResetTransform,
 )
 from rclpy.node import Node
+from rclpy.utilities import remove_ros_args
 from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
@@ -87,12 +89,37 @@ class DisplayState:
 class InteractiveSolverController(Node):
     """Interactive TUI controller using Rich."""
 
-    SERVICE_BASE = "/calibration/advanced_extrinsic_solver/advanced_extrinsic_solver"
+    # Service path layout: <namespace>/advanced_extrinsic_solver/<service>
+    NODE_NAME = "advanced_extrinsic_solver"
+    DISCOVERY_SUFFIX = "/get_pose_info"  # unique service used to locate a solver
 
     def __init__(self):
         super().__init__("interactive_solver_controller")
         self.state = DisplayState()
         self.default_save_path = os.path.expanduser("~/detections.json")
+        self.SERVICE_BASE = None
+
+    def discover_service_bases(self, timeout: float = 5.0):
+        """Scan the ROS graph for advanced_extrinsic_solver service bases.
+
+        Returns a sorted list of service-base prefixes (one per running solver),
+        e.g. "/calibration/seyond_lidar_left_camera/advanced_extrinsic_solver".
+        """
+        match_suffix = f"/{self.NODE_NAME}{self.DISCOVERY_SUFFIX}"
+        deadline = time.time() + timeout
+        found = set()
+        while time.time() < deadline:
+            for name, types in self.get_service_names_and_types():
+                if name.endswith(match_suffix) and any("GetPoseInfo" in t for t in types):
+                    found.add(name[: -len(self.DISCOVERY_SUFFIX)])
+            if found:
+                break
+            rclpy.spin_once(self, timeout_sec=0.2)
+        return sorted(found)
+
+    def configure(self, service_base: str):
+        """Bind this controller to a discovered/specified service base."""
+        self.SERVICE_BASE = service_base
         self._create_service_clients()
 
     def _create_service_clients(self):
@@ -450,18 +477,80 @@ def read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
+def _resolve_service_base(node, console, override):
+    """Determine the solver service base via CLI override or graph discovery.
+
+    Returns the service-base string, or None if the user should abort.
+    """
+    if override:
+        base = override.rstrip("/")
+        # Accept either a namespace or a full service base.
+        if not base.endswith(f"/{node.NODE_NAME}"):
+            base = f"{base}/{node.NODE_NAME}"
+        console.print(f"Using service base: [cyan]{base}[/]")
+        return base
+
+    console.print("Discovering solver services...", end=" ")
+    bases = node.discover_service_bases(timeout=5.0)
+    if not bases:
+        console.print("[red]none found[/]")
+        console.print(
+            "[red]No advanced_extrinsic_solver services on the ROS graph.[/]\n"
+            "[dim]Is the solver running with use_advanced_solver=true?[/]"
+        )
+        return None
+    if len(bases) == 1:
+        console.print(f"[green]found[/] [cyan]{bases[0]}[/]")
+        return bases[0]
+
+    console.print(f"[green]found {len(bases)}[/]")
+    console.print("[yellow]Multiple solvers found:[/]")
+    for i, b in enumerate(bases):
+        console.print(f"  [{i}] {b}")
+    while True:
+        choice = console.input("Select index ([dim]q to quit[/]): ").strip()
+        if choice.lower() == "q":
+            return None
+        if choice.isdigit() and int(choice) < len(bases):
+            return bases[int(choice)]
+        console.print("[red]Invalid selection[/]")
+
+
 def main(args=None):
     """Main entry point."""
     rclpy.init(args=args)
+
+    parser = argparse.ArgumentParser(prog="interactive_solver_controller")
+    parser.add_argument(
+        "--service-base",
+        "--namespace",
+        dest="service_base",
+        default=None,
+        help="Solver namespace or full service base. Default: auto-discover from graph.",
+    )
+    cli_args = remove_ros_args(args=sys.argv)[1:]
+    parsed, _ = parser.parse_known_args(cli_args)
+
     console = Console()
     node = InteractiveSolverController()
+
+    service_base = _resolve_service_base(node, console, parsed.service_base)
+    if service_base is None:
+        node.destroy_node()
+        rclpy.shutdown()
+        return
+
+    node.configure(service_base)
 
     console.print("[bold cyan]Extrinsic Calibration Controller[/]")
     console.print("Connecting to services...", end=" ")
 
     if not node.wait_for_services(timeout=10.0):
         console.print("[red]FAILED[/]")
-        console.print("[red]Could not connect to solver services.[/]")
+        console.print(
+            f"[red]Could not connect to solver services at {service_base}.[/]"
+        )
+        node.destroy_node()
         rclpy.shutdown()
         return
 
