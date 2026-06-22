@@ -24,8 +24,9 @@
 | `ros/lctk_launch/config/board/bbox_2_lidar_seyond.json5` | **Exists** | Bbox for Seyond frame: center `[-0.7, -0.7, 7.6]`, size `[1.8, 2.0, 1.0]` |
 | `ros/lctk_launch/config/rviz/two_lidar_calibration.rviz` | **Exists** | RViz config; fixed frame = `velodyne` |
 | `ros/lidar_board_detector/src/main.rs` | **Fixed** | ICP debug topics changed from absolute `/calibration/icp_debug/*` to relative `debug/icp/*` (namespace-scoped); `debug/icp_stats` now also publishes on ICP failure |
-| `ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py` | **Fixed** | (1) Stale check guarded by `max_message_age_ms > 0`; (2) `_handle_sync_group` uses `group.get()` + substring fallback — resolved Conflux KeyError where SyncGroup keys don't match literal topic strings |
-| `ros/lctk_launch/launch/calibrate.launch.py` | **Temp workaround** | Lidar-lidar solver hardcoded to `sync_tolerance_ms=0` (infinite), `sync_queue_size=100`, `max_message_age_ms=0` — bypasses rosbag QoS+timestamp issues. Needs proper solution (rosbag RELIABLE override or mode-aware solver sync params) |
+| `ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py` | **Rewritten** | Replaced Conflux with manual nearest-timestamp matching (`deque` of lidar1, pair each lidar2 to closest). Fixes FIFO-drift + buffer-freeze + branch-starvation. Added [STATS] diagnostics + per-stream rx counters |
+| `ros/lidar_to_lidar_solver/package.xml` | **Fixed** | Removed `conflux_py` dependency (no longer used) |
+| `ros/lctk_launch/launch/calibrate.launch.py` | **Fixed** | Lidar-lidar solver params: `sync_tolerance_ms=0` (accept nearest), `sync_queue_size=20`, `max_message_age_ms=0`. Dropped obsolete `sync_drop_policy` |
 
 ---
 
@@ -208,32 +209,43 @@ Find board position from "Input points" in RViz (read coordinates with Publish P
 
 ---
 
-## Root Cause Analysis — Conflux Groups Freeze (Shared Buffer Starvation)
+## Root Cause Analysis — Conflux Mismatched Pairing + Freeze (RESOLVED)
 
-**Symptom:** Solver publishes 6-10 transforms at startup, then `groups` counter freezes forever. Rejection rate climbs to >90% and keeps growing. Both streams still actively receiving.
+**Symptom:** Solver publishes 6-10 transforms at startup, then `groups` counter freezes forever. Rejection rate climbs to >97%. Both streams still receiving (`node_rx` keeps climbing).
 
-**Diagnosis from [STATS] log:**
-- `node_rx` (our own counter subscription) confirms both streams receive continuously: VLP32 ~6 Hz, Seyond ~1 Hz
-- After the initial burst of groups, Conflux in-buffer math shows: `front_lidar in-buffer = rx - rej - consumed = 0` while `top_lidar in-buffer ≈ 27`
-- New Seyond messages get "rejected" even though the Seyond buffer should be empty
+**Verified from Conflux source** (`ros/conflux/crates/conflux-core/src/{sync,state,buffer}.rs`):
 
-**Root cause:** Conflux `buffer_size=100` is a **shared total** across ALL streams, not 100 per stream. VLP32 at 6 Hz fills the shared 100 slots in ~16s. Once full:
-- `reject_new`: new Seyond messages rejected (no room in shared buffer)
-- `drop_oldest`: new Seyond messages cause VLP32 eviction — Seyond briefly enters then immediately gets evicted by the next VLP32 flood
-- Either way: Seyond never accumulates in buffer → no groups form
+`try_match()` (state.rs:130) pops the **front (oldest)** of every buffer — FIFO oldest-to-oldest pairing. With infinite window (`window_size=None`) it skips ALL timestamp-distance checks (state.rs:157): it pairs buffer1-oldest with buffer2-oldest **no matter how far apart in time**.
 
-**What Conflux is:** A multi-stream timestamp synchronizer. Waits until all subscribed topics have a message within `window_size_ms`, fires a callback with the matched group. Works well when stream rates are similar. Fails when one stream (VLP32 6 Hz) is 6× faster than the other (Seyond 1 Hz) and the buffer is shared.
-
-**Fix (pending):** Replace Conflux in `lidar_to_lidar_solver` with manual nearest-timestamp matching:
-- `deque(maxlen=N)` for lidar1 (VLP32) messages
-- On each lidar2 (Seyond) arrival: find nearest lidar1 by timestamp, compute transform
-- Eliminates shared-buffer issue entirely; always pairs latest Seyond with nearest VLP32
-
-**What to log (new [STATS] format after fix):**
+**Proof from the `Calibration #` log stamps:**
 ```
-[STATS] node_rx: top_lidar_calibration_board=123(buf=20) front_lidar_calibration_board=22(buf=0)
-        | pairs=22 no_match=0 | last_transform=0.9s ago
+#1: top_lidar=...403.147s front_lidar=...403.999s dt=852ms
+#6: top_lidar=...403.947s front_lidar=...408.399s dt=4452ms
 ```
+Over 6 matches: VLP32 stamp advanced +0.8s, Seyond +4.4s, `dt` grew 852ms→4452ms. The pairs drift apart — every transform is computed from mismatched board positions.
+
+**Three compounding bugs:**
+1. **FIFO matching, not nearest-timestamp.** Correct for equal-rate streams; broken for 6:1 (VLP32 6 Hz vs Seyond 1 Hz). Pairing dt diverges unboundedly.
+2. **`reject_new` freezes the fast buffer.** VLP32 fills buf=100 in ~16s, then `push()` hits `BufferFull→RejectNew` (state.rs:311) for every new VLP32. The buffer permanently holds a stale 16s window; current detections all rejected → rejection rate climbs to >97%.
+3. **Branch-1 starvation → freeze.** The poll loop (sync.rs:118) only calls `try_match` when `is_full` (ALL buffers full) or `is_ready` (ALL buffers ≥2). VLP32 is full but Seyond never fills, so `is_full` never true. Seyond at 1 Hz can't hold ≥2 (match drops it to 1, refill takes 1s). When Seyond <2, the loop parks in branch 1, which for a live (non-depleting) stream only pushes, never matches (sync.rs:128-177). Groups freeze.
+
+`drop_oldest` did NOT help — it evicts a buffer's own oldest to admit its own new; doesn't fix cross-stream rate mismatch or branch-1 starvation.
+
+**What Conflux is:** A multi-stream timestamp synchronizer (used by all LCTK solver nodes). Buffers one queue per topic, waits until all topics have a message within `window_size_ms`, fires `on_synchronized(group)`. Works for similar-rate, time-aligned streams (lidar-camera). Violated by two LiDARs at 6:1 with visibility-gated detections that don't even fire at the same wall-time.
+
+**Fix (APPLIED):** Replaced Conflux in `lidar_to_lidar_solver` with manual nearest-timestamp matching:
+- `deque(maxlen=20)` buffers lidar1 (fast, VLP32) detections
+- Each lidar2 (Seyond) detection triggers `min(buf, key=|stamp - t2|)` → nearest VLP32
+- `sync_tolerance_ms` (0 = accept any nearest; >0 = bound max pairing dt)
+- No shared buffer, no FIFO drift, no branch starvation
+- Removed `conflux_py` from `package.xml`
+
+**New [STATS] format:**
+```
+[STATS] node_rx: top_lidar_calibration_board=123(buf=20) front_lidar_calibration_board=22
+        | pairs=22 no_match=0 last_dt=40ms | last_transform=0.9s ago
+```
+After fix, expect `last_dt` to stay small (~tens of ms, matching the nearest VLP32 to each Seyond) instead of growing to seconds, and `pairs` to climb continuously at the Seyond rate (~1 Hz).
 
 ---
 
@@ -275,8 +287,9 @@ This is the same class of bug that was diagnosed and fixed for the Seyond during
 | Seyond detections empty | Bbox at `[-0.7, -0.7, 7.6]` doesn't cover board | Widen bbox; read actual board position from input points |
 | VLP32 ICP stops at iteration 1 | `icp_min_inlier_points: 1000` too high; VLP32 at ~10m yields ~270-300 pts | **Fixed**: lowered to 100 in `board_detector_vlp32.json5` |
 | `debug/all_points` silent (node alive) | QoS mismatch: rosbag BEST_EFFORT vs node RELIABLE | Use `mode=realtime` |
-| Solver node disappears from node list | KeyError crash in `_handle_sync_group` on first sync group | **Fixed**: `group.get()` + substring fallback in `_handle_sync_group` |
-| Solver not publishing (no crash) | Sync tolerance 50ms too tight for mismatched detection rates | **Fixed**: launch hardcoded to infinite window |
+| Transform publishes then freezes; rejection >97% | Conflux FIFO oldest-to-oldest pairing + reject_new buffer freeze + branch-1 starvation under 6:1 rate mismatch | **Fixed**: replaced Conflux with manual nearest-timestamp matching |
+| Pairing `dt` grows to seconds | Conflux infinite-window pairs oldest-of-each regardless of timestamp distance | **Fixed**: nearest-timestamp matching keeps dt small |
+| Solver not publishing (no crash) | Sync tolerance 50ms too tight for mismatched detection rates | **Fixed**: manual sync, `sync_tolerance_ms=0` accepts nearest |
 | Transform looks wrong | Board detected but ICP poor fit | Check `icp_good_fit_threshold` in vlp32 config; inspect RViz board vs points alignment |
 
 ---
