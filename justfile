@@ -171,15 +171,14 @@ test:
     python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
-lidar-camera:
+lidar-camera CONFIG='seyond_left.yaml':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/seyond_left.yaml
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$CONFIG \
+        config_file:=$(ros2 pkg prefix lctk_launch --share)/config/examples/{{ CONFIG }} \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
@@ -262,8 +261,8 @@ advanced-solver-controller:
     source install/setup.bash
     ros2 run interactive_solver_controller interactive_solver_controller
 
-republish:
+republish which:
     ros2 run image_transport republish compressed raw \
       --ros-args \
-      -r in/compressed:=/camera/left/image_raw/compressed \
-      -r out:=/camera/left/image_raw
+      -r in/compressed:=/camera/{{ which }}/image_raw/compressed \
+      -r out:=/camera/{{ which }}/image_raw

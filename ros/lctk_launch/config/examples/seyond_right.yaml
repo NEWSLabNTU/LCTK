@@ -1,0 +1,37 @@
+# LCTK Calibration Configuration — Seyond LiDAR + Left Camera
+#
+# Rosbag topics:
+#   /iv_points                          (sensor_msgs/PointCloud2, frame: seyond, ~10Hz)
+#   /camera/left/image_raw/compressed   (sensor_msgs/CompressedImage, frame: camera_left, ~30Hz)
+#   /camera/left/camera_info            (sensor_msgs/CameraInfo, frame: camera_left)
+#
+# NOTE: image topic is CompressedImage. If aruco_locator_node requires raw Image,
+# add a decompress step:
+#   ros2 run image_transport republish compressed raw \
+#       --ros-args -r in/compressed:=/camera/left/image_raw/compressed \
+#                  -r out:=/camera/left/image_raw
+# Then change image_topic below to /camera/left/image_raw
+#
+# Usage:
+#   ros2 launch lctk_launch calibrate.launch.py \
+#       config_file:=$(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/seyond_left.yaml
+
+devices:
+  lidars:
+    seyond_lidar:
+      pointcloud_topic: /iv_points
+      frame_id: seyond
+
+  cameras:
+    left_camera:
+      image_topic: /camera/right/image_raw
+      frame_id: camera_right
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
+    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    pairs:
+      - [seyond_lidar, left_camera]
