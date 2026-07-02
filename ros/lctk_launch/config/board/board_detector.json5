@@ -13,7 +13,7 @@
     // ICP Algorithm Parameters
     // ========================================
     // max number of ICP iterations (increased for observing convergence behavior)
-    "max_icp_iterations": 100,
+    "max_icp_iterations": 50,
     // pose weight is amount of pose change per iteration
     // the ICP terminates if pose weight is below this threshold several times
     "icp_pose_weight_threshold": 1e-4,
@@ -24,9 +24,9 @@
     // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
     "icp_outlier_threshold": 0.050,  // Effectively disabled - keep all correspondences
     // damping factor for pose updates (increased for better convergence)
-    "icp_damping_factor": 1.0,  // Increased from 0.35 to 0.6
+    "icp_damping_factor": 0.5,  // Increased from 0.35 to 0.6
     // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
-    "icp_min_inlier_points": 1000,  // Lowered from 1500 to avoid stopping when points are good
+    "icp_min_inlier_points": 500,  // Lowered from 1500 to avoid stopping when points are good
 
     // ========================================
     // Voxel Downsampling (Performance Optimization)
