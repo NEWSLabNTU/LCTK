@@ -19,7 +19,7 @@
 devices:
   lidars:
     seyond_lidar:
-      pointcloud_topic: /iv_points
+      pointcloud_topic: /lidar/falcon/iv_points
       frame_id: seyond
 
   cameras:
