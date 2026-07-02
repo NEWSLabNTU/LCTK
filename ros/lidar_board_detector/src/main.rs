@@ -1345,11 +1345,18 @@ impl CalibrationBoardLocatorNode {
                     temp_board_model.right_corner(),
                 ];
 
-                // Find the corner with the lowest z-coordinate
+                // Find the vertically lowest corner using the configured sensor up axis
+                let up_vector = config.sensor_up_axis.as_vector();
                 let (lowest_index, lowest_corner) = corners
                     .iter()
                     .enumerate()
-                    .min_by(|a, b| a.1.z.partial_cmp(&b.1.z).unwrap())
+                    .min_by(|a, b| {
+                        // Project the corner position onto the 'up' axis.
+                        // The lowest corner will have the smallest value along this axis.
+                        let height_a = a.1.coords.dot(&up_vector);
+                        let height_b = b.1.coords.dot(&up_vector);
+                        height_a.partial_cmp(&height_b).unwrap()
+                    })
                     .unwrap();
 
                 log_debug!(

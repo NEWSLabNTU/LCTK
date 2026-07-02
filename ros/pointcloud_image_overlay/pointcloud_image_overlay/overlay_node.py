@@ -230,7 +230,11 @@ class EducationalOverlayNode(Node):
             PointCloud2,
             "plane_inliers",
             self.on_inlier_pointcloud_received,
-            qos,
+            QoSProfile(
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                durability=DurabilityPolicy.VOLATILE,
+                depth=1,  # Prevent buffering delays
+            ),
         )
 
         # Camera intrinsic parameters (sensor_msgs/CameraInfo)
