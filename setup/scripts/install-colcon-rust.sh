@@ -27,4 +27,12 @@ pip3 install --user 'play_launch>=0.5.0'
 echo "Removing pip-installed empy if present..."
 pip3 uninstall -y empy 2>/dev/null || true
 
+# Remove pip-installed setuptools if present so the Ubuntu apt version is used.
+# ROS 2 Humble's ament_python builds assume the apt setuptools (59.6.0); a newer
+# pip setuptools (>=80, which the pip installs above can pull in) breaks colcon's
+# `setup.py develop --editable` step with "error: option --editable not
+# recognized", failing every ament_python package (conflux_py, the solver nodes).
+echo "Removing pip-installed setuptools if present (use apt setuptools for Humble)..."
+pip3 uninstall -y setuptools 2>/dev/null || true
+
 echo "Colcon Rust integration installation complete."
