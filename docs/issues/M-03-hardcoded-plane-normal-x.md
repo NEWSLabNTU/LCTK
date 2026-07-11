@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** hollow-board-detector (live path)
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:** `rust/hollow-board-detector/src/algo.rs:197-203` (`desired_front = Vector3::x_axis()`)
 
@@ -17,3 +17,9 @@ Reusing the crate on a sensor whose forward axis is not +X (e.g. camera-forward-
 ## Suggested fix
 
 Derive the "front" direction from the sensor→board vector (e.g. flip so the normal points toward the sensor origin) instead of a hardcoded axis, or make the desired-front axis a configurable parameter.
+
+## Resolution (2026-07-11)
+Orient the RANSAC plane normal from the board centroid toward the sensor (origin)
+instead of forcing it onto +X. Reproduces the old behavior for an in-front (+X)
+rig while generalizing to any sensor forward axis / board placement.
+`rust/hollow-board-detector/src/algo.rs`. Verified: `just build` + `just test`.

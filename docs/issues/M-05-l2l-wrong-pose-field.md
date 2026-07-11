@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lidar_to_lidar_solver
-- **Status:** Open
+- **Status:** Not a bug (false positive)
 - **Verified:** Static review
 - **Location:**
   - `ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py:191-193` (`det.bbox.center`)
@@ -19,3 +19,12 @@ Running L2L calibration produces garbage output. Consistent with CLAUDE.md's "th
 ## Suggested fix
 
 Read the board pose from the same field the detector populates (`results[0].pose.pose`), matching the camera solvers. Add an integration test for the L2L path.
+
+## Status note (2026-07-11)
+
+False positive. The `lidar_board_detector` populates the detected board pose into
+BOTH `bbox.center` and `results[0].pose.pose` with the same value
+(`convert_board_detection_to_detection3d` sets `bbox = BoundingBox3D { center:
+pose.clone(), ... }` and `results[0].pose.pose = pose`). So the L2L solver reading
+`det.bbox.center` gets the correct board pose, identical to what the camera path
+reads. No fix needed.

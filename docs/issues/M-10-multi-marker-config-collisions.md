@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lctk_launch config parser
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:** `ros/lctk_launch/lctk_launch/config_parser.py:383-393` (first-marker wins), `414-431` (solvers not de-duped)
 
@@ -19,3 +19,9 @@ A camera observing two boards with different patterns silently mismatches detect
 ## Suggested fix
 
 Key the aruco_locator per (camera, marker) when patterns differ, warn on conflicting configs for one camera, and de-duplicate calibration pairs (or error on duplicates) before spawning solver nodes.
+
+## Resolution (2026-07-11)
+`config_parser` now raises a clear error when a camera observes markers with
+different ArUco configs (instead of silently using the first), and de-duplicates
+calibration pairs so a repeated pair no longer produces two solver nodes with the
+same name/namespace.

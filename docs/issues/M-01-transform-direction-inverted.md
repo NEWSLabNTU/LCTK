@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** extrinsic solvers / TF output
-- **Status:** Open
+- **Status:** Deferred (needs visual verification)
 - **Verified:** Static review
 - **Location:**
   - `ros/extrinsic_solver_node/extrinsic_solver_node/main.py:753-768`
@@ -20,3 +20,24 @@ Any standard `tf2` consumer — the natural Autoware ingestion route via `/tf_st
 ## Suggested fix
 
 Publish the transform with frame labels matching TF semantics (invert `(R, t)` before building the `TransformStamped`, or relabel parent/child), and keep the overlay node's direct-rvec/tvec usage consistent with that choice. Document the convention explicitly.
+
+## Status note (2026-07-11)
+
+Deferred, not because it isn't real but because it cannot be verified without a
+visual check. The published transform is self-consistent within LCTK (the overlay
+consumes it directly as `rvec`/`tvec` for `projectPoints`), so changing the TF
+labels to the correct direction requires a coordinated change in the overlay
+(invert it back) and the only correctness signal is whether point clouds still
+project onto the image correctly — a visual result this environment can't produce.
+Recommended fix, to be done with sample data + the overlay:
+
+1. Publish the `TransformStamped` with correct TF semantics (invert the solvePnP
+   `T_cam_lidar` so `frame_id=lidar, child=camera` really is the camera pose in
+   the lidar frame).
+2. Update `pointcloud_image_overlay` to invert the looked-up transform back into
+   the LiDAR→camera-points mapping it feeds to `projectPoints`.
+3. Verify the overlay alignment is unchanged on `just demo`, then confirm a
+   `tf2` lookup gives the Autoware-correct direction.
+
+Until then this is the one blocker between the solver output and a correct
+Autoware `sensor_kit_calibration.yaml` (see [gap-autoware-export.md](./gap-autoware-export.md)).

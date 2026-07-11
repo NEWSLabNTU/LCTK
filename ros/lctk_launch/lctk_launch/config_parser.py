@@ -216,6 +216,11 @@ class CalibrationConfigParser:
 
     def _parse_marker_pairs(self, markers_config: dict) -> None:
         """Extract calibration pairs from marker definitions (new format)."""
+        # M-10: de-duplicate pairs. Board detectors and aruco locators are keyed
+        # by a set, but solver nodes are generated per pair, so a repeated pair
+        # would create two nodes with identical name and namespace (a ROS name
+        # collision). Skip pairs already seen (order-independent, per marker).
+        seen: set = set()
         for marker_name, config in markers_config.items():
             for pair in config.get("pairs", []):
                 if len(pair) != 2:
@@ -223,6 +228,10 @@ class CalibrationConfigParser:
                         f"Marker {marker_name}: each pair must have exactly "
                         f"2 devices, got {len(pair)}: {pair}"
                     )
+                key = (frozenset(pair), marker_name)
+                if key in seen:
+                    continue
+                seen.add(key)
                 self.calibration_pairs.append(
                     CalibrationPair(
                         device1=pair[0],
@@ -399,17 +408,28 @@ class CalibrationConfigParser:
         for camera_name in sorted(cameras_needed):
             camera = self.cameras[camera_name]
 
-            # Find a marker config for this camera (use first available)
-            aruco_config = None
+            # M-10: one aruco_locator is created per camera, so all markers this
+            # camera observes must share a single ArUco pattern. Collect the
+            # distinct configs and fail loudly on a conflict instead of silently
+            # using whichever came first (which would make the detector and the
+            # solver for another pair disagree on the pattern).
+            aruco_configs = set()
             for pair in self.calibration_pairs:
                 if camera_name in (pair.device1, pair.device2):
                     marker = self.markers[pair.marker]
                     if marker.aruco_config:
-                        aruco_config = marker.aruco_config
-                        break
+                        aruco_configs.add(marker.aruco_config)
 
-            if aruco_config is None:
+            if not aruco_configs:
                 raise ValueError(f"No ArUco config found for camera {camera_name}")
+            if len(aruco_configs) > 1:
+                raise ValueError(
+                    f"Camera {camera_name} observes markers with different ArUco "
+                    f"configs {sorted(aruco_configs)}; a single aruco_locator can only "
+                    "use one pattern. Use the same ArUco pattern for all boards this "
+                    "camera observes."
+                )
+            aruco_config = next(iter(aruco_configs))
 
             node_name = f"aruco_locator_{camera_name}"
             namespace = f"calibration/{camera_name}"

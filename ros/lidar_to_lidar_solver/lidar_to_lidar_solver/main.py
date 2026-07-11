@@ -64,7 +64,12 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("same_face_mode", True)
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_rate_hz", 10.0)
-        self.declare_parameter("max_message_age_ms", 500.0)
+        # M-04: staleness is measured against the node clock. Under rosbag
+        # playback without use_sim_time the clock is wall-time while message
+        # stamps are recorded time, so any positive threshold drops every pair.
+        # Default to 0 (disabled); set > 0 only for live sensors (with a clock
+        # that matches the stamps).
+        self.declare_parameter("max_message_age_ms", 0.0)
         self.declare_parameter("use_best_effort_qos", True)
 
         # Get parameters
@@ -173,7 +178,9 @@ class LidarToLidarSolver(Node):
         age1_ms = (now - msg1_time).nanoseconds / 1e6
         age2_ms = (now - msg2_time).nanoseconds / 1e6
 
-        if age1_ms > self.max_message_age_ms or age2_ms > self.max_message_age_ms:
+        if self.max_message_age_ms > 0 and (
+            age1_ms > self.max_message_age_ms or age2_ms > self.max_message_age_ms
+        ):
             self.stats.dropped_stale += 1
             self.get_logger().debug(
                 f"Dropped stale messages: age1={age1_ms:.1f}ms, age2={age2_ms:.1f}ms"

@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** conflux-core
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:** `ros/conflux/crates/conflux-core/src/state.rs:308-329`
 
@@ -17,3 +17,9 @@ Out-of-order arrivals (normal under BEST_EFFORT) cause double message loss. Comp
 ## Suggested fix
 
 Perform the ordering/acceptance check before evicting, so a message that would be rejected does not first destroy a valid buffered one. Only evict when the new message will actually be accepted.
+
+## Resolution (2026-07-11)
+Fixed in conflux (`jerry73204/conflux`@b9912a4; LCTK pins it). Under DropOldest the
+core now checks the monotonic timestamp (via a new `Buffer::last_ts`) BEFORE
+evicting: an out-of-order message is rejected without destroying a good buffered
+one. Verified by the conflux workspace tests.

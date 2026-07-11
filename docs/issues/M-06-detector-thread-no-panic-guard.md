@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lidar_board_detector
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:** `ros/lidar_board_detector/src/main.rs:569-613` (detached thread); unwrap-on-NaN at `930, 1349, 1634`
 
@@ -17,3 +17,9 @@ One bad point (NaN/Inf) arrives; the processing thread dies. The node reports no
 ## Suggested fix
 
 Wrap the processing loop body in `std::panic::catch_unwind` and log/recover, and replace `partial_cmp().unwrap()` with `total_cmp` (or filter NaN points at ingest).
+
+## Resolution (2026-07-11)
+Wrap the detached processing thread's `pointcloud_callback` in
+`std::panic::catch_unwind`; a panic (e.g. on a NaN point) is now logged and the
+thread keeps processing subsequent clouds instead of dying silently.
+`ros/lidar_board_detector/src/main.rs`.

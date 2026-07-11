@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** advanced_extrinsic_solver
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:** `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1256-1261`
 
@@ -17,3 +17,7 @@ A user configures a board with fewer than 4 markers. The solve service crashes m
 ## Suggested fix
 
 Validate `len(marker_ids) >= 4` (or handle variable marker counts) at config load, with a clear message, before the solve path.
+
+## Resolution (2026-07-11)
+Both solvers validate `len(marker_ids) >= 4` before the 2x2 indexing and raise a
+clear ValueError at config load instead of an IndexError inside the solve path.

@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** advanced_extrinsic_solver services
-- **Status:** Open
+- **Status:** Not a bug (already unit-labeled)
 - **Verified:** Static review
 - **Location:** `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:804-806, 822, 868, 878, 1105`
 
@@ -19,3 +19,14 @@ A client reads "30" from the service response (which is degrees) and sends 30 ba
 ## Suggested fix
 
 Standardize on one unit across inputs, outputs, and log/response strings — recommend degrees for the human-facing service API — and label the unit in every field name or docstring.
+
+## Status note (2026-07-11)
+
+On review the structured API is internally consistent: `AdjustTransform.srv`
+documents `delta_*` as radians, `adjust_transform` applies them as radians, and
+`GetPoseInfo.srv` documents/returns radians — the interactive controller sends
+radian steps and converts to degrees only for display (`math.degrees(...)`). The
+only place degrees appear is the human-readable `adjust_transform` response
+string and the solve log, and both already print the `deg` unit explicitly. So
+there is no functional radians/degrees mismatch to fix; the value is correct and
+labeled. Left as-is.

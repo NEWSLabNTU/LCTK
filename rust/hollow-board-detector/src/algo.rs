@@ -194,9 +194,24 @@ pub fn fit_plane_ransac<'a>(
     };
 
     {
-        let desired_front = Vector3::x_axis();
+        // M-03: orient the plane normal to point from the board toward the sensor
+        // (the origin), i.e. along the viewing direction. The previous code forced
+        // the normal onto +X, which only holds when the board sits in front of the
+        // sensor along +X; for a sensor whose forward axis is not +X (or a board
+        // mounted to the side) that flips the board frame into the wrong hemisphere.
+        // Using the board centroid generalizes to any placement and reproduces the
+        // old behavior for the common in-front (+X) rig.
+        let centroid: Vector3<f64> = {
+            let n = inlier_indices.len().max(1) as f64;
+            let sum = inlier_indices
+                .iter()
+                .fold(Vector3::zeros(), |acc, &idx| acc + points[idx].coords);
+            sum / n
+        };
         let current_normal: Vector3<f64> = nalgebra::convert(*plane_model.normal);
-        if current_normal.dot(&desired_front) < 0.0 {
+        // Keep the normal pointing along the board direction (away from the sensor),
+        // matching the original +X convention when the board is in front.
+        if current_normal.dot(&centroid) < 0.0 {
             let flipped = nalgebra::Unit::new_normalize(-current_normal);
             plane_model.normal = flipped;
         }

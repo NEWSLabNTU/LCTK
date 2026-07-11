@@ -1241,6 +1241,13 @@ class AdvancedExtrinsicSolver(Node):
         marker_square_size_ratio = config["marker_square_size_ratio"]
         num_squares = config["num_squares_per_side"]
         marker_ids = config["marker_ids"]
+        # M-09: the 2x2 board layout indexes marker_ids[0..3]; fail with a clear
+        # message instead of an IndexError deep inside the solve service.
+        if len(marker_ids) < 4:
+            raise ValueError(
+                f"ArUco config must define at least 4 marker_ids for the 2x2 board, "
+                f"got {len(marker_ids)}: {marker_ids}"
+            )
 
         square_size = (board_size - 2.0 * board_border_size) / num_squares
         marker_size = square_size * marker_square_size_ratio

@@ -590,14 +590,27 @@ impl CalibrationBoardLocatorNode {
                     // Clone the message for processing (msg is Arc<PointCloud2>)
                     let msg_clone: PointCloud2 = (**msg).clone();
 
-                    Self::pointcloud_callback(
-                        msg_clone,
-                        &detector,
-                        &detection_publisher_shared,
-                        &bbox_params_for_callback,
-                        &board_debug_shared,
-                        &icp_debug_shared,
-                    );
+                    // M-06: guard against panics in the detection pipeline (e.g.
+                    // partial_cmp().unwrap() on a NaN point). Without this a single
+                    // panic kills only this detached thread, leaving the node alive
+                    // but permanently silent. Catch, log, and continue.
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        Self::pointcloud_callback(
+                            msg_clone,
+                            &detector,
+                            &detection_publisher_shared,
+                            &bbox_params_for_callback,
+                            &board_debug_shared,
+                            &icp_debug_shared,
+                        );
+                    }));
+                    if result.is_err() {
+                        log_error!(
+                            LOGGER_NAME,
+                            "Board detection panicked while processing a cloud; \
+                             skipping it and continuing"
+                        );
+                    }
 
                     let processing_time = callback_start.elapsed();
                     log_debug!(

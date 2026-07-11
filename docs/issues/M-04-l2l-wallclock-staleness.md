@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lidar_to_lidar_solver
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:**
   - `ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py:169-181`
@@ -19,3 +19,9 @@ In offline / rosbag playback without `use_sim_time`, the wall clock is far ahead
 ## Suggested fix
 
 Respect `use_sim_time`, or make the staleness check relative to the latest received stamp rather than wall-clock `now()`, or disable it in offline mode.
+
+## Resolution (2026-07-11)
+Default `max_message_age_ms` to 0 (disabled) and only apply the check when > 0,
+since the wall-clock-vs-recorded-stamp mismatch drops every pair under rosbag
+playback (the default offline mode). Live users can re-enable it.
+`ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py`.
