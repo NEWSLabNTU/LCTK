@@ -68,41 +68,46 @@ fn convert_marker_to_detection2d(
         })
         .collect();
 
-    // Calculate bounding box from corners
+    // Calculate bounding box from corners (kept for generic viewers)
     let bbox = calculate_bounding_box(&corners);
 
-    // Create object hypothesis with marker ID
-    let hypothesis = ObjectHypothesis {
-        class_id: marker_id.to_string(),
-        score: 1.0, // ArUco detections are binary (detected or not)
-    };
-
-    // Create pose (placeholder for now - would need actual pose estimation)
-    let pose_with_covariance = PoseWithCovariance {
-        pose: Pose {
-            position: Point {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
+    // C-01: carry the REAL detected marker corners through the message.
+    //
+    // The axis-aligned `bbox` loses all rotation and perspective information, so
+    // reconstructing corners from `center +/- size/2` downstream yields biased
+    // PnP correspondences for any non-fronto-parallel view. Instead we publish
+    // one `ObjectHypothesisWithPose` per corner (in the detector's order:
+    // top-left, top-right, bottom-right, bottom-left), storing the pixel corner
+    // in `pose.position.{x,y}`. The extrinsic solvers read these back directly.
+    let results: Vec<ObjectHypothesisWithPose> = corners
+        .iter()
+        .map(|corner| ObjectHypothesisWithPose {
+            hypothesis: ObjectHypothesis {
+                class_id: marker_id.to_string(),
+                score: 1.0, // ArUco detections are binary (detected or not)
             },
-            orientation: Quaternion {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-                w: 1.0,
+            pose: PoseWithCovariance {
+                pose: Pose {
+                    position: Point {
+                        x: corner.x,
+                        y: corner.y,
+                        z: 0.0,
+                    },
+                    orientation: Quaternion {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        w: 1.0,
+                    },
+                },
+                covariance: [0.0; 36], // 6x6 covariance matrix
             },
-        },
-        covariance: [0.0; 36], // 6x6 covariance matrix
-    };
-
-    let object_hypothesis_with_pose = ObjectHypothesisWithPose {
-        hypothesis,
-        pose: pose_with_covariance,
-    };
+        })
+        .collect();
 
     Ok(Detection2D {
         header: header.clone(),
-        results: vec![object_hypothesis_with_pose],
+        results,
         bbox,
         id: format!("aruco_{marker_id}"),
     })

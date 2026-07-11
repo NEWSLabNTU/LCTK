@@ -1146,28 +1146,41 @@ class AdvancedExtrinsicSolver(Node):
     def _detection2d_to_aruco_markers(
         self, detection_msg: Detection2DArray
     ) -> List[ArUcoMarker]:
-        """Convert ROS Detection2DArray to ArUcoMarker objects."""
+        """Convert ROS Detection2DArray to ArUcoMarker objects.
+
+        The real detected marker corners are carried in ``detection.results``
+        (one entry per corner, in detector order TL, TR, BR, BL) by the ArUco
+        locator node; the axis-aligned bounding box is only a fallback.
+        """
         markers = []
 
         for detection in detection_msg.detections:
             bbox = detection.bbox
-            center_x = bbox.center.position.x
-            center_y = bbox.center.position.y
-            size_x = bbox.size_x
-            size_y = bbox.size_y
+            center = (bbox.center.position.x, bbox.center.position.y)
 
-            # Convert bounding box to 4 corner points
-            corners = [
-                (center_x - size_x / 2.0, center_y - size_y / 2.0),  # Top-left
-                (center_x + size_x / 2.0, center_y - size_y / 2.0),  # Top-right
-                (center_x + size_x / 2.0, center_y + size_y / 2.0),  # Bottom-right
-                (center_x - size_x / 2.0, center_y + size_y / 2.0),  # Bottom-left
-            ]
+            # C-01: prefer the real per-corner pixel coordinates. Reconstructing
+            # corners from `center +/- size/2` discards rotation and perspective,
+            # biasing the PnP correspondences for any angled view of the board.
+            if len(detection.results) >= 4:
+                corners = [
+                    (r.pose.pose.position.x, r.pose.pose.position.y)
+                    for r in detection.results[:4]
+                ]
+            else:
+                size_x = bbox.size_x
+                size_y = bbox.size_y
+                cx, cy = center
+                corners = [
+                    (cx - size_x / 2.0, cy - size_y / 2.0),  # Top-left
+                    (cx + size_x / 2.0, cy - size_y / 2.0),  # Top-right
+                    (cx + size_x / 2.0, cy + size_y / 2.0),  # Bottom-right
+                    (cx - size_x / 2.0, cy + size_y / 2.0),  # Bottom-left
+                ]
 
             marker_id = detection.id if hasattr(detection, "id") else 0
 
             markers.append(
-                ArUcoMarker(id=marker_id, corners=corners, center=(center_x, center_y))
+                ArUcoMarker(id=marker_id, corners=corners, center=center)
             )
 
         return markers
