@@ -2,7 +2,7 @@
 
 - **Severity:** Critical
 - **Area:** aruco_locator_node → extrinsic solvers
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Yes (confirmed against live source, 2026-07-09)
 - **Location:**
   - `ros/aruco_locator_node/src/main.rs:62-108`
@@ -31,3 +31,14 @@ For any marker seen rotated or under perspective — i.e. in essentially every r
 ## Suggested fix
 
 Add the 4 corner points to the detection message (extend `Detection2D` usage or publish a custom message / put corners in the result pose array) and consume the real corners in the solvers. Do not derive corners from the bounding box.
+
+## Resolution (2026-07-11)
+
+Took the "corners in the result pose array" option (no new message, no conflux
+subscription change). `aruco_locator_node` now publishes one
+`ObjectHypothesisWithPose` per corner (detector order TL, TR, BR, BL) with the
+pixel corner in `pose.position.{x,y}`; the bbox is kept for generic viewers. Both
+solvers read the real corners from `results` (falling back to the bbox rectangle
+only when a detection carries fewer than 4 results). Verified: the build compiles
+the change and `tmp/test_c01_corner_extraction.py` confirms a perspective marker's
+corners are recovered exactly (the old bbox path was off by up to 20 px).

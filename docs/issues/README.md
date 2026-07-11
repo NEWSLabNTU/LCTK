@@ -6,7 +6,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 
 | ID | Sev | Title | Status |
 |----|-----|-------|--------|
-| [C-01](./C-01-aruco-corners-discarded.md) | Critical | ArUco marker corners discarded; PnP uses axis-aligned bbox | 🔴 |
+| [C-01](./C-01-aruco-corners-discarded.md) | Critical | ArUco marker corners discarded; PnP uses axis-aligned bbox | 🟢 |
 | [C-02](./C-02-conflux-realtime-memory-leak.md) | Critical | Conflux realtime mode leaks a message object per dropped message | 🟢 |
 | [H-01](./H-01-conflux-not-built.md) | High | `conflux_py` never built → solvers ImportError at startup | 🟢 |
 | [H-02](./H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🟢 |
