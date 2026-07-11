@@ -19,17 +19,33 @@ default:
     @just --list
 
 # Build all ROS packages using colcon and cargo-ros2
-# Note: ros/conflux is built separately (it uses git rclrs with DynamicMessage support)
-build:
+# The conflux packages LCTK depends on (conflux_cpp + conflux_py) are built
+# first by `build-conflux`; the rest of ros/conflux (conflux, conflux-ros2)
+# is excluded because it uses a git rclrs that conflicts with our crates.io rclrs.
+build: build-conflux
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
     colcon build \
         --base-paths ros \
-        --ignore-paths ros/conflux \
+        --packages-ignore conflux conflux_cpp conflux_py \
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         --cargo-args --profile=test-release
+
+# Build the conflux packages LCTK needs at runtime.
+# conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
+# solver nodes import conflux_py and fail to start without it. Only these two
+# packages are selected so the git-rclrs conflux/conflux-ros2 packages are skipped.
+build-conflux:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source /opt/ros/humble/setup.bash
+    colcon build \
+        --base-paths ros \
+        --packages-select conflux_cpp conflux_py \
+        --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
 # Set up development environment (install all dependencies)
 setup *args:
