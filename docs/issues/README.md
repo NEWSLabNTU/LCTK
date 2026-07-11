@@ -9,10 +9,10 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [C-01](./C-01-aruco-corners-discarded.md) | Critical | ArUco marker corners discarded; PnP uses axis-aligned bbox | 🔴 |
 | [C-02](./C-02-conflux-realtime-memory-leak.md) | Critical | Conflux realtime mode leaks a message object per dropped message | 🔴 |
 | [H-01](./H-01-conflux-not-built.md) | High | `conflux_py` never built → solvers ImportError at startup | 🟢 |
-| [H-02](./H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🔴 |
+| [H-02](./H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🟢 |
 | [H-03](./H-03-pointcloud-datatype-endian.md) | High | Point cloud XYZ decoded as LE float32 without checking datatype/endianness | 🟢 |
 | [H-04](./H-04-board-detector-mandatory-params.md) | High | Detector declares params mandatory that launch adds only "if present" | 🟢 |
-| [H-05](./H-05-conflux-error-stats-collapse.md) | High | Conflux FFI collapses all push errors to BufferFull → corrupt stats | 🔴 |
+| [H-05](./H-05-conflux-error-stats-collapse.md) | High | Conflux FFI collapses all push errors to BufferFull → corrupt stats | 🟢 |
 | [H-06](./H-06-config-schema-drift.md) | High | CLAUDE.md documents a config schema the parser does not accept | 🟢 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🔴 |
 | [M-02](./M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | 🔴 |

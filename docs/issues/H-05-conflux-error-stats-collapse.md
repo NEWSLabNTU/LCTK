@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** conflux synchronizer (FFI + stats)
-- **Status:** Open
+- **Status:** Fixed (2026-07-11, conflux submodule)
 - **Verified:** Static review
 - **Location:**
   - `ros/conflux/conflux_cpp/rust/src/lib.rs:240-243`
@@ -20,3 +20,16 @@ Under BEST_EFFORT / realtime, late and out-of-order messages are normal. They in
 ## Suggested fix
 
 Preserve distinct error variants across the FFI (add `LateMessage` / `OutOfOrder` result codes) and account for them separately in the stats. Only true buffer-overflow rejections should trigger the overflow warning.
+
+## Resolution (2026-07-11)
+
+Fixed in the conflux submodule (`jerry73204/conflux`, branch `fix/h02-h05-stats`,
+commit da9f101; LCTK pins it). The FFI now maps each `PushError` to a distinct
+`ConfluxResult` (`LateMessage=6`, `OutOfOrder=7`, `Timeout=8`, `UnknownKey ->
+KeyNotFound`) instead of collapsing all to `BufferFull`; cbindgen regenerated
+`conflux_ffi.h` accordingly. The Python binding records the last push result, and
+`ROS2Synchronizer` now counts only `BufferFull` as a rejection / overflow warning,
+tracking late and out-of-order drops in a separate `messages_dropped` statistic so
+the rejection rate is no longer inflated. Verified by conflux's Rust FFI tests and
+a full LCTK `just build` + `just test` (268 Rust, 48 Python). Should be upstreamed
+to conflux `main` via PR.

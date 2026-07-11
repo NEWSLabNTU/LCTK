@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** conflux synchronizer (Python FFI)
-- **Status:** Open
+- **Status:** Fixed (2026-07-11, conflux submodule)
 - **Verified:** Yes (confirmed against live source, 2026-07-09)
 - **Location:** `ros/conflux/conflux_py/conflux_py/_ffi.py:211, 237-245, 273-279`
 
@@ -17,3 +17,11 @@ The first sync group that needs the id-0 message fails: the consumer's `group["/
 ## Suggested fix
 
 Start `self._next_id = 1` (and never reuse 0). A one-line change.
+
+## Resolution (2026-07-11)
+
+Fixed in the conflux submodule (`jerry73204/conflux`, branch `fix/h02-h05-stats`,
+commit da9f101): `_next_id` now starts at 1. LCTK pins the updated submodule.
+Verified with a functional test (`tmp/test_h02_first_message.py`) that drives the
+low-level `Synchronizer` and confirms the very first pushed message survives into
+the synchronized group. Should be upstreamed to conflux `main` via PR.
