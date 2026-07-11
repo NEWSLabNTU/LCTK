@@ -9,7 +9,6 @@ use aruco_config::MultiArucoPattern;
 use hollow_board_config::{BoardModel, BoardShape};
 use na::coordinates::XYZ;
 use nalgebra as na;
-use noisy_float::prelude::*;
 use std::f64::{self, consts::FRAC_PI_2};
 
 #[derive(Debug, Clone)]
@@ -101,7 +100,7 @@ impl Detector {
             let (lowest_index, _) = corners
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, point)| r64(point.z))
+                .min_by(|(_, a), (_, b)| a.z.total_cmp(&b.z))
                 .unwrap();
 
             // Compute the rotation using the by 90deg * index.
@@ -205,7 +204,7 @@ impl Detector {
             let (lowest_index, _) = corners
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, point)| r64(point.z))
+                .min_by(|(_, a), (_, b)| a.z.total_cmp(&b.z))
                 .unwrap();
 
             let fixup_rotation = {
@@ -310,8 +309,13 @@ impl Detector {
                 losses.push(state.avg_loss);
             }
 
-            let successful = !iterator.termination_reason(&state).contains("failed")
-                && !iterator.termination_reason(&state).contains("Insufficient");
+            // L-01: exclude non-converged terminations (iteration cap / no
+            // correspondences) from "successful", not just "failed"/"Insufficient".
+            let reason = iterator.termination_reason(&state);
+            let successful = !reason.contains("failed")
+                && !reason.contains("Insufficient")
+                && !reason.contains("Max iterations")
+                && !reason.contains("No correspondences");
 
             let icp_stats = crate::detection::IcpStatistics {
                 iterations: state.iteration,
@@ -367,7 +371,7 @@ impl Detector {
             let (lowest_index, _) = corners
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, point)| r64(point.z))
+                .min_by(|(_, a), (_, b)| a.z.total_cmp(&b.z))
                 .unwrap();
 
             let fixup_rotation = {

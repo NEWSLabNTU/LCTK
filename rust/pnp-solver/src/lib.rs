@@ -66,7 +66,10 @@ impl PnpSolver {
         // OpenCV typically uses: (k1, k2, p1, p2, k3)
         let d_len = camera_info.d.len();
         let distortion_coefs = if d_len >= 5 {
-            Mat::from_slice(&camera_info.d[..5]).unwrap()
+            // L-03: pass the full distortion vector, not just the first 5. Rational
+            // (8-coeff) and other models are silently truncated otherwise, biasing
+            // the pose. OpenCV solvePnP accepts 4/5/8/12/14-length distortion.
+            Mat::from_slice(&camera_info.d).unwrap()
         } else {
             // If we have fewer than 5 coefficients, pad with zeros
             let mut d_vec = camera_info.d.clone();
@@ -99,7 +102,9 @@ impl PnpSolver {
 
         let mut rvec = Mat::zeros(3, 1, CV_64FC1).unwrap().to_mat().unwrap();
         let mut tvec = Mat::zeros(3, 1, CV_64FC1).unwrap().to_mat().unwrap();
-        let solved = calib3d::solve_pnp(
+        // L-03: a degenerate / too-small correspondence set makes OpenCV throw;
+        // return None instead of panicking the caller's process on sensor data.
+        let solved = match calib3d::solve_pnp(
             &object_points,
             &image_points,
             &self.camera_matrix,
@@ -108,14 +113,25 @@ impl PnpSolver {
             &mut tvec,
             false,
             self.method,
-        )
-        .unwrap();
+        ) {
+            Ok(solved) => solved,
+            Err(err) => {
+                warn!("solvePnP failed: {err}");
+                return None;
+            }
+        };
 
         if !solved {
             return None;
         }
 
-        let transform: na::Isometry3<f64> = OpenCvPose { rvec, tvec }.try_to_cv().unwrap();
+        let transform: na::Isometry3<f64> = match (OpenCvPose { rvec, tvec }.try_to_cv()) {
+            Ok(transform) => transform,
+            Err(err) => {
+                warn!("Failed to convert PnP pose: {err}");
+                return None;
+            }
+        };
 
         Some(transform)
     }

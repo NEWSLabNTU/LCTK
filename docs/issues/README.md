@@ -24,15 +24,15 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [M-08](./M-08-conflux-ffi-no-locking.md) | Medium | Mutable Rust conflux State crosses FFI with no locking | 🟢 |
 | [M-09](./M-09-marker-ids-hard-index.md) | Medium | `marker_ids[0..3]` hard index → IndexError on short config | 🟢 |
 | [M-10](./M-10-multi-marker-config-collisions.md) | Medium | Multi-marker camera uses wrong ArUco config; duplicate pairs collide | 🟢 |
-| [L-01](./L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🔴 |
-| [L-02](./L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🔴 |
-| [L-03](./L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🔴 |
-| [L-04](./L-04-hardcoded-2x2-board.md) | Low | `multi_marker_corners` hardcodes 2×2; unknown config fields ignored | 🔴 |
-| [L-05](./L-05-mode-typo-static-mut.md) | Low | `mode` typo silently offline; `static mut` counters race | 🔴 |
-| [L-06](./L-06-pokemon-exceptions.md) | Low | Pervasive `except Exception: pass` against project guideline | 🔴 |
-| [L-07](./L-07-tf-broadcaster-qos.md) | Low | tf_tree_broadcaster QoS may be incompatible with realtime publishers | 🔴 |
-| [L-08](./L-08-stale-readme-docs.md) | Low | Stale README & docs misdirect new users | 🔴 |
-| [L-09](./L-09-setup-fragility-export-labeling.md) | Low | Setup fragility, no export tooling, dump JSON mislabeled | 🔴 |
+| [L-01](./L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
+| [L-02](./L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
+| [L-03](./L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
+| [L-04](./L-04-hardcoded-2x2-board.md) | Low | `multi_marker_corners` hardcodes 2×2; unknown config fields ignored | 🟡 |
+| [L-05](./L-05-mode-typo-static-mut.md) | Low | `mode` typo silently offline; `static mut` counters race | 🟢 |
+| [L-06](./L-06-pokemon-exceptions.md) | Low | Pervasive `except Exception: pass` against project guideline | 🟢 |
+| [L-07](./L-07-tf-broadcaster-qos.md) | Low | tf_tree_broadcaster QoS may be incompatible with realtime publishers | 🟢 |
+| [L-08](./L-08-stale-readme-docs.md) | Low | Stale README & docs misdirect new users | 🟡 |
+| [L-09](./L-09-setup-fragility-export-labeling.md) | Low | Setup fragility, no export tooling, dump JSON mislabeled | 🟡 |
 
 ## Three headline gaps
 

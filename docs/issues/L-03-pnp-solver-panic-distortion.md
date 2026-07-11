@@ -2,7 +2,7 @@
 
 - **Severity:** Low (no production caller today — PnP is done in Python)
 - **Area:** pnp-solver crate
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:** `rust/pnp-solver/src/lib.rs:66-75, 96, 102-118`
 
@@ -18,3 +18,8 @@ If this crate is ever wired into the live path: process crash on sensor data, an
 ## Suggested fix
 
 Return `Result` instead of `unwrap()`, validate correspondence count, and pass the full distortion vector.
+
+## Resolution (2026-07-11)
+`pnp-solver` now returns `None` (with a warning) instead of unwrapping a failed
+`solve_pnp` or pose conversion, and passes the full distortion vector rather than
+truncating to 5 coefficients.

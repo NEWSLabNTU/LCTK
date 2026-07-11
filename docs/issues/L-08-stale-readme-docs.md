@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** documentation
-- **Status:** Open
+- **Status:** Partially fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:**
   - `README.md:13, 18-19, 116, 142`
@@ -25,3 +25,12 @@ A new user copy-pastes any quick-start command and it errors or builds the wrong
 ## Suggested fix
 
 Sweep README, config/README, and the book against the current justfile and launch files; add a CI doc-lint or a smoke test that runs the documented commands.
+
+## Partial resolution (2026-07-11)
+Fixed the highest-impact drift: README Quick Start (`./setup.sh`, `just sample-data`
+/ `just demo` instead of the nonexistent `setup-dev-env.sh` / `... start`), the web
+UI port (`:8000`) and `max_icp_iterations` default (10) across the book, and
+`config/README.md` (`lctk_launch`, `board_detector.json5`). The rest of README.md
+still documents an older `just sample-sensor-data {start|stop|status|logs}` /
+`just lidar-camera start` interface that no longer exists — it needs a broader
+rewrite against the current justfile (tracked here).

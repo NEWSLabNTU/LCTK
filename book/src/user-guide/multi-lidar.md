@@ -60,7 +60,7 @@ The `just two-lidar` command starts:
 
 ### 3. Monitor Progress
 
-Open `http://localhost:8080` to see the web UI.
+Open `http://localhost:8000` to see the web UI.
 
 Check that both LiDARs are detecting the board:
 ```bash

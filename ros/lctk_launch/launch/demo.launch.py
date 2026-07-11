@@ -53,6 +53,18 @@ def generate_launch_description():
         description="Use advanced multi-pose solver vs standard solver",
     )
 
+    enable_overlay_arg = DeclareLaunchArgument(
+        "enable_overlay",
+        default_value="true",
+        description="Launch the pointcloud/image overlay for visual validation",
+    )
+
+    enable_judge_arg = DeclareLaunchArgument(
+        "enable_judge",
+        default_value="true",
+        description="Launch the calibration judge (IoU metrics)",
+    )
+
     # Debug: Log the mode and derived QoS setting
     # This helps diagnose if the parameter is being passed correctly
     mode_log = LogInfo(
@@ -116,6 +128,10 @@ def generate_launch_description():
             "mode": LaunchConfiguration("mode"),
             "enable_rviz": LaunchConfiguration("enable_rviz"),
             "use_advanced_solver": LaunchConfiguration("use_advanced_solver"),
+            # L-09: forward overlay/judge so `just demo` matches `just lidar-camera`
+            # instead of silently falling back to calibrate.launch.py's defaults.
+            "enable_overlay": LaunchConfiguration("enable_overlay"),
+            "enable_judge": LaunchConfiguration("enable_judge"),
         }.items(),
     )
 
@@ -126,6 +142,8 @@ def generate_launch_description():
             mode_arg,
             enable_rviz_arg,
             use_advanced_solver_arg,
+            enable_overlay_arg,
+            enable_judge_arg,
             mode_log,  # Debug logging of mode and QoS settings
             sample_data_launch,
             calibration_launch,

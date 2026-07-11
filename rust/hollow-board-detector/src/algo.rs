@@ -516,8 +516,13 @@ pub fn fit_board_icp(
                 iterations: step,
                 final_loss,
                 min_loss,
+                // L-01: a run that hit the iteration cap or found no
+                // correspondences is NOT a successful fit. Those reasons contain
+                // neither "failed" nor "Insufficient", so exclude them explicitly.
                 successful: !convergence_reason.contains("failed")
-                    && !convergence_reason.contains("Insufficient"),
+                    && !convergence_reason.contains("Insufficient")
+                    && !convergence_reason.contains("Max iterations")
+                    && !convergence_reason.contains("No correspondences"),
                 initial_loss,
                 convergence_reason,
             };
@@ -584,7 +589,7 @@ pub fn fit_board_icp(
                 let mut eigen_pairs: Vec<(f64, Vector3<f64>)> = (0..3)
                     .map(|i| (eigenvalues[i], eigenvectors.column(i).into()))
                     .collect();
-                eigen_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                eigen_pairs.sort_by(|a, b| b.0.total_cmp(&a.0));
 
                 let pc1 = eigen_pairs[0].1.normalize();
                 let pc2 = eigen_pairs[1].1.normalize();
@@ -681,7 +686,7 @@ pub fn fit_board_icp_with_iterator<'a>(
                 let mut eigen_pairs: Vec<(f64, Vector3<f64>)> = (0..3)
                     .map(|i| (eigenvalues[i], eigenvectors.column(i).into()))
                     .collect();
-                eigen_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                eigen_pairs.sort_by(|a, b| b.0.total_cmp(&a.0));
 
                 let pc1 = eigen_pairs[0].1.normalize();
                 let pc2 = eigen_pairs[1].1.normalize();

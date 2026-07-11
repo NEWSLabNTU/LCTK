@@ -19,7 +19,7 @@ config/
 - `aruco_pattern.json5` - ArUco marker pattern definitions for detection
 
 ### Board Configurations (`board/`)
-- `board_pattern.json5` - Physical calibration board specifications
+- `board_detector.json5` - Physical calibration board specifications
 - `board_detector.json5` - Board detection algorithm parameters
 
 ### Camera Configurations (`camera/`)
@@ -37,17 +37,17 @@ Configuration files are referenced in launch files using the ROS 2 package share
 
 ```xml
 <arg name="aruco_config_file"
-     default="$(find-pkg-share calib_launch)/config/aruco/aruco_pattern.json5"/>
+     default="$(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5"/>
 
 <arg name="board_config_file"
-     default="$(find-pkg-share calib_launch)/config/board/board_pattern.json5"/>
+     default="$(find-pkg-share lctk_launch)/config/board/board_detector.json5"/>
 ```
 
 Or accessed via command line:
 ```bash
-ros2 pkg prefix calib_launch
-# Returns: /path/to/install/calib_launch
-# Config files at: /path/to/install/calib_launch/share/calib_launch/config/
+ros2 pkg prefix lctk_launch
+# Returns: /path/to/install/lctk_launch
+# Config files at: /path/to/install/lctk_launch/share/lctk_launch/config/
 ```
 
 ## File Formats
@@ -59,7 +59,7 @@ ros2 pkg prefix calib_launch
 
 1. Place configuration files in the appropriate subdirectory
 2. Update CMakeLists.txt if adding new file extensions
-3. Reference the file in launch files using `$(find-pkg-share calib_launch)/config/<subdir>/<file>`
+3. Reference the file in launch files using `$(find-pkg-share lctk_launch)/config/<subdir>/<file>`
 
 ## Notes
 

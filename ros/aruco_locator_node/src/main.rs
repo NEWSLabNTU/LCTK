@@ -13,7 +13,7 @@ use rclrs::{PublisherOptions, SubscriptionOptions, *};
 use sensor_msgs::msg::{CameraInfo, Image as ImageMsg};
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -606,16 +606,15 @@ impl ArucoLocatorNode {
                 Some(detector) => Arc::clone(detector),
                 None => {
                     // Detector not initialized yet, skip this frame
-                    // Log periodically to indicate waiting for camera_info
-                    static mut NO_DETECTOR_COUNT: u32 = 0;
-                    unsafe {
-                        NO_DETECTOR_COUNT += 1;
-                        if NO_DETECTOR_COUNT % 60 == 1 {
-                            log_warn!(
-                                LOGGER_NAME,
-                                "Received image but detector not initialized yet - waiting for camera_info"
-                            );
-                        }
+                    // Log periodically to indicate waiting for camera_info.
+                    // L-05: atomic counter (no `static mut`, which is a data race
+                    // under a multithreaded executor and a hard error in edition 2024).
+                    static NO_DETECTOR_COUNT: AtomicU32 = AtomicU32::new(0);
+                    if NO_DETECTOR_COUNT.fetch_add(1, Ordering::Relaxed) % 60 == 0 {
+                        log_warn!(
+                            LOGGER_NAME,
+                            "Received image but detector not initialized yet - waiting for camera_info"
+                        );
                     }
                     return;
                 }
@@ -633,17 +632,14 @@ impl ArucoLocatorNode {
             Some(calib) => calib,
             None => {
                 // Camera info not received yet, skip this frame
-                // Log occasionally to avoid spam
-                static mut NO_CAMERA_INFO_COUNT: u32 = 0;
-                unsafe {
-                    NO_CAMERA_INFO_COUNT += 1;
-                    if NO_CAMERA_INFO_COUNT % 60 == 1 {
-                        // Log every 60th frame to indicate waiting for camera_info
-                        log_warn!(
-                            LOGGER_NAME,
-                            "Waiting for camera_info before processing images (suppressing repeated messages)"
-                        );
-                    }
+                // Log occasionally to avoid spam (L-05: atomic, not `static mut`)
+                static NO_CAMERA_INFO_COUNT: AtomicU32 = AtomicU32::new(0);
+                if NO_CAMERA_INFO_COUNT.fetch_add(1, Ordering::Relaxed) % 60 == 0 {
+                    // Log every 60th frame to indicate waiting for camera_info
+                    log_warn!(
+                        LOGGER_NAME,
+                        "Waiting for camera_info before processing images (suppressing repeated messages)"
+                    );
                 }
                 return;
             }
@@ -663,32 +659,28 @@ impl ArucoLocatorNode {
                 // Only log summary info, not details
                 if detection_msg.detections.is_empty() {
                     // Only log occasionally for no detections to avoid spam
-                    static mut NO_DETECTION_COUNT: u32 = 0;
-                    unsafe {
-                        NO_DETECTION_COUNT += 1;
-                        if NO_DETECTION_COUNT % 30 == 1 {
-                            // Log every 30th frame (approximately once per second at 30fps)
-                            log_warn!(
-                                LOGGER_NAME,
-                                "No ArUco markers detected (suppressing repeated messages)"
-                            );
-                        }
+                    // (L-05: atomic, not `static mut`)
+                    static NO_DETECTION_COUNT: AtomicU32 = AtomicU32::new(0);
+                    if NO_DETECTION_COUNT.fetch_add(1, Ordering::Relaxed) % 30 == 0 {
+                        // Log every 30th frame (approximately once per second at 30fps)
+                        log_warn!(
+                            LOGGER_NAME,
+                            "No ArUco markers detected (suppressing repeated messages)"
+                        );
                     }
                 } else {
                     // Log only a brief summary when markers are detected
-                    static mut LAST_DETECTION_COUNT: usize = 0;
+                    // (L-05: atomic, not `static mut`)
+                    static LAST_DETECTION_COUNT: AtomicUsize = AtomicUsize::new(0);
                     let current_count = detection_msg.detections.len();
-                    unsafe {
-                        if LAST_DETECTION_COUNT != current_count {
-                            // Only log when the number of detected markers changes
-                            log_info!(
-                                LOGGER_NAME,
-                                "Detected {} ArUco markers: {:?}",
-                                current_count,
-                                detection_result.marker_ids
-                            );
-                            LAST_DETECTION_COUNT = current_count;
-                        }
+                    if LAST_DETECTION_COUNT.swap(current_count, Ordering::Relaxed) != current_count {
+                        // Only log when the number of detected markers changes
+                        log_info!(
+                            LOGGER_NAME,
+                            "Detected {} ArUco markers: {:?}",
+                            current_count,
+                            detection_result.marker_ids
+                        );
                     }
                 }
 

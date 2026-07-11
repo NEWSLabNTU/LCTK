@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** Python solver nodes
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1437-1448`
@@ -19,3 +19,8 @@ A stats or cleanup error at shutdown is swallowed with no diagnostic, masking re
 ## Suggested fix
 
 Catch specific exceptions, log the error, and only suppress where a documented, benign reason exists.
+
+## Resolution (2026-07-11)
+The shutdown/stats `except Exception: pass` blocks in advanced_extrinsic_solver
+and lidar_to_lidar_solver now log the error (via the node logger, or stderr where
+the context may already be gone) instead of silently swallowing it.

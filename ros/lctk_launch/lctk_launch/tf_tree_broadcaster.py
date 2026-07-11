@@ -34,11 +34,17 @@ class TfTreeBroadcaster(Node):
         self.broadcaster = StaticTransformBroadcaster(self)
         self.latest_transforms: dict[str, TransformStamped] = {}
 
-        # Use transient local durability so we pick up latched transforms
+        # L-07: subscribe with BEST_EFFORT + VOLATILE so we are compatible with
+        # the solver's publisher QoS in BOTH modes. The solvers publish RELIABLE
+        # in offline mode and BEST_EFFORT in realtime; a RELIABLE/TRANSIENT_LOCAL
+        # subscriber (the old setting) is incompatible with a BEST_EFFORT/VOLATILE
+        # publisher, so realtime transforms were silently never delivered and the
+        # TF tree was never broadcast. A BEST_EFFORT/VOLATILE subscriber accepts
+        # both reliability and both durability publishers.
         qos = QoSProfile(
             depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
         )
 
         for topic in topics:

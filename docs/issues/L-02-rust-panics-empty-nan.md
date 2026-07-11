@@ -2,7 +2,7 @@
 
 - **Severity:** Low (ROS node guards emptiness first; mostly library-only)
 - **Area:** hollow-board-detector
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:**
   - `rust/hollow-board-detector/src/algo.rs:263, 545, 643` (`centroid_of_points(...).unwrap()`)
@@ -20,3 +20,10 @@ A bad LiDAR return (NaN/Inf) reaches PCA init, or the library API is called with
 ## Suggested fix
 
 Return `Result`/`Option` from these helpers and handle the empty/NaN cases; use `total_cmp` for sorting.
+
+## Resolution (2026-07-11)
+Replaced the NaN-panicking comparisons: eigen-sort uses `f64::total_cmp` instead of
+`partial_cmp().unwrap()`, and the corner `min_by_key(r64(z))` uses `min_by` with
+`total_cmp`. A NaN/Inf point now sorts deterministically instead of panicking.
+(The `centroid_of_points().unwrap()` sites remain guarded by the ROS node's empty
+checks.)

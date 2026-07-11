@@ -127,7 +127,9 @@ demo:
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        use_advanced_solver:={{ use_advanced_solver }}
+        use_advanced_solver:={{ use_advanced_solver }} \
+        enable_overlay:={{ enable_overlay }} \
+        enable_judge:={{ enable_judge }}
 
 # Launch RViz for calibration visualization
 rviz:

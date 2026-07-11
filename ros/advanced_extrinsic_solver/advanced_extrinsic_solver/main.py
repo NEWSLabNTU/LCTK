@@ -26,6 +26,7 @@ License: MIT
 """
 
 import json
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -1454,18 +1455,19 @@ def main(args=None):
                     f"rejected={stats.messages_rejected[topic]}, "
                     f"rejection_rate={topic_rate:.1%}"
                 )
-        except Exception:
-            pass  # Ignore errors during statistics logging
+        except Exception as e:
+            node.get_logger().warning(f"Failed to log final sync statistics: {e}")
 
         try:
             node.destroy_node()
-        except Exception:
-            pass  # Ignore errors during cleanup
+        except Exception as e:
+            node.get_logger().warning(f"Error while destroying node: {e}")
         try:
             if rclpy.ok():
                 rclpy.shutdown()
-        except Exception:
-            pass  # Ignore errors if context is already invalid
+        except Exception as e:
+            # Context may already be invalid at this point; log to stderr.
+            print(f"Error during rclpy shutdown: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

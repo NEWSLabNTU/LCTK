@@ -62,7 +62,7 @@ just lidar-camera
 
 ### 3. Monitor Progress
 
-Open `http://localhost:8080` to see the web UI.
+Open `http://localhost:8000` to see the web UI.
 
 Check detection rates (should be >1 Hz):
 ```bash
@@ -90,7 +90,7 @@ If misaligned, check:
 Key parameters in `ros/lctk_launch/config/board/board_detector.json5`:
 - `plane_ransac_max_iterations`: RANSAC iterations (default: 2000)
 - `plane_ransac_inlier_threshold`: Inlier distance in meters (default: 0.05)
-- `max_icp_iterations`: ICP refinement iterations (default: 100)
+- `max_icp_iterations`: ICP refinement iterations (default: 10)
 
 See [Configuration Guide](./configuration.md) for full details.
 

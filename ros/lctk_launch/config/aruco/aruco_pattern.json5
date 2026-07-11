@@ -16,5 +16,4 @@
     // while square size is determined by num_squares_per_side
     "marker_square_size_ratio": 0.8,
     "border_bits": 1,
-    "permute_axis": ["x", "y", "z"],
 }

@@ -27,7 +27,7 @@ Launch the demo which plays sample data and runs calibration:
 just demo
 ```
 
-Open `http://localhost:8080` in your browser to see the web UI showing node status.
+Open `http://localhost:8000` in your browser to see the web UI showing node status.
 
 The system will:
 1. Play back recorded LiDAR and camera data

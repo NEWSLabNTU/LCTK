@@ -60,7 +60,7 @@ Test with sample data:
 just demo
 ```
 
-Open a web browser to `http://localhost:8080` to see the web UI.
+Open a web browser to `http://localhost:8000` to see the web UI.
 
 In another terminal, check running topics:
 ```bash

@@ -369,8 +369,8 @@ def main(args=None):
                     f"rejected={sync_stats.messages_rejected[topic]}, "
                     f"rejection_rate={topic_rate:.1%}"
                 )
-        except Exception:
-            pass  # Ignore errors during statistics logging
+        except Exception as e:
+            node.get_logger().warning(f"Failed to log final sync statistics: {e}")
 
         node.destroy_node()
         rclpy.shutdown()

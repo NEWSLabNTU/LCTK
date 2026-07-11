@@ -10,14 +10,14 @@ git clone https://github.com/NEWSLabNTU/LCTK.git
 cd LCTK
 
 # Setup development environment
-./setup-dev-env.sh         # Install system dependencies
+./setup.sh                 # Install system dependencies
 
 # Build the project
 just build
 
-# Test with sample data
-just sample-sensor-data start    # Launch sample data playback
-just lidar-camera start          # Launch calibration pipeline
+# Test with sample data (two terminals)
+just sample-data           # Terminal 1: sample data playback
+just demo                  # Or: sample data + calibration pipeline in one command
 ```
 
 ## Overview
