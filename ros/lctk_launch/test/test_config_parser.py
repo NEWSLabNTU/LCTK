@@ -209,6 +209,43 @@ def test_two_lidar_node_parity():
     assert len(pipeline.lidar_camera_solvers) == 0
 
 
+def test_hollow_board_missing_bbox_config_raises(tmp_path):
+    """H-04: a hollow_board marker used by a lidar must have bbox_config.
+
+    The lidar_board_detector declares bbox_file/aruco_pattern_file as mandatory
+    ROS parameters, so the config parser must reject a marker that omits them
+    (with a clear message) rather than letting the node crash at startup.
+    """
+    import pytest
+
+    config_text = """
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /lidar/points
+      frame_id: velodyne_top
+  cameras:
+    front_center:
+      image_topic: /camera/image_raw
+      frame_id: camera_front_center
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: /tmp/board.json5
+    aruco_config: /tmp/aruco.json5
+    # bbox_config intentionally omitted
+    pairs:
+      - [top_lidar, front_center]
+"""
+    config_path = tmp_path / "missing_bbox.yaml"
+    config_path.write_text(config_text)
+
+    parser = CalibrationConfigParser(str(config_path))
+    with pytest.raises(ValueError, match="bbox_config"):
+        parser.parse()
+
+
 if __name__ == "__main__":
     import inspect
 

@@ -353,6 +353,22 @@ class CalibrationConfigParser:
             lidar = self.lidars[lidar_name]
             marker = self.markers[marker_name]
 
+            # H-04: the lidar_board_detector declares aruco_pattern_file and
+            # bbox_file as mandatory ROS parameters (it needs the marker paper
+            # size for board geometry and the bbox for the ROI filter). If the
+            # marker omits them the node crashes at startup with an opaque
+            # mandatory-parameter error, so fail fast here with a clear message.
+            if not marker.aruco_config:
+                raise ValueError(
+                    f"Marker '{marker_name}' (used by lidar '{lidar_name}') is missing "
+                    "'aruco_config', which the lidar_board_detector requires."
+                )
+            if not marker.bbox_config:
+                raise ValueError(
+                    f"Marker '{marker_name}' (used by lidar '{lidar_name}') is missing "
+                    "'bbox_config', which the lidar_board_detector requires."
+                )
+
             node_name = f"board_detector_{lidar_name}_{marker_name}"
             namespace = f"calibration/{lidar_name}_{marker_name}"
             output_topic = f"/{namespace}/calibration_board_detections"

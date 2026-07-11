@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** lidar_board_detector ↔ lctk_launch
-- **Status:** Open
+- **Status:** Fixed (2026-07-11)
 - **Verified:** Static review
 - **Location:**
   - `ros/lidar_board_detector/src/main.rs:308-312` (`.mandatory()?`)
@@ -20,3 +20,13 @@ A user writes a `hollow_board` marker that omits `bbox_config` (or `aruco_config
 ## Suggested fix
 
 Either (a) make the parser validate that `aruco_config` and `bbox_config` are present for any `hollow_board` marker used by a detector and fail fast with a clear message, or (b) make the detector params non-mandatory with sensible defaults. Keep the launch and node contracts in sync.
+
+## Resolution (2026-07-11)
+
+Chose (a) — the params are genuinely required (the detector uses the ArUco paper
+size for board geometry and the bbox for the ROI filter). `config_parser._derive_pipeline`
+now raises a clear `ValueError` naming the marker and lidar when a hollow_board
+marker used by a detector omits `aruco_config` or `bbox_config`. Since presence is
+now guaranteed, `calibrate.launch.py` passes both params unconditionally (removing
+the `if present` mismatch). Added regression test
+`test_hollow_board_missing_bbox_config_raises`; `just test` green (48 Python tests).

@@ -124,7 +124,11 @@ def compute_plan(
         )
 
     if not pairs:
-        raise ValueError("No calibration pairs defined")
+        raise ValueError(
+            "No calibration pairs defined. Define pairs inside each marker as a "
+            "'pairs' list of [deviceA, deviceB] entries (not a top-level "
+            "'calibration_pairs' block)."
+        )
 
     # Build weighted edges and classify
     weighted_edges: list[

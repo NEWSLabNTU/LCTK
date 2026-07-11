@@ -109,10 +109,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "use_best_effort_qos": use_best_effort_qos,
         }
 
-        if detector.aruco_config:
-            params["aruco_pattern_file"] = detector.aruco_config
-        if detector.bbox_config:
-            params["bbox_file"] = detector.bbox_config
+        # aruco_config and bbox_config are guaranteed present by config_parser
+        # validation (both are mandatory parameters for the lidar_board_detector).
+        params["aruco_pattern_file"] = detector.aruco_config
+        params["bbox_file"] = detector.bbox_config
 
         nodes.append(
             Node(

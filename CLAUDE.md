@@ -255,10 +255,10 @@ markers:
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
     aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
     bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
-
-calibration_pairs:
-  - devices: [top_lidar, front_center]
-    marker: calibration_board
+    # Calibration pairs are defined inside each marker as a list of
+    # [deviceA, deviceB] pairs that observe this marker.
+    pairs:
+      - [top_lidar, front_center]
 ```
 
 **Generated Nodes:**

@@ -1552,14 +1552,21 @@ impl CalibrationBoardLocatorNode {
             .find(|f| f.name == "z")
             .ok_or_else(|| anyhow!("Missing 'z' field in PointCloud2"))?;
 
-        // Get field offsets
+        // Get field offsets and datatypes. H-03: honor the declared datatype and
+        // endianness instead of assuming little-endian FLOAT32 -- a FLOAT64 or
+        // big-endian producer would otherwise be decoded from the wrong bytes,
+        // yielding garbage points and a silently wrong calibration.
         let x_offset = x_field.offset as usize;
         let y_offset = y_field.offset as usize;
         let z_offset = z_field.offset as usize;
+        let x_datatype = x_field.datatype;
+        let y_datatype = y_field.datatype;
+        let z_datatype = z_field.datatype;
+        let is_bigendian = msg.is_bigendian;
 
-        // Parse points
+        // Parse points (use usize arithmetic to avoid u32 overflow on large clouds)
         let point_step = msg.point_step as usize;
-        let num_points = (msg.width * msg.height) as usize;
+        let num_points = (msg.width as usize) * (msg.height as usize);
 
         let mut points = Vec::with_capacity(num_points);
 
@@ -1572,10 +1579,10 @@ impl CalibrationBoardLocatorNode {
                 break;
             }
 
-            // Read x, y, z as f32 (assuming FLOAT32 datatype = 7)
-            let x = Self::read_f32_le(&msg.data, base_offset + x_offset)?;
-            let y = Self::read_f32_le(&msg.data, base_offset + y_offset)?;
-            let z = Self::read_f32_le(&msg.data, base_offset + z_offset)?;
+            // Read x, y, z according to the field datatype and endianness
+            let x = Self::read_coord(&msg.data, base_offset + x_offset, x_datatype, is_bigendian)?;
+            let y = Self::read_coord(&msg.data, base_offset + y_offset, y_datatype, is_bigendian)?;
+            let z = Self::read_coord(&msg.data, base_offset + z_offset, z_datatype, is_bigendian)?;
 
             // Skip points with invalid coordinates (NaN or infinity)
             if x.is_finite() && y.is_finite() && z.is_finite() {
@@ -1586,20 +1593,41 @@ impl CalibrationBoardLocatorNode {
         Ok(points)
     }
 
-    fn read_f32_le(data: &[u8], offset: usize) -> Result<f32> {
-        if offset + 4 > data.len() {
-            return Err(anyhow!(
-                "Buffer overflow when reading f32 at offset {}",
-                offset
-            ));
+    /// Read a single XYZ coordinate honoring the PointField datatype and the
+    /// cloud's endianness. Supports FLOAT32 (7) and FLOAT64 (8); returns an
+    /// error for any other datatype so an unsupported layout fails loudly rather
+    /// than being silently misdecoded.
+    fn read_coord(data: &[u8], offset: usize, datatype: u8, is_bigendian: bool) -> Result<f32> {
+        const PF_FLOAT32: u8 = 7;
+        const PF_FLOAT64: u8 = 8;
+        match datatype {
+            PF_FLOAT32 => {
+                if offset + 4 > data.len() {
+                    return Err(anyhow!("Buffer overflow when reading f32 at offset {offset}"));
+                }
+                let bytes: [u8; 4] = data[offset..offset + 4].try_into().unwrap();
+                Ok(if is_bigendian {
+                    f32::from_be_bytes(bytes)
+                } else {
+                    f32::from_le_bytes(bytes)
+                })
+            }
+            PF_FLOAT64 => {
+                if offset + 8 > data.len() {
+                    return Err(anyhow!("Buffer overflow when reading f64 at offset {offset}"));
+                }
+                let bytes: [u8; 8] = data[offset..offset + 8].try_into().unwrap();
+                let value = if is_bigendian {
+                    f64::from_be_bytes(bytes)
+                } else {
+                    f64::from_le_bytes(bytes)
+                };
+                Ok(value as f32)
+            }
+            other => Err(anyhow!(
+                "Unsupported PointField datatype {other} for XYZ (expected FLOAT32=7 or FLOAT64=8)"
+            )),
         }
-        let bytes: [u8; 4] = [
-            data[offset],
-            data[offset + 1],
-            data[offset + 2],
-            data[offset + 3],
-        ];
-        Ok(f32::from_le_bytes(bytes))
     }
 
     /// Compute a plane model from points using PCA (for skip_ransac mode)
