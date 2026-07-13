@@ -36,6 +36,7 @@ import numpy as np
 import rclpy
 from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
+from lctk_quality import build_report
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
     AdjustTransform,
@@ -194,6 +195,15 @@ class AdvancedExtrinsicSolver(Node):
         self.last_transform: Optional[TransformStamped] = None
         self.publishing_enabled = False
         self.last_solve_status = "No calibration performed yet"
+
+        # H-09: quality report for the last solve (None until one succeeds), plus the per-frame
+        # arrays it needs. Kept per-frame, not concatenated, because N is the number of DISTINCT
+        # board placements -- buffering one placement a hundred times is duplication, not
+        # information.
+        self.last_quality = None
+        self._per_frame_object_points = []
+        self._per_frame_image_points = []
+        self._per_frame_board_poses = []
         self.total_correspondences = 0
 
         # Pose state: solved (from PnP) and current (with manual adjustments)
@@ -695,6 +705,36 @@ class AdvancedExtrinsicSolver(Node):
             if transform_data:
                 save_data["transform"] = transform_data
 
+            # H-09: a saved calibration carries its own quality record, so it can be judged
+            # later without re-deriving it. Unknown keys are ignored by older loaders.
+            if self.last_quality is not None:
+                q = self.last_quality
+                save_data["quality"] = {
+                    "status": q.status_line(),
+                    "is_degenerate": q.is_degenerate,
+                    "n_frames": q.n_frames,
+                    "n_distinct_placements": q.n_placements,
+                    "reprojection_rms_px": q.residuals.rms_px,
+                    "reprojection_max_px": q.residuals.max_px,
+                    "per_pose_rms_px": q.residuals.per_pose_rms_px,
+                    "cond_JtJ": q.conditioning.cond,
+                    "diversity": {
+                        "normal_span_deg": q.diversity.normal_span_deg,
+                        "depth_range_m": q.diversity.depth_range_m,
+                        "lateral_span_m": q.diversity.lateral_span_m,
+                    },
+                    "uncertainty": (
+                        {
+                            "rot_deg": q.spread.rot_deg,
+                            "trans_mm": q.spread.trans_mm,
+                            "n_subsets": q.spread.n_subsets,
+                        }
+                        if q.spread is not None
+                        else None
+                    ),
+                    "warnings": q.warnings(),
+                }
+
             with open(file_path, "w") as f:
                 json.dump(save_data, f, indent=2)
 
@@ -1079,6 +1119,36 @@ class AdvancedExtrinsicSolver(Node):
 
         return msg
 
+    def _assess_quality(self, rvec: np.ndarray, tvec: np.ndarray) -> None:
+        """Compute the H-09 quality report and surface it.
+
+        Reports and warns; never rejects. C-04 was a gate whose threshold was unreachable, and it
+        silently discarded every detection for months — quality thresholds get validated against
+        field data before anything is allowed to refuse.
+        """
+        K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
+
+        self.last_quality = build_report(
+            self._per_frame_object_points,
+            self._per_frame_image_points,
+            self._per_frame_board_poses,
+            K,
+            rvec,
+            tvec,
+        )
+        if self.last_quality is None:
+            return
+
+        # `last_solve_status` is already a string, so the metric reaches the operator and the
+        # interactive controller with no .srv change and no lctk_interfaces rebuild.
+        self.last_solve_status = self.last_quality.status_line()
+
+        warnings = self.last_quality.warnings()
+        if warnings:
+            self.get_logger().warn("\n".join(warnings))
+        else:
+            self.get_logger().info(f"Calibration quality: {self.last_solve_status}")
+
     def _solve_from_buffer(self) -> bool:
         """
         Solve extrinsic calibration using all buffered detection pairs.
@@ -1111,10 +1181,19 @@ class AdvancedExtrinsicSolver(Node):
             f"{'#' * 80}\n"
         )
 
-        # Accumulate all correspondences from buffer
+        # Accumulate all correspondences from buffer.
+        #
+        # H-09: keep the PER-FRAME arrays and the board poses as well as the concatenated set. The
+        # quality metrics need them, because `N` is the number of DISTINCT board placements, not the
+        # number of buffered frames — buffering one placement a hundred times is duplication, not
+        # information, and a metric that cannot tell the difference reports its highest confidence
+        # exactly when the calibration is worst.
         all_object_points = []
         all_image_points = []
         pose_board_detections = []  # H-07: for the pose-diversity gate
+        self._per_frame_object_points = []
+        self._per_frame_image_points = []
+        self._per_frame_board_poses = []
 
         for pose_idx, (aruco_msg, board_msg) in enumerate(self.detection_buffer, 1):
             self.get_logger().info(
@@ -1139,6 +1218,16 @@ class AdvancedExtrinsicSolver(Node):
 
             all_object_points.extend(object_points)
             all_image_points.extend(image_points)
+
+            self._per_frame_object_points.append(
+                np.asarray(object_points, dtype=np.float64)
+            )
+            self._per_frame_image_points.append(
+                np.asarray(image_points, dtype=np.float64)
+            )
+            self._per_frame_board_poses.append(
+                (board_detection.position, board_detection.orientation)
+            )
 
         # Convert to numpy arrays
         all_object_points = np.array(all_object_points, dtype=np.float64)
@@ -1206,6 +1295,10 @@ class AdvancedExtrinsicSolver(Node):
             self.last_solve_status = "PnP solver failed"
             self.get_logger().error(self.last_solve_status)
             return False
+
+        # H-09: assess the solve. This does not change the estimate and does not block publishing;
+        # it says how much the estimate is worth, which the pipeline previously could not.
+        self._assess_quality(rvec, tvec)
 
         # Store solved and current rvec/tvec
         with self.lock:

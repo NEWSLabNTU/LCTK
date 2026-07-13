@@ -35,6 +35,7 @@ from sensor_msgs.msg import CameraInfo
 # ROS2 message types
 from std_msgs.msg import Header
 from vision_msgs.msg import Detection2DArray, Detection3D, Detection3DArray
+from lctk_quality import compute_conditioning, compute_residuals
 
 
 @dataclass
@@ -345,6 +346,9 @@ class EducationalExtrinsicSolver(Node):
             self.get_logger().error("PnP solver failed")
             return False
 
+        # H-09: report the quality of what we just solved.
+        self._report_quality(object_points, image_points, rvec, tvec)
+
         # Step 5: Publish transformation
         transform_msg = self._create_transform_message_educational(
             rvec, tvec, aruco_msg.header
@@ -400,9 +404,7 @@ class EducationalExtrinsicSolver(Node):
             # Extract marker ID
             marker_id = detection.id if hasattr(detection, "id") else 0
 
-            markers.append(
-                ArUcoMarker(id=marker_id, corners=corners, center=center)
-            )
+            markers.append(ArUcoMarker(id=marker_id, corners=corners, center=center))
 
         return markers
 
@@ -737,6 +739,45 @@ class EducationalExtrinsicSolver(Node):
         except cv2.error as e:
             self.get_logger().error(f"OpenCV PnP error: {e}")
             return False, None, None
+
+    def _report_quality(
+        self,
+        object_points: np.ndarray,
+        image_points: np.ndarray,
+        rvec: np.ndarray,
+        tvec: np.ndarray,
+    ) -> None:
+        """H-09: say how much this solve is worth.
+
+        This node solves from a SINGLE detection pair — 16 coplanar ArUco corners. That is the
+        most degenerate configuration the pipeline can produce, and it is what `just demo` runs.
+        Measured: it scores the *best* reprojection error of any capture (0.125 px) while being the
+        worst-conditioned. Left unsaid, that number reads as success.
+
+        Resampling and diversity need multiple distinct board placements, so they do not apply here.
+        What we can say — and must — is that a single placement cannot constrain the extrinsic, no
+        matter how good the residuals look.
+        """
+        K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
+
+        residuals = compute_residuals([object_points], [image_points], K, rvec, tvec)
+        conditioning = compute_conditioning(residuals.jacobian, residuals.rms_px)
+
+        self._solve_count = getattr(self, "_solve_count", 0) + 1
+        if (
+            self._solve_count % 30 != 1
+        ):  # rate-limit: this runs on every synchronized pair
+            return
+
+        self.get_logger().warn(
+            "Single-pose solve: the extrinsic is under-constrained BY CONSTRUCTION.\n"
+            f"  reprojection rms {residuals.rms_px:.2f} px, cond(JtJ) {conditioning.cond:.0e}\n"
+            "  A low reprojection error here is NOT evidence of a good calibration -- one board\n"
+            "  placement cannot determine the transform, and a degenerate capture typically\n"
+            "  scores a BETTER reprojection error than a good one.\n"
+            "  For a calibration you can trust, use the buffered solver over several distinct\n"
+            "  board placements: `just demo use_advanced_solver=true` (see docs/issues/H-07)."
+        )
 
     def _create_transform_message_educational(
         self, rvec: np.ndarray, tvec: np.ndarray, header: Header

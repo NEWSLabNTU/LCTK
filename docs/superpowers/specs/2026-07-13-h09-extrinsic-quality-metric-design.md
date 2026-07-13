@@ -61,6 +61,54 @@ Four conclusions, three of which contradict the obvious design:
    in the pixels and structurally cannot see the ICP 3D error. σ is therefore a usable *relative*
    signal but a dishonest *absolute* one, and must be labelled as such wherever it is shown.
 
+## Then it was run on real data, and the design changed again
+
+The simulation above was validated against the real field capture
+(`data/2022-10-14-otobrite-calibration`, the one that produced the shipped production extrinsic).
+**Subset resampling — the metric the simulation crowned — inverts on real data.**
+
+| capture | distinct placements | rms | cond(JᵀJ) | **subset spread** | **normal span** |
+|---|---|---|---|---|---|
+| scene 1 only | ~1 (3 within 5 cm) | 6.12 px | 4.4e4 | **±0.54° / 19 mm** | **3.0°** |
+| scene 2 only | **1** | 3.46 px | 3.0e4 | **±0.22° / 9 mm** | **1.7°** |
+| both scenes | **2** | 8.12 px | 2.2e4 | ±1.44° / 70 mm | **41.4°** |
+
+Scene 2 alone — **a single board placement, filmed nine times** — reports the *most confident*
+uncertainty in the table (±0.22° / 9 mm) and is completely degenerate. The only set with genuine
+geometric diversity reports the *worst*.
+
+**Why the simulation missed it.** The simulation gave each pose *independent* ICP noise. In reality,
+nine frames of a **static** board carry highly *correlated* error — same points, same systematic ICP
+bias — so every C(N,3) subset returns nearly the same answer. **Resampling measures variance; a
+degenerate capture has low variance and high bias.** Repeated frames of one placement are not
+independent samples, and counting them as N = 9 is a lie the metric then believes.
+
+Tsai et al. do not hit this because their 50 poses are genuinely distinct placements. Ours are not.
+
+**What survives contact with real data is the board-normal span: 1.7°–3.0° (degenerate) vs 41.4°
+(diverse).** A clean 20× separation, and the only metric in the table that does not invert or go
+flat.
+
+### Consequences for this design
+
+1. **Deduplicate by placement before computing anything.** `N` is the number of *distinct board
+   placements*, not the number of frames. The 18 usable frames in the field capture are **2
+   placements**. Every metric is computed on deduplicated placements.
+2. **Diversity is the primary gate**, not the footnote it was in the first draft. It is the only
+   signal that separates cleanly on real data.
+3. **Subset spread is reported only after dedup, and suppressed below 4 distinct placements** —
+   otherwise it manufactures confidence out of repeated frames.
+4. `cond(JᵀJ)` separates by only 1.4–2× on real data (vs 190× in simulation). Keep it, demote it: it
+   is a supporting signal, not the discriminator.
+
+### What this says about the shipped calibration
+
+`solve-extrinsics.sh` solved the production extrinsic from **exactly two poses** — one frame
+hand-picked from each scene. The operator had already worked out that the other 16 frames were
+duplicates. This design's whole purpose is to say that out loud, and to add the part the operator
+could not know: even using **all** the real data, the uncertainty (±70 mm) **exceeds the project's
+own 50 mm target**.
+
 ## Architecture
 
 New package `ros/lctk_quality/` — **pure Python, numpy + cv2 only, no `rclpy`.** Both solver nodes
@@ -69,13 +117,17 @@ degenerate and well-conditioned cases.
 
 ```
 ros/lctk_quality/lctk_quality/
-    residuals.py      per-corner and per-pose reprojection error
-    conditioning.py   Jacobian -> cond(JtJ), per-DoF sigma (flagged optimistic)
-    resampling.py     all C(N,k) pose subsets -> empirical parameter spread
-    diversity.py      board-normal spread, depth range, image coverage
+    placements.py     dedupe frames -> DISTINCT board placements   <- runs FIRST
+    diversity.py      normal span, depth range, lateral spread     <- the primary gate
+    residuals.py      per-corner and per-pose reprojection error   <- report, never rank
+    conditioning.py   Jacobian -> cond(JtJ), per-DoF sigma (both flagged)
+    resampling.py     C(N,3) spread over DISTINCT placements, N>=4 only
     report.py         QualityReport dataclass + the one-line summary string
-  test/               synthetic; no ROS, no rosbag
+  test/               synthetic + the real-data inversion, pinned
 ```
+
+Order matters and is enforced by the module boundaries: `placements.py` runs before anything else,
+and `resampling.py` refuses to produce a number when it is handed fewer than 4 distinct placements.
 
 ### The Jacobian is free
 
@@ -151,8 +203,19 @@ tests:
    RMSE than the good one, so that nobody later "simplifies" the design down to reprojection error.
 4. **The Jacobian columns are what we think they are.** Assert `jac[:, :6]` matches finite
    differences of `(rvec, tvec)`.
-5. **Subset spread tracks true error.** On synthetic data with known ground truth, assert the
-   estimated spread is the right order of magnitude — it is the number the operator will act on.
+5. **Subset spread tracks true error — but only over DISTINCT placements.** On synthetic data with
+   independent per-pose noise, assert the estimated spread is the right order of magnitude.
+6. **The correlated-frames trap, pinned.** Build a capture of N repeated frames of *one* board
+   placement with correlated error. Assert that:
+   - `placements.py` collapses it to **1** distinct placement;
+   - `resampling.py` **refuses to emit a spread** rather than reporting the falsely-confident
+     ±0.22° / 9 mm that the real scene-2 data produces;
+   - the diversity gate flags it.
+
+   This is the test that stops someone re-deriving the first draft of this spec and shipping a
+   number that is most confident exactly when the calibration is worst.
+7. **RMSE and subset spread must be shown to invert on real-shaped data**, so nobody later
+   "simplifies" the design down to either of them.
 
 ## Deletions (settles L-12, L-13)
 

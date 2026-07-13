@@ -18,7 +18,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [H-06](./H-06-config-schema-drift.md) | High | CLAUDE.md documents a config schema the parser does not accept | 🟢 |
 | [H-07](./H-07-no-pose-diversity-gate.md) | High | Degenerate pose sets accepted silently; extrinsic under-constrained | 🟡 |
 | [H-08](./H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
-| [H-09](./H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🔴 |
+| [H-09](./H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
 | [H-10](./H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🟢 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |

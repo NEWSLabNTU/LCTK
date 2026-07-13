@@ -114,7 +114,7 @@ test:
     set -eo pipefail
     cargo nextest run --cargo-profile test-release --no-fail-fast
     source install/setup.bash
-    pytest ros/lctk_launch/test/ -v --no-header
+    pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
 lidar-camera:

@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** advanced_extrinsic_solver, extrinsic_solver_node
-- **Status:** Open
+- **Status:** Fixed (2026-07-14)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1333-1366` (`_solve_pnp`)
@@ -72,3 +72,52 @@ proposed here does not work at all, and another is actively misleading.
 Note `rust/calibration-quality/` already defines a `CalibrationMetrics` struct
 (`metrics.rs:9-27`) — but it is dead code, and its `reprojection_error` is actually a 3D-3D
 residual, not an image-plane one. See [L-12](./L-12-dead-solver-crates.md).
+
+## Resolution (2026-07-14)
+
+New pure-Python package `ros/lctk_quality/`, imported by both solvers. Surfaced through
+`last_solve_status` (already a string — no message change, no `lctk_interfaces` rebuild), through
+warnings that say what to DO, and through a `"quality"` block in the `dump_detections` JSON.
+Nothing rejects: C-04 was a gate with an unreachable threshold that silently discarded every
+detection for months.
+
+**The design was rebuilt twice, both times because a metric was measured rather than assumed.**
+
+1. *Reprojection RMSE inverts.* A degenerate capture scores a **better** RMSE than a good one
+   (8.77 px vs 10.88 px in simulation; 3.46 px vs 8.12 px on the real field capture), and the
+   single-pose solve `just demo` produces scores the best of all (0.125 px) while being the
+   worst-conditioned thing the pipeline can make. Reported, never ranked on.
+2. *Leave-one-out CV is blind here and was cut.* Holdout/train ratio measured **1.1× degenerate vs
+   1.3× good** — flat. When the board is held still the held-out pose is *identical* to the training
+   poses, so it is predicted perfectly.
+3. *Resampled uncertainty inverts too, if fed frames.* The real scene-2 capture — **one board
+   placement filmed nine times** — reports **±0.22° / ±9 mm**, the most confident number in the
+   suite, for a capture that cannot constrain the extrinsic at all. Repeated frames of a static
+   board carry correlated error, so every subset agrees. Resampling measures variance; a degenerate
+   capture has low variance and high bias.
+
+So the pipeline is: **frames → distinct placements → diversity (the gate) → residuals →
+conditioning → spread**. `N` is the number of distinct board placements, never the frame count, and
+`resampling` refuses to emit a number below 4 of them. Board-normal span is the primary signal — the
+only one that separates cleanly on real data (1.7–3.0° degenerate vs 41.4° diverse).
+
+**Verified against the capture that produced the shipped production extrinsic**
+(`data/2022-10-14-otobrite-calibration`, whose `solve-extrinsics.sh` used exactly two poses):
+
+```
+DEGENERATE | 2 placements (18 frames) | uncert n/a (too few placements) | normals 41deg | rms 8.12px
+  2 distinct placements (aim for 10+); move the board to a new spot and re-capture
+  depth range is 0.10 m (aim for 1.5+); move the board nearer and farther
+  Reprojection error (8.12 px) is NOT evidence of quality here
+```
+
+And on the live `just demo` pipeline, which had been reporting nothing but success:
+
+```
+[WARN] Single-pose solve: the extrinsic is under-constrained BY CONSTRUCTION.
+       reprojection rms 1.27 px, cond(JtJ) 2e+04
+```
+
+10 tests, including two that exist purely to stop the design regressing to either trap.
+Settles [L-13](./L-13-calibration-metrics-msg-dead.md) and [L-12](./L-12-dead-solver-crates.md) in
+principle — the dead scaffolding should now be deleted.
