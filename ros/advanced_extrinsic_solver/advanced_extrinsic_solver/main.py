@@ -107,6 +107,16 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("debug_mode", True)
         self.declare_parameter("publishing_rate", 10.0)
         self.declare_parameter("min_poses_required", 2)
+        # H-07: pose-diversity gate. The PnP correspondences all lie on one 500 mm
+        # coplanar ArUco patch, so a near-coplanar / single-depth buffer leaves a
+        # rotation about the correspondence centroid almost unconstrained (the board
+        # overlay stays glued while the background tilts). Gate the solve on the
+        # GEOMETRY of the accumulated poses, not just their count.
+        self.declare_parameter("min_normal_spread_deg", 20.0)
+        self.declare_parameter("min_depth_range_m", 1.0)
+        # Warn by default (so the sample single-placement demo still solves), refuse
+        # only when explicitly enforced.
+        self.declare_parameter("enforce_pose_diversity", False)
         self.declare_parameter("axis_length", 0.3)  # Length of axis arrows in meters
         self.declare_parameter("axis_diameter", 0.02)  # Diameter of axis arrows
         self.declare_parameter("use_best_effort_qos", True)
@@ -131,6 +141,17 @@ class AdvancedExtrinsicSolver(Node):
         )
         self.min_poses_required = (
             self.get_parameter("min_poses_required").get_parameter_value().integer_value
+        )
+        self.min_normal_spread_deg = (
+            self.get_parameter("min_normal_spread_deg")
+            .get_parameter_value()
+            .double_value
+        )
+        self.min_depth_range_m = (
+            self.get_parameter("min_depth_range_m").get_parameter_value().double_value
+        )
+        self.enforce_pose_diversity = (
+            self.get_parameter("enforce_pose_diversity").get_parameter_value().bool_value
         )
         self.axis_length = (
             self.get_parameter("axis_length").get_parameter_value().double_value
@@ -1040,6 +1061,7 @@ class AdvancedExtrinsicSolver(Node):
         # Accumulate all correspondences from buffer
         all_object_points = []
         all_image_points = []
+        pose_board_detections = []  # H-07: for the pose-diversity gate
 
         for pose_idx, (aruco_msg, board_msg) in enumerate(self.detection_buffer, 1):
             self.get_logger().info(
@@ -1051,6 +1073,7 @@ class AdvancedExtrinsicSolver(Node):
             board_detection = self._detection3d_to_board_detection(
                 board_msg.detections[0]
             )
+            pose_board_detections.append(board_detection)
 
             # Create correspondences for this pose
             object_points, image_points = self._create_point_correspondences(
@@ -1080,6 +1103,43 @@ class AdvancedExtrinsicSolver(Node):
         self.get_logger().info(
             f"Accumulated {num_correspondences} correspondences from {buffer_size} poses"
         )
+
+        # H-07: pose-diversity gate. Every correspondence lies on a 500 mm coplanar
+        # patch, so a near-coplanar / single-depth buffer under-constrains the
+        # extrinsic (rotation about the correspondence centroid is a near-null
+        # direction: the board overlay stays glued while the background tilts).
+        # Buffering more frames of the same placement does NOT help -- only new
+        # board orientations and depths do.
+        normal_spread_deg, depth_range_m = self._compute_pose_diversity(
+            pose_board_detections
+        )
+        self.get_logger().info(
+            f"Pose diversity: board-normal spread = {normal_spread_deg:.1f} deg "
+            f"(min {self.min_normal_spread_deg:.0f}), depth range = {depth_range_m:.2f} m "
+            f"(min {self.min_depth_range_m:.2f})"
+        )
+        if (
+            normal_spread_deg < self.min_normal_spread_deg
+            or depth_range_m < self.min_depth_range_m
+        ):
+            diversity_msg = (
+                f"Low pose diversity (board-normal spread {normal_spread_deg:.1f} deg, "
+                f"depth range {depth_range_m:.2f} m): the accumulated poses are nearly "
+                f"coplanar / at one depth, so the extrinsic is under-constrained about "
+                f"the board centroid and the background will tilt. Capture the board at "
+                f"more orientations (>~{self.min_normal_spread_deg:.0f} deg apart) and "
+                f"depths (>~{self.min_depth_range_m:.1f} m range); more frames of the same "
+                f"placement will NOT help."
+            )
+            if self.enforce_pose_diversity:
+                self.last_solve_status = (
+                    f"Refused: insufficient pose diversity "
+                    f"(normal spread {normal_spread_deg:.1f} deg, "
+                    f"depth range {depth_range_m:.2f} m)"
+                )
+                self.get_logger().error(diversity_msg)
+                return False
+            self.get_logger().warn(diversity_msg)
 
         # Solve PnP
         self.get_logger().info(
@@ -1185,6 +1245,42 @@ class AdvancedExtrinsicSolver(Node):
             )
 
         return markers
+
+    def _compute_pose_diversity(
+        self, board_detections: List[BoardDetection]
+    ) -> Tuple[float, float]:
+        """H-07: geometric diversity of the accumulated board poses.
+
+        Returns ``(max_board_normal_spread_deg, depth_range_m)``:
+
+        - ``max_board_normal_spread_deg`` -- the largest angle between any two board
+          plane normals. A near-parallel set cannot constrain the extrinsic rotation.
+          Normals are compared unsigned (a normal and its flip describe the same plane).
+        - ``depth_range_m`` -- the span of board-centroid ranges from the sensor.
+
+        Both are 0.0 for fewer than two poses.
+        """
+        if len(board_detections) < 2:
+            return 0.0, 0.0
+
+        normals = []
+        depths = []
+        for det in board_detections:
+            rot = R.from_quat(det.orientation).as_matrix()
+            # Board plane normal is the board frame's +Z axis in the LiDAR frame.
+            normals.append(rot @ np.array([0.0, 0.0, 1.0]))
+            depths.append(float(np.linalg.norm(det.position)))
+
+        max_angle_deg = 0.0
+        for i in range(len(normals)):
+            for j in range(i + 1, len(normals)):
+                cos_angle = abs(float(np.dot(normals[i], normals[j])))
+                cos_angle = min(1.0, max(-1.0, cos_angle))
+                angle_deg = float(np.degrees(np.arccos(cos_angle)))
+                max_angle_deg = max(max_angle_deg, angle_deg)
+
+        depth_range_m = max(depths) - min(depths)
+        return max_angle_deg, depth_range_m
 
     def _detection3d_to_board_detection(self, detection) -> BoardDetection:
         """Convert ROS Detection3D to BoardDetection object."""
