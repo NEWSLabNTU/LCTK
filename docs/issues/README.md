@@ -1,6 +1,6 @@
 # LCTK Issue Tracker
 
-Findings from the 2026-07-09 workflow + correctness audit (sensor → config → build → runtime → solver → Autoware export). One file per finding, ranked by severity.
+Findings from the 2026-07-09 workflow + correctness audit (sensor → config → build → runtime → solver → Autoware export), plus the 2026-07-12 extrinsic-stability audit (C-03, H-07…H-09, M-11…M-14, L-10…L-12). One file per finding, ranked by severity.
 
 Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by-design
 
@@ -8,12 +8,16 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 |----|-----|-------|--------|
 | [C-01](./C-01-aruco-corners-discarded.md) | Critical | ArUco marker corners discarded; PnP uses axis-aligned bbox | 🟢 |
 | [C-02](./C-02-conflux-realtime-memory-leak.md) | Critical | Conflux realtime mode leaks a message object per dropped message | 🟢 |
+| [C-03](./C-03-double-undistortion.md) | Critical | Image undistorted twice before ArUco detection → every corner biased | 🟢 |
 | [H-01](./H-01-conflux-not-built.md) | High | `conflux_py` never built → solvers ImportError at startup | 🟢 |
 | [H-02](./H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🟢 |
 | [H-03](./H-03-pointcloud-datatype-endian.md) | High | Point cloud XYZ decoded as LE float32 without checking datatype/endianness | 🟢 |
 | [H-04](./H-04-board-detector-mandatory-params.md) | High | Detector declares params mandatory that launch adds only "if present" | 🟢 |
 | [H-05](./H-05-conflux-error-stats-collapse.md) | High | Conflux FFI collapses all push errors to BufferFull → corrupt stats | 🟢 |
 | [H-06](./H-06-config-schema-drift.md) | High | CLAUDE.md documents a config schema the parser does not accept | 🟢 |
+| [H-07](./H-07-no-pose-diversity-gate.md) | High | Degenerate pose sets accepted silently; extrinsic under-constrained | 🔴 |
+| [H-08](./H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🔴 |
+| [H-09](./H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🔴 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -24,6 +28,10 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [M-08](./M-08-conflux-ffi-no-locking.md) | Medium | Mutable Rust conflux State crosses FFI with no locking | 🟢 |
 | [M-09](./M-09-marker-ids-hard-index.md) | Medium | `marker_ids[0..3]` hard index → IndexError on short config | 🟢 |
 | [M-10](./M-10-multi-marker-config-collisions.md) | Medium | Multi-marker camera uses wrong ArUco config; duplicate pairs collide | 🟢 |
+| [M-11](./M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🔴 |
+| [M-12](./M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🔴 |
+| [M-13](./M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🔴 |
+| [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🔴 |
 | [L-01](./L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -33,6 +41,9 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [L-07](./L-07-tf-broadcaster-qos.md) | Low | tf_tree_broadcaster QoS may be incompatible with realtime publishers | 🟢 |
 | [L-08](./L-08-stale-readme-docs.md) | Low | Stale README & docs misdirect new users | 🟡 |
 | [L-09](./L-09-setup-fragility-export-labeling.md) | Low | Setup fragility, no export tooling, dump JSON mislabeled | 🟡 |
+| [L-10](./L-10-solver-float32-precision.md) | Low | PnP correspondences and intrinsics cast to `float32` | 🔴 |
+| [L-11](./L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🔴 |
+| [L-12](./L-12-dead-solver-crates.md) | Low | Dead crates (`pnp-solver`, `calibration-quality`) better than the live code | 🔴 |
 
 ## Three headline gaps
 
@@ -40,5 +51,29 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 2. **The build omits a dependency the solvers need** — H-01. `conflux` is never built.
 3. **The Autoware last mile is fully manual and undocumented** — see [gap-autoware-export.md](./gap-autoware-export.md) (+ M-01).
 
+## The extrinsic-stability cluster (2026-07-12)
+
+C-03, H-07, H-08, H-09, M-11–M-14 and L-10–L-12 are one story, not ten independent bugs. Together
+they explain the standing symptom that the point-cloud overlay is correct on the board and on the
+ArUco markers while the background points are tilted, and that caching more image/point-cloud pairs
+does not fix it.
+
+The short version: the PnP correspondences all live on a 500 mm coplanar patch, so a rotation about
+the correspondence centroid is a near-null direction of the reprojection cost — it leaves the board
+overlay untouched and tilts everything else. Nothing in the pipeline measures conditioning, so a
+degenerate capture reports `"Calibration successful"` exactly like a good one.
+
+- Root cause and geometry: [H-07](./H-07-no-pose-diversity-gate.md)
+- Why it is invisible: [H-09](./H-09-no-extrinsic-quality-metric.md)
+- The remediation plan: [docs/roadmap/phase-5-stable-extrinsic-solution.md](../roadmap/phase-5-stable-extrinsic-solution.md)
+
+**Fix order matters.** [C-03](./C-03-double-undistortion.md) made border-of-image poses carry the
+largest systematic bias — so the standard remedy for H-07 ("spread the board across the field of
+view") would have injected error rather than removing it. C-03 is now **fixed** (2026-07-12), which
+unblocks the pose-diversity work.
+
 ## Verified against live source
-C-01, H-01, H-02 were confirmed by reading the current code during the audit; the rest are from static review and marked with their file:line anchors.
+C-01, H-01, H-02 were confirmed by reading the current code during the audit; the rest of the
+2026-07-09 findings are from static review and marked with their file:line anchors.
+Every 2026-07-12 finding (C-03, H-07–H-09, M-11–M-14, L-10–L-12) was confirmed by reading the
+current source.
