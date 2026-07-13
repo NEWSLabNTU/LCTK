@@ -4,7 +4,6 @@ use aruco_detector::multi_aruco::ImageMarker;
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
 use opencv::{
-    calib3d,
     core::{Mat, Scalar, CV_8UC1, CV_8UC3, CV_8UC4},
     imgproc::{self, FONT_HERSHEY_SIMPLEX, LINE_8},
     prelude::*,
@@ -157,17 +156,6 @@ fn calculate_bounding_box(corners: &[Point2D]) -> BoundingBox2D {
     }
 }
 
-/// Camera calibration data for undistortion (using vectors for thread-safety)
-#[derive(Clone, Debug)]
-struct CameraCalibration {
-    camera_matrix: [f64; 9], // 3x3 matrix in row-major order
-    distortion_coeffs: Vec<f64>,
-    #[allow(dead_code)]
-    width: i32,
-    #[allow(dead_code)]
-    height: i32,
-}
-
 /// ArUco detection ROS 2 node
 #[allow(dead_code)]
 pub struct ArucoLocatorNode {
@@ -176,7 +164,6 @@ pub struct ArucoLocatorNode {
     detection_publisher: Publisher<Detection2DArray>,
     overlay_publisher: Option<Publisher<ImageMsg>>,
     detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
-    camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
     aruco_pattern: Arc<aruco_config::MultiArucoPattern>,
     debug_overlay_enabled: bool,
 }
@@ -184,11 +171,11 @@ pub struct ArucoLocatorNode {
 impl ArucoLocatorNode {
     /// Create a new ArUco locator node
     pub fn new(node: &Node) -> Result<Self> {
-        // Create the detector state using ArcSwap for lock-free access
+        // Create the detector state using ArcSwap for lock-free access.
+        // The detector owns the intrinsics (it needs them to rectify), so there is deliberately
+        // no second copy of the camera matrix / distortion coefficients in this node — that
+        // duplication is what allowed the image to be rectified twice (C-03).
         let detector_state = Arc::new(ArcSwap::from_pointee(None));
-
-        // Create camera calibration storage using ArcSwap for lock-free access
-        let camera_calibration = Arc::new(ArcSwap::from_pointee(None));
 
         // Get the aruco_config_file parameter (mandatory - must be set by user)
         let aruco_config_file = node
@@ -303,7 +290,6 @@ impl ArucoLocatorNode {
 
         // Subscribe to camera_info using derived topic name
         let detector_state_camera_info = Arc::clone(&detector_state);
-        let camera_calibration_camera_info = Arc::clone(&camera_calibration);
         let config_file_for_callback = aruco_config_file.clone();
         let mut camera_info_options = SubscriptionOptions::new(&camera_info_topic);
         camera_info_options.qos = qos_profile;
@@ -312,7 +298,6 @@ impl ArucoLocatorNode {
                 Self::camera_info_callback(
                     msg,
                     Arc::clone(&detector_state_camera_info),
-                    Arc::clone(&camera_calibration_camera_info),
                     &config_file_for_callback,
                 );
             })?;
@@ -320,7 +305,6 @@ impl ArucoLocatorNode {
         std::mem::drop(temp_image_subscription); // Drop the temporary subscription
 
         let detector_state_image = Arc::clone(&detector_state);
-        let camera_calibration_image = Arc::clone(&camera_calibration);
         let detection_publisher_image = detection_publisher.clone();
         let overlay_publisher_image = overlay_publisher.clone();
         let aruco_pattern_image = Arc::clone(&aruco_pattern);
@@ -332,7 +316,6 @@ impl ArucoLocatorNode {
                 Self::image_callback(
                     msg,
                     Arc::clone(&detector_state_image),
-                    Arc::clone(&camera_calibration_image),
                     &detection_publisher_image,
                     &overlay_publisher_image,
                     Arc::clone(&aruco_pattern_image),
@@ -356,7 +339,6 @@ impl ArucoLocatorNode {
             detection_publisher,
             overlay_publisher,
             detector_state,
-            camera_calibration,
             aruco_pattern,
             debug_overlay_enabled,
         };
@@ -368,7 +350,6 @@ impl ArucoLocatorNode {
     fn camera_info_callback(
         camera_info: CameraInfo,
         detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
-        camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
         aruco_config_file: &str,
     ) {
         // Check if detector is already initialized (lock-free read)
@@ -392,18 +373,6 @@ impl ArucoLocatorNode {
                 return;
             }
         };
-
-        // Store camera calibration data for undistortion (only log once)
-        match Self::store_camera_calibration(&camera_info, Arc::clone(&camera_calibration)) {
-            Ok(_) => {
-                if !already_initialized {
-                    log_info!(LOGGER_NAME, "Camera calibration stored for undistortion");
-                }
-            }
-            Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to store camera calibration: {e}");
-            }
-        }
 
         let config = ArucoDetectorConfig {
             camera_info,
@@ -446,89 +415,26 @@ impl ArucoLocatorNode {
         Ok(pattern)
     }
 
-    /// Store camera calibration data for undistortion
-    fn store_camera_calibration(
-        camera_info: &CameraInfo,
-        camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
-    ) -> Result<()> {
-        // Extract camera matrix (3x3) as array
-        let camera_matrix: [f64; 9] = camera_info.k[0..9]
-            .try_into()
-            .map_err(|_| anyhow!("Camera matrix must have 9 elements"))?;
-
-        // Extract distortion coefficients as vector
-        let distortion_coeffs: Vec<f64> = camera_info.d.to_vec();
-
-        let calibration = CameraCalibration {
-            camera_matrix,
-            distortion_coeffs,
-            width: camera_info.width as i32,
-            height: camera_info.height as i32,
-        };
-
-        // Store the calibration using ArcSwap
-        camera_calibration.store(Arc::new(Some(calibration)));
-        Ok(())
-    }
-
-    /// Undistort image using camera calibration
-    fn undistort_image(image: &Mat, calibration: &CameraCalibration) -> Result<Mat> {
-        // Convert camera matrix from array to Mat (CV_64FC1 - double precision)
-        let camera_matrix = Mat::from_slice_2d(&[
-            &calibration.camera_matrix[0..3],
-            &calibration.camera_matrix[3..6],
-            &calibration.camera_matrix[6..9],
-        ])?;
-
-        // Convert distortion coefficients from Vec to Mat (CV_64FC1 - double precision)
-        // OpenCV expects distortion coefficients as a 1xN or Nx1 matrix
-        let distortion_coeffs = if calibration.distortion_coeffs.is_empty() {
-            // No distortion - use zeros
-            Mat::zeros(1, 5, opencv::core::CV_64FC1)?.to_mat()?
-        } else {
-            // Create 1xN matrix from vector (row vector)
-            Mat::from_slice_rows_cols(
-                &calibration.distortion_coeffs,
-                1,
-                calibration.distortion_coeffs.len(),
-            )?
-        };
-
-        let mut undistorted = Mat::default();
-
-        calib3d::undistort(
-            image,
-            &mut undistorted,
-            &camera_matrix,
-            &distortion_coeffs,
-            &opencv::core::no_array(),
-        )?;
-
-        Ok(undistorted)
-    }
-
-    /// Process the incoming image with undistortion
+    /// Rectify the incoming image, then detect markers in it.
+    ///
+    /// C-03: rectification happens exactly once, and it is the detector that owns it. The
+    /// detector's `detect_markers` deliberately does not rectify, so doing it here as well would
+    /// correct the image twice and displace every corner by roughly the size of the lens
+    /// correction. The rectified Mat is returned so the debug overlay is drawn in the same frame
+    /// the corners were measured in.
     fn process_image(
         msg: &ImageMsg,
         detector: &ArucoDetector,
-        camera_calibration: Option<&CameraCalibration>,
     ) -> Result<(aruco_locator::DetectionResult, Mat)> {
         // Validate image encoding and convert to OpenCV Mat
         let mat = Self::ros_image_to_opencv_mat(msg)?;
 
-        // Camera calibration must be available to proceed
-        let calibration = camera_calibration.ok_or_else(|| {
-            anyhow!("process_image called without camera calibration - this is a bug")
-        })?;
+        let rectified_mat = detector.rectify(&mat)?;
+        log_debug!(LOGGER_NAME, "Image rectified for ArUco detection");
 
-        // Undistort image - fail if undistortion fails
-        let processed_mat = Self::undistort_image(&mat, calibration)?;
-        log_debug!(LOGGER_NAME, "Image undistorted for ArUco detection");
+        let detection_result = detector.detect_markers(&rectified_mat)?;
 
-        // Detect ArUco markers on processed (undistorted) image
-        let detection_result = detector.detect_markers(&processed_mat)?;
-
-        Ok((detection_result, processed_mat))
+        Ok((detection_result, rectified_mat))
     }
 
     /// Convert ROS Image message to OpenCV Mat with proper encoding handling
@@ -593,13 +499,13 @@ impl ArucoLocatorNode {
     fn image_callback(
         msg: ImageMsg,
         detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
-        camera_calibration: Arc<ArcSwap<Option<CameraCalibration>>>,
         detection_publisher: &Publisher<Detection2DArray>,
         overlay_publisher: &Option<Publisher<ImageMsg>>,
         aruco_pattern: Arc<aruco_config::MultiArucoPattern>,
         debug_overlay_enabled: bool,
     ) {
-        // Get detector (lock-free read with ArcSwap)
+        // Get detector (lock-free read with ArcSwap). The detector is created only once
+        // camera_info has arrived, so its presence is also the camera_info readiness check.
         let detector = {
             let state = detector_state.load();
             match state.as_ref() {
@@ -621,31 +527,7 @@ impl ArucoLocatorNode {
             }
         };
 
-        // Get camera calibration for undistortion (lock-free read with ArcSwap)
-        let calibration = {
-            let calib = camera_calibration.load();
-            (**calib).clone()
-        };
-
-        // Wait for camera_info before processing images
-        let calibration = match calibration {
-            Some(calib) => calib,
-            None => {
-                // Camera info not received yet, skip this frame
-                // Log occasionally to avoid spam (L-05: atomic, not `static mut`)
-                static NO_CAMERA_INFO_COUNT: AtomicU32 = AtomicU32::new(0);
-                if NO_CAMERA_INFO_COUNT.fetch_add(1, Ordering::Relaxed) % 60 == 0 {
-                    // Log every 60th frame to indicate waiting for camera_info
-                    log_warn!(
-                        LOGGER_NAME,
-                        "Waiting for camera_info before processing images (suppressing repeated messages)"
-                    );
-                }
-                return;
-            }
-        };
-
-        match Self::process_image(&msg, &detector, Some(&calibration)) {
+        match Self::process_image(&msg, &detector) {
             Ok((detection_result, processed_image)) => {
                 // Create message header
                 let header = Header {
@@ -673,7 +555,8 @@ impl ArucoLocatorNode {
                     // (L-05: atomic, not `static mut`)
                     static LAST_DETECTION_COUNT: AtomicUsize = AtomicUsize::new(0);
                     let current_count = detection_msg.detections.len();
-                    if LAST_DETECTION_COUNT.swap(current_count, Ordering::Relaxed) != current_count {
+                    if LAST_DETECTION_COUNT.swap(current_count, Ordering::Relaxed) != current_count
+                    {
                         // Only log when the number of detected markers changes
                         log_info!(
                             LOGGER_NAME,

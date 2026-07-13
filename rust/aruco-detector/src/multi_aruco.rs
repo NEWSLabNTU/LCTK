@@ -341,6 +341,34 @@ pub struct Detector {
 }
 
 impl Detector {
+    /// Rectify an image with this detector's intrinsics.
+    ///
+    /// Rectification is deliberately *not* performed inside [`Detector::detect_markers`]: a
+    /// caller that already holds a rectified image (the ROS node does, because it publishes the
+    /// same image as a debug overlay) would otherwise have it corrected twice, which biases
+    /// every corner by roughly the magnitude of the lens correction itself. Rectify exactly
+    /// once, here, and pass the result to the detection methods.
+    pub fn rectify(&self, mat: &Mat) -> Result<Mat> {
+        let camera_matrix = Mat::from_slice(&self.camera_info.k)?.reshape(1, 3)?;
+        let distortion_coefs = Mat::from_slice(&self.camera_info.d)?;
+
+        let mut rectified = Mat::default();
+        calib3d::undistort(
+            mat,
+            &mut rectified,
+            &camera_matrix,
+            &distortion_coefs,
+            &core_cv::no_array(),
+        )?;
+
+        Ok(rectified)
+    }
+
+    /// Detect the configured multi-ArUco pattern in a **rectified** image.
+    ///
+    /// The image must already be rectified with [`Detector::rectify`] (or an equivalent
+    /// `undistort` under the same camera matrix). Corners are returned in that rectified frame,
+    /// so downstream PnP must use this detector's `K` with zero distortion coefficients.
     pub fn detect_markers(&self, mat: &Mat) -> Result<Option<ImageDetection>> {
         let Self {
             ref pattern,
@@ -357,19 +385,10 @@ impl Detector {
 
         let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
 
-        // Convert CameraInfo to OpenCV matrices
+        // Convert CameraInfo to OpenCV matrices. These are carried in the ImageDetection for
+        // pose estimation; they are NOT used to warp `mat`, which is already rectified.
         let camera_matrix = Mat::from_slice(&camera_info.k)?.reshape(1, 3)?;
         let distortion_coefs = Mat::from_slice(&camera_info.d)?;
-        let mut canvas = Mat::default();
-
-        // undistord image
-        calib3d::undistort(
-            mat,
-            &mut canvas,
-            &camera_matrix,
-            &distortion_coefs,
-            &core_cv::no_array(),
-        )?;
 
         // find aruco markers
         let (aruco_corners_vec, aruco_ids) = {
@@ -389,7 +408,7 @@ impl Detector {
 
             #[allow(clippy::unnecessary_mut_passed)]
             aruco::detect_markers(
-                &canvas,
+                mat,
                 &dictionary,
                 &mut corners_vec,
                 &mut ids,
@@ -438,12 +457,12 @@ impl Detector {
         }))
     }
 
+    /// Detect any ArUco markers in a **rectified** image.
+    ///
+    /// As with [`Detector::detect_markers`], the image must already be rectified via
+    /// [`Detector::rectify`].
     pub fn detect_single_aruco(&self, mat: &Mat) -> Result<Vec<ImageMarker>> {
-        let Self {
-            ref pattern,
-            ref camera_info,
-            ..
-        } = *self;
+        let Self { ref pattern, .. } = *self;
         let MultiArucoPattern {
             dictionary,
             border_bits,
@@ -451,20 +470,6 @@ impl Detector {
         } = *pattern;
 
         let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
-
-        // Convert CameraInfo to OpenCV matrices
-        let camera_matrix = Mat::from_slice(&camera_info.k)?.reshape(1, 3)?;
-        let distortion_coefs = Mat::from_slice(&camera_info.d)?;
-        let mut canvas = Mat::default();
-
-        // undistort image
-        calib3d::undistort(
-            mat,
-            &mut canvas,
-            &camera_matrix,
-            &distortion_coefs,
-            &core_cv::no_array(),
-        )?;
 
         // find aruco markers
         let mut corners_vec = VectorOfMat::new();
@@ -483,7 +488,7 @@ impl Detector {
 
         #[allow(clippy::unnecessary_mut_passed)]
         aruco::detect_markers(
-            &canvas,
+            mat,
             &dictionary,
             &mut corners_vec,
             &mut ids,

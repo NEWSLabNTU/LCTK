@@ -5,8 +5,8 @@ use aruco_config::MultiArucoPattern;
 use aruco_detector::multi_aruco::ImageMarker;
 use config::MrptCalibration;
 use opencv::{
-    aruco, calib3d,
-    core::{no_array, Point2i, Scalar},
+    aruco,
+    core::{Point2i, Scalar},
     highgui,
     imgproc::{self, HersheyFonts, LINE_8},
     prelude::*,
@@ -70,7 +70,18 @@ impl ArucoDetector {
         Ok(Self { detector, config })
     }
 
-    /// Detect ArUco markers in an image
+    /// Rectify a raw camera image with the configured intrinsics.
+    ///
+    /// Every other method on this type expects an image that has been through here exactly once.
+    pub fn rectify(&self, image: &Mat) -> Result<Mat> {
+        if image.empty() {
+            bail!("Input image is empty");
+        }
+
+        self.detector.rectify(image)
+    }
+
+    /// Detect ArUco markers in a **rectified** image (see [`ArucoDetector::rectify`]).
     pub fn detect_markers(&self, image: &Mat) -> Result<DetectionResult> {
         if image.empty() {
             bail!("Input image is empty");
@@ -96,29 +107,20 @@ impl ArucoDetector {
         }
     }
 
-    /// Detect markers and visualize results on image
+    /// Detect markers and visualize results on a **rectified** image
+    /// (see [`ArucoDetector::rectify`]).
     pub fn detect_and_visualize(&self, image: &Mat) -> Result<(DetectionResult, Mat)> {
         let detection_result = self.detect_markers(image)?;
         let visualization = self.create_visualization(image, &detection_result)?;
         Ok((detection_result, visualization))
     }
 
-    /// Create visualization of detection results
+    /// Create visualization of detection results.
+    ///
+    /// `image` must be the same **rectified** image that produced `result`, so that the drawn
+    /// corners land where the detector actually found them.
     pub fn create_visualization(&self, image: &Mat, result: &DetectionResult) -> Result<Mat> {
-        let mut display_image = Mat::default();
-
-        // Convert CameraInfo to OpenCV matrices
-        let camera_matrix = Mat::from_slice(&self.config.camera_info.k)?.reshape(1, 3)?;
-        let dist_coeffs = Mat::from_slice(&self.config.camera_info.d)?;
-
-        // Undistort the image
-        calib3d::undistort(
-            image,
-            &mut display_image,
-            &camera_matrix,
-            &dist_coeffs,
-            &no_array(),
-        )?;
+        let mut display_image = image.clone();
 
         let draw_text = |image: &mut Mat, text: &str, (x, y), (b, g, r)| -> Result<()> {
             imgproc::put_text(

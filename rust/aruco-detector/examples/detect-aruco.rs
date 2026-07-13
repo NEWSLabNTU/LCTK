@@ -44,8 +44,9 @@ fn main() -> Result<()> {
     }
     .build()?;
 
-    // Perform pattern detection.
+    // Perform pattern detection. The detector expects a rectified image.
     let image = imread(&args.input_file, IMREAD_GRAYSCALE)?;
+    let image = detector.rectify(&image)?;
     let detection = detector.detect_markers(&image)?;
 
     // Print the detection results.

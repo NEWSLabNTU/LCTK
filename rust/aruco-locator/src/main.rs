@@ -42,6 +42,9 @@ fn main() -> Result<()> {
         anyhow::bail!("Failed to load image from {:?}", opts.input_image);
     }
 
+    // Rectify once; detection and visualization both work in the rectified frame.
+    let image = detector.rectify(&image)?;
+
     // Detect ArUco markers
     let detection_result = detector.detect_markers(&image)?;
 
