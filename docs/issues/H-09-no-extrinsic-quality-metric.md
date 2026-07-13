@@ -42,18 +42,32 @@ shipped to Autoware with no recorded evidence of its quality.
 
 All of these are cheap and computable from data the solver already has:
 
-1. **Reprojection residuals.** `cv2.projectPoints(all_object_points, rvec, tvec, K, dist)` →
-   per-corner error vector. Report mean / RMS / max, plus a per-pose breakdown. ~10 lines.
-2. **Leave-one-pose-out cross-validation.** Solve on `K−1` poses, evaluate reprojection RMSE on
-   the held-out pose; repeat. The spread between train-RMSE and holdout-RMSE is the direct
-   numeric proxy for "does this transform generalise off the board". This is the construction
-   behind the VOQ score of Tsai et al. (ITSC 2021), whose whole subject is calibration that
-   overfits its sample poses.
-3. **Covariance and conditioning.** `Σ ≈ σ²(JᵀJ)⁻¹` from the PnP Jacobian gives a per-DoF
-   standard deviation; `cond(JᵀJ)` exposes the near-null rotation direction of
-   [H-07](./H-07-no-pose-diversity-gate.md) as a single number.
-4. Surface all of the above in `GetBufferStatus`, in the interactive controller, and in the
-   `dump_detections` JSON, so a saved calibration carries its own quality record.
+**Design, with measurements:**
+[docs/superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md](../superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md).
+The plan below was **revised on 2026-07-13 after simulating it** — one of the metrics originally
+proposed here does not work at all, and another is actively misleading.
+
+1. **Reprojection residuals** — report, but **never alone and never to rank**. Measured: the
+   degenerate capture scores a *lower* RMSE (8.77 px) than the well-spread one (10.88 px) while
+   being 13× worse in rotation, and the single-pose solve scores the best RMSE of all (0.125 px)
+   while being the worst-conditioned. Reprojection error does not merely fail to catch the
+   problem — it inverts the ranking.
+2. **~~Leave-one-pose-out cross-validation~~ — CUT.** Measured holdout/train ratio: 1.1×
+   (degenerate) vs 1.3× (well-spread). Flat. When the board is held still the held-out pose is
+   *identical* to the training poses, so the model predicts it perfectly. LOO is structurally blind
+   to this failure.
+3. **Conditioning — the discriminator.** `cond(JᵀJ)` = 4.6e4 (degenerate) vs 2.4e2 (well-spread).
+   Nearly free: `cv2.projectPoints` already returns the Jacobian. The per-DoF σ from
+   `Σ ≈ σ²(JᵀJ)⁻¹` separates too but **under-reports ~4×**, because it assumes all noise is in the
+   pixels and cannot see the ICP 3D error ([M-13](./M-13-icp-quality-not-propagated.md)).
+4. **Subset resampling — the honest uncertainty.** Parameter spread over all C(N,3) pose subsets:
+   ±5.77° / ±311 mm (degenerate) vs ±1.08° / ±52 mm (well-spread), and it predicts the true error.
+   At N = 9–10 this is 120 solves — milliseconds. Tsai et al.'s construction; gives a covariance
+   with no ground truth.
+5. **Diversity statistics** — normal spread, depth range, image coverage. These say *what to do
+   next*.
+6. Surface it all in `last_solve_status` (already a string — no message change), in the logs with
+   guidance, and in the `dump_detections` JSON.
 
 Note `rust/calibration-quality/` already defines a `CalibrationMetrics` struct
 (`metrics.rs:9-27`) — but it is dead code, and its `reprojection_error` is actually a 3D-3D

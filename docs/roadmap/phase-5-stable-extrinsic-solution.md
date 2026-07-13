@@ -95,27 +95,43 @@ L-10 (`float32`).
 You cannot fix conditioning you cannot see. Everything here is computable from data the solver
 already holds; none of it changes the estimate.
 
-Tracked as [H-09](../issues/H-09-no-extrinsic-quality-metric.md).
+Tracked as [H-09](../issues/H-09-no-extrinsic-quality-metric.md). **Design (with measurements):**
+[2026-07-13-h09-extrinsic-quality-metric-design.md](../superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md).
 
-1. **Reprojection residuals.** `cv2.projectPoints(object_points, rvec, tvec, K, dist)` after the
-   solve → per-corner error. Report mean / RMS / max, and a **per-pose** breakdown (per-pose is
-   the meaningful unit — see the correlated-error argument above).
-2. **Leave-one-pose-out cross-validation.** Solve on `K−1` poses, evaluate reprojection RMSE on
-   the held-out pose, repeat. The **gap between train-RMSE and holdout-RMSE is the direct
-   numeric proxy for "does this generalise off the board"** — a degenerate set fits its own
-   poses beautifully and predicts a held-out pose badly. This is the construction behind the
-   VOQ score of Tsai et al. (ITSC 2021), whose entire subject is calibration that overfits its
-   sample poses.
-3. **Covariance and conditioning.** `Σ ≈ σ²(JᵀJ)⁻¹` from the PnP Jacobian gives a per-DoF σ;
-   `cond(JᵀJ)` collapses the whole near-null-direction story into one number. The Livox/HKU
-   work derives the same Jacobian degeneracy analytically and uses `Σ_T = (J_Tᵀ Σ⁻¹ J_T)⁻¹`.
-4. **Diversity statistics on the buffer**: board-normal angular spread, board-centroid depth
-   range, image-area coverage of the ArUco patches.
-5. Surface all of it in `GetBufferStatus`, in the interactive controller, and in the
-   `dump_detections` JSON, so a saved calibration carries its own quality record.
+> **This stage was re-planned on 2026-07-13 after simulating it.** Two of the metrics originally
+> listed here do not work, and one is worse than useless. The list below is what the measurements
+> support. See the design doc for the numbers.
 
-**Exit criterion:** a deliberately degenerate capture (board held still, 20 adds) and a good
-capture (10 spread poses) are separable by the reported numbers alone, with no overlay.
+1. **Reprojection residuals** — per-corner and per-pose. Report them, but **never alone and never
+   to rank**. Measured: on a degenerate capture (board held still) the RMSE comes out *lower*
+   (8.77 px) than on a well-spread one (10.88 px), while the extrinsic is **13× worse in rotation**.
+   The single-pose default solve scores the best RMSE of all (0.125 px) and is the worst-conditioned
+   thing the pipeline can produce. Reprojection error here is not merely insufficient — it inverts.
+2. **~~Leave-one-pose-out cross-validation~~ — CUT.** Measured holdout/train ratio: **1.1×
+   degenerate vs 1.3× well-spread**. Flat, and pointing the wrong way. The reason is structural:
+   when the board is held still, the held-out pose is *identical* to the training poses, so the
+   model predicts it perfectly. LOO detects failure to generalise to *different* poses, and the
+   degenerate case has none. It is blind to exactly the failure it was meant to catch.
+3. **Conditioning — the discriminator.** `cond(JᵀJ)`: **4.6e4** (degenerate) vs **2.4e2**
+   (well-spread), a 190× gap. Nearly free: `cv2.projectPoints` already returns the Jacobian, whose
+   first 6 columns are ∂proj/∂(rvec, tvec).
+   The per-DoF σ from `Σ ≈ σ²(JᵀJ)⁻¹` separates too, but **under-reports by ~4×** (1.22° where the
+   true error is 5.07°) because it assumes all noise is in the pixels and cannot see the ICP 3D
+   error. Useful as a relative signal; dishonest as an absolute one. Label it.
+4. **Subset resampling — the honest uncertainty.** Spread of the solved parameters over all C(N,3)
+   pose subsets. Measured: **±5.77° / ±311 mm** (degenerate) vs **±1.08° / ±52 mm** (well-spread) —
+   and it *predicts the true error* (5.77° estimated, 5.07° actual). This is Tsai et al.'s
+   construction, and at N = 9–10 real poses it is 120 solves: milliseconds. It is the headline
+   number the operator acts on.
+5. **Diversity statistics**: board-normal angular spread, depth range, image coverage. These do not
+   measure quality — they say *what to do next*, which a condition number cannot.
+6. Surface it all in `last_solve_status` (already a string — no message change), in the logs with
+   guidance, and in the `dump_detections` JSON, so a saved calibration carries its own quality
+   record.
+
+**Exit criterion:** a deliberately degenerate capture (board held still) and a good one (spread
+poses) are separable by the reported numbers alone, with no overlay. **Met in simulation** — the
+separation is 190× on conditioning and ~6× on subset spread.
 
 ## Stage 5.2 — Robust estimator
 
