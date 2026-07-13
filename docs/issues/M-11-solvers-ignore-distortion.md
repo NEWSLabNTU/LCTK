@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** advanced_extrinsic_solver, extrinsic_solver_node
-- **Status:** Open
+- **Status:** Fixed (2026-07-13)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1341-1353`
@@ -49,3 +49,26 @@ Make the contract explicit. Two coherent options:
 
 The second is the more robust design (no resampling of the image, no interpolation blur before
 sub-pixel corner refinement), but it is the larger change.
+
+## Resolution (2026-07-13)
+
+Fixed as part of [H-08](./H-08-no-subpixel-corner-refinement.md), and essentially by taking the
+second option — but at the *producer*, not the solver.
+
+The detector now detects and sub-pixel-refines on the **raw** frame (no resampling, no
+interpolation blur before refinement), then maps the corners into the rectified frame with
+`undistortPoints(R = I, P = K)`. So `dist_coeffs = 0` in the solvers is no longer an unstated
+invariant that happens to hold — it is **correct by construction**, because the corners on the
+wire are, by definition, rectified points.
+
+The three things that made the old arrangement fragile are all gone:
+
+- It is no longer undocumented: `Detector::detect_markers` states the contract, and
+  `rectify()` is explicitly demoted to a visualization-only utility.
+- It is no longer violated: C-03 (the double rectification) is fixed.
+- It is no longer silently breakable: `rust/aruco-detector/tests/rectify_contract.rs` fails if the
+  corners are not mapped back into the rectified frame, and specifically catches an
+  `undistortPoints` call made without `P = K` (which would emit *normalized* coordinates).
+
+The solvers themselves were not touched, which was the point — the contract moved from "an image
+somebody hopefully warped exactly once" to "the corners are rectified points".

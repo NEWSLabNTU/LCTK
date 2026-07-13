@@ -1,0 +1,40 @@
+// ArUco *detector* tuning.
+//
+// Separate from aruco_pattern.json5 on purpose: that file describes the printed board and is also
+// read by aruco_generator_node to produce it. Detection tuning has no business in a file that
+// describes a piece of paper.
+{
+    // How the marker corners are localised.
+    //
+    // OpenCV's default is NONE, which returns the raw contour/quad intersections quantised to
+    // roughly the pixel grid (~0.5-1 px error). Corner localisation error is the direct input
+    // noise of the PnP solve, and with only 16 corners per pose there is no redundancy to average
+    // it away, so this was the largest single accuracy lever available (H-08).
+    "corner_refinement": {
+        // NONE | SUBPIX | CONTOUR | APRILTAG
+        //
+        // SUBPIX: iterative gradient search around each corner. Most accurate on well-resolved
+        //         markers (~0.05-0.1 px).
+        // CONTOUR: fits lines to the marker's sides and intersects them. No window to tune;
+        //          degrades more gracefully on small or motion-blurred markers.
+        // APRILTAG: replaces the detection pipeline rather than refining it. Not evaluated.
+        "method": "SUBPIX",
+
+        // Half-width of the SUBPIX search window, in pixels. Must stay well under half the
+        // spacing between two corners of the same marker, or adjacent corners' windows overlap
+        // and pull each other off-target. The board's markers span ~200 px at 1.5 m and ~35 px at
+        // 6 m, so 5 is safe across the working range.
+        "win_size": 5,
+
+        "max_iterations": 30,
+        "min_accuracy": 0.01,
+    },
+
+    // Adaptive-threshold sweep used to find marker candidates.
+    "adaptive_thresh": {
+        "win_size_min": 13,
+        "win_size_max": 33,
+        // L-11: this was previously assigned twice in code (2, then 10); the 2 was dead.
+        "win_size_step": 10,
+    },
+}

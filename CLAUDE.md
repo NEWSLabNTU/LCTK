@@ -267,11 +267,26 @@ markers:
     board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
     aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
     bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    # Optional. ArUco *detector* tuning (corner refinement, adaptive threshold).
+    # Defaults to config/aruco/aruco_detector.json5 when omitted.
+    aruco_detector_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_detector.json5
     # Calibration pairs are defined inside each marker as a list of
     # [deviceA, deviceB] pairs that observe this marker.
     pairs:
       - [top_lidar, front_center]
 ```
+
+**ArUco config files are split by purpose:**
+
+| File | Describes | Also read by |
+|------|-----------|--------------|
+| `aruco_pattern.json5` | the *printed board* (marker IDs, dictionary, sizes) | `aruco_generator_node`, to print it |
+| `aruco_detector.json5` | how the *detector* finds it (corner refinement, adaptive threshold) | — |
+
+Detection runs on the **raw** camera frame: sub-pixel corner refinement reads image gradients, and
+undistorting first resamples them away. The detector maps the refined corners into the rectified
+frame with `undistortPoints`, so the corners on the wire pair with `K` and zero distortion. Do not
+hand `detect_markers` a rectified image.
 
 **Generated Nodes:**
 - `lidar_board_detector` - One per unique (lidar, marker) pair

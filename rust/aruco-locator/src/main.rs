@@ -21,6 +21,9 @@ struct Opts {
     /// Show GUI with detected markers.
     #[arg(long)]
     pub gui: bool,
+    /// Detector tuning (corner refinement, adaptive threshold). Defaults if omitted.
+    #[arg(long)]
+    pub detector_config: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -30,20 +33,19 @@ fn main() -> Result<()> {
     let config = ArucoDetectorConfig::from_files(
         &opts.intrinsics_file,
         &PathBuf::from(ARUCO_PATTERN_CONFIG),
+        opts.detector_config.as_deref(),
     )?;
 
     // Create detector
     let detector = ArucoDetector::new(config)?;
 
-    // Load input image
+    // Load input image. The detector consumes the RAW frame: sub-pixel refinement reads image
+    // gradients, and undistorting first would resample them away.
     let image = imgcodecs::imread(opts.input_image.to_str().unwrap(), imgcodecs::IMREAD_COLOR)?;
 
     if image.empty() {
         anyhow::bail!("Failed to load image from {:?}", opts.input_image);
     }
-
-    // Rectify once; detection and visualization both work in the rectified frame.
-    let image = detector.rectify(&image)?;
 
     // Detect ArUco markers
     let detection_result = detector.detect_markers(&image)?;
@@ -65,9 +67,11 @@ fn main() -> Result<()> {
         println!("No ArUco markers detected in the image.");
     }
 
-    // Show GUI if requested
+    // Show GUI if requested. Corners are reported in the rectified frame, so the overlay must be
+    // drawn on the rectified image.
     if opts.gui {
-        let visualization = detector.create_visualization(&image, &detection_result)?;
+        let rectified = detector.rectify(&image)?;
+        let visualization = detector.create_visualization(&rectified, &detection_result)?;
         detector.show_visualization(&visualization, "ArUco Detection")?;
     }
 

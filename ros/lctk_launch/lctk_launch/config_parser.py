@@ -21,6 +21,13 @@ import yaml
 
 from lctk_launch.calibration_planner import CalibrationPlan, compute_plan, format_plan
 
+# Detector tuning used when a marker does not name its own. The node itself has no hidden
+# defaults; this is the launch layer supplying the shipped file so pre-existing configs, which
+# predate the aruco_detector_config key, keep working.
+DEFAULT_ARUCO_DETECTOR_CONFIG = (
+    "$(find-pkg-share lctk_launch)/config/aruco/aruco_detector.json5"
+)
+
 
 def resolve_package_path(path: str) -> str:
     """
@@ -83,6 +90,9 @@ class Marker:
     board_config: str  # Path to board configuration file
     aruco_config: Optional[str] = None  # Path to ArUco pattern config (optional)
     bbox_config: Optional[str] = None  # Path to bounding box filter config (optional)
+    # Path to ArUco *detector* tuning (corner refinement, adaptive threshold). Optional:
+    # falls back to DEFAULT_ARUCO_DETECTOR_CONFIG, so existing configs keep working.
+    aruco_detector_config: Optional[str] = None
 
 
 @dataclass
@@ -119,6 +129,7 @@ class ArucoLocatorNode:
     image_topic: str
     frame_id: str
     aruco_config: str
+    aruco_detector_config: str
     output_topic: str  # Detection output topic
 
 
@@ -291,6 +302,9 @@ class CalibrationConfigParser:
             bbox_config = config.get("bbox_config")
             if bbox_config:
                 bbox_config = resolve_package_path(bbox_config)
+            aruco_detector_config = config.get("aruco_detector_config")
+            if aruco_detector_config:
+                aruco_detector_config = resolve_package_path(aruco_detector_config)
 
             self.markers[name] = Marker(
                 name=name,
@@ -298,6 +312,7 @@ class CalibrationConfigParser:
                 board_config=board_config,
                 aruco_config=aruco_config,
                 bbox_config=bbox_config,
+                aruco_detector_config=aruco_detector_config,
             )
 
     def _validate(self) -> None:
@@ -431,6 +446,26 @@ class CalibrationConfigParser:
                 )
             aruco_config = next(iter(aruco_configs))
 
+            # Same one-locator-per-camera constraint applies to the detector tuning (H-08).
+            # Markers that omit the key fall back to the shipped default.
+            aruco_detector_configs = set()
+            for pair in self.calibration_pairs:
+                if camera_name in (pair.device1, pair.device2):
+                    marker = self.markers[pair.marker]
+                    aruco_detector_configs.add(
+                        marker.aruco_detector_config
+                        or resolve_package_path(DEFAULT_ARUCO_DETECTOR_CONFIG)
+                    )
+
+            if len(aruco_detector_configs) > 1:
+                raise ValueError(
+                    f"Camera {camera_name} observes markers with different ArUco detector "
+                    f"configs {sorted(aruco_detector_configs)}; a single aruco_locator can only "
+                    "use one. Use the same aruco_detector_config for all boards this camera "
+                    "observes."
+                )
+            aruco_detector_config = next(iter(aruco_detector_configs))
+
             node_name = f"aruco_locator_{camera_name}"
             namespace = f"calibration/{camera_name}"
             output_topic = f"/{namespace}/aruco_detections"
@@ -443,6 +478,7 @@ class CalibrationConfigParser:
                     image_topic=camera.image_topic,
                     frame_id=camera.frame_id,
                     aruco_config=aruco_config,
+                    aruco_detector_config=aruco_detector_config,
                     output_topic=output_topic,
                 )
             )

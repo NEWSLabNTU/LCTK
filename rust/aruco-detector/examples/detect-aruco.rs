@@ -1,5 +1,5 @@
 use anyhow::Result;
-use aruco_config::{ArucoDictionary, MultiArucoPattern};
+use aruco_config::{ArucoDetectorParams, ArucoDictionary, MultiArucoPattern};
 use aruco_detector::multi_aruco::Builder;
 use clap::Parser;
 use measurements::Length;
@@ -41,12 +41,13 @@ fn main() -> Result<()> {
     let detector = Builder {
         pattern,
         camera_info,
+        detector_params: ArucoDetectorParams::default(),
     }
     .build()?;
 
-    // Perform pattern detection. The detector expects a rectified image.
+    // Perform pattern detection. The detector consumes the RAW image and returns corners in the
+    // rectified frame.
     let image = imread(&args.input_file, IMREAD_GRAYSCALE)?;
-    let image = detector.rectify(&image)?;
     let detection = detector.detect_markers(&image)?;
 
     // Print the detection results.

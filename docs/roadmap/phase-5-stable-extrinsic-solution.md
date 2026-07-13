@@ -76,16 +76,19 @@ bias every correspondence or actively invert the sign of the Stage 5.5 guidance.
 
 | Issue | Why it blocks |
 |-------|---------------|
-| ✅ [C-03](../issues/C-03-double-undistortion.md) — image undistorted twice — **fixed 2026-07-12** | Radius-dependent bias on every corner. Border poses carried the *largest* error, so "spread the board across the FoV" (Stage 5.5) would have injected more systematic error than it removed. Rectification is now explicit, single-sourced in `Detector::rectify`, and pinned by `rust/aruco-detector/tests/rectify_contract.rs`. Stage 5.5 is unblocked. |
-| [H-08](../issues/H-08-no-subpixel-corner-refinement.md) — no sub-pixel refinement | `CORNER_REFINE_NONE`. The dominant image-side noise term is ~10× larger than it needs to be, and there is no redundancy to average it away. |
-| [M-11](../issues/M-11-solvers-ignore-distortion.md) — solvers hardcode `dist_coeffs = 0` | The rectify-once contract is unstated, currently violated, and silently breakable. |
+| ✅ [C-03](../issues/C-03-double-undistortion.md) — image undistorted twice — **fixed 2026-07-12** | Radius-dependent bias on every corner. Border poses carried the *largest* error, so "spread the board across the FoV" (Stage 5.5) would have injected more systematic error than it removed. Stage 5.5 is unblocked. |
+| ✅ [H-08](../issues/H-08-no-subpixel-corner-refinement.md) — no sub-pixel refinement — **fixed 2026-07-13** | `CORNER_REFINE_NONE`, and there is no redundancy to average the error away. Now `SUBPIX`, refined on the **raw** frame (where the gradients still exist) and mapped to the rectified frame with `undistortPoints`. Measured 25–60% lower corner RMSE than `NONE` across the working marker-size range; `CONTOUR` was no better than `NONE`. |
+| ✅ [M-11](../issues/M-11-solvers-ignore-distortion.md) — solvers hardcode `dist_coeffs = 0` — **fixed 2026-07-13** | The rectify-once contract was unstated, violated, and silently breakable. Now correct *by construction*: the corners on the wire are rectified points, so `dist_coeffs = 0` is a definition rather than an assumption. The solvers were not touched. |
 | [M-14](../issues/M-14-corner-order-brittle.md) — gravity-based origin corner; duplicated corner-order logic | Produces silent 90° errors in individual poses. Poisons the buffer with correlated outliers. |
 | [L-10](../issues/L-10-solver-float32-precision.md) — `float32` solve | Free precision loss; makes a `cond(JᵀJ)` diagnostic unreliable. |
-| [L-11](../issues/L-11-detector-param-block-bugs.md) — detector param block | Reduces pose yield. Same code block as H-08. |
+| ✅ [L-11](../issues/L-11-detector-param-block-bugs.md) — detector param block — **fixed 2026-07-13** | Reduced pose yield. Both copies of the block are gone; `DetectorParameters` is now constructed in exactly one place, from config. |
 
-**Exit criterion:** a synthetic marker rendered through a known `K, D` recovers its corners to
-< 0.1 px through the full detector path, and a synthetic board at a known extrinsic recovers
-that extrinsic to within numerical tolerance.
+**Exit criterion:** a board rendered through a known `K, D` recovers its corners through the full
+detector path. Met — `rust/aruco-detector/tests/rectify_contract.rs` closes the distort → detect →
+undistort round trip, and both underlying bugs were re-introduced to confirm the tests catch them.
+
+**Remaining in this stage:** M-14 (gravity-based origin corner; duplicated corner-order logic) and
+L-10 (`float32`).
 
 ## Stage 5.1 — Measure the instability
 

@@ -16,7 +16,12 @@ roughly the pixel grid. The `set_corner_refinement_min_accuracy(0.01)` call at
 
 Corner localisation error is the direct input noise of the PnP solve, and with only 16 corners per
 pose (carrying ~6 DoF of independent information, see H-07) there is no redundancy to average it
-away. Enabling refinement takes the dominant image-side error term from ~0.5–1 px to ~0.05–0.1 px.
+away.
+
+> **Note (post-implementation):** an earlier draft of this spec asserted refinement would take the
+> error "from ~0.5–1 px to ~0.05–0.1 px". That figure was received wisdom, not measurement, and the
+> harness does not support it — see [Measured results](#measured-results). The improvement is real
+> and large (25–60% lower RMSE), but the absolute numbers quoted above were not evidence.
 
 ## Design decisions
 
@@ -150,6 +155,35 @@ In `rust/aruco-detector/tests/`. Deterministic, no rosbag, CI-runnable.
 
 The board's markers are 192 mm on a 1000 mm plate, so at 1.5–6 m they span roughly 200 px down to
 ~35 px — the low end is where the methods diverge and where `win_size` collision becomes a risk.
+
+## Measured results
+
+`cargo run -p aruco-detector --example refinement-sweep`. Board rendered at 200 dpi and downscaled
+by exact factors, so true corner positions are known analytically and land off the pixel grid.
+Corner RMSE, in pixels:
+
+| marker size | NONE | **SUBPIX** | CONTOUR |
+|---|---|---|---|
+| 302 px | 1.129 | **0.923** | 1.380 |
+| 216 px | 0.603 | **0.243** | 0.603 |
+| 151 px | 0.801 | **0.360** | 0.801 |
+| 108 px | 0.973 | **0.603** | 1.108 |
+| 76 px | 0.783 | **0.589** | 0.743 |
+| 54 px | 1.045 | **0.612** | 0.914 |
+
+Three things fall out, and two of them contradict what this spec assumed going in:
+
+1. **SUBPIX wins everywhere**, by 25–60%. The default is confirmed.
+2. **CONTOUR is not competitive.** It tracks NONE almost exactly and is sometimes worse. The spec
+   expected it to overtake SUBPIX at small marker sizes; it does not. Measuring was worth it.
+3. **`win_size` barely matters.** Across {3, 5, 7} the result moves by <0.02 px over the whole
+   range, so 5 is safe from ~300 px down to ~54 px — well past the ~35 px the markers subtend at
+   6 m. The predicted window-collision failure never materialised in the working range.
+
+**Caveat on the absolute values.** Ground truth here is itself derived from detecting on the
+reference render, so the harness's own error floors these numbers, and the INTER_AREA downscale
+adds more. The *relative* comparison is what this harness can honestly support. Absolute accuracy
+should be re-measured on the sample rosbag once H-09 provides a reprojection metric.
 
 ## Out of scope
 

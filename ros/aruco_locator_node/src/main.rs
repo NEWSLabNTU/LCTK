@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use arc_swap::ArcSwap;
+use aruco_config::ArucoDetectorParams;
 use aruco_detector::multi_aruco::ImageMarker;
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
@@ -189,6 +190,30 @@ impl ArucoLocatorNode {
         // Load ArUco pattern for use in overlay generation
         let aruco_pattern = Arc::new(Self::load_aruco_pattern(&aruco_config_file)?);
 
+        // Detector tuning (H-08: sub-pixel corner refinement). Kept in a file separate from the
+        // pattern, because the pattern describes the printed board and is also read by
+        // aruco_generator_node to produce it.
+        let aruco_detector_config_file = node
+            .declare_parameter::<Arc<str>>("aruco_detector_config_file")
+            .mandatory()?
+            .get()
+            .to_string();
+
+        log_info!(
+            LOGGER_NAME,
+            "Using ArUco detector config file: {aruco_detector_config_file}"
+        );
+
+        let detector_params = Self::load_detector_params(&aruco_detector_config_file)?;
+        log_info!(
+            LOGGER_NAME,
+            "Corner refinement: {:?} (win_size={}, max_iterations={}, min_accuracy={})",
+            detector_params.corner_refinement.method,
+            detector_params.corner_refinement.win_size,
+            detector_params.corner_refinement.max_iterations,
+            detector_params.corner_refinement.min_accuracy
+        );
+
         // Get debug overlay parameter (default: false)
         let debug_overlay_enabled = node
             .declare_parameter("debug_overlay_enabled")
@@ -299,6 +324,7 @@ impl ArucoLocatorNode {
                     msg,
                     Arc::clone(&detector_state_camera_info),
                     &config_file_for_callback,
+                    detector_params,
                 );
             })?;
         // Replace temporary subscription with actual image subscription
@@ -351,6 +377,7 @@ impl ArucoLocatorNode {
         camera_info: CameraInfo,
         detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
         aruco_config_file: &str,
+        detector_params: ArucoDetectorParams,
     ) {
         // Check if detector is already initialized (lock-free read)
         let already_initialized = detector_state.load().is_some();
@@ -377,6 +404,7 @@ impl ArucoLocatorNode {
         let config = ArucoDetectorConfig {
             camera_info,
             aruco_pattern,
+            detector_params,
         };
 
         let detector = match ArucoDetector::new(config) {
@@ -394,6 +422,13 @@ impl ArucoLocatorNode {
         if !already_initialized {
             log_info!(LOGGER_NAME, "ArUco detector initialized");
         }
+    }
+
+    /// Load detector tuning (corner refinement, adaptive threshold) from its config file.
+    fn load_detector_params(config_file: &str) -> Result<ArucoDetectorParams> {
+        let json5_text = std::fs::read_to_string(config_file)?;
+        let params: ArucoDetectorParams = json5::from_str(&json5_text)?;
+        Ok(params)
     }
 
     /// Load ArUco pattern from config file
@@ -415,26 +450,29 @@ impl ArucoLocatorNode {
         Ok(pattern)
     }
 
-    /// Rectify the incoming image, then detect markers in it.
+    /// Detect markers in the incoming image.
     ///
-    /// C-03: rectification happens exactly once, and it is the detector that owns it. The
-    /// detector's `detect_markers` deliberately does not rectify, so doing it here as well would
-    /// correct the image twice and displace every corner by roughly the size of the lens
-    /// correction. The rectified Mat is returned so the debug overlay is drawn in the same frame
-    /// the corners were measured in.
+    /// H-08: detection runs on the RAW frame. Sub-pixel corner refinement reads image gradients,
+    /// and `undistort` resamples the image bilinearly, which blunts exactly those gradients. The
+    /// detector refines on the raw pixels and then maps the corners into the rectified frame with
+    /// `undistortPoints`, so the published corners still pair with `K` and zero distortion.
+    ///
+    /// The full-frame rectification survives only to draw the debug overlay in the same frame the
+    /// corners are reported in — so it is skipped entirely when the overlay is off, which saves a
+    /// full-image warp per frame.
     fn process_image(
         msg: &ImageMsg,
         detector: &ArucoDetector,
-    ) -> Result<(aruco_locator::DetectionResult, Mat)> {
+        want_overlay: bool,
+    ) -> Result<(aruco_locator::DetectionResult, Option<Mat>)> {
         // Validate image encoding and convert to OpenCV Mat
         let mat = Self::ros_image_to_opencv_mat(msg)?;
 
-        let rectified_mat = detector.rectify(&mat)?;
-        log_debug!(LOGGER_NAME, "Image rectified for ArUco detection");
+        let detection_result = detector.detect_markers(&mat)?;
 
-        let detection_result = detector.detect_markers(&rectified_mat)?;
+        let overlay_base = want_overlay.then(|| detector.rectify(&mat)).transpose()?;
 
-        Ok((detection_result, rectified_mat))
+        Ok((detection_result, overlay_base))
     }
 
     /// Convert ROS Image message to OpenCV Mat with proper encoding handling
@@ -527,8 +565,8 @@ impl ArucoLocatorNode {
             }
         };
 
-        match Self::process_image(&msg, &detector) {
-            Ok((detection_result, processed_image)) => {
+        match Self::process_image(&msg, &detector, debug_overlay_enabled) {
+            Ok((detection_result, overlay_base)) => {
                 // Create message header
                 let header = Header {
                     stamp: msg.header.stamp.clone(),
@@ -572,11 +610,12 @@ impl ArucoLocatorNode {
                     log_error!(LOGGER_NAME, "Failed to publish detection result: {e}");
                 }
 
-                // Create and publish overlay image if debug is enabled
-                if debug_overlay_enabled {
+                // Create and publish overlay image if debug is enabled. `overlay_base` is the
+                // rectified frame, which is the frame the corners are reported in.
+                if let Some(overlay_base) = &overlay_base {
                     Self::publish_debug_overlay(
                         &msg,
-                        &processed_image,
+                        overlay_base,
                         &detection_result,
                         overlay_publisher,
                         &aruco_pattern,

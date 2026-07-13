@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** aruco-detector
-- **Status:** Open
+- **Status:** Fixed (2026-07-13)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:** `rust/aruco-detector/src/multi_aruco.rs:379-388`, duplicated at `multi_aruco.rs:474-482`
 
@@ -38,3 +38,15 @@ the entire frame. Not incorrect, but it silently reduces the pose yield that
 
 Pick one step value deliberately and comment why. Factor the parameter block into a single
 constructor shared by both call sites. Fold into the H-08 change.
+
+## Resolution (2026-07-13)
+
+Fixed as part of [H-08](./H-08-no-subpixel-corner-refinement.md). Both copies of the block are
+gone: `DetectorParameters` is now constructed in exactly one place,
+`ArucoDetectorParams::to_opencv_params()` in `rust/aruco-config/src/detector_params.rs`, and both
+`detect_markers` and `detect_single_aruco` call it.
+
+The values moved out of Rust and into `ros/lctk_launch/config/aruco/aruco_detector.json5`, where
+`win_size_step` is set once (to 10, the value that was actually taking effect) with a comment
+recording that the dead `2` was an editing accident. `min_accuracy` now tunes a refiner that
+actually runs.

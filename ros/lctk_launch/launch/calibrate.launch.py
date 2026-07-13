@@ -154,6 +154,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                 parameters=[
                     {
                         "aruco_config_file": locator.aruco_config,
+                        "aruco_detector_config_file": locator.aruco_detector_config,
                         "debug_mode": debug_mode == "true",
                         "debug_overlay_enabled": debug_mode == "true",
                         "use_best_effort_qos": use_best_effort_qos,

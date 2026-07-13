@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use aruco_config::MultiArucoPattern;
+use aruco_config::{ArucoDetectorParams, MultiArucoPattern};
 use cv_convert::{OpenCvPose, TryToCv};
 use indexmap::IndexSet;
 use itertools::{iproduct, izip};
@@ -295,6 +295,8 @@ pub struct Params {
 pub struct Builder {
     pub pattern: MultiArucoPattern,
     pub camera_info: CameraInfo,
+    /// Detector tuning. Defaults enable sub-pixel corner refinement (H-08).
+    pub detector_params: ArucoDetectorParams,
 }
 
 impl Builder {
@@ -302,6 +304,7 @@ impl Builder {
         let Self {
             pattern,
             camera_info,
+            detector_params,
         } = self;
 
         let MultiArucoPattern {
@@ -309,6 +312,7 @@ impl Builder {
             board_border_size,
             num_squares_per_side,
             marker_square_size_ratio,
+            border_bits,
             ref marker_ids,
             ..
         } = pattern;
@@ -323,9 +327,13 @@ impl Builder {
             "ArUco IDs must be unique"
         );
 
+        // Validate the detector params once, at construction, rather than per frame.
+        detector_params.to_opencv_params(border_bits)?;
+
         Ok(Detector {
             pattern,
             camera_info,
+            detector_params,
             marker_size,
             marker_ids,
         })
@@ -336,21 +344,21 @@ impl Builder {
 pub struct Detector {
     pattern: MultiArucoPattern,
     camera_info: CameraInfo,
+    detector_params: ArucoDetectorParams,
     marker_size: Length,
     marker_ids: IndexSet<u32>,
 }
 
 impl Detector {
-    /// Rectify an image with this detector's intrinsics.
+    /// Rectify a raw image with this detector's intrinsics.
     ///
-    /// Rectification is deliberately *not* performed inside [`Detector::detect_markers`]: a
-    /// caller that already holds a rectified image (the ROS node does, because it publishes the
-    /// same image as a debug overlay) would otherwise have it corrected twice, which biases
-    /// every corner by roughly the magnitude of the lens correction itself. Rectify exactly
-    /// once, here, and pass the result to the detection methods.
+    /// This is a **visualization utility only**. It is NOT part of the detection path: detection
+    /// runs on the raw frame (see [`Detector::detect_markers`]), because `undistort` resamples the
+    /// image bilinearly and that blunts exactly the gradients sub-pixel corner refinement depends
+    /// on. Use this to produce a debug overlay in the same frame the corners are reported in.
     pub fn rectify(&self, mat: &Mat) -> Result<Mat> {
-        let camera_matrix = Mat::from_slice(&self.camera_info.k)?.reshape(1, 3)?;
-        let distortion_coefs = Mat::from_slice(&self.camera_info.d)?;
+        let camera_matrix = self.camera_matrix()?;
+        let distortion_coefs = self.distortion_coefs()?;
 
         let mut rectified = Mat::default();
         calib3d::undistort(
@@ -364,16 +372,63 @@ impl Detector {
         Ok(rectified)
     }
 
-    /// Detect the configured multi-ArUco pattern in a **rectified** image.
+    fn camera_matrix(&self) -> Result<Mat> {
+        Ok(Mat::from_slice(&self.camera_info.k)?.reshape(1, 3)?)
+    }
+
+    fn distortion_coefs(&self) -> Result<Mat> {
+        Ok(Mat::from_slice(&self.camera_info.d)?)
+    }
+
+    /// Map detected corners from the raw (distorted) frame into the rectified frame.
     ///
-    /// The image must already be rectified with [`Detector::rectify`] (or an equivalent
-    /// `undistort` under the same camera matrix). Corners are returned in that rectified frame,
-    /// so downstream PnP must use this detector's `K` with zero distortion coefficients.
+    /// `P = K` is what makes the output pixel coordinates; omitting it would yield *normalized*
+    /// coordinates instead, which is the easy way to get this silently and subtly wrong. The
+    /// iterative form is used over the default 5-iteration one because the default leaves residual
+    /// error under strong distortion.
+    fn undistort_corners(&self, corners: &VectorOfMat) -> Result<VectorOfMat> {
+        let camera_matrix = self.camera_matrix()?;
+        let distortion_coefs = self.distortion_coefs()?;
+        let eye = Mat::eye(3, 3, core_cv::CV_64FC1)?.to_mat()?;
+
+        let criteria = core_cv::TermCriteria::new(
+            core_cv::TermCriteria_Type::COUNT as i32 + core_cv::TermCriteria_Type::EPS as i32,
+            20,
+            1e-8,
+        )?;
+
+        corners
+            .iter()
+            .map(|marker_corners| -> Result<Mat> {
+                let mut undistorted = Mat::default();
+                calib3d::undistort_points_iter(
+                    &marker_corners,
+                    &mut undistorted,
+                    &camera_matrix,
+                    &distortion_coefs,
+                    &eye,
+                    &camera_matrix,
+                    criteria,
+                )?;
+                Ok(undistorted)
+            })
+            .collect()
+    }
+
+    /// Detect the configured multi-ArUco pattern in a **raw (distorted)** image.
+    ///
+    /// Detection and sub-pixel refinement run on the unresampled sensor image; the resulting
+    /// corners are then mapped into the rectified frame with `undistortPoints`. Corners are
+    /// therefore returned in the rectified frame, so downstream PnP uses this detector's `K` with
+    /// zero distortion coefficients — the same contract as before, but now exact at the point
+    /// level rather than approximated via a warped image.
+    ///
+    /// Do NOT pass a rectified image here; that would correct it twice (C-03).
     pub fn detect_markers(&self, mat: &Mat) -> Result<Option<ImageDetection>> {
         let Self {
             ref pattern,
-            ref camera_info,
             ref marker_ids,
+            ref detector_params,
             marker_size,
             ..
         } = *self;
@@ -385,26 +440,16 @@ impl Detector {
 
         let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
 
-        // Convert CameraInfo to OpenCV matrices. These are carried in the ImageDetection for
-        // pose estimation; they are NOT used to warp `mat`, which is already rectified.
-        let camera_matrix = Mat::from_slice(&camera_info.k)?.reshape(1, 3)?;
-        let distortion_coefs = Mat::from_slice(&camera_info.d)?;
+        // Carried in the ImageDetection for pose estimation. `mat` is never warped by them.
+        let camera_matrix = self.camera_matrix()?;
+        let distortion_coefs = self.distortion_coefs()?;
 
-        // find aruco markers
+        // find aruco markers, with sub-pixel corner refinement (H-08) on the RAW image
         let (aruco_corners_vec, aruco_ids) = {
             let mut corners_vec = VectorOfMat::new();
             let mut ids = Vector::<i32>::new();
 
-            let parameters = {
-                let mut params = aruco::DetectorParameters::create()?;
-                params.set_marker_border_bits(border_bits as i32);
-                params.set_adaptive_thresh_win_size_min(13);
-                params.set_adaptive_thresh_win_size_max(33);
-                params.set_adaptive_thresh_win_size_step(2);
-                params.set_adaptive_thresh_win_size_step(10);
-                params.set_corner_refinement_min_accuracy(0.01);
-                params
-            };
+            let parameters = detector_params.to_opencv_params(border_bits)?;
 
             #[allow(clippy::unnecessary_mut_passed)]
             aruco::detect_markers(
@@ -447,6 +492,10 @@ impl Detector {
             (reordered_corners_vec, reordered_ids)
         };
 
+        // Map the refined corners from the raw frame into the rectified frame. Downstream PnP
+        // consumes these with `K` and zero distortion.
+        let aruco_corners_vec = self.undistort_corners(&aruco_corners_vec)?;
+
         Ok(Some(ImageDetection {
             id: aruco_ids,
             corners: aruco_corners_vec,
@@ -457,12 +506,16 @@ impl Detector {
         }))
     }
 
-    /// Detect any ArUco markers in a **rectified** image.
+    /// Detect any ArUco markers in a **raw (distorted)** image.
     ///
-    /// As with [`Detector::detect_markers`], the image must already be rectified via
-    /// [`Detector::rectify`].
+    /// As with [`Detector::detect_markers`], corners are refined on the raw image and returned in
+    /// the rectified frame.
     pub fn detect_single_aruco(&self, mat: &Mat) -> Result<Vec<ImageMarker>> {
-        let Self { ref pattern, .. } = *self;
+        let Self {
+            ref pattern,
+            ref detector_params,
+            ..
+        } = *self;
         let MultiArucoPattern {
             dictionary,
             border_bits,
@@ -475,16 +528,7 @@ impl Detector {
         let mut corners_vec = VectorOfMat::new();
         let mut ids = Vector::<i32>::new();
 
-        let parameters = {
-            let mut params = aruco::DetectorParameters::create()?;
-            params.set_marker_border_bits(border_bits as i32);
-            params.set_adaptive_thresh_win_size_min(13);
-            params.set_adaptive_thresh_win_size_max(33);
-            params.set_adaptive_thresh_win_size_step(2);
-            params.set_adaptive_thresh_win_size_step(10);
-            params.set_corner_refinement_min_accuracy(0.01);
-            params
-        };
+        let parameters = detector_params.to_opencv_params(border_bits)?;
 
         #[allow(clippy::unnecessary_mut_passed)]
         aruco::detect_markers(
@@ -501,6 +545,8 @@ impl Detector {
         if !ids.is_empty() {
             info!("found ArUco IDs: {:?}", ids.to_vec());
         }
+
+        let corners_vec = self.undistort_corners(&corners_vec)?;
 
         // convert to ImageMarker
         let markers: Vec<ImageMarker> = izip!(&corners_vec, &ids)

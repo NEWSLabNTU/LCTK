@@ -32,9 +32,14 @@ tag = "v0.2.1"
 [dev-dependencies.opencv]
 workspace = true
 default-features = false
-features = ["aruco", "imgcodecs"]
+# imgproc: `remap`, used by the contract tests to synthesize a distorted camera image.
+features = ["aruco", "calib3d", "imgcodecs", "imgproc"]
 
 [dev-dependencies]
 clap = { workspace = true }
 sensor_msgs.workspace = true
 std_msgs.workspace = true
+aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
+measurements = { workspace = true }
+noisy_float = { workspace = true }
+anyhow = { workspace = true }

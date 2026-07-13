@@ -16,7 +16,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [H-05](./H-05-conflux-error-stats-collapse.md) | High | Conflux FFI collapses all push errors to BufferFull → corrupt stats | 🟢 |
 | [H-06](./H-06-config-schema-drift.md) | High | CLAUDE.md documents a config schema the parser does not accept | 🟢 |
 | [H-07](./H-07-no-pose-diversity-gate.md) | High | Degenerate pose sets accepted silently; extrinsic under-constrained | 🔴 |
-| [H-08](./H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🔴 |
+| [H-08](./H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🔴 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
@@ -28,7 +28,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [M-08](./M-08-conflux-ffi-no-locking.md) | Medium | Mutable Rust conflux State crosses FFI with no locking | 🟢 |
 | [M-09](./M-09-marker-ids-hard-index.md) | Medium | `marker_ids[0..3]` hard index → IndexError on short config | 🟢 |
 | [M-10](./M-10-multi-marker-config-collisions.md) | Medium | Multi-marker camera uses wrong ArUco config; duplicate pairs collide | 🟢 |
-| [M-11](./M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🔴 |
+| [M-11](./M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🟢 |
 | [M-12](./M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🔴 |
 | [M-13](./M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🔴 |
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🔴 |
@@ -42,7 +42,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [L-08](./L-08-stale-readme-docs.md) | Low | Stale README & docs misdirect new users | 🟡 |
 | [L-09](./L-09-setup-fragility-export-labeling.md) | Low | Setup fragility, no export tooling, dump JSON mislabeled | 🟡 |
 | [L-10](./L-10-solver-float32-precision.md) | Low | PnP correspondences and intrinsics cast to `float32` | 🔴 |
-| [L-11](./L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🔴 |
+| [L-11](./L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🟢 |
 | [L-12](./L-12-dead-solver-crates.md) | Low | Dead crates (`pnp-solver`, `calibration-quality`) better than the live code | 🔴 |
 
 ## Three headline gaps
