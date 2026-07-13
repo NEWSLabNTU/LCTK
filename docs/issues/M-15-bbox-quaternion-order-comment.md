@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lctk_launch config → lidar_board_detector
-- **Status:** Open
+- **Status:** Fixed (2026-07-13)
 - **Verified:** Yes (confirmed against the running node, 2026-07-13)
 - **Location:**
   - `ros/lctk_launch/config/board/bbox.json5:7-8` (the wrong comment)
@@ -55,3 +55,16 @@ Better: make it unambiguous rather than merely documented. Accept a named form �
 `{"x": …, "y": …, "z": …, "w": …}` — or express the rotation as `yaw_deg`, which is all any real
 config has ever used. A bare 4-element array whose ordering convention is carried only in a comment
 is a defect waiting to recur; it already silently disagrees with itself once in this repo.
+
+## Resolution (2026-07-13)
+
+Corrected the comment in `config/board/bbox.json5` to state the quaternion is
+`(x, y, z, w)` — nalgebra's serde order, w **last** — and fixed the value: the
+previous `[1, 0, 0, 0]` is a 180° rotation about X in that order (only masked by the
+box's y/z symmetry), so it is now the true identity `[0, 0, 0, 1]`. The filtered
+volume is unchanged for the shipped symmetric box, and the config no longer disagrees
+with itself. `bbox.json5` was the only config carrying the wrong comment.
+
+**Better (not done):** accept a named form (`{"x":…,"y":…,"z":…,"w":…}`) or a `yaw_deg`
+scalar so the ordering can't be misread — a parser change to `lidar_board_detector`
+left as a follow-up.

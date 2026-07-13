@@ -1088,8 +1088,8 @@ class AdvancedExtrinsicSolver(Node):
             all_image_points.extend(image_points)
 
         # Convert to numpy arrays
-        all_object_points = np.array(all_object_points, dtype=np.float32)
-        all_image_points = np.array(all_image_points, dtype=np.float32)
+        all_object_points = np.array(all_object_points, dtype=np.float64)
+        all_image_points = np.array(all_image_points, dtype=np.float64)
 
         num_correspondences = len(all_object_points)
 
@@ -1391,9 +1391,9 @@ class AdvancedExtrinsicSolver(Node):
         image_points = []
 
         board_rotation = (
-            R.from_quat(board_detection.orientation).as_matrix().astype(np.float32)
+            R.from_quat(board_detection.orientation).as_matrix().astype(np.float64)
         )
-        board_position = np.array(board_detection.position, dtype=np.float32)
+        board_position = np.array(board_detection.position, dtype=np.float64)
 
         board_frame_corners = self._compute_multi_marker_corners()
 
@@ -1414,16 +1414,16 @@ class AdvancedExtrinsicSolver(Node):
                 )
                 continue
 
-            local_corners = np.array(board_frame_corners[marker_id], dtype=np.float32)
+            local_corners = np.array(board_frame_corners[marker_id], dtype=np.float64)
             world_corners = (board_rotation @ local_corners.T).T + board_position
 
-            image_corners = np.array(marker.corners, dtype=np.float32)
+            image_corners = np.array(marker.corners, dtype=np.float64)
 
             object_points.extend(world_corners)
             image_points.extend(image_corners)
 
-        return np.array(object_points, dtype=np.float32), np.array(
-            image_points, dtype=np.float32
+        return np.array(object_points, dtype=np.float64), np.array(
+            image_points, dtype=np.float64
         )
 
     def _solve_pnp(
@@ -1434,8 +1434,8 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error("PnP requires at least 4 point correspondences")
             return False, None, None
 
-        K = np.array(self.camera_info.k, dtype=np.float32).reshape(3, 3)
-        dist_coeffs = np.zeros(5, dtype=np.float32)
+        K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
+        dist_coeffs = np.zeros(5, dtype=np.float64)
 
         self.get_logger().info(f"Solving PnP with {len(object_points)} correspondences")
 

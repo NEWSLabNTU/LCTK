@@ -4,8 +4,12 @@
     "pose": {
         // Translation from origin (x, y, z in meters)
         "translation": [2.6, 0.0, 0.35],
-        // Rotation as quaternion (w, x, y, z)
-        "rotation": [1.0, 0.0, 0.0, 0.0]
+        // Rotation as quaternion in (x, y, z, w) order -- this is nalgebra's serde
+        // representation, with w LAST. The value below is the identity (no rotation).
+        // NOTE: the previous value [1, 0, 0, 0] was NOT identity in this order; it is a
+        // 180 deg rotation about X, which only looked correct because this box is
+        // symmetric in y and z about its centre.
+        "rotation": [0.0, 0.0, 0.0, 1.0]
     },
     // Size of the bounding box in meters (x, y, z)
     "size_xyz": [3.1, 3.94, 2.2]

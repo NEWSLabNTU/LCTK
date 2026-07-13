@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** advanced_extrinsic_solver
-- **Status:** Open
+- **Status:** Fixed (2026-07-13)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:** `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1068-1069`, `:1298-1330`, `:1341-1342`
 
@@ -34,3 +34,11 @@ reasons:
 ## Suggested fix
 
 Use `np.float64` throughout the solver. There is no performance argument at 16·N points.
+
+## Resolution (2026-07-13)
+
+The advanced solver's PnP path is now `float64` throughout — board rotation/position,
+model and image corners, the concatenated buffers, the camera matrix and distortion
+vector. OpenCV `solvePnP`/`solvePnPRefineLM` accept `CV_64F`, and there is no
+performance argument at 16·N points. This removes the isolated single-precision
+downgrade and keeps any future `cond(JᵀJ)` diagnostic (H-09) trustworthy.
