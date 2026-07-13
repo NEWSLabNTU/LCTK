@@ -91,17 +91,21 @@ just serve-public   # Serve on 0.0.0.0
    pip3 uninstall colcon-cargo colcon-ros-cargo
    ```
 
-3. **pip setuptools shadows the apt one**: If the build fails with `error: option --editable not
-   recognized` (killing `conflux_py` and every other ament_python package):
-   ```bash
-   pip3 uninstall -y setuptools
-   ```
-   ROS 2 Humble's ament_python builds require the apt `python3-setuptools` (59.6.0). A pip
-   `--user` install lands in `~/.local/lib/python3.10/site-packages`, which precedes
-   `/usr/lib/python3/dist-packages` on `sys.path`, and setuptools >= 80 removed the
-   `setup.py develop --editable` step colcon uses for `--symlink-install`. Any
-   `pip3 install --user` can drag a newer setuptools back in, so `just build` now checks for
-   this and fails fast with the fix. Never `pip3 install setuptools` on this machine.
+3. **pip packages shadowing apt ones** (this has bitten twice — `just build` now guards both):
+
+   A pip `--user` install lands in `~/.local/lib/python3.10/site-packages`, which **precedes**
+   `/usr/lib/python3/dist-packages` on `sys.path` and silently shadows the apt package that ROS 2
+   Humble and apt's OpenCV were built against. Both known cases fail far from the cause:
+
+   | symptom | when | fix |
+   |---------|------|-----|
+   | `error: option --editable not recognized` (kills `conflux_py` and every ament_python package) | **build** time | `pip3 uninstall -y setuptools` |
+   | `ImportError: numpy.core.multiarray failed to import` (kills every solver node at startup, after a clean build) | **run** time | `pip3 uninstall -y numpy` |
+
+   setuptools >= 80 removed the `setup.py develop --editable` step colcon uses for
+   `--symlink-install`; numpy >= 2 breaks the ABI apt's `cv2` was compiled against.
+   **Never `pip3 install --user` setuptools or numpy on this machine** — and note that
+   installing *anything else* with pip can drag them in as dependencies.
 
 4. **ROS2 daemon issues**: Kill unresponsive daemon:
    ```bash
@@ -230,7 +234,10 @@ Profiling conducted on sample data (2026-01-18):
 **Key Insights:**
 - Board detection (ICP) is the processing bottleneck at ~100ms per frame
 - Offline mode achieves ~50% higher throughput due to RELIABLE QoS
-- ICP quality is consistent across modes (loss: 0.026-0.029)
+- ICP quality is consistent across modes (loss: 0.026-0.029). **This is the noise floor, not a bad
+  fit** — a VLP-32C is spec'd at ~±3 cm range accuracy, so a ~2.6 cm mean point-to-model residual is
+  as good as the sensor gets. `icp_good_fit_threshold` must sit *above* this; it was once set to
+  0.012 and the detector then silently accepted nothing (see `docs/issues/C-04`).
 - Realtime mode has higher latency variance due to message skipping
 
 **Profiling scripts:** `tmp/profile_modes.sh`, `tmp/analyze_logs.py`, `tmp/profile_latency.py`

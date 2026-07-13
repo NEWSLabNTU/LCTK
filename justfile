@@ -37,7 +37,7 @@ build: build-conflux
 # conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
 # solver nodes import conflux_py and fail to start without it. Only these two
 # packages are selected so the git-rclrs conflux/conflux-ros2 packages are skipped.
-build-conflux: _check-setuptools
+build-conflux: _check-python-env
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
@@ -47,25 +47,46 @@ build-conflux: _check-setuptools
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
-# Guard: ROS 2 Humble's ament_python builds need the apt setuptools (59.6.0).
-# A pip `--user` setuptools shadows it on sys.path, and setuptools >= 80 removed the
-# `setup.py develop --editable` step colcon uses for --symlink-install. Without this
-# check the build dies deep inside colcon with a bare
-# "error: option --editable not recognized", which points nowhere near the cause.
-_check-setuptools:
+# Guard: this project runs against the SYSTEM python that ROS 2 Humble and apt's OpenCV were
+# built against. A pip `--user` install lands in ~/.local/lib/python3.10/site-packages, which
+# precedes /usr/lib/python3/dist-packages on sys.path and silently shadows the apt package.
+# Two of these have already cost us a day each, and both fail far from the cause:
+#
+#   setuptools >= 80  removed the `setup.py develop --editable` step colcon uses for
+#                     --symlink-install  ->  "error: option --editable not recognized",
+#                     which kills every ament_python package at BUILD time.
+#   numpy >= 2        breaks the ABI apt's cv2 was compiled against  ->  "ImportError:
+#                     numpy.core.multiarray failed to import", which kills every solver
+#                     node at RUN time, after a clean build.
+#
+# Never `pip3 install --user` setuptools or numpy on this machine.
+_check-python-env:
     #!/usr/bin/env bash
     set -eo pipefail
-    location=$(python3 -c 'import setuptools; print(setuptools.__file__)')
-    version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
-    if [[ "$location" != /usr/lib/python3/dist-packages/* ]]; then
-        echo "error: setuptools $version ($location) shadows the apt setuptools." >&2
-        echo "       ROS 2 Humble's ament_python packages need the apt version (59.6.0);" >&2
-        echo "       every ament_python package will fail with" >&2
-        echo "       'error: option --editable not recognized'." >&2
-        echo "" >&2
-        echo "       Fix with:  pip3 uninstall -y setuptools" >&2
-        exit 1
+    fail=0
+
+    for pkg in setuptools numpy; do
+        location=$(python3 -c "import $pkg; print($pkg.__file__)" 2>/dev/null) || continue
+        version=$(python3 -c "import $pkg; print($pkg.__version__)" 2>/dev/null) || continue
+        if [[ "$location" != /usr/lib/python3/dist-packages/* ]]; then
+            echo "error: $pkg $version shadows the apt package that ROS 2 Humble needs." >&2
+            echo "       found: $location" >&2
+            echo "       Fix with:  pip3 uninstall -y $pkg" >&2
+            echo "" >&2
+            fail=1
+        fi
+    done
+
+    # The failure that actually bites at runtime: cv2 cannot import under a numpy it was not
+    # built against. Check it directly rather than inferring it from version numbers.
+    if ! python3 -c 'import cv2' 2>/dev/null; then
+        echo "error: 'import cv2' fails. The solver nodes import cv2 and will crash at startup." >&2
+        python3 -c 'import cv2' 2>&1 | tail -1 | sed 's/^/       /' >&2
+        echo "       Usually a pip numpy shadowing apt's; fix with:  pip3 uninstall -y numpy" >&2
+        fail=1
     fi
+
+    [[ $fail -eq 0 ]]
 
 # Set up development environment (install all dependencies)
 setup *args:

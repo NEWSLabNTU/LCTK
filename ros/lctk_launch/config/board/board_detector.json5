@@ -19,8 +19,17 @@
     "icp_pose_weight_threshold": 1e-4,
     // the maximum accepted ICP loss (balanced for stability)
     "icp_rejection_threshold": 0.008,
-    // good fit threshold for convergence detection (tightened for accuracy)
-    "icp_good_fit_threshold": 0.012,  // Relaxed to handle downsampled point clouds
+    // Maximum mean point-to-model distance, in metres, for a board fit to be ACCEPTED.
+    //
+    // This must sit ABOVE the sensor's own range noise, or no fit can ever pass. A VLP-32C is
+    // spec'd at roughly +/-3 cm range accuracy, and the measured ICP loss on the sample data
+    // asymptotes at 0.026-0.029 (the same range CLAUDE.md's profiling section records as normal).
+    // So ~0.026 is the noise floor, not a bad fit.
+    //
+    // It was 0.012 between commit 19a82f3 and 2026-07-13, i.e. below that floor -- so the gate
+    // could never pass and the detector published empty detections forever (see docs/issues/C-04).
+    // 0.035 clears the observed maximum (0.0286) with margin while still rejecting gross misfits.
+    "icp_good_fit_threshold": 0.035,
     // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
     "icp_outlier_threshold": 0.050,  // Effectively disabled - keep all correspondences
     // damping factor for pose updates (increased for better convergence)

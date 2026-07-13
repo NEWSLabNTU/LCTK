@@ -9,6 +9,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [C-01](./C-01-aruco-corners-discarded.md) | Critical | ArUco marker corners discarded; PnP uses axis-aligned bbox | 🟢 |
 | [C-02](./C-02-conflux-realtime-memory-leak.md) | Critical | Conflux realtime mode leaks a message object per dropped message | 🟢 |
 | [C-03](./C-03-double-undistortion.md) | Critical | Image undistorted twice before ArUco detection → every corner biased | 🟢 |
+| [C-04](./C-04-board-detector-gate-unreachable.md) | Critical | ICP accept gate set below the sensor noise floor → detector silently accepts nothing | 🟢 |
 | [H-01](./H-01-conflux-not-built.md) | High | `conflux_py` never built → solvers ImportError at startup | 🟢 |
 | [H-02](./H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🟢 |
 | [H-03](./H-03-pointcloud-datatype-endian.md) | High | Point cloud XYZ decoded as LE float32 without checking datatype/endianness | 🟢 |
@@ -18,6 +19,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [H-07](./H-07-no-pose-diversity-gate.md) | High | Degenerate pose sets accepted silently; extrinsic under-constrained | 🔴 |
 | [H-08](./H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🔴 |
+| [H-10](./H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🔴 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -32,6 +34,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [M-12](./M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🔴 |
 | [M-13](./M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🔴 |
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🔴 |
+| [M-15](./M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🔴 |
 | [L-01](./L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -44,6 +47,7 @@ Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by
 | [L-10](./L-10-solver-float32-precision.md) | Low | PnP correspondences and intrinsics cast to `float32` | 🔴 |
 | [L-11](./L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🟢 |
 | [L-12](./L-12-dead-solver-crates.md) | Low | Dead crates (`pnp-solver`, `calibration-quality`) better than the live code | 🔴 |
+| [L-13](./L-13-calibration-metrics-msg-dead.md) | Low | `CalibrationMetrics.msg` built, unused, and IoU-shaped rather than residual-shaped | 🔴 |
 
 ## Three headline gaps
 
@@ -71,6 +75,22 @@ degenerate capture reports `"Calibration successful"` exactly like a good one.
 largest systematic bias — so the standard remedy for H-07 ("spread the board across the field of
 view") would have injected error rather than removing it. C-03 is now **fixed** (2026-07-12), which
 unblocks the pose-diversity work.
+
+## The pipeline was producing nothing at all (2026-07-13)
+
+Worth stating plainly, because it reframes everything above: **`just demo` had been silently
+producing zero calibrations.** The board detector's ICP accept gate (`icp_good_fit_threshold`) had
+been tightened to `0.012` — *below the VLP-32C's ±3 cm range noise*, and below the 0.026–0.029 loss
+that `CLAUDE.md`'s own profiling section records as normal. No fit could ever pass. The rejection
+was logged at `debug`, so the detector emitted empty detections forever without a word.
+
+That is [C-04](./C-04-board-detector-gate-unreachable.md), now fixed: 0 → 1,049 board detections,
+0 → 1,031 PnP solves on the shipped sample data.
+
+The lesson generalises, and it is the same one [H-09](./H-09-no-extrinsic-quality-metric.md) makes
+about the extrinsic: **this system has no way to tell you it is not working.** A gate that can never
+pass, a detector that publishes empty results, and a solver that reports `"Calibration successful"`
+are all the same failure — silence where a number should be.
 
 ## Verified against live source
 C-01, H-01, H-02 were confirmed by reading the current code during the audit; the rest of the
