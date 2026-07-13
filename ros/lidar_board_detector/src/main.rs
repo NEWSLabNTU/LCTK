@@ -940,7 +940,7 @@ impl CalibrationBoardLocatorNode {
                 .icp_losses
                 .iter()
                 .copied()
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .min_by(|a, b| a.total_cmp(b))
                 .unwrap_or(0.0);
 
             log_info!(
@@ -1355,12 +1355,36 @@ impl CalibrationBoardLocatorNode {
                     temp_board_model.right_corner(),
                 ];
 
-                // Find the corner with the lowest z-coordinate
+                // Find the corner with the lowest z-coordinate (total_cmp is
+                // NaN-safe; partial_cmp().unwrap() would panic on a NaN corner).
                 let (lowest_index, lowest_corner) = corners
                     .iter()
                     .enumerate()
-                    .min_by(|a, b| a.1.z.partial_cmp(&b.1.z).unwrap())
+                    .min_by(|a, b| a.1.z.total_cmp(&b.1.z))
                     .unwrap();
+
+                // M-14: the board origin corner is disambiguated purely by "lowest
+                // world z" -- an unstated assumption that exactly one corner is
+                // clearly lowest. Near a 45deg roll, a diamond-mounted board, or a
+                // LiDAR frame that is not gravity-aligned, the two lowest corners are
+                // nearly tied and the wrong one can win, rotating the board frame 90deg
+                // and silently biasing the extrinsic for this pose. Warn when the
+                // disambiguation is marginal instead of failing silently.
+                {
+                    let mut zs: Vec<f64> = corners.iter().map(|c| c.z).collect();
+                    zs.sort_by(|a, b| a.total_cmp(b));
+                    let z_spread = zs[3] - zs[0];
+                    if z_spread > 1e-9 && (zs[1] - zs[0]) < 0.15 * z_spread {
+                        log_warn!(
+                            LOGGER_NAME,
+                            "Board origin corner is ambiguous: the two lowest corners are \
+                             within {:.0}% of the corner z-spread. The board may be near a \
+                             45deg roll or the LiDAR frame may not be gravity-aligned; the \
+                             extrinsic could be off by a 90deg in-plane rotation for this pose.",
+                            100.0 * (zs[1] - zs[0]) / z_spread
+                        );
+                    }
+                }
 
                 log_debug!(
                     LOGGER_NAME,
@@ -1672,7 +1696,7 @@ impl CalibrationBoardLocatorNode {
         // The eigenvector with the smallest eigenvalue is the plane normal
         let mut eigenvalues_indexed: Vec<(usize, f64)> =
             (0..3).map(|i| (i, eigen.eigenvalues[i])).collect();
-        eigenvalues_indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        eigenvalues_indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
 
         let normal_idx = eigenvalues_indexed[0].0; // Smallest eigenvalue
         let normal_vec = eigen.eigenvectors.column(normal_idx).into_owned();
