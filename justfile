@@ -37,7 +37,7 @@ build: build-conflux
 # conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
 # solver nodes import conflux_py and fail to start without it. Only these two
 # packages are selected so the git-rclrs conflux/conflux-ros2 packages are skipped.
-build-conflux:
+build-conflux: _check-setuptools
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
@@ -46,6 +46,26 @@ build-conflux:
         --packages-select conflux_cpp conflux_py \
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+# Guard: ROS 2 Humble's ament_python builds need the apt setuptools (59.6.0).
+# A pip `--user` setuptools shadows it on sys.path, and setuptools >= 80 removed the
+# `setup.py develop --editable` step colcon uses for --symlink-install. Without this
+# check the build dies deep inside colcon with a bare
+# "error: option --editable not recognized", which points nowhere near the cause.
+_check-setuptools:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    location=$(python3 -c 'import setuptools; print(setuptools.__file__)')
+    version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
+    if [[ "$location" != /usr/lib/python3/dist-packages/* ]]; then
+        echo "error: setuptools $version ($location) shadows the apt setuptools." >&2
+        echo "       ROS 2 Humble's ament_python packages need the apt version (59.6.0);" >&2
+        echo "       every ament_python package will fail with" >&2
+        echo "       'error: option --editable not recognized'." >&2
+        echo "" >&2
+        echo "       Fix with:  pip3 uninstall -y setuptools" >&2
+        exit 1
+    fi
 
 # Set up development environment (install all dependencies)
 setup *args:

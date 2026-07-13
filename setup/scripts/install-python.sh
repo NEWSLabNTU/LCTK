@@ -28,9 +28,13 @@ sudo apt-get install -y \
     python3-pandas
 
 echo "Installing Python build dependencies..."
+# NOTE: do NOT pip-install setuptools here. python3-setuptools is installed from apt above,
+# and ROS 2 Humble's ament_python builds require that apt version (59.6.0). A pip
+# `--user` setuptools shadows it on sys.path, and setuptools >= 80 dropped the
+# `setup.py develop --editable` step colcon uses for --symlink-install, which breaks
+# every ament_python package with "error: option --editable not recognized".
 pip3 install --user \
     "cffi>=1.0.0" \
-    "setuptools>=45" \
     wheel
 
 echo "Python environment installation complete."

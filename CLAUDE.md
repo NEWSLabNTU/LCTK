@@ -91,19 +91,31 @@ just serve-public   # Serve on 0.0.0.0
    pip3 uninstall colcon-cargo colcon-ros-cargo
    ```
 
-3. **ROS2 daemon issues**: Kill unresponsive daemon:
+3. **pip setuptools shadows the apt one**: If the build fails with `error: option --editable not
+   recognized` (killing `conflux_py` and every other ament_python package):
+   ```bash
+   pip3 uninstall -y setuptools
+   ```
+   ROS 2 Humble's ament_python builds require the apt `python3-setuptools` (59.6.0). A pip
+   `--user` install lands in `~/.local/lib/python3.10/site-packages`, which precedes
+   `/usr/lib/python3/dist-packages` on `sys.path`, and setuptools >= 80 removed the
+   `setup.py develop --editable` step colcon uses for `--symlink-install`. Any
+   `pip3 install --user` can drag a newer setuptools back in, so `just build` now checks for
+   this and fails fast with the fix. Never `pip3 install setuptools` on this machine.
+
+4. **ROS2 daemon issues**: Kill unresponsive daemon:
    ```bash
    pkill -9 -f ros2-daemon
    ```
 
-4. **Text file busy during build**: If build fails with "Text file busy (os error 26)", kill running nodes and clean:
+5. **Text file busy during build**: If build fails with "Text file busy (os error 26)", kill running nodes and clean:
    ```bash
    pkill -9 -f "<node_name>"
    rm -rf build/<package> install/<package>
    just build
    ```
 
-5. **Killing play_launch leaves orphan processes**: When killing play_launch with `pkill`, child processes become orphans. Kill the entire process group instead:
+6. **Killing play_launch leaves orphan processes**: When killing play_launch with `pkill`, child processes become orphans. Kill the entire process group instead:
    ```bash
    # Find the play_launch process group ID (PGID)
    ps -o pid,pgid,cmd | grep play_launch
