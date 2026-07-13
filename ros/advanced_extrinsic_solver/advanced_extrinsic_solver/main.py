@@ -1449,6 +1449,17 @@ class AdvancedExtrinsicSolver(Node):
             )
 
             if success:
+                # M-12: SQPnP is a direct global solver and performs no nonlinear
+                # polish of the reprojection cost. Refine the initialization with
+                # Levenberg-Marquardt -- one call, strictly better, and cheap.
+                try:
+                    rvec, tvec = cv2.solvePnPRefineLM(
+                        object_points, image_points, K, dist_coeffs, rvec, tvec
+                    )
+                except cv2.error as refine_err:
+                    self.get_logger().warning(
+                        f"solvePnPRefineLM skipped ({refine_err}); using SQPnP result"
+                    )
                 self.get_logger().info(
                     f"PnP solved successfully!\nTranslation: {tvec.flatten()}"
                 )

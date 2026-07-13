@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** advanced_extrinsic_solver, extrinsic_solver_node
-- **Status:** Open
+- **Status:** Partially fixed (2026-07-13) — LM refinement landed; residual gating & weighting are H-09/M-13
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1333-1366` (`_solve_pnp`, `SOLVEPNP_SQPNP`)
@@ -45,3 +45,21 @@ Layered, in increasing order of change:
    pose as the sampling unit.
 4. Weight each pose by its ICP quality once that is available
    ([M-13](./M-13-icp-quality-not-propagated.md)).
+
+## Resolution (2026-07-13) — LM refinement (fix item 1)
+
+The advanced solver's `_solve_pnp` now runs `cv2.solvePnPRefineLM` after the
+`SOLVEPNP_SQPNP` initialization, so the reprojection cost gets a nonlinear polish
+it previously never received (SQPnP is a direct global solver). The refinement is
+guarded — if it raises, the SQPnP result is kept and a warning is logged. The
+standard `extrinsic_solver_node` already uses `SOLVEPNP_ITERATIVE`, which runs LM
+internally, so it was not touched.
+
+Items 2–4 (per-corner/per-pose residual gating, IRLS/RANSAC, ICP-quality weighting)
+are intentionally left: residuals are the [H-09](./H-09-no-extrinsic-quality-metric.md)
+metric surface and per-pose ICP quality is [M-13](./M-13-icp-quality-not-propagated.md),
+both in progress by other agents. Doing the gating here would collide with the
+residual computation being added under H-09.
+
+Verified: `tmp/test_m12_refine.py` confirms RefineLM never worsens the reprojection
+RMSE on a synthetic noisy scene; `just build` + `just test` green.
