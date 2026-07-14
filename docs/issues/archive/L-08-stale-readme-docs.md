@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** documentation
-- **Status:** Partially fixed (2026-07-11)
+- **Status:** Fixed (2026-07-14)
 - **Verified:** Static review
 - **Location:**
   - `README.md:13, 18-19, 116, 142`
@@ -34,3 +34,16 @@ UI port (`:8000`) and `max_icp_iterations` default (10) across the book, and
 still documents an older `just sample-sensor-data {start|stop|status|logs}` /
 `just lidar-camera start` interface that no longer exists — it needs a broader
 rewrite against the current justfile (tracked here).
+
+## Resolution (2026-07-14) — full README pass
+Rewrote README.md against the current justfile. Removed the nonexistent
+"systemd user services" model (`just <recipe> {start|stop|restart|status|logs}`)
+and replaced it with the real foreground `play_launch` model: `just sample-data`,
+`just demo`, `just lidar-camera`, `just two-lidar`, `just calibrate <config>`;
+monitoring via the web UI at http://localhost:8000; stopping via Ctrl+C (with the
+process-group kill note for orphans). Fixed `./setup-dev-env.sh` -> `./setup.sh`,
+the config-variable list to the actual justfile variables (debug_mode, log_level,
+rviz_enabled, mode, use_advanced_solver, enable_overlay, enable_judge), the
+own-data path to the config-driven `just calibrate`, `run-advanced-solver-controller`
+-> `advanced-solver-controller`, and stale `src/ros2/...` / `data/sampledata/...`
+paths. A repo-wide sweep now finds zero references to the old interface.

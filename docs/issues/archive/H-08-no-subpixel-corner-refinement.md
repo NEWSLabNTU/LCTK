@@ -4,7 +4,7 @@
 - **Area:** aruco-detector
 - **Status:** Fixed (2026-07-13)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
-- **Design:** [docs/superpowers/specs/2026-07-13-h08-subpixel-corner-refinement-design.md](../superpowers/specs/2026-07-13-h08-subpixel-corner-refinement-design.md)
+- **Design:** [docs/superpowers/specs/2026-07-13-h08-subpixel-corner-refinement-design.md](../../superpowers/specs/2026-07-13-h08-subpixel-corner-refinement-design.md)
 - **Location:** `rust/aruco-detector/src/multi_aruco.rs:379-388` (and the duplicate block at `multi_aruco.rs:474-482`)
 
 ## Problem

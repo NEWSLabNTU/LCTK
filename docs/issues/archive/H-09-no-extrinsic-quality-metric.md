@@ -28,7 +28,7 @@ see [H-07](./H-07-no-pose-diversity-gate.md) — because 20 frames of a stationa
 320 "correspondences" while carrying the information of one.
 
 The only quality signal that exists anywhere is the LiDAR-side ICP loss, and it never reaches
-the solver ([M-13](./M-13-icp-quality-not-propagated.md)).
+the solver ([M-13](../M-13-icp-quality-not-propagated.md)).
 
 ## Failure scenario
 
@@ -43,7 +43,7 @@ shipped to Autoware with no recorded evidence of its quality.
 All of these are cheap and computable from data the solver already has:
 
 **Design, with measurements:**
-[docs/superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md](../superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md).
+[docs/superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md](../../superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md).
 The plan below was **revised on 2026-07-13 after simulating it** — one of the metrics originally
 proposed here does not work at all, and another is actively misleading.
 
@@ -59,7 +59,7 @@ proposed here does not work at all, and another is actively misleading.
 3. **Conditioning — the discriminator.** `cond(JᵀJ)` = 4.6e4 (degenerate) vs 2.4e2 (well-spread).
    Nearly free: `cv2.projectPoints` already returns the Jacobian. The per-DoF σ from
    `Σ ≈ σ²(JᵀJ)⁻¹` separates too but **under-reports ~4×**, because it assumes all noise is in the
-   pixels and cannot see the ICP 3D error ([M-13](./M-13-icp-quality-not-propagated.md)).
+   pixels and cannot see the ICP 3D error ([M-13](../M-13-icp-quality-not-propagated.md)).
 4. **Subset resampling — the honest uncertainty.** Parameter spread over all C(N,3) pose subsets:
    ±5.77° / ±311 mm (degenerate) vs ±1.08° / ±52 mm (well-spread), and it predicts the true error.
    At N = 9–10 this is 120 solves — milliseconds. Tsai et al.'s construction; gives a covariance
@@ -71,7 +71,7 @@ proposed here does not work at all, and another is actively misleading.
 
 Note `rust/calibration-quality/` already defines a `CalibrationMetrics` struct
 (`metrics.rs:9-27`) — but it is dead code, and its `reprojection_error` is actually a 3D-3D
-residual, not an image-plane one. See [L-12](./L-12-dead-solver-crates.md).
+residual, not an image-plane one. See [L-12](../L-12-dead-solver-crates.md).
 
 ## Resolution (2026-07-14)
 
@@ -119,5 +119,5 @@ And on the live `just demo` pipeline, which had been reporting nothing but succe
 ```
 
 10 tests, including two that exist purely to stop the design regressing to either trap.
-Settles [L-13](./L-13-calibration-metrics-msg-dead.md) and [L-12](./L-12-dead-solver-crates.md) in
+Settles [L-13](../L-13-calibration-metrics-msg-dead.md) and [L-12](../L-12-dead-solver-crates.md) in
 principle — the dead scaffolding should now be deleted.

@@ -124,10 +124,21 @@ impl BoardModel {
         let MultiArucoPattern {
             board_border_size,
             marker_square_size_ratio,
+            num_squares_per_side,
             ..
         } = *pattern;
 
-        let square_size = (self.marker_paper_size - 2.0 * board_border_size) / 2.0;
+        // L-04: this routine hardcodes a 2x2 marker grid (it places exactly 4
+        // markers below), so make that assumption explicit instead of baking a bare
+        // "/ 2.0" divisor. A config with a different grid would otherwise produce
+        // silently wrong object points; assert it loudly in debug builds and derive
+        // the divisor from the pattern.
+        debug_assert_eq!(
+            num_squares_per_side, 2,
+            "multi_marker_corners only supports a 2x2 marker grid"
+        );
+        let square_size =
+            (self.marker_paper_size - 2.0 * board_border_size) / num_squares_per_side as f64;
         let marker_size = square_size * marker_square_size_ratio.raw();
         let marker_border = (square_size - marker_size) / 2.0;
 

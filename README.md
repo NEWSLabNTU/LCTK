@@ -112,14 +112,15 @@ graph TB
 ### Setup Environment
 
 ```bash
-# Setup system dependencies and development environment
-./setup-dev-env.sh
+# Interactive setup (installs all dependencies)
+./setup.sh
 
-# For non-interactive installation:
-./setup-dev-env.sh -y
+# Show what is already installed
+./setup.sh status
 
-# For minimal installation (skip CUDA and dev tools):
-./setup-dev-env.sh -y --minimal
+# Run a single recipe (e.g. only ROS 2), or see all options
+./setup.sh ros2
+./setup.sh --help
 ```
 
 The setup process installs:
@@ -134,12 +135,9 @@ The setup process installs:
 ### Build Project
 
 ```bash
-# Build entire project
+# Build everything (always use this — it also builds the conflux packages the
+# solver nodes depend on, which a plain `colcon build` does not)
 just build
-
-# Or use colcon directly for more control:
-source install/setup.bash
-colcon build --base-paths ros --symlink-install
 ```
 
 ## Usage
@@ -153,74 +151,63 @@ LCTK supports two data input methods:
 Test the calibration pipeline with included sample data:
 
 ```bash
-# Launch sample data playback (LiDAR + camera)
-just sample-sensor-data start
+# Terminal 1: sample data playback (LiDAR + camera)
+just sample-data
 
-# Launch calibration pipeline (in another terminal)
-just lidar-camera start
+# Terminal 2: calibration pipeline
+just lidar-camera
 
-# Launch with debug topics disabled and custom log level
-just debug_mode=false log_level=info lidar-camera start
+# Or run playback + pipeline together in one command
+just demo
+
+# Disable debug topics / set a custom log level
+just debug_mode=false log_level=info lidar-camera
 
 # Launch RViz for visualization
 just rviz
-
-# Check service status
-just lidar-camera status
-just sample-sensor-data status
-
-# View logs
-just lidar-camera logs -f         # Follow logs
-just sample-sensor-data logs -f
-
-# Stop services when done
-just lidar-camera stop
-just sample-sensor-data stop
 ```
+
+The launch runs in the foreground. Monitor node status in the play_launch web UI
+at <http://localhost:8000>, and stop it with `Ctrl+C` in the launching terminal
+(see [Stopping a launch](#stopping-a-launch) if child processes are left behind).
 
 ### Configuration Variables
 
 You can customize the calibration pipeline behavior using configuration variables:
 
 ```bash
-# Available variables (with defaults):
-debug_mode=true                # Enable debug topics
-enable_icp_iteration_debug=true   # Enable ICP iteration debug
-enable_evaluator=true          # Enable calibration evaluator
-enable_overlay=true            # Enable point cloud overlay
-log_level=info                 # ROS log level (debug/info/warn/error)
-rviz_enabled=true             # Launch RViz
-use_best_effort_qos=true      # Use best effort QoS
-use_advanced_solver=false     # Use advanced solver
-camera_topic=/sensing/camera/zedxm/zed_node/left_raw/image_raw_color
-pointcloud_topic=/sensing/lidar/concatenated/pointcloud
+# Available justfile variables (with defaults):
+debug_mode=true            # Enable debug topics
+log_level=info             # ROS log level (debug/info/warn/error)
+rviz_enabled=true          # Launch RViz
+mode=offline               # offline (RELIABLE QoS, rosbags) or realtime (BEST_EFFORT, live)
+use_advanced_solver=false  # Use the multi-pose buffered advanced solver
+enable_overlay=true        # Point cloud / image overlay for visual validation
+enable_judge=true          # Calibration judge (IoU metrics)
 
-# Example usage:
-just debug_mode=true rviz_enabled=true log_level=debug lidar-camera start
+# Example usage (override with just var=value <recipe>):
+just debug_mode=true rviz_enabled=true log_level=debug lidar-camera
 ```
 
 ### Using Your Own Data
 
-For custom sensor data recorded in ROS bags:
+Sensors and calibration pairs are described in a YAML config; point `just calibrate`
+at it (see the [Configuration](#configuration-files) section and
+`ros/lctk_launch/config/examples/`). Topics live in the config, not in justfile
+variables.
 
 ```bash
 # Play your rosbag in one terminal
 ros2 bag play your_data.bag
 
-# Launch calibration with rosbag-compatible QoS in another terminal
-just use_best_effort_qos=false lidar-camera start
+# Run the config-driven pipeline against your config in another terminal
+just calibrate /path/to/your_config.yaml
 
-# With custom topic remapping if your bag uses different topic names
-just use_best_effort_qos=false \
-     camera_topic=/your/camera/topic \
-     pointcloud_topic=/your/lidar/topic \
-     lidar-camera start
+# For live sensors, use realtime QoS
+just mode=realtime calibrate /path/to/your_config.yaml
 ```
 
-Default expected topics:
-- `/sensing/lidar/concatenated/pointcloud` (sensor_msgs/PointCloud2)
-- `/sensing/camera/zedxm/zed_node/left_raw/image_raw_color` (sensor_msgs/Image)
-- Camera info is auto-derived following image_pipeline convention
+Camera info is auto-derived from each image topic (image_pipeline convention).
 
 For sample data topics:
 - `/sensing/lidar/top/pointcloud_raw` (sensor_msgs/PointCloud2)
@@ -230,17 +217,10 @@ For sample data topics:
 #### Two LiDAR Calibration
 
 ```bash
-# Launch two LiDAR calibration pipeline
-just two-lidar start
+# Launch two-LiDAR calibration (config-driven, aligns two LiDAR sensors)
+just two-lidar
 
-# Check status and logs
-just two-lidar status
-just two-lidar logs
-
-# Stop when done
-just two-lidar stop
-
-# This uses multi-wayside detection to align two LiDAR sensors
+# Stop with Ctrl+C in the launching terminal
 ```
 
 ### Visualization
@@ -259,33 +239,29 @@ just rviz
 ### Advanced Tools
 
 ```bash
-# Run interactive advanced solver controller
-just run-advanced-solver-controller
+# Interactive TUI to drive the advanced (multi-pose) solver
+just advanced-solver-controller
 ```
 
-### Service Management
+### Running and stopping a launch
 
-LCTK uses systemd user services for reliable process management:
+The `just` launch recipes run `play_launch` in the **foreground** — there is no
+background service to manage.
 
 ```bash
-# Check status of services
-just lidar-camera status
-just sample-sensor-data status
-just two-lidar status
+# Monitor node status while a launch runs: open the play_launch web UI
+#   http://localhost:8000
 
-# View logs from services
-just lidar-camera logs
-just sample-sensor-data logs -f      # Follow logs
-just two-lidar logs --since "5 min ago"
+# Stop a launch: Ctrl+C in the terminal that started it
+```
 
-# Restart services
-just lidar-camera restart
-just sample-sensor-data restart
+<a id="stopping-a-launch"></a>
+If `Ctrl+C` leaves orphaned nodes behind, kill the whole `play_launch` process
+group (note the leading `-` before the PGID):
 
-# Stop services
-just lidar-camera stop
-just sample-sensor-data stop
-just two-lidar stop
+```bash
+ps -o pid,pgid,cmd | grep play_launch   # find the PGID
+kill -9 -<PGID>
 ```
 
 ## Customization
@@ -296,7 +272,7 @@ All calibration parameters and settings are stored in configuration files:
 
 ```bash
 # Configuration file locations
-src/ros2/lctk_launch/config/
+ros/lctk_launch/config/
 ├── board/              # Calibration board parameters
 │   └── board_detector.json5    # ICP and RANSAC settings
 ├── aruco/              # ArUco marker patterns
@@ -329,14 +305,11 @@ Enable detailed debug logging to diagnose calibration issues:
 
 ```bash
 # Launch with debug logging enabled
-just log_level=debug debug_mode=true lidar-camera start
+just log_level=debug debug_mode=true lidar-camera
 
 # View debug topics in another terminal
 ros2 topic list | grep debug
 ros2 topic echo /calibration/lidar_board_detector/debug/icp_stats
-
-# Check service logs
-just lidar-camera logs -f
 ```
 
 Debug mode provides:
@@ -356,10 +329,10 @@ Debug mode provides:
    If sample data playback fails, test the GStreamer pipeline:
    ```bash
    # Check the gscam configuration
-   cat src/ros2/lctk_launch/launch/camera.launch.xml
+   cat ros/lctk_launch/launch/camera.launch.xml
 
    # Test the GStreamer pipeline manually
-   gst-launch-1.0 filesrc location=data/sampledata/3/video.avi ! \
+   gst-launch-1.0 filesrc location=ros/lctk_sample_data/data/3/video.avi ! \
        decodebin ! videoconvert ! autovideosink
 
    # Install missing plugins if needed
@@ -367,34 +340,23 @@ Debug mode provides:
        gstreamer1.0-plugins-ugly gstreamer1.0-libav
    ```
 
-3. **Service fails immediately (two-lidar)**
+3. **two-lidar exits immediately**
    ```bash
-   # Check the status - it will show ROS launch logs
-   just two-lidar status
-
-   # View full logs
-   just two-lidar logs
-
-   # Common issue: missing config files
-   # Verify config files exist in src/ros2/lctk_launch/config/
+   # Watch the launch output in the foreground terminal for the error.
+   # Common issue: missing config files -- verify they exist under
+   # ros/lctk_launch/config/
    ```
 
-4. **Service management issues**
+4. **Orphaned nodes after Ctrl+C**
    ```bash
-   # Stop all services
-   just lidar-camera stop
-   just sample-sensor-data stop
-   just two-lidar stop
-
-   # Check systemd service status
-   systemctl --user status lctk-calibration
-   systemctl --user status lctk-lidar-camera-data
-   systemctl --user status lctk-two-lidar
+   # Kill the whole play_launch process group (see "Running and stopping a launch")
+   ps -o pid,pgid,cmd | grep play_launch
+   kill -9 -<PGID>
    ```
 
 5. **No detections found**
    - Verify calibration board is visible in sensor data
-   - Check configuration files in `src/ros2/lctk_launch/config/`
+   - Check configuration files in `ros/lctk_launch/config/`
    - Enable debug mode to see intermediate processing steps
    - Ensure ArUco markers are clearly visible to camera
 
@@ -471,23 +433,22 @@ The `.envrc` file automatically:
 # View all available commands
 just --list
 
-# View detailed help
-just help
-
-# Build commands
-just build                 # Build all ROS packages
+# Build / check
+just build                 # Build all ROS packages (+ conflux)
 just clean                 # Clean build artifacts
 just lint                  # Run linters
 just test                  # Run tests
 
-# Service management
-just lidar-camera {start|stop|restart|status|logs}
-just sample-sensor-data {start|stop|restart|status|logs}
-just two-lidar {start|stop|restart|status|logs}
+# Launch (foreground; Ctrl+C to stop)
+just sample-data           # Sample data playback
+just demo                  # Sample data + calibration pipeline
+just lidar-camera          # LiDAR-camera calibration
+just two-lidar             # Two-LiDAR calibration
+just calibrate <config>    # Config-driven calibration for your own sensors
 
 # Tools
-just rviz                              # Launch RViz
-just run-advanced-solver-controller    # Interactive solver controller
+just rviz                          # Launch RViz
+just advanced-solver-controller    # Interactive advanced-solver TUI
 ```
 
 ## Contributing

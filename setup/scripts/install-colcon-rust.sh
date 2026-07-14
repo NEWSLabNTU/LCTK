@@ -35,4 +35,11 @@ pip3 uninstall -y empy 2>/dev/null || true
 echo "Removing pip-installed setuptools if present (use apt setuptools for Humble)..."
 pip3 uninstall -y setuptools 2>/dev/null || true
 
+# Remove pip-installed numpy if present so the Ubuntu apt version is used, for the
+# same reason as setuptools: a newer user-pip numpy (e.g. 2.x) shadows the apt numpy
+# that ROS 2 Humble's Python packages are built against. The build's
+# `_check-python-env` guard rejects a shadowing numpy, so drop it here.
+echo "Removing pip-installed numpy if present (use apt numpy for Humble)..."
+pip3 uninstall -y numpy 2>/dev/null || true
+
 echo "Colcon Rust integration installation complete."

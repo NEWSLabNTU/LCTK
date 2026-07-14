@@ -45,7 +45,7 @@ Make the contract explicit. Two coherent options:
   advertises rectification (e.g. via a parameter), so the pairing can't drift.
 - **Publish raw corners and let PnP model the lens**: pass `np.array(self.camera_info.d)` into
   `solvePnP`. This is what the (dead) `rust/pnp-solver` already does correctly
-  (`rust/pnp-solver/src/lib.rs:68-78`) — see [L-12](./L-12-dead-solver-crates.md).
+  (`rust/pnp-solver/src/lib.rs:68-78`) — see [L-12](../L-12-dead-solver-crates.md).
 
 The second is the more robust design (no resampling of the image, no interpolation blur before
 sub-pixel corner refinement), but it is the larger change.
