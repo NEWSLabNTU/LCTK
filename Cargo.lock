@@ -1344,17 +1344,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "calibration-quality"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "approx",
- "nalgebra 0.32.6",
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "calloop"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2347,18 +2336,6 @@ name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
-
-[[package]]
-name = "dynamic-calibration"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "approx",
- "calibration-quality",
- "nalgebra 0.32.6",
- "serde",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "earcutr"
@@ -4571,7 +4548,6 @@ version = "0.1.0"
 dependencies = [
  "geometry_msgs",
  "rosidl_runtime_rs",
- "std_msgs",
 ]
 
 [[package]]
@@ -6250,19 +6226,6 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
-]
-
-[[package]]
-name = "pnp-solver"
-version = "0.1.1"
-dependencies = [
- "cv-convert",
- "log",
- "nalgebra 0.32.6",
- "opencv",
- "sensor_msgs",
- "serde",
- "strum",
 ]
 
 [[package]]

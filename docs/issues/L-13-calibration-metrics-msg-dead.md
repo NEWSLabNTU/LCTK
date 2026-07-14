@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** lctk_interfaces
-- **Status:** Deferred to H-09 (2026-07-13) — decision coupled to the H-09 metrics work, in progress
+- **Status:** Fixed (2026-07-14) — deleted
 - **Verified:** Yes (confirmed against live source, 2026-07-13)
 - **Location:**
   - `ros/lctk_interfaces/msg/CalibrationMetrics.msg`
@@ -63,3 +63,17 @@ publishes a metrics topic, reuse this message name and redefine its fields; othe
 delete it together with `rust/calibration-quality` and `rust/dynamic-calibration`
 ([L-12](./L-12-dead-solver-crates.md)). H-09 is in progress by another agent, so this
 message is left untouched to avoid pre-empting or colliding with that decision.
+
+## Resolution (2026-07-14) — deleted
+
+H-09 landed inside the existing services (`last_solve_status`, the logs, the `dump_detections`
+JSON) and needed no new topic, so per this issue's own suggested fix the message goes.
+
+Removed `ros/lctk_interfaces/msg/CalibrationMetrics.msg` and its line in
+`ros/lctk_interfaces/CMakeLists.txt` (the only live reference). It was IoU/coverage-shaped and
+required a ground-truth board region, so it could not have carried H-09's residual/covariance
+numbers even if someone had wired it up.
+
+The tree no longer offers four answers to "how good is this calibration?". `lctk_quality` is the
+only one, and `ros/calibration_judge/` remains what it always was: a benchmark harness that scores
+against a supplied ground truth, which is precisely what you do not have in the field.

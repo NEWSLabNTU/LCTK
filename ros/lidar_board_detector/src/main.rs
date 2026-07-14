@@ -1640,7 +1640,9 @@ impl CalibrationBoardLocatorNode {
         match datatype {
             PF_FLOAT32 => {
                 if offset + 4 > data.len() {
-                    return Err(anyhow!("Buffer overflow when reading f32 at offset {offset}"));
+                    return Err(anyhow!(
+                        "Buffer overflow when reading f32 at offset {offset}"
+                    ));
                 }
                 let bytes: [u8; 4] = data[offset..offset + 4].try_into().unwrap();
                 Ok(if is_bigendian {
@@ -1651,7 +1653,9 @@ impl CalibrationBoardLocatorNode {
             }
             PF_FLOAT64 => {
                 if offset + 8 > data.len() {
-                    return Err(anyhow!("Buffer overflow when reading f64 at offset {offset}"));
+                    return Err(anyhow!(
+                        "Buffer overflow when reading f64 at offset {offset}"
+                    ));
                 }
                 let bytes: [u8; 8] = data[offset..offset + 8].try_into().unwrap();
                 let value = if is_bigendian {
@@ -1781,6 +1785,130 @@ impl CalibrationBoardLocatorNode {
         })
     }
 
+    /// M-13: the 6x6 covariance of the fitted board pose, from the converged ICP correspondences.
+    ///
+    /// The solver used to treat every board pose as exact and equally trustworthy. It is neither.
+    /// The error is strongly **anisotropic**, and that falls straight out of the correspondence
+    /// model (`hollow-board-config`):
+    ///
+    /// - an **interior** point's model correspondence is its own projection onto the board plane,
+    ///   so its residual is purely along the plane normal. It says nothing at all about where the
+    ///   board sits *within* its own plane.
+    /// - only points **outside the square** (clamped to the border) and points **inside a hole**
+    ///   (snapped to the rim) have an in-plane residual, and so only they constrain in-plane
+    ///   position and the rotation about the normal.
+    ///
+    /// So a board with few edge and hole-rim returns is tightly determined out-of-plane and almost
+    /// free in-plane — and a naive isotropic covariance would hide exactly that.
+    ///
+    /// The linearisation therefore projects each residual onto the direction the model actually
+    /// constrains (at a closest-point correspondence, that is the surface normal, i.e. the residual
+    /// direction):
+    ///
+    /// ```text
+    ///   e_i = n_i . (p_i - q_i)                     scalar residual
+    ///   J_i = [ n_i^T , (d_i x n_i)^T ]             d_i = q_i - c   (c = the POSE ORIGIN)
+    ///   H   = sum J_i^T J_i                         sigma^2 = sum e_i^2 / (N - 6)
+    ///   Cov = sigma^2 * H^-1
+    /// ```
+    ///
+    /// Interior points contribute `n_i` = the board normal, so they load only the out-of-plane
+    /// block; if the edges and rims are sparse, `H` goes near-singular in-plane and the covariance
+    /// blows up precisely where the fit is genuinely weak. That is the point.
+    ///
+    /// **Frame.** `c` is the *published* pose origin, not the raw ICP one. The post-ICP fixup
+    /// (origin moved to the lowest corner, frame rotated by 90°·k about the normal) is a pure
+    /// re-parameterisation of the same physical plate — the model points `q_i` are unchanged world
+    /// points — so building `J` about the published origin yields the covariance directly in the
+    /// published parameterisation. No adjoint, and no chance of silently transposing the x/y and
+    /// rx/ry blocks.
+    ///
+    /// Returns row-major 6x6 in the ROS `PoseWithCovariance` order `[x, y, z, rx, ry, rz]`.
+    fn compute_pose_covariance(
+        correspondences: &[(na::Point3<f64>, na::Point3<f64>)],
+        pose_origin: &na::Point3<f64>,
+        board_normal: &na::Vector3<f64>,
+    ) -> [f64; 36] {
+        const MIN_CORRESPONDENCES: usize = 10;
+        // Below this the residual direction is numerically meaningless; fall back to the plane
+        // normal, which is the correct constraint direction for an interior point.
+        const MIN_RESIDUAL_M: f64 = 1e-4;
+
+        let n_points = correspondences.len();
+        if n_points < MIN_CORRESPONDENCES {
+            return [0.0; 36];
+        }
+
+        let mut hessian = na::Matrix6::<f64>::zeros();
+        let mut sum_sq_residual = 0.0;
+
+        for (data_point, model_point) in correspondences {
+            let residual = data_point - model_point;
+            let norm = residual.norm();
+
+            let direction = if norm > MIN_RESIDUAL_M {
+                residual / norm
+            } else {
+                *board_normal
+            };
+
+            // Scalar residual along the constrained direction.
+            let e = direction.dot(&residual);
+            sum_sq_residual += e * e;
+
+            // A model point rigidly attached to the board moves by  dt + dtheta x (q - c).
+            // The residual's sensitivity is therefore  [ n , (q - c) x n ].
+            let lever = model_point - pose_origin;
+            let rot_part = lever.cross(&direction);
+
+            let mut jacobian = na::SVector::<f64, 6>::zeros();
+            jacobian[0] = direction.x;
+            jacobian[1] = direction.y;
+            jacobian[2] = direction.z;
+            jacobian[3] = rot_part.x;
+            jacobian[4] = rot_part.y;
+            jacobian[5] = rot_part.z;
+
+            hessian += jacobian * jacobian.transpose();
+        }
+
+        let dof = (n_points as f64 - 6.0).max(1.0);
+        let sigma_sq = sum_sq_residual / dof;
+
+        // H is routinely SINGULAR here, and that is a result, not an error: a board seen with only
+        // interior returns has no in-plane information at all, so H has rank 3 (z, rx, ry) and no
+        // inverse exists.
+        //
+        // A plain `try_inverse()` would bail on exactly the case this covariance exists to
+        // describe, and any single fallback for the whole matrix would throw away the DoF that ARE
+        // well determined. So invert per eigendirection instead: each mode gets sigma^2 / lambda,
+        // and an unobservable mode (lambda -> 0) saturates at MAX_VARIANCE rather than exploding
+        // to infinity or collapsing to zero.
+        //
+        // Zero would be the dangerous one -- a zeroed covariance reads downstream as "this pose is
+        // exact", which is precisely the lie M-13 is about.
+        const MAX_VARIANCE: f64 = 1e6;
+        let lambda_floor = sigma_sq / MAX_VARIANCE;
+
+        let eigen = na::SymmetricEigen::new(hessian);
+        let mut inverse = na::Matrix6::<f64>::zeros();
+        for i in 0..6 {
+            let lambda = eigen.eigenvalues[i].max(lambda_floor);
+            let v = eigen.eigenvectors.column(i);
+            inverse += (v * v.transpose()) / lambda;
+        }
+
+        let covariance = inverse * sigma_sq;
+
+        let mut out = [0.0; 36];
+        for row in 0..6 {
+            for col in 0..6 {
+                out[6 * row + col] = covariance[(row, col)];
+            }
+        }
+        out
+    }
+
     fn convert_board_detection_to_detection3d(
         board_detection: &BoardDetection,
         header: &std_msgs::msg::Header,
@@ -1815,15 +1943,33 @@ impl CalibrationBoardLocatorNode {
         };
 
         // Create object hypothesis
+        // M-13: publish the REAL board-pose covariance, computed from the converged ICP
+        // correspondences about the published pose origin. It used to be `[0.0; 36]` -- which the
+        // solver read as "this pose is exact", so every board pose was weighted equally and the
+        // errors-in-variables bias went unmodelled.
+        let covariance = Self::compute_pose_covariance(
+            &board_detection.icp_data.correspondences,
+            &board_model.pose.translation.vector.into(),
+            &board_model.board_z_axis(),
+        );
+
+        // The score used to be a hardcoded 1.0. Report the inlier ratio instead -- a quantity the
+        // detector actually measured.
+        let stats = &board_detection.icp_stats;
+        let score = if stats.final_loss.is_finite() && stats.final_loss > 0.0 {
+            // Bounded, monotonically decreasing in the fit error. `icp_good_fit_threshold` is the
+            // acceptance bar (C-04), so a fit exactly at the bar scores 0.5.
+            (1.0 / (1.0 + stats.final_loss / 0.035)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
         let hypothesis = ObjectHypothesisWithPose {
             hypothesis: vision_msgs::msg::ObjectHypothesis {
                 class_id: "calibration_board".to_string(),
-                score: 1.0, // Confidence score
+                score,
             },
-            pose: PoseWithCovariance {
-                pose,
-                covariance: [0.0; 36], // Zero covariance for now
-            },
+            pose: PoseWithCovariance { pose, covariance },
         };
 
         Ok(Detection3D {
@@ -2601,4 +2747,146 @@ fn main() -> Result<()> {
         .spin(SpinOptions::default())
         .first_error()
         .map_err(|err| anyhow!("Failed to spin executor: {err}"))
+}
+
+#[cfg(test)]
+mod covariance_tests {
+    use super::*;
+
+    /// Build correspondences for a board lying in the world XY plane (normal = +Z), origin at c.
+    ///
+    /// `interior` points get a residual purely along the normal — that is what the correspondence
+    /// model produces for a point whose plane projection lands inside the square and outside every
+    /// hole. `in_plane` points get a residual in the plane, as a border-clamped or hole-rim point
+    /// does.
+    fn make_correspondences(
+        n_interior: usize,
+        n_in_plane: usize,
+    ) -> (
+        Vec<(na::Point3<f64>, na::Point3<f64>)>,
+        na::Point3<f64>,
+        na::Vector3<f64>,
+    ) {
+        let origin = na::Point3::new(0.0, 0.0, 0.0);
+        let normal = na::Vector3::new(0.0, 0.0, 1.0);
+        let mut corr = Vec::new();
+
+        // Spread the points over a 1 m board so the rotation lever arms are realistic.
+        for i in 0..n_interior {
+            let t = i as f64 / n_interior.max(1) as f64;
+            let x = -0.5 + t;
+            let y = -0.5 + (t * 7.0).fract();
+            let model = na::Point3::new(x, y, 0.0);
+            // residual along the normal only
+            let noise = if i % 2 == 0 { 0.003 } else { -0.003 };
+            let data = na::Point3::new(x, y, noise);
+            corr.push((data, model));
+        }
+
+        for i in 0..n_in_plane {
+            let t = i as f64 / n_in_plane.max(1) as f64;
+            // On the border, residual pointing in-plane (outward in +x).
+            let model = na::Point3::new(0.5, -0.5 + t, 0.0);
+            let data = na::Point3::new(0.5 + 0.003, -0.5 + t, 0.0);
+            corr.push((data, model));
+        }
+
+        (corr, origin, normal)
+    }
+
+    fn diag(cov: &[f64; 36]) -> [f64; 6] {
+        let mut d = [0.0; 6];
+        for i in 0..6 {
+            d[i] = cov[6 * i + i];
+        }
+        d
+    }
+
+    /// M-13's core claim: interior points constrain only the out-of-plane DoF, so a board seen
+    /// with no edge or hole-rim returns is almost free to slide within its own plane. The
+    /// covariance must SAY that, instead of reporting a confident zero.
+    #[test]
+    fn interior_only_correspondences_are_unobservable_in_plane() {
+        let (corr, origin, normal) = make_correspondences(200, 0);
+
+        let cov = CalibrationBoardLocatorNode::compute_pose_covariance(&corr, &origin, &normal);
+        let d = diag(&cov);
+
+        let (var_x, var_y, var_z) = (d[0], d[1], d[2]);
+        let var_rz = d[5];
+
+        assert!(
+            var_z < 1e-4,
+            "out-of-plane translation should be well determined by interior points, got {var_z}"
+        );
+        assert!(
+            var_x > var_z * 1e3 && var_y > var_z * 1e3,
+            "in-plane translation must be reported as poorly determined when only interior points \
+             are present (interior residuals are purely along the normal and say nothing about \
+             where the board sits within its plane); got var_x={var_x}, var_y={var_y}, var_z={var_z}"
+        );
+        assert!(
+            var_rz > 1e-2,
+            "rotation about the board normal is unobservable from interior points alone; got {var_rz}"
+        );
+    }
+
+    /// Adding border / hole-rim points — the ones with an in-plane residual — must actually
+    /// constrain the in-plane DoF. Otherwise the anisotropy above is an artefact, not a measurement.
+    #[test]
+    fn in_plane_correspondences_constrain_the_in_plane_dofs() {
+        let (interior_only, origin, normal) = make_correspondences(200, 0);
+        let (with_edges, _, _) = make_correspondences(200, 60);
+
+        let before = diag(&CalibrationBoardLocatorNode::compute_pose_covariance(
+            &interior_only,
+            &origin,
+            &normal,
+        ));
+        let after = diag(&CalibrationBoardLocatorNode::compute_pose_covariance(
+            &with_edges,
+            &origin,
+            &normal,
+        ));
+
+        assert!(
+            after[0] < before[0] / 100.0,
+            "border points must sharply reduce the in-plane x variance: {} -> {}",
+            before[0],
+            after[0]
+        );
+        assert!(
+            after[5] < before[5] / 10.0,
+            "border points must reduce the yaw-about-normal variance: {} -> {}",
+            before[5],
+            after[5]
+        );
+    }
+
+    /// Too few points: report nothing rather than a fabricated number.
+    #[test]
+    fn too_few_correspondences_yields_zero_covariance() {
+        let (corr, origin, normal) = make_correspondences(4, 0);
+        let cov = CalibrationBoardLocatorNode::compute_pose_covariance(&corr, &origin, &normal);
+        assert_eq!(cov, [0.0; 36]);
+    }
+
+    /// The published order is ROS's: row-major 6x6, [x, y, z, rx, ry, rz]. Symmetry is a cheap
+    /// guard that the row-major flattening is not transposed.
+    #[test]
+    fn covariance_is_symmetric_and_row_major() {
+        let (corr, origin, normal) = make_correspondences(200, 60);
+        let cov = CalibrationBoardLocatorNode::compute_pose_covariance(&corr, &origin, &normal);
+
+        for row in 0..6 {
+            for col in 0..6 {
+                let a = cov[6 * row + col];
+                let b = cov[6 * col + row];
+                assert!(
+                    (a - b).abs() < 1e-12 * (1.0 + a.abs()),
+                    "covariance must be symmetric at ({row},{col}): {a} vs {b}"
+                );
+            }
+        }
+    }
 }

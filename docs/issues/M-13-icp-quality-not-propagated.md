@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lidar_board_detector → extrinsic solvers
-- **Status:** Open
+- **Status:** Fixed (2026-07-14)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/lidar_board_detector/src/main.rs:975-994` (ICP stats published as a `String` debug topic)
@@ -52,3 +52,78 @@ the message that could carry the information even if there were.
 
 Item (1) is a prerequisite for the errors-in-variables / joint-optimisation work in
 [docs/roadmap/phase-5-stable-extrinsic-solution.md](../roadmap/phase-5-stable-extrinsic-solution.md).
+
+## Resolution (2026-07-14)
+
+The detector now publishes a real 6x6 board-pose covariance, and the solver consumes it.
+
+### Producing it — the anisotropy is the whole point
+
+`compute_pose_covariance` (`ros/lidar_board_detector/src/main.rs`) builds the information matrix
+from the converged ICP correspondences. The linearisation projects each residual onto the direction
+the model *actually* constrains — at a closest-point correspondence, the surface normal:
+
+```
+e_i = n_i . (p_i - q_i)
+J_i = [ n_i^T , (d_i x n_i)^T ]     d_i = q_i - c   (c = the PUBLISHED pose origin)
+H   = sum J_i^T J_i                 Cov = sigma^2 * H^-1
+```
+
+This reproduces the anisotropy the issue predicted, for free. Interior points project onto the board
+normal, so they say **nothing** about where the board sits within its own plane; only border and
+hole-rim points have an in-plane residual. A board with sparse edge returns is therefore tight
+out-of-plane and nearly free in-plane, and the covariance now says so.
+
+Two things that would each have silently produced a wrong answer:
+
+- **`H` is routinely singular, and that is a result, not an error.** With only interior points it
+  has rank 3. `try_inverse()` bails exactly on the case this covariance exists to describe, and a
+  single whole-matrix fallback throws away the DoF that *are* well determined. So it is inverted
+  per eigendirection: each mode gets `sigma^2 / lambda`, and an unobservable mode saturates at a
+  large variance instead of collapsing to zero. **Zero is the dangerous value** — downstream it
+  reads as "this pose is exact", which is the original bug.
+- **The published pose is not the ICP pose.** A post-ICP fixup moves the origin to the lowest corner
+  and rotates the frame by 90°·k. Rather than push the covariance through that adjoint (easy to get
+  silently transposed), `J` is built about the *published* origin — the fixup is a pure
+  re-parameterisation of the same plate, so the model points are unchanged and the covariance comes
+  out directly in the published frame.
+
+`score` also stops being a hardcoded `1.0`; it now decays with the ICP fit error.
+
+### Consuming it
+
+`BoardDetection` gains a `covariance` field. `_pose_weight` propagates it onto the ArUco corners
+that pose generated (`J_corner = [I | -[c]_x]`, `Sigma_corner = J Sigma_pose J^T`) and weights the
+pose by the inverse of the resulting positional sigma.
+
+**No OpenCV PnP entry point accepts per-point weights** — not `solvePnP`, not `solvePnPRefineLM`,
+not `solvePnPRefineVVS`. So M-12's LM polish slot becomes a weighted `scipy.least_squares` when a
+covariance is present, and falls back to OpenCV's unweighted `RefineLM` when it is not (so an older
+detector behaves exactly as before). This also completes item 4 of
+[M-12](./M-12-no-robust-estimation-or-refinement.md).
+
+### Verified
+
+**On the live pipeline** — the covariance is on the wire and the numbers are physical:
+
+```
+score (was hardcoded 1.0):  0.557
+covariance all-zero?        False
+  sigma translation (mm):  x=2.45   y=15.15   z=5.55     <- 6x anisotropy, on real data
+  sigma rotation   (deg):  rx=1.11  ry=0.21   rz=0.13
+  symmetric?                  True
+```
+
+**Rust** (`covariance_tests` in `lidar_board_detector`, 4 tests): interior-only correspondences
+report the in-plane DoF as unobservable while `z` stays tight; adding border points collapses the
+in-plane variance by >100x. Symmetry and row-major order pinned.
+
+**Python** (`test_pose_weighting.py`, 4 tests): a loose pose is weighted down; no covariance means
+no behaviour change; and — the test that justifies the mechanism — **weighted refinement beats
+unweighted when one pose in the buffer has a bad ICP fit.** If that had failed, the covariance would
+be decoration and should have been deleted rather than maintained.
+
+### Left
+
+The ICP itself still has no robust kernel (Kabsch, no Huber; `avg_loss` is a mean, not an RMS).
+That is a detector-algorithm change, separate from propagating the uncertainty it already has.

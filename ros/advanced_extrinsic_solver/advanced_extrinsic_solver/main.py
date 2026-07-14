@@ -75,6 +75,32 @@ class BoardDetection:
     position: Tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
     orientation: Tuple[float, float, float, float]  # quaternion x, y, z, w
 
+    # M-13: the board-pose covariance from the detector's ICP fit, 6x6 row-major in the ROS
+    # PoseWithCovariance order [x, y, z, rx, ry, rz]. It is strongly ANISOTROPIC: interior LiDAR
+    # returns constrain only the out-of-plane DoF, so a board with few edge/hole-rim returns is
+    # tightly determined along its normal and nearly free within its own plane.
+    #
+    # This used to be discarded, and the solver treated every board pose as exact -- which is the
+    # errors-in-variables bias: solvePnP assumes the 3D points are noiseless, while they are model
+    # corners pushed through this very pose.
+    covariance: Optional[np.ndarray] = (
+        None  # 6x6, or None for a detector that does not publish it
+    )
+
+    @property
+    def position_sigma_m(self) -> Optional[np.ndarray]:
+        """Per-axis translation standard deviation, metres. None if no covariance was published."""
+        if self.covariance is None:
+            return None
+        return np.sqrt(np.abs(np.diag(self.covariance)[:3]))
+
+    @property
+    def rotation_sigma_deg(self) -> Optional[np.ndarray]:
+        """Per-axis rotation standard deviation, degrees."""
+        if self.covariance is None:
+            return None
+        return np.degrees(np.sqrt(np.abs(np.diag(self.covariance)[3:])))
+
 
 class AdvancedExtrinsicSolver(Node):
     """
@@ -161,7 +187,9 @@ class AdvancedExtrinsicSolver(Node):
             self.get_parameter("min_depth_range_m").get_parameter_value().double_value
         )
         self.enforce_pose_diversity = (
-            self.get_parameter("enforce_pose_diversity").get_parameter_value().bool_value
+            self.get_parameter("enforce_pose_diversity")
+            .get_parameter_value()
+            .bool_value
         )
         self.axis_length = (
             self.get_parameter("axis_length").get_parameter_value().double_value
@@ -213,6 +241,9 @@ class AdvancedExtrinsicSolver(Node):
         self._per_frame_object_points = []
         self._per_frame_image_points = []
         self._per_frame_board_poses = []
+        # M-13: per-frame weight from the board-pose covariance. A pose whose ICP fit is loose
+        # contributes less to the solve than one that is tight.
+        self._per_frame_weights = []
         self.total_correspondences = 0
 
         # Pose state: solved (from PnP) and current (with manual adjustments)
@@ -1261,6 +1292,7 @@ class AdvancedExtrinsicSolver(Node):
         self._per_frame_object_points = []
         self._per_frame_image_points = []
         self._per_frame_board_poses = []
+        self._per_frame_weights = []
 
         for pose_idx, (aruco_msg, board_msg) in enumerate(self.detection_buffer, 1):
             self.get_logger().info(
@@ -1294,6 +1326,9 @@ class AdvancedExtrinsicSolver(Node):
             )
             self._per_frame_board_poses.append(
                 (board_detection.position, board_detection.orientation)
+            )
+            self._per_frame_weights.append(
+                self._pose_weight(board_detection, object_points)
             )
 
         # Convert to numpy arrays
@@ -1356,7 +1391,10 @@ class AdvancedExtrinsicSolver(Node):
             f"Solving PnP with {num_correspondences} total correspondences...\n"
             f"{'=' * 80}"
         )
-        success, rvec, tvec = self._solve_pnp(all_object_points, all_image_points)
+        weights = self._expand_weights_to_correspondences()
+        success, rvec, tvec = self._solve_pnp(
+            all_object_points, all_image_points, weights=weights
+        )
 
         if not success:
             self.last_solve_status = "PnP solver failed"
@@ -1453,9 +1491,7 @@ class AdvancedExtrinsicSolver(Node):
 
             marker_id = detection.id if hasattr(detection, "id") else 0
 
-            markers.append(
-                ArUcoMarker(id=marker_id, corners=corners, center=center)
-            )
+            markers.append(ArUcoMarker(id=marker_id, corners=corners, center=center))
 
         return markers
 
@@ -1500,7 +1536,16 @@ class AdvancedExtrinsicSolver(Node):
         if not detection.results:
             raise ValueError("No detection results available")
 
-        pose = detection.results[0].pose.pose
+        result = detection.results[0]
+        pose = result.pose.pose
+
+        # M-13: read the board-pose covariance the detector now publishes. An all-zero covariance
+        # means the detector did not compute one (too few correspondences, or an older detector) --
+        # treat that as "unknown", NOT as "exact".
+        covariance = np.array(result.pose.covariance, dtype=np.float64).reshape(6, 6)
+        if not np.any(covariance):
+            covariance = None
+
         return BoardDetection(
             position=(pose.position.x, pose.position.y, pose.position.z),
             orientation=(
@@ -1509,6 +1554,7 @@ class AdvancedExtrinsicSolver(Node):
                 pose.orientation.z,
                 pose.orientation.w,
             ),
+            covariance=covariance,
         )
 
     def _load_aruco_pattern_config(self, config_file_path: str) -> dict:
@@ -1639,8 +1685,111 @@ class AdvancedExtrinsicSolver(Node):
             image_points, dtype=np.float64
         )
 
+    @staticmethod
+    def _pose_weight(
+        board_detection: BoardDetection, object_points: np.ndarray
+    ) -> float:
+        """M-13: how much this board pose should count, from its ICP covariance.
+
+        `cv2.solvePnP` assumes the 3D points are exact. They are not — they are ideal ArUco corners
+        pushed through the board pose that ICP fitted, so the board-pose uncertainty lands squarely
+        in the "known" 3D points. That is an errors-in-variables problem, and the estimate is
+        *biased*, not merely noisy.
+
+        Propagate the pose covariance onto the corners it generated. A corner at lever arm `c` from
+        the pose origin moves under a pose perturbation as `dt + dtheta x c`, so
+
+            J_corner = [ I | -[c]_x ]   (3x6)      Sigma_corner = J Sigma_pose J^T
+
+        and the weight is the inverse of the resulting positional standard deviation. A pose whose
+        board sat at a grazing angle with few edge returns is loose in-plane, produces sloppy 3D
+        corners, and now contributes proportionally less.
+
+        Returns 1.0 when no covariance was published, so an older detector behaves exactly as
+        before rather than silently down-weighting everything.
+        """
+        if board_detection.covariance is None or len(object_points) == 0:
+            return 1.0
+
+        origin = np.asarray(board_detection.position, dtype=np.float64)
+        cov = board_detection.covariance
+
+        total_var = 0.0
+        for corner in np.asarray(object_points, dtype=np.float64):
+            lever = corner - origin
+            skew = np.array(
+                [
+                    [0.0, -lever[2], lever[1]],
+                    [lever[2], 0.0, -lever[0]],
+                    [-lever[1], lever[0], 0.0],
+                ]
+            )
+            jac = np.hstack([np.eye(3), -skew])  # 3x6
+            total_var += float(np.trace(jac @ cov @ jac.T))
+
+        mean_var = total_var / len(object_points)
+        sigma = np.sqrt(max(mean_var, 1e-12))
+
+        # 1 cm is the scale of a healthy board fit (VLP-32C range noise is ~3 cm, and the ICP loss
+        # asymptotes near 2.6 cm), so a good pose lands near weight 1 and a badly-conditioned one
+        # falls off smoothly rather than being cliff-edged out.
+        weight = 1.0 / (1.0 + sigma / 0.01)
+        return float(np.clip(weight, 1e-3, 1.0))
+
+    def _expand_weights_to_correspondences(self) -> Optional[np.ndarray]:
+        """One weight per correspondence, from the per-frame board-pose weights.
+
+        Returns None when every pose is equally trusted (no covariance anywhere), so the solve
+        takes the plain unweighted path.
+        """
+        if not self._per_frame_weights:
+            return None
+        if all(w >= 1.0 for w in self._per_frame_weights):
+            return None
+
+        weights = []
+        for w, obj in zip(self._per_frame_weights, self._per_frame_object_points):
+            weights.extend([w] * len(obj))
+        return np.asarray(weights, dtype=np.float64)
+
+    def _refine_pnp_weighted(
+        self,
+        object_points: np.ndarray,
+        image_points: np.ndarray,
+        K: np.ndarray,
+        rvec: np.ndarray,
+        tvec: np.ndarray,
+        weights: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Weighted Levenberg-Marquardt polish of the reprojection cost.
+
+        M-12 added `cv2.solvePnPRefineLM`, but **no OpenCV PnP entry point accepts per-point
+        weights** — not solvePnP, not RefineLM, not RefineVVS. So to consume M-13's covariance at
+        all, the polish has to be ours. This is the same LM refinement, with each residual scaled by
+        its pose's weight.
+        """
+        from scipy.optimize import least_squares
+
+        dist = np.zeros(5, dtype=np.float64)
+        w = np.repeat(weights, 2)  # one weight per residual component (u and v)
+
+        def residuals(params: np.ndarray) -> np.ndarray:
+            r = params[:3].reshape(3, 1)
+            t = params[3:].reshape(3, 1)
+            projected, _ = cv2.projectPoints(object_points, r, t, K, dist)
+            err = (projected.reshape(-1, 2) - image_points).ravel()
+            return w * err
+
+        seed = np.concatenate([rvec.ravel(), tvec.ravel()])
+        result = least_squares(residuals, seed, method="lm", max_nfev=200)
+
+        return result.x[:3].reshape(3, 1), result.x[3:].reshape(3, 1)
+
     def _solve_pnp(
-        self, object_points: np.ndarray, image_points: np.ndarray
+        self,
+        object_points: np.ndarray,
+        image_points: np.ndarray,
+        weights: Optional[np.ndarray] = None,
     ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
         """Solve the Perspective-n-Point problem using OpenCV."""
         if len(object_points) < 4:
@@ -1662,17 +1811,35 @@ class AdvancedExtrinsicSolver(Node):
             )
 
             if success:
-                # M-12: SQPnP is a direct global solver and performs no nonlinear
-                # polish of the reprojection cost. Refine the initialization with
-                # Levenberg-Marquardt -- one call, strictly better, and cheap.
-                try:
-                    rvec, tvec = cv2.solvePnPRefineLM(
-                        object_points, image_points, K, dist_coeffs, rvec, tvec
-                    )
-                except cv2.error as refine_err:
-                    self.get_logger().warning(
-                        f"solvePnPRefineLM skipped ({refine_err}); using SQPnP result"
-                    )
+                # M-12: SQPnP is a direct global solver and performs no nonlinear polish of the
+                # reprojection cost, so refine the initialisation with Levenberg-Marquardt.
+                #
+                # M-13: when the detector publishes a board-pose covariance, the poses are NOT
+                # equally trustworthy, and no OpenCV PnP entry point accepts per-point weights.
+                # So the polish becomes a weighted LM of our own; without covariance we fall back
+                # to OpenCV's, which is exactly the previous behaviour.
+                if weights is not None:
+                    try:
+                        rvec, tvec = self._refine_pnp_weighted(
+                            object_points, image_points, K, rvec, tvec, weights
+                        )
+                        self.get_logger().info(
+                            f"Weighted LM refine (M-13): pose weights "
+                            f"{np.round(self._per_frame_weights, 2).tolist()}"
+                        )
+                    except (ValueError, np.linalg.LinAlgError) as refine_err:
+                        self.get_logger().warning(
+                            f"Weighted refine failed ({refine_err}); using SQPnP result"
+                        )
+                else:
+                    try:
+                        rvec, tvec = cv2.solvePnPRefineLM(
+                            object_points, image_points, K, dist_coeffs, rvec, tvec
+                        )
+                    except cv2.error as refine_err:
+                        self.get_logger().warning(
+                            f"solvePnPRefineLM skipped ({refine_err}); using SQPnP result"
+                        )
                 self.get_logger().info(
                     f"PnP solved successfully!\nTranslation: {tvec.flatten()}"
                 )

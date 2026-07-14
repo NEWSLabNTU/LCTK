@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** rust/pnp-solver, rust/calibration-quality, rust/dynamic-calibration, rust/aruco-detector
-- **Status:** Deferred to H-09 (2026-07-13) — decision coupled to the H-09 metrics work, in progress
+- **Status:** Fixed (2026-07-14) — deleted
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 
 ## Problem
@@ -70,3 +70,22 @@ wire up `estimate_pose` for phase 5.3's camera-frame board pose). H-09 is in pro
 by another agent and may reuse this code, so nothing is deleted or renamed here to
 avoid colliding with that work. Left as a recorded decision for the H-09 change to
 resolve; nothing should remain unreferenced once H-09 lands.
+
+## Resolution (2026-07-14) — deleted
+
+H-09 landed as `ros/lctk_quality/` (pure Python), and reused none of this code. So the decision this
+issue deferred is now made: **delete**.
+
+Removed `rust/calibration-quality/`, `rust/dynamic-calibration/` and `rust/pnp-solver/`. All three
+were workspace members compiled by every build and depended on by nothing:
+`dynamic-calibration` was the only consumer of `calibration-quality`, and itself had no consumers;
+`pnp-solver` had zero inbound edges of any kind.
+
+`pnp-solver` was the awkward one — it handled distortion correctly where the live Python did not.
+That advantage evaporated with M-11/H-08: the corners on the wire are now rectified points by
+construction, so `dist_coeffs = 0` is a definition rather than an assumption, and there is nothing
+left for it to be better at.
+
+`Detector::estimate_pose` / `PoseEstimation::fit_icp` in `aruco-detector` are **kept**: phase 5.3
+wants a camera-frame board pose for plane-normal correspondences, and that is exactly what they
+provide. They remain uncalled, and that is now a recorded intention rather than an accident.
