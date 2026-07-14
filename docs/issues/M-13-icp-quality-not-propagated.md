@@ -26,7 +26,7 @@ The solver therefore treats every board pose as exact and equally trustworthy, w
   **only** by the square's edges and the 3 hole rims (`hollow-board-config/src/lib.rs:339-387`).
   Out-of-plane is tightly observed; in-plane is loose.
 - **the solve is an errors-in-variables problem.** PnP object points are the ideal model corners
-  pushed through `T_board` ([H-07](./H-07-no-pose-diversity-gate.md)), so all of that anisotropic
+  pushed through `T_board` ([H-07](./archive/H-07-no-pose-diversity-gate.md)), so all of that anisotropic
   ICP error lands in the "known" 3D points — and `cv2.solvePnP` assumes 3D points are noiseless
   and all noise is in the pixels. The estimate is biased, not merely noisy.
 - ICP itself has no robust kernel: Kabsch closed-form SVD, a single hard 50 mm gate

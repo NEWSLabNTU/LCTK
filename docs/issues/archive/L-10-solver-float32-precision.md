@@ -25,7 +25,7 @@ reasons:
 
 1. It is a free loss of headroom, and it will start to matter once the residuals get small
    enough for the improvements in
-   [phase 5](../roadmap/phase-5-stable-extrinsic-solution.md) to be measurable.
+   [phase 5](../../roadmap/phase-5-stable-extrinsic-solution.md) to be measurable.
 2. Conditioning is *already* the core problem ([H-07](./H-07-no-pose-diversity-gate.md)). When
    the normal equations are near-singular, single precision eats a meaningful fraction of the
    remaining significant digits, and any `cond(JᵀJ)` diagnostic computed in `float32` will

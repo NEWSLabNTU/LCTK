@@ -44,7 +44,7 @@ Board is mounted at ~45° roll on a rig whose LiDAR frame is not gravity-aligned
 resolve to the correct origin corner, some to the neighbour. The concatenated correspondence
 set is a mix of correct and quarter-turned object points, and the least-squares solve returns
 something between them. Reprojection error is large but nothing reports it
-([H-09](./H-09-no-extrinsic-quality-metric.md)), so the operator sees only a mysteriously bad
+([H-09](./archive/H-09-no-extrinsic-quality-metric.md)), so the operator sees only a mysteriously bad
 overlay.
 
 ## Suggested fix
@@ -61,7 +61,7 @@ overlay.
 - **Delete the Python re-implementation.** Export the corner layout once (from the Rust
   `hollow-board-config`, or from the JSON5 config), and have the solver read it — or at least
   add a test that asserts the two implementations agree corner-for-corner.
-- Once [H-09](./H-09-no-extrinsic-quality-metric.md) lands, a per-pose reprojection residual
+- Once [H-09](./archive/H-09-no-extrinsic-quality-metric.md) lands, a per-pose reprojection residual
   makes a permuted pose trivially detectable, and [M-12](./M-12-no-robust-estimation-or-refinement.md)
   can reject it.
 

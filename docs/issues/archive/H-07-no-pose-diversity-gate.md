@@ -96,7 +96,7 @@ Gate the solve on the *geometry* of the accumulated set, not its cardinality:
 Collection guidance in the literature converges on 10–20 poses, ≥1–2 m depth range, spread
 across the FoV width, with maximum variation in board yaw/pitch (ACFR `cam_lidar_calibration`;
 Tsai et al., ITSC 2021). Full design in
-[docs/roadmap/phase-5-stable-extrinsic-solution.md](../roadmap/phase-5-stable-extrinsic-solution.md).
+[docs/roadmap/phase-5-stable-extrinsic-solution.md](../../roadmap/phase-5-stable-extrinsic-solution.md).
 
 ## Resolution (2026-07-13) — geometric diversity gate
 

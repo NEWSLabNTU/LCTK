@@ -19,7 +19,7 @@ over the concatenated correspondence set. There is:
   *zero* nonlinear polish of the reprojection cost,
 - **no weighting** — every one of the `16 × N` corners enters with equal weight,
 - **no residual gating** — nothing looks at per-corner error, because nothing computes it
-  ([H-09](./H-09-no-extrinsic-quality-metric.md)).
+  ([H-09](./archive/H-09-no-extrinsic-quality-metric.md)).
 
 ## Failure scenario
 
@@ -56,7 +56,7 @@ standard `extrinsic_solver_node` already uses `SOLVEPNP_ITERATIVE`, which runs L
 internally, so it was not touched.
 
 Items 2–4 (per-corner/per-pose residual gating, IRLS/RANSAC, ICP-quality weighting)
-are intentionally left: residuals are the [H-09](./H-09-no-extrinsic-quality-metric.md)
+are intentionally left: residuals are the [H-09](./archive/H-09-no-extrinsic-quality-metric.md)
 metric surface and per-pose ICP quality is [M-13](./M-13-icp-quality-not-propagated.md),
 both in progress by other agents. Doing the gating here would collide with the
 residual computation being added under H-09.
