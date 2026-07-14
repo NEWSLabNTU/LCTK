@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** lctk_interfaces
-- **Status:** Open
+- **Status:** Deferred to H-09 (2026-07-13) — decision coupled to the H-09 metrics work, in progress
 - **Verified:** Yes (confirmed against live source, 2026-07-13)
 - **Location:**
   - `ros/lctk_interfaces/msg/CalibrationMetrics.msg`
@@ -51,3 +51,15 @@ Decide as part of H-09, not before it:
 
 Either way, do not leave four dead answers in the tree. Whatever H-09 lands should be the only
 thing in the repo called "calibration metrics".
+
+## Disposition (2026-07-13) — deferred to H-09
+
+Confirmed: `lctk_interfaces/msg/CalibrationMetrics.msg` is built (CMakeLists.txt) and
+has zero publishers/subscribers/imports across `ros/` and `rust/`. Its fields are
+IoU/coverage, not residual/covariance/conditioning.
+
+The suggested fix is explicitly "decide as part of H-09, not before it": if H-09
+publishes a metrics topic, reuse this message name and redefine its fields; otherwise
+delete it together with `rust/calibration-quality` and `rust/dynamic-calibration`
+([L-12](./L-12-dead-solver-crates.md)). H-09 is in progress by another agent, so this
+message is left untouched to avoid pre-empting or colliding with that decision.

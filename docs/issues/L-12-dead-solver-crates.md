@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** rust/pnp-solver, rust/calibration-quality, rust/dynamic-calibration, rust/aruco-detector
-- **Status:** Open
+- **Status:** Deferred to H-09 (2026-07-13) — decision coupled to the H-09 metrics work, in progress
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 
 ## Problem
@@ -55,3 +55,18 @@ This is a decision, not a mechanical cleanup, and it should be made *with*
   correspondences). That is exactly what this method provides. Wire it up rather than delete it.
 
 Whatever is decided, nothing should stay in the tree unreferenced.
+
+## Disposition (2026-07-13) — deferred to H-09
+
+Confirmed against the current tree: `rust/pnp-solver` has zero Cargo dependents;
+`rust/dynamic-calibration` has zero dependents and is the only thing that depends on
+`rust/calibration-quality`; `Detector::estimate_pose` and `PoseEstimation::fit_icp`
+have zero callers. `calibration-quality`'s `reprojection_error` does compute a 3D-3D
+residual — `(transform * source - target).norm_squared()`, metres², not pixels.
+
+Per the suggested fix, this is a decision to make *with* H-09 (delete vs promote
+`pnp-solver`; delete vs repurpose `calibration-quality` as the H-09 metrics home;
+wire up `estimate_pose` for phase 5.3's camera-frame board pose). H-09 is in progress
+by another agent and may reuse this code, so nothing is deleted or renamed here to
+avoid colliding with that work. Left as a recorded decision for the H-09 change to
+resolve; nothing should remain unreferenced once H-09 lands.
