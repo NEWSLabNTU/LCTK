@@ -36,7 +36,8 @@ import numpy as np
 import rclpy
 from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
-from lctk_quality import build_report
+from lctk_quality import build_report, distinct_placements
+from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
     AdjustTransform,
@@ -107,7 +108,13 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("aruco_config_file", "")
         self.declare_parameter("debug_mode", True)
         self.declare_parameter("publishing_rate", 10.0)
-        self.declare_parameter("min_poses_required", 2)
+        # H-07: this is a minimum number of buffered FRAMES before a solve is attempted. It is
+        # NOT a measure of how well-constrained the calibration is -- twenty frames of a board that
+        # never moved are one board placement and cannot determine the extrinsic. The constraint
+        # that matters is the number of DISTINCT placements, which is measured and reported by
+        # lctk_quality (H-09) rather than gated on here.
+        self.declare_parameter("min_frames_required", 2)
+
         # H-07: pose-diversity gate. The PnP correspondences all lie on one 500 mm
         # coplanar ArUco patch, so a near-coplanar / single-depth buffer leaves a
         # rotation about the correspondence centroid almost unconstrained (the board
@@ -140,8 +147,10 @@ class AdvancedExtrinsicSolver(Node):
         publishing_rate = (
             self.get_parameter("publishing_rate").get_parameter_value().double_value
         )
-        self.min_poses_required = (
-            self.get_parameter("min_poses_required").get_parameter_value().integer_value
+        self.min_frames_required = (
+            self.get_parameter("min_frames_required")
+            .get_parameter_value()
+            .integer_value
         )
         self.min_normal_spread_deg = (
             self.get_parameter("min_normal_spread_deg")
@@ -351,7 +360,7 @@ class AdvancedExtrinsicSolver(Node):
             f"Advanced Extrinsic Solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
             f"Using conflux_py for time-synchronized detection pairs\n"
-            f"Minimum poses required: {self.min_poses_required}\n"
+            f"Minimum frames before solving: {self.min_frames_required}\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled), axis_markers\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
@@ -502,46 +511,70 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(response.message)
             return response
 
-        # Add to buffer (no similarity check - allow multiple detections to average out)
+        # H-07: accept the frame, but tell the operator NOW whether it is a new board placement or
+        # a duplicate of one already buffered. This is the only moment the feedback can change what
+        # they do — by the time they read the solve log, they have already put the board down.
+        #
+        # Duplicates are still buffered (they do average down the per-frame noise), but they add no
+        # geometry, and the pipeline used to count them as "poses" and report success.
         with self.lock:
             self.detection_buffer.append((aruco_msg, board_msg))
             buffer_size = len(self.detection_buffer)
+            placements_before = self._count_placements(exclude_last=True)
+            placements_after = self._count_placements()
 
-        # Log successful addition
         board_pos = board_msg.detections[0].results[0].pose.pose.position
-        self.get_logger().info(
-            f"Added detection pair #{buffer_size} to buffer\n"
-            f"  Board position: ({board_pos.x:.4f}, {board_pos.y:.4f}, {board_pos.z:.4f})"
-        )
+        is_new_placement = placements_after > placements_before
+
+        if is_new_placement:
+            self.get_logger().info(
+                f"Added detection #{buffer_size}: NEW board placement "
+                f"#{placements_after} at "
+                f"({board_pos.x:.2f}, {board_pos.y:.2f}, {board_pos.z:.2f}) m"
+            )
+        else:
+            self.get_logger().warn(
+                f"Added detection #{buffer_size}, but it is a DUPLICATE of a board placement "
+                f"already buffered — still {placements_after} distinct placement(s).\n"
+                "  Repeated frames of the same board placement average down the noise but add no "
+                "geometry, and cannot constrain the extrinsic.\n"
+                "  MOVE THE BOARD: a new distance, or a new yaw/pitch."
+            )
 
         # Re-solve calibration from entire buffer
         success = self._solve_from_buffer()
 
+        response.buffer_size = buffer_size
+
         if success:
+            # H-07: the response is what the operator actually reads when they hit Add. It used to
+            # say "solved calibration successfully (320 correspondences from 20 poses)" — and both
+            # of those numbers are the exact lies H-09 disproved: 20 frames of one placement are
+            # not 20 poses, and 320 correspondences are not 320 pieces of information. Report the
+            # quality verdict instead, so the operator cannot collect a degenerate buffer while
+            # being congratulated twenty times.
+            response.success = True
+            response.message = self.last_solve_status
+
+            if self.last_quality is not None and self.last_quality.is_degenerate:
+                self.get_logger().warn(response.message)
+            else:
+                self.get_logger().info(response.message)
+        elif placements_after < MIN_PLACEMENTS_FOR_SPREAD:
+            # Not an error — just not enough distinct geometry yet to say anything.
             response.success = True
             response.message = (
-                f"Added detection pair and solved calibration successfully "
-                f"({self.total_correspondences} correspondences from {buffer_size} poses)"
+                f"Buffered: {buffer_size} frame(s), {placements_after} distinct placement(s). "
+                f"Need {MIN_PLACEMENTS_FOR_SPREAD} distinct placements before the uncertainty can "
+                "be estimated. Move the board and add more."
             )
-            response.buffer_size = buffer_size
             self.get_logger().info(response.message)
         else:
-            # Check if we just need more poses (not an error, just waiting)
-            if buffer_size < self.min_poses_required:
-                response.success = True  # Detection was added successfully
-                response.message = (
-                    f"Detection buffered ({buffer_size}/{self.min_poses_required} poses). "
-                    f"Add {self.min_poses_required - buffer_size} more to solve calibration."
-                )
-                response.buffer_size = buffer_size
-                self.get_logger().info(response.message)
-            else:
-                response.success = False
-                response.message = (
-                    f"Added to buffer but calibration failed: {self.last_solve_status}"
-                )
-                response.buffer_size = buffer_size
-                self.get_logger().error(response.message)
+            response.success = False
+            response.message = (
+                f"Added to buffer but calibration failed: {self.last_solve_status}"
+            )
+            self.get_logger().error(response.message)
 
         return response
 
@@ -567,7 +600,14 @@ class AdvancedExtrinsicSolver(Node):
         return response
 
     def get_status_callback(self, request, response):
-        """Service callback: Return buffer status."""
+        """Service callback: Return buffer status.
+
+        H-07: `last_solve_status` now carries the quality verdict from lctk_quality, so the
+        interactive controller shows "DEGENERATE | 2 placements (18 frames) | ..." rather than
+        "Calibration successful". `buffer_size` and `total_correspondences` are still frame counts,
+        and are still misleading on their own — the placement count is the number that matters, so
+        it goes into the status string where a reader cannot miss it.
+        """
         with self.lock:
             response.buffer_size = len(self.detection_buffer)
             response.total_correspondences = self.total_correspondences
@@ -822,7 +862,7 @@ class AdvancedExtrinsicSolver(Node):
                     self.get_logger().info(
                         "Restored manual transform adjustments from file"
                     )
-                elif buffer_size >= self.min_poses_required:
+                elif buffer_size >= self.min_frames_required:
                     # No saved transform, re-solve from detections
                     self._solve_from_buffer()
 
@@ -912,9 +952,9 @@ class AdvancedExtrinsicSolver(Node):
         with self.lock:
             buffer_size = len(self.detection_buffer)
 
-            if buffer_size < self.min_poses_required:
+            if buffer_size < self.min_frames_required:
                 response.success = False
-                response.message = f"Cannot reset: need at least {self.min_poses_required} poses in buffer (have {buffer_size})"
+                response.message = f"Cannot reset: need at least {self.min_frames_required} frames in buffer (have {buffer_size})"
                 return response
 
         # Re-solve from buffer (this will reset current_rvec/current_tvec to the solved values)
@@ -1119,6 +1159,35 @@ class AdvancedExtrinsicSolver(Node):
 
         return msg
 
+    def _count_placements(self, exclude_last: bool = False) -> int:
+        """How many DISTINCT board placements are in the buffer.
+
+        H-07/H-09: this — not `len(self.detection_buffer)` — is the number that says how much the
+        capture actually constrains. Twenty frames of a board that never moved are one placement.
+        Caller must hold `self.lock`.
+        """
+        buffer = self.detection_buffer[:-1] if exclude_last else self.detection_buffer
+        if not buffer:
+            return 0
+
+        poses = []
+        for _, board_msg in buffer:
+            if not board_msg.detections:
+                continue
+            pose = board_msg.detections[0].results[0].pose.pose
+            poses.append(
+                (
+                    (pose.position.x, pose.position.y, pose.position.z),
+                    (
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z,
+                        pose.orientation.w,
+                    ),
+                )
+            )
+        return len(distinct_placements(poses)) if poses else 0
+
     def _assess_quality(self, rvec: np.ndarray, tvec: np.ndarray) -> None:
         """Compute the H-09 quality report and surface it.
 
@@ -1165,13 +1234,11 @@ class AdvancedExtrinsicSolver(Node):
             return False
 
         # Check minimum poses requirement for multi-pose calibration
-        if buffer_size < self.min_poses_required:
-            self.last_solve_status = (
-                f"Insufficient poses: {buffer_size}/{self.min_poses_required} required"
-            )
+        if buffer_size < self.min_frames_required:
+            self.last_solve_status = f"Insufficient frames: {buffer_size}/{self.min_frames_required} required"
             self.get_logger().warn(
-                f"Buffered {buffer_size} pose(s), need {self.min_poses_required} minimum. "
-                f"Add {self.min_poses_required - buffer_size} more pose(s) to start calibration."
+                f"Buffered {buffer_size} frame(s), need {self.min_frames_required} minimum. "
+                f"Add {self.min_frames_required - buffer_size} more to start calibration."
             )
             return False
 

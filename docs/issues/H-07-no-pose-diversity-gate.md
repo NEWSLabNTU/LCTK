@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** advanced_extrinsic_solver
-- **Status:** Partially fixed (2026-07-13) — geometric diversity gate landed; conditioning metric is [H-09](./H-09-no-extrinsic-quality-metric.md)
+- **Status:** Fixed (2026-07-14)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:109` (`min_poses_required` default `2`)
@@ -125,3 +125,64 @@ changes to the same service.
 Verified: `tmp/test_h07_pose_diversity.py` shows a still-board 20-add buffer reads
 0° / 0 m (gated) while a 4-pose spread buffer reads 47.6° / 1.87 m (passes); full
 `just build` + `just test` (273 Rust, 48 Python) green.
+
+---
+
+The two halves above and below were developed concurrently by two agents and are complementary, not
+alternatives. The section above adds the **geometric diversity gate** (normal spread, depth range,
+`enforce_pose_diversity`). The section below adds **placement deduplication** — the finding that the
+diversity must be computed over *distinct board placements*, not raw frames, because on real data a
+static board filmed nine times otherwise reports the most confident uncertainty in the whole suite.
+Both are in the tree; `lctk_quality` is the shared implementation.
+
+---
+
+## Resolution (2026-07-14)
+
+The geometry in this issue is unchanged and unfixable — a rotation about the correspondence
+centroid *is* a near-null direction of the reprojection cost. What is fixed is that the pipeline no
+longer hides it, and no longer rewards the operator for making it worse.
+
+**1. The buffer counts distinct board placements, not frames.** `_count_placements()` deduplicates
+by board position and plane normal (5 cm / 5°). Twenty frames of a board that never moved are **one
+placement** — they average down the per-frame noise but add no geometry.
+
+**2. The operator is told at Add time, not at solve time.** This is the only moment the feedback can
+change what they do; by the time they read the solve log they have already put the board down.
+
+```
+Added detection #4: NEW board placement #2 at (1.80, 0.90, 0.30) m
+
+Added detection #5, but it is a DUPLICATE of a board placement already buffered
+  — still 2 distinct placement(s).
+  Repeated frames of the same board placement average down the noise but add no
+  geometry, and cannot constrain the extrinsic.
+  MOVE THE BOARD: a new distance, or a new yaw/pitch.
+```
+
+**3. The `add_detection` *response* carries the quality verdict.** It used to read *"Added detection
+pair and solved calibration successfully (320 correspondences from 20 poses)"* — and **both numbers
+are the lies [H-09](./H-09-no-extrinsic-quality-metric.md) disproved.** An operator could hit Add
+twenty times, be congratulated twenty times, and end up with a degenerate calibration. The response
+is now `last_solve_status`, i.e. the lctk_quality verdict line, so the interactive controller shows
+`DEGENERATE | 2 placements (18 frames) | normals 41deg | ...`.
+
+**4. `min_poses_required` → `min_frames_required`.** The parameter counted frames while calling them
+poses, and defaulted to 2 — so two frames of a static board passed the gate and "solved
+successfully". It is now honestly named a frame minimum, and it is explicitly *not* the measure of
+whether the calibration is constrained; that is the placement count, which is measured and reported
+rather than gated on.
+
+**Nothing rejects.** [C-04](./C-04-board-detector-gate-unreachable.md) was a gate whose threshold was
+unreachable and which silently discarded every detection for months. Thresholds get validated against
+field data before anything is allowed to refuse.
+
+**Verified:** `ros/advanced_extrinsic_solver/test/test_placement_counting.py` (5 tests). One of them
+records a correction: spinning the board about its own normal is deliberately **not** a new placement
+— the plane, depth and centroid are unchanged, so it contributes nothing against the near-null
+direction, and counting it would overstate how well-constrained the capture is.
+
+*Not verified end-to-end:* the `add_detection` service could not be exercised from the development
+shell (DDS discovery is restricted there). The placement counting is unit-tested and the quality
+verdict string was confirmed on the live pipeline under H-09, but the Add-time operator messages
+have not been observed in a real session.
