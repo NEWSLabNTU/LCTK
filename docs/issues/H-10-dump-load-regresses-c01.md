@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** advanced_extrinsic_solver
-- **Status:** Open
+- **Status:** Fixed (2026-07-14)
 - **Verified:** Yes (confirmed against live source, 2026-07-13)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:897-921` (`_serialize_detection2d_array`, the writer)
@@ -77,3 +77,18 @@ v2 file carries no real corners and will produce a biased solve, rather than sil
 
 Add a round-trip test: buffer a detection with known rotated corners, dump, load, and assert the
 corners survive. The existing detection-file fixtures make this cheap.
+
+## Resolution (2026-07-14)
+
+`_serialize_detection2d_array` now persists the real ArUco corners in `results`
+(class_id, score, and the corner pixel in `pose.position`), mirroring what the 3D
+serializer already did. `_deserialize_detection2d_array` restores them, so a reloaded
+capture uses the real corners and the C-01 reader path (`results` preferred over the
+bbox) works exactly as on a live capture. The dump format is bumped to `version: 3`;
+`load_detections` still accepts v1/v2 but **warns loudly** that such a file carries no
+corners and will produce a biased (C-01) solve.
+
+Verified: `tmp/test_h10_dump_load_corners.py` builds a detection with known *rotated*
+(trapezoidal) corners, runs it through serialize → JSON → deserialize, and asserts all
+four corners survive exactly; a v2-style file (no `results`) deserializes to an empty
+results list (the documented fallback). Full `just build` + `just test` green.

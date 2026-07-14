@@ -685,7 +685,10 @@ class AdvancedExtrinsicSolver(Node):
 
         try:
             save_data = {
-                "version": 2,  # Bumped version for new format with transform
+                # v3 (H-10): 2D detections now persist the real ArUco corners in
+                # `results`, not just the axis-aligned bbox. v1/v2 files carry no
+                # corners and reload into a biased (C-01) solve.
+                "version": 3,
                 "num_detections": buffer_size,
                 "detections": detections_data,
             }
@@ -722,12 +725,24 @@ class AdvancedExtrinsicSolver(Node):
                 data = json.load(f)
 
             version = data.get("version", 0)
-            if version not in [1, 2]:
+            if version not in [1, 2, 3]:
                 response.success = False
                 response.message = "Invalid or unsupported file format"
                 response.num_detections = 0
                 response.buffer_size = len(self.detection_buffer)
                 return response
+
+            # H-10: files written before v3 carry no real ArUco corners, so the
+            # solver falls back to the axis-aligned bbox and reintroduces C-01 --
+            # a systematically biased extrinsic for any angled board view. Warn
+            # loudly rather than degrading silently.
+            if version < 3:
+                self.get_logger().warn(
+                    f"Loaded a version {version} detection file: it contains no real "
+                    "ArUco corners (only the axis-aligned bounding box), so any solve "
+                    "from it will be biased for non-fronto-parallel board views (C-01). "
+                    "Re-capture and re-save to get a version 3 file with corners."
+                )
 
             loaded_detections = []
             for detection_pair in data.get("detections", []):
@@ -936,6 +951,21 @@ class AdvancedExtrinsicSolver(Node):
                         "size_x": d.bbox.size_x,
                         "size_y": d.bbox.size_y,
                     },
+                    # H-10: persist the real ArUco corners carried in `results`
+                    # (one per corner, C-01). Without this a reloaded capture falls
+                    # back to the axis-aligned bbox and re-introduces C-01.
+                    "results": [
+                        {
+                            "class_id": r.hypothesis.class_id,
+                            "score": r.hypothesis.score,
+                            "position": {
+                                "x": r.pose.pose.position.x,
+                                "y": r.pose.pose.position.y,
+                                "z": r.pose.pose.position.z,
+                            },
+                        }
+                        for r in d.results
+                    ],
                 }
                 for d in msg.detections
             ],
@@ -978,7 +1008,12 @@ class AdvancedExtrinsicSolver(Node):
 
     def _deserialize_detection2d_array(self, data: dict) -> Detection2DArray:
         """Deserialize Detection2DArray from JSON-compatible dict."""
-        from vision_msgs.msg import Detection2D, BoundingBox2D
+        from vision_msgs.msg import (
+            Detection2D,
+            BoundingBox2D,
+            ObjectHypothesisWithPose,
+        )
+        from geometry_msgs.msg import PoseWithCovariance, Pose
 
         msg = Detection2DArray()
         msg.header.stamp.sec = data["header"]["stamp"]["sec"]
@@ -994,6 +1029,24 @@ class AdvancedExtrinsicSolver(Node):
             detection.bbox.center.position.y = d_data["bbox"]["center"]["y"]
             detection.bbox.size_x = d_data["bbox"]["size_x"]
             detection.bbox.size_y = d_data["bbox"]["size_y"]
+
+            # H-10: restore the real ArUco corners (results) so the solver uses
+            # them rather than reconstructing an axis-aligned box (C-01). Files
+            # written before version 3 carry no results and are handled/warned in
+            # load_detections_callback.
+            for r_data in d_data.get("results", []):
+                result = ObjectHypothesisWithPose()
+                result.hypothesis.class_id = r_data.get("class_id", "")
+                result.hypothesis.score = r_data.get("score", 1.0)
+                result.pose = PoseWithCovariance()
+                result.pose.pose = Pose()
+                pos = r_data["position"]
+                result.pose.pose.position.x = pos["x"]
+                result.pose.pose.position.y = pos["y"]
+                result.pose.pose.position.z = pos.get("z", 0.0)
+                result.pose.pose.orientation.w = 1.0
+                detection.results.append(result)
+
             msg.detections.append(detection)
 
         return msg
