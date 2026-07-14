@@ -93,3 +93,19 @@ Two safe, verifiable parts landed; the deeper algorithm change is left with a pl
   test calls it); the two live Python reimplementations (`advanced_extrinsic_solver`
   and `extrinsic_solver_node`) are byte-identical today. Consolidating them into one
   shared helper (or deleting the dead Rust copy) is the remaining cleanup.
+
+## Update (2026-07-14) — corner-order duplication now cross-checked
+
+The two Python `_compute_multi_marker_corners` implementations
+(`advanced_extrinsic_solver` and `extrinsic_solver_node`) were confirmed to differ
+only in comments — the corner math and `[right, top, left, bottom]` ordering are
+identical. Added `tmp/test_m14_corner_impls_agree.py`, which drives both
+implementations on a representative config and asserts they produce the same
+board-frame corners for every marker, so a future divergence (a silent corner
+permutation folded into the extrinsic) is caught. The dead Rust `multi_marker_corners`
+is unchanged (still 2x2 by construction, now with a `debug_assert!` from L-04).
+
+Still open: the robust origin disambiguation (parts 1a/1b) — scoring the 4 in-plane
+rotations by ICP loss against the asymmetric holes, or camera cross-validation — which
+require board captures near 45° roll (not reproducible headlessly) and are best paired
+with the H-09 per-pose reprojection residual now that `lctk_quality` has landed.
