@@ -12,7 +12,7 @@ replaces "eyeball the overlay" with a number that fails when the background tilt
 
 **Scope note.** The fixes divide cleanly into *defects* (tracked as issues, fixed first) and
 *design work* (staged below). The defects are not optional preliminaries — two of them
-([C-03](../issues/C-03-double-undistortion.md), [H-08](../issues/H-08-no-subpixel-corner-refinement.md))
+([C-03](../issues/archive/C-03-double-undistortion.md), [H-08](../issues/archive/H-08-no-subpixel-corner-refinement.md))
 directly poison the remedy for the design problem, so the ordering is load-bearing.
 
 ## Problem Statement
@@ -59,12 +59,12 @@ Two consequences that determine everything below:
   plateaus.
 - **Only new board placements — at new depths and new orientations — shrink the null
   direction.** And the solver currently has no idea whether it has any
-  ([H-07](../issues/H-07-no-pose-diversity-gate.md)).
+  ([H-07](../issues/archive/H-07-no-pose-diversity-gate.md)).
 
 ### Why nothing catches it
 
 There is no reprojection error, no covariance, no condition number, and no cross-validation
-anywhere in the pipeline ([H-09](../issues/H-09-no-extrinsic-quality-metric.md)). A degenerate
+anywhere in the pipeline ([H-09](../issues/archive/H-09-no-extrinsic-quality-metric.md)). A degenerate
 solve and a good one both report `"Calibration successful"`. The *only* check that
 distinguishes them is the human looking at the overlay — and the near-null direction is
 precisely the error that the board region of that overlay cannot show.
@@ -76,12 +76,12 @@ bias every correspondence or actively invert the sign of the Stage 5.5 guidance.
 
 | Issue | Why it blocks |
 |-------|---------------|
-| ✅ [C-03](../issues/C-03-double-undistortion.md) — image undistorted twice — **fixed 2026-07-12** | Radius-dependent bias on every corner. Border poses carried the *largest* error, so "spread the board across the FoV" (Stage 5.5) would have injected more systematic error than it removed. Stage 5.5 is unblocked. |
-| ✅ [H-08](../issues/H-08-no-subpixel-corner-refinement.md) — no sub-pixel refinement — **fixed 2026-07-13** | `CORNER_REFINE_NONE`, and there is no redundancy to average the error away. Now `SUBPIX`, refined on the **raw** frame (where the gradients still exist) and mapped to the rectified frame with `undistortPoints`. Measured 25–60% lower corner RMSE than `NONE` across the working marker-size range; `CONTOUR` was no better than `NONE`. |
-| ✅ [M-11](../issues/M-11-solvers-ignore-distortion.md) — solvers hardcode `dist_coeffs = 0` — **fixed 2026-07-13** | The rectify-once contract was unstated, violated, and silently breakable. Now correct *by construction*: the corners on the wire are rectified points, so `dist_coeffs = 0` is a definition rather than an assumption. The solvers were not touched. |
+| ✅ [C-03](../issues/archive/C-03-double-undistortion.md) — image undistorted twice — **fixed 2026-07-12** | Radius-dependent bias on every corner. Border poses carried the *largest* error, so "spread the board across the FoV" (Stage 5.5) would have injected more systematic error than it removed. Stage 5.5 is unblocked. |
+| ✅ [H-08](../issues/archive/H-08-no-subpixel-corner-refinement.md) — no sub-pixel refinement — **fixed 2026-07-13** | `CORNER_REFINE_NONE`, and there is no redundancy to average the error away. Now `SUBPIX`, refined on the **raw** frame (where the gradients still exist) and mapped to the rectified frame with `undistortPoints`. Measured 25–60% lower corner RMSE than `NONE` across the working marker-size range; `CONTOUR` was no better than `NONE`. |
+| ✅ [M-11](../issues/archive/M-11-solvers-ignore-distortion.md) — solvers hardcode `dist_coeffs = 0` — **fixed 2026-07-13** | The rectify-once contract was unstated, violated, and silently breakable. Now correct *by construction*: the corners on the wire are rectified points, so `dist_coeffs = 0` is a definition rather than an assumption. The solvers were not touched. |
 | [M-14](../issues/M-14-corner-order-brittle.md) — gravity-based origin corner; duplicated corner-order logic | Produces silent 90° errors in individual poses. Poisons the buffer with correlated outliers. |
-| [L-10](../issues/L-10-solver-float32-precision.md) — `float32` solve | Free precision loss; makes a `cond(JᵀJ)` diagnostic unreliable. |
-| ✅ [L-11](../issues/L-11-detector-param-block-bugs.md) — detector param block — **fixed 2026-07-13** | Reduced pose yield. Both copies of the block are gone; `DetectorParameters` is now constructed in exactly one place, from config. |
+| [L-10](../issues/archive/L-10-solver-float32-precision.md) — `float32` solve | Free precision loss; makes a `cond(JᵀJ)` diagnostic unreliable. |
+| ✅ [L-11](../issues/archive/L-11-detector-param-block-bugs.md) — detector param block — **fixed 2026-07-13** | Reduced pose yield. Both copies of the block are gone; `DetectorParameters` is now constructed in exactly one place, from config. |
 
 **Exit criterion:** a board rendered through a known `K, D` recovers its corners through the full
 detector path. Met — `rust/aruco-detector/tests/rectify_contract.rs` closes the distort → detect →
@@ -95,7 +95,7 @@ L-10 (`float32`).
 You cannot fix conditioning you cannot see. Everything here is computable from data the solver
 already holds; none of it changes the estimate.
 
-Tracked as [H-09](../issues/H-09-no-extrinsic-quality-metric.md). **Design (with measurements):**
+Tracked as [H-09](../issues/archive/H-09-no-extrinsic-quality-metric.md). **Design (with measurements):**
 [2026-07-13-h09-extrinsic-quality-metric-design.md](../superpowers/specs/2026-07-13-h09-extrinsic-quality-metric-design.md).
 
 > **This stage was re-planned on 2026-07-13 after simulating it.** Two of the metrics originally
@@ -136,7 +136,7 @@ separation is 190× on conditioning and ~6× on subset spread.
 ## Stage 5.2 — Robust estimator
 
 Tracked as [M-12](../issues/M-12-no-robust-estimation-or-refinement.md),
-[M-13](../issues/M-13-icp-quality-not-propagated.md).
+[M-13](../issues/archive/M-13-icp-quality-not-propagated.md).
 
 1. **Refine.** `solvePnPRefineLM` (or `RefineVVS`) after the SQPnP initialisation. The advanced
    path currently performs *zero* nonlinear polish of the reprojection cost.
@@ -173,7 +173,7 @@ Two changes, either of which helps and which compose:
    plane correspondences.
    *The machinery already exists and is dead code*: `Detector::estimate_pose`
    (`rust/aruco-detector/src/multi_aruco.rs:83-104`) has zero callers
-   ([L-12](../issues/L-12-dead-solver-crates.md)).
+   ([L-12](../issues/archive/L-12-dead-solver-crates.md)).
 
 2. **Bundle-adjust the board poses together with the extrinsic.**
    Stop treating `T_board` as ground truth. Optimise `{T_extrinsic, T_board^(1..K)}` jointly
@@ -221,7 +221,7 @@ reprojection error is blind to by construction.
 ## Stage 5.5 — Capture guidance and next-best-pose
 
 Once conditioning is observable (5.1) it can be optimised during capture instead of diagnosed
-afterwards. (This stage was blocked on [C-03](../issues/C-03-double-undistortion.md) — telling the
+afterwards. (This stage was blocked on [C-03](../issues/archive/C-03-double-undistortion.md) — telling the
 operator to work the image borders would have made things worse while the frame was being rectified
 twice. C-03 is fixed, so the guidance below is now safe to issue.)
 

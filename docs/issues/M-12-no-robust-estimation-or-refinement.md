@@ -44,7 +44,7 @@ Layered, in increasing order of change:
 3. IRLS with a Huber/Cauchy kernel over pose-grouped residuals, or `solvePnPRansac` with the
    pose as the sampling unit.
 4. Weight each pose by its ICP quality once that is available
-   ([M-13](./M-13-icp-quality-not-propagated.md)).
+   ([M-13](./archive/M-13-icp-quality-not-propagated.md)).
 
 ## Resolution (2026-07-13) — LM refinement (fix item 1)
 
@@ -57,7 +57,7 @@ internally, so it was not touched.
 
 Items 2–4 (per-corner/per-pose residual gating, IRLS/RANSAC, ICP-quality weighting)
 are intentionally left: residuals are the [H-09](./archive/H-09-no-extrinsic-quality-metric.md)
-metric surface and per-pose ICP quality is [M-13](./M-13-icp-quality-not-propagated.md),
+metric surface and per-pose ICP quality is [M-13](./archive/M-13-icp-quality-not-propagated.md),
 both in progress by other agents. Doing the gating here would collide with the
 residual computation being added under H-09.
 

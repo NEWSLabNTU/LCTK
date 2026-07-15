@@ -31,7 +31,7 @@ This is now the **fourth** piece of unused quality scaffolding in the repo:
 ## Failure scenario
 
 Not a runtime failure — a **research hazard**, and it has a cost. Anyone (human or agent) starting
-[H-09](./archive/H-09-no-extrinsic-quality-metric.md) will grep for "metrics", find four plausible-looking
+[H-09](./H-09-no-extrinsic-quality-metric.md) will grep for "metrics", find four plausible-looking
 homes for a quality number, and have to read all four to discover that none of them measures what
 H-09 needs. Two of them are actively misleading: one is named `reprojection_error` but returns
 metres, and this one is named `CalibrationMetrics` but computes image-overlap against a ground

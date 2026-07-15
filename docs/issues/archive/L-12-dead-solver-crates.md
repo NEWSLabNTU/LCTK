@@ -16,14 +16,14 @@ work:
 - it exposes `PnpMethod::{ITERATIVE, EPNP, IPPE, SQPNP}` (`src/lib.rs:31-42`) — including
   `IPPE`, which is the correct choice for a planar target;
 - it passes the **real** distortion vector, handling OpenCV's 4/5/8/12/14-length forms
-  (`src/lib.rs:68-78`), which the live solver does not ([M-11](./archive/M-11-solvers-ignore-distortion.md));
+  (`src/lib.rs:68-78`), which the live solver does not ([M-11](./M-11-solvers-ignore-distortion.md));
 - it guards against the empty-input panic (`src/lib.rs:98`).
 
 ### `rust/calibration-quality` — reachable only from dead code
 
 Defines `CalibrationMetrics { reprojection_error, consistency_score, num_inliers, inlier_ratio,
 geometric_error, statistical_metrics }` (`metrics.rs:9-27`) — exactly the vocabulary
-[H-09](./archive/H-09-no-extrinsic-quality-metric.md) is asking for. It is depended on only by
+[H-09](./H-09-no-extrinsic-quality-metric.md) is asking for. It is depended on only by
 `rust/dynamic-calibration`, which nothing depends on. Also, its `reprojection_error` is
 misnamed: it computes a 3D-3D residual `‖T·source − target‖²` (`metrics.rs:63-70`), not an
 image-plane reprojection.
@@ -45,7 +45,7 @@ pipeline does something different and, in places, worse. A contributor fixing
 ## Suggested fix
 
 This is a decision, not a mechanical cleanup, and it should be made *with*
-[phase 5](../roadmap/phase-5-stable-extrinsic-solution.md) rather than before it:
+[phase 5](../../roadmap/phase-5-stable-extrinsic-solution.md) rather than before it:
 
 - **`pnp-solver`**: either delete it, or promote it — port the solver's PnP core to it and call
   it via a Python binding. Phase 5 wants method selection and honest distortion handling anyway.

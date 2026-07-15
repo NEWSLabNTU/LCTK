@@ -1,10 +1,10 @@
 # H-08: Sub-pixel ArUco Corner Refinement — Design
 
 - **Date:** 2026-07-13
-- **Issue:** [H-08](../../issues/H-08-no-subpixel-corner-refinement.md)
-- **Also closes:** [L-11](../../issues/L-11-detector-param-block-bugs.md) (duplicated detector param block)
-- **Also resolves:** [M-11](../../issues/M-11-solvers-ignore-distortion.md)'s fragile implicit contract
-- **Depends on:** [C-03](../../issues/C-03-double-undistortion.md) (fixed 2026-07-12)
+- **Issue:** [H-08](../../issues/archive/H-08-no-subpixel-corner-refinement.md)
+- **Also closes:** [L-11](../../issues/archive/L-11-detector-param-block-bugs.md) (duplicated detector param block)
+- **Also resolves:** [M-11](../../issues/archive/M-11-solvers-ignore-distortion.md)'s fragile implicit contract
+- **Depends on:** [C-03](../../issues/archive/C-03-double-undistortion.md) (fixed 2026-07-12)
 - **Phase:** [Phase 5, Stage 5.0](../../roadmap/phase-5-stable-extrinsic-solution.md)
 
 ## Problem

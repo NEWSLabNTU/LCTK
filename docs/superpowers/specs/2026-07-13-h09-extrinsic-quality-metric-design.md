@@ -1,9 +1,9 @@
 # H-09: A Quality Metric for the Extrinsic Solve — Design
 
 - **Date:** 2026-07-13
-- **Issue:** [H-09](../../issues/H-09-no-extrinsic-quality-metric.md)
-- **Also settles:** [L-13](../../issues/L-13-calibration-metrics-msg-dead.md) (dead quality scaffolding), [L-12](../../issues/L-12-dead-solver-crates.md) (dead Rust crates)
-- **Enables:** [H-07](../../issues/H-07-no-pose-diversity-gate.md) (you cannot gate on conditioning you do not measure)
+- **Issue:** [H-09](../../issues/archive/H-09-no-extrinsic-quality-metric.md)
+- **Also settles:** [L-13](../../issues/archive/L-13-calibration-metrics-msg-dead.md) (dead quality scaffolding), [L-12](../../issues/archive/L-12-dead-solver-crates.md) (dead Rust crates)
+- **Enables:** [H-07](../../issues/archive/H-07-no-pose-diversity-gate.md) (you cannot gate on conditioning you do not measure)
 - **Phase:** [Phase 5, Stage 5.1](../../roadmap/phase-5-stable-extrinsic-solution.md)
 
 ## Problem
@@ -13,7 +13,7 @@
 no cross-validation anywhere in the pipeline. A degenerate solve and a good one are indistinguishable
 from the outside.
 
-This is the same defect that produced [C-04](../../issues/C-04-board-detector-gate-unreachable.md),
+This is the same defect that produced [C-04](../../issues/archive/C-04-board-detector-gate-unreachable.md),
 one layer up: **the system has no way to tell you it is not working.**
 
 ## The evidence this design is built on
@@ -21,7 +21,7 @@ one layer up: **the system has no way to tell you it is not working.**
 Everything below was *measured* before it was specified, with a simulation that models what the
 pipeline actually does: PnP over 16 coplanar ArUco corners per pose, where the 3D points are model
 corners pushed through an ICP board pose carrying realistic per-pose rigid noise (1 cm translation,
-0.5° rotation — the errors-in-variables problem of [M-13](../../issues/M-13-icp-quality-not-propagated.md)),
+0.5° rotation — the errors-in-variables problem of [M-13](../../issues/archive/M-13-icp-quality-not-propagated.md)),
 and the image corners carry 0.1 px noise.
 
 Ground truth: a real LiDAR→camera extrinsic. Target: 2° / 50 mm (the project's own, from

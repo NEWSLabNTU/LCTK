@@ -26,7 +26,7 @@ The solver therefore treats every board pose as exact and equally trustworthy, w
   **only** by the square's edges and the 3 hole rims (`hollow-board-config/src/lib.rs:339-387`).
   Out-of-plane is tightly observed; in-plane is loose.
 - **the solve is an errors-in-variables problem.** PnP object points are the ideal model corners
-  pushed through `T_board` ([H-07](./archive/H-07-no-pose-diversity-gate.md)), so all of that anisotropic
+  pushed through `T_board` ([H-07](./H-07-no-pose-diversity-gate.md)), so all of that anisotropic
   ICP error lands in the "known" 3D points — and `cv2.solvePnP` assumes 3D points are noiseless
   and all noise is in the pixels. The estimate is biased, not merely noisy.
 - ICP itself has no robust kernel: Kabsch closed-form SVD, a single hard 50 mm gate
@@ -51,7 +51,7 @@ the message that could carry the information even if there were.
 3. Add a Huber kernel and an RMS loss to the ICP itself.
 
 Item (1) is a prerequisite for the errors-in-variables / joint-optimisation work in
-[docs/roadmap/phase-5-stable-extrinsic-solution.md](../roadmap/phase-5-stable-extrinsic-solution.md).
+[docs/roadmap/phase-5-stable-extrinsic-solution.md](../../roadmap/phase-5-stable-extrinsic-solution.md).
 
 ## Resolution (2026-07-14)
 
@@ -100,7 +100,7 @@ pose by the inverse of the resulting positional sigma.
 not `solvePnPRefineVVS`. So M-12's LM polish slot becomes a weighted `scipy.least_squares` when a
 covariance is present, and falls back to OpenCV's unweighted `RefineLM` when it is not (so an older
 detector behaves exactly as before). This also completes item 4 of
-[M-12](./M-12-no-robust-estimation-or-refinement.md).
+[M-12](../M-12-no-robust-estimation-or-refinement.md).
 
 ### Verified
 
