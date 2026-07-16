@@ -55,7 +55,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 
 1. **Every calibration is biased** — C-01. The detector throws away real ArUco corners.
 2. **The build omits a dependency the solvers need** — H-01. `conflux` is never built.
-3. **The Autoware last mile is fully manual and undocumented** — see [gap-autoware-export.md](./gap-autoware-export.md) (+ M-01).
+3. **The Autoware last mile is fully manual and undocumented** — see [gap-autoware-export.md](./gap-autoware-export.md) (+ M-01). Target format verified 2026-07-16; remediation planned as [Phase 6](../roadmap/phase-6-autoware-export.md).
 
 ## The extrinsic-stability cluster (2026-07-12)
 
