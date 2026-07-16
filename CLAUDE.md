@@ -66,14 +66,23 @@ just
   of the conflux submodule is excluded because its git rclrs conflicts with our crates.io rclrs)
 - Binding generation runs once per `build/` tree, guarded by `build/.colcon/bindgen.lock` — see
   Known Issue 7 before deleting anything under `build/`
+- **Dependency updates must run inside the sourced build env** (`source /opt/ros/humble/setup.bash
+  && source install/setup.bash`): a bare `cargo update` re-resolves the wildcard ROS message
+  crates against crates.io and aborts on the yanked `sensor_msgs`. Procedure + vuln log:
+  `docs/roadmap/phase-4-dependency-updates-and-vulns.md`. Tracked advisory exceptions live in
+  `.cargo/audit.toml`
+- Setup installers are version-pinned (L-09) with env overrides: `ROS_APT_VERSION`,
+  `CARGO_AMENT_BUILD_VERSION`, `CARGO_NEXTEST_VERSION`, `CUDA_KEYRING_VERSION`
 
 ## Key Commands
 
 ```bash
 just build      # Build all packages
 just clean      # Clean build artifacts
-just test       # Run tests
-just lint       # Run linting
+just test       # Run tests (cargo nextest + pytest suites)
+just lint       # Full lint (rustfmt + clippy + ruff; clippy takes minutes)
+just lint-py    # Fast ruff-only lint
+just audit      # cargo-audit for RUSTSEC advisories (runs in the sourced build env)
 
 just lidar-camera   # Launch calibration (legacy XML launch)
 just demo           # Launch demo (sample data + calibration pipeline)
