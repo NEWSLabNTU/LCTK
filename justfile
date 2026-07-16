@@ -130,6 +130,17 @@ lint-py:
     ruff check ros/
     ruff format --check ros/
 
+# Audit Rust dependencies for RUSTSEC advisories (Phase 4).
+# Must run in the sourced build env: a bare `cargo audit` re-resolves the wildcard ROS
+# message crates against crates.io and hits the yanked sensor_msgs. Tracked exceptions
+# live in .cargo/audit.toml with justification.
+audit:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source /opt/ros/humble/setup.bash
+    source install/setup.bash
+    cargo audit
+
 # Run all tests (Rust + Python)
 test:
     #!/usr/bin/env bash

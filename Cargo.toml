@@ -68,7 +68,7 @@ unzip-n = "0.1.2"
 rand = "0.8.5"
 
 # Visualization
-rerun = { version = "0.23.4" }
+rerun = { version = "0.34.1" }
 
 # newslab-serde crates
 newslab-serde-measurements = { git = "https://github.com/NEWSLabNTU/newslab-serde.git", tag = "v0.2.0" }

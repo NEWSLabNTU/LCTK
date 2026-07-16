@@ -185,3 +185,37 @@ pulled transitively (arrow / datafusion chain). Options, in order of preference:
 - GitHub Dependabot: <https://github.com/NEWSLabNTU/LCTK/security/dependabot>
 - CLAUDE.md → Known Issues (the `.cargo/config.toml` conflict is the same
   generated-message override mechanism referenced above).
+
+## Execution Log (2026-07-16)
+
+**Step 1 — done.** All in-range bumps applied inside the sourced build env exactly as
+documented (openssl 0.10.80, rustls-webpki 0.103.13, lz4_flex 0.11.6, tar 0.4.46,
+time 0.3.47, bytes 1.11.1, rand 0.8.6/0.9.3). Two advisories had moved since this doc
+was drafted and were bumped further: quinn-proto → 0.11.15 (RUSTSEC-2026-0185) and
+crossbeam-epoch → 0.9.20 (RUSTSEC-2026-0204). No `--precise` bump was rejected.
+
+**Step 3 — resolved and blocked halves.**
+- `lru`: fixed by bumping the parent — `rerun` 0.23.4 → 0.34.1 (dev-dependency of
+  board-fitter, one example; compiled against 0.34 with zero code changes). lru now 0.18.1.
+- `thrift` 0.17: still pinned by parquet even at parquet 58.3 (latest); upstream blocker,
+  option 2 (tracking note, re-check on parquet releases).
+- `quick-xml` <0.41 (RUSTSEC-2026-0194/0195, new since drafting): three parents inside
+  rerun's tree (urdf-rs, minidom, wayland-scanner) all cap below the fix. Dev-dependency
+  exposure only. Tracked as ignores in `.cargo/audit.toml` with justification.
+
+**Step 4 — partially done.** `cargo audit` installed (0.22.2); new `just audit` recipe
+runs it in the sourced build env; `.cargo/audit.toml` holds the two tracked quick-xml
+ignores. `just audit` is green (8 informational warnings: unmaintained/unsound/yanked,
+no fixes published). No CI pipeline exists in this repo yet, so the CI hook part waits
+for CI to exist; Dependabot verification requires the GitHub UI.
+
+**Step 2 — `just build` + `just test` pass after the bumps** (see commit).
+
+### Success criteria status
+
+- [x] `cargo update` sequence completes inside the build env
+- [ ] Dependabot high-severity count drops to 0 — verify in the GitHub UI after push
+- [x] Moderate/low reduced to documented major-bump blockers (thrift, quick-xml)
+- [x] `just build` and `just test` pass after the bump
+- [x] `cargo audit` runs clean apart from tracked blockers (`just audit`)
+- [ ] CI advisory check — blocked on the repo having CI at all
