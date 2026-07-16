@@ -1,7 +1,7 @@
 # Design: Autoware Calibration Export
 
 - **Date:** 2026-07-16
-- **Issue:** [gap-autoware-export](../../issues/gap-autoware-export.md)
+- **Issue:** [gap-autoware-export](../../issues/archive/gap-autoware-export.md)
 - **Roadmap:** [Phase 6](../../roadmap/phase-6-autoware-export.md)
 - **Status:** Proposed
 

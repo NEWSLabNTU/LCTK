@@ -2,9 +2,9 @@
 
 - **Severity:** High (headline gap)
 - **Area:** output / integration
-- **Status:** Open
+- **Status:** Fixed (2026-07-16, Phase 6: `lctk_autoware_export`)
 - **Verified:** Static review (whole-repo grep for "autoware", "sensor_kit", "static_transform" — zero hits)
-- **Related:** [M-01](./M-01-transform-direction-inverted.md), [M-02](./archive/M-02-radians-degrees-mix.md), [L-09](./L-09-setup-fragility-export-labeling.md)
+- **Related:** [M-01](../M-01-transform-direction-inverted.md), [M-02](./M-02-radians-degrees-mix.md), [L-09](../L-09-setup-fragility-export-labeling.md)
 
 ## Problem
 
@@ -63,5 +63,5 @@ One writer + a destination flag covers both eras.
 3. Chain composition: `T(kit→camera_link) = T(kit→lidar) · T(lidar→camera_optical) · T(optical→camera_link)`,
    with `T(kit→lidar)` read from the existing YAML (often identity+yaw for the reference lidar).
 
-**Design:** [2026-07-16-autoware-export-design.md](../superpowers/specs/2026-07-16-autoware-export-design.md)
-**Roadmap:** [phase-6-autoware-export.md](../roadmap/phase-6-autoware-export.md)
+**Design:** [2026-07-16-autoware-export-design.md](../../superpowers/specs/2026-07-16-autoware-export-design.md)
+**Roadmap:** [phase-6-autoware-export.md](../../roadmap/phase-6-autoware-export.md)

@@ -40,4 +40,4 @@ Recommended fix, to be done with sample data + the overlay:
    `tf2` lookup gives the Autoware-correct direction.
 
 Until then this is the one blocker between the solver output and a correct
-Autoware `sensor_kit_calibration.yaml` (see [gap-autoware-export.md](./gap-autoware-export.md)).
+Autoware `sensor_kit_calibration.yaml` (see [gap-autoware-export.md](./archive/gap-autoware-export.md)).

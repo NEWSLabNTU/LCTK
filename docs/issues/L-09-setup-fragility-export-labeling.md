@@ -21,14 +21,14 @@ GitHub API changes break a fresh setup; a user expects the dumped JSON to be the
 
 ## Suggested fix
 
-Pin installer versions (or vendor a known-good source), rename/clearly document the dump JSON as a solver session file (see [gap-autoware-export.md](./gap-autoware-export.md) for the real export), and make `demo` forward the same defaults as `lidar-camera`.
+Pin installer versions (or vendor a known-good source), rename/clearly document the dump JSON as a solver session file (see [gap-autoware-export.md](./archive/gap-autoware-export.md) for the real export), and make `demo` forward the same defaults as `lidar-camera`.
 
 ## Partial resolution (2026-07-11)
 `just demo` now forwards `enable_overlay`/`enable_judge` (wired through
 demo.launch.py), so it matches `just lidar-camera` instead of silently disabling
 them. The runtime-fetched installer pinning is folded into the Phase-4
 dependency/vuln work (docs/roadmap/phase-4-*), and the "dump_detections is not an
-extract" clarification is covered by [gap-autoware-export.md](./gap-autoware-export.md).
+extract" clarification is covered by [gap-autoware-export.md](./archive/gap-autoware-export.md).
 
 ## Update (2026-07-14)
 Added a numpy pin to `setup/scripts/install-colcon-rust.sh` (mirroring the setuptools
@@ -36,4 +36,4 @@ one): a user-pip numpy shadowing the apt numpy that Humble is built against is n
 removed at setup time, matching the build's `_check-python-env` guard. The remaining
 runtime-fetched installer version-pinning (curl `releases/latest`) is still tracked
 under Phase-4; the dump-JSON "not an extract" clarification remains in
-[gap-autoware-export.md](./gap-autoware-export.md).
+[gap-autoware-export.md](./archive/gap-autoware-export.md).

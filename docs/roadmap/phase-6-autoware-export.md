@@ -5,7 +5,7 @@
 LCTK ends today at a `TransformStamped` on a topic and a log line. The user's actual
 destination is an Autoware workspace, and the last mile — getting the solved extrinsic
 into `sensor_kit_calibration.yaml` with the right direction, frames, and angle
-convention — is fully manual and undocumented ([gap-autoware-export](../issues/gap-autoware-export.md)).
+convention — is fully manual and undocumented ([gap-autoware-export](../issues/archive/gap-autoware-export.md)).
 This phase ships that last mile.
 
 Design: [2026-07-16-autoware-export-design.md](../superpowers/specs/2026-07-16-autoware-export-design.md)
@@ -48,5 +48,5 @@ Design: [2026-07-16-autoware-export-design.md](../superpowers/specs/2026-07-16-a
 
 - [x] 1. Frame-algebra core + tests (`ros/lctk_autoware_export/lctk_autoware_export/frames.py`)
 - [x] 2. CLI + golden-file tests (`ros2 run lctk_autoware_export export`)
-- [ ] 3. xacro round-trip e2e
-- [ ] 4. Book page
+- [x] 3. xacro round-trip e2e (`test/test_e2e_xacro.py`, runs the real xacro pipeline)
+- [x] 4. Book page (`book/src/user-guide/autoware-export.md`)
