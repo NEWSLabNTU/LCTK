@@ -1,6 +1,6 @@
 """Patch an Autoware ``sensor_kit_calibration.yaml`` with an LCTK-solved extrinsic.
 
-Input is the advanced solver's ``dump_detections`` JSON (version 2), whose
+Input is the advanced solver's ``dump_detections`` JSON (version 3), whose
 ``transform`` holds the raw solver rvec/tvec (``T_optical<-lidar``). The re-labeled
 TF topic is deliberately not an input — see M-01 and the Phase 6 design doc.
 """

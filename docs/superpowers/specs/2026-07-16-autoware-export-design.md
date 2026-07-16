@@ -66,7 +66,7 @@ Same schema either way → one writer, destination is just a path argument.
   (object points are in LiDAR frame, image points in camera pixels, so rvec/tvec map
   LiDAR-frame points into the optical frame: `T(optical ← lidar)`).
 - Published as `TransformStamped` with **inverted frame labels** (M-01, still open).
-- `dump_detections` JSON (version 2) persists `transform: {rvec, tvec}` — this is the
+- `dump_detections` JSON (version 3, H-10) persists `transform: {rvec, tvec}` — this is the
   stable machine-readable artifact the exporter should read.
 
 ## 3. Frame algebra the exporter owns
@@ -103,7 +103,7 @@ is a YAML file. Optional `--from-topic` convenience wraps a one-shot subscriptio
 
 ```
 ros2 run lctk_autoware_export export \
-  --detections ~/detections.json \          # solver dump (version 2), source of rvec/tvec
+  --detections ~/detections.json \          # solver dump (version 3), source of rvec/tvec
   --target /path/to/sensor_kit_calibration.yaml \
   --camera-frame camera0/camera_link \      # child key to write
   --lidar-frame velodyne_top_base_link \    # existing entry used for T(kit→lidar)

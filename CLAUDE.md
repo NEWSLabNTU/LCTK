@@ -24,16 +24,28 @@ just
 
 ## Project Structure
 
-- **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, etc.)
+- **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, board-fitter, plane-estimator, etc.)
 - **`ros/`**: ROS 2 packages
   - `lctk_launch/` - Unified launch system with config-driven calibration pipeline
+  - `lctk_interfaces/` - Shared msg/srv definitions (solver services, quality report)
   - `aruco_locator_node/` - ArUco marker detection from camera images
+  - `aruco_generator_node/` - Prints the ArUco board pattern from `aruco_pattern.json5`
   - `lidar_board_detector/` - Calibration board detection from point clouds
-  - `advanced_extrinsic_solver/` - Multi-pose LiDAR-camera calibration solver
+  - `extrinsic_solver_node/` - Auto-publishing single-pose LiDAR-camera solver (default)
+  - `advanced_extrinsic_solver/` - Multi-pose buffered LiDAR-camera solver with services
+  - `interactive_solver_controller/` - Rich TUI driving the advanced solver
   - `lidar_to_lidar_solver/` - LiDAR-to-LiDAR calibration solver
-  - `lctk_sample_data/` - Sample data playback for testing
+  - `lctk_quality/` + `calibration_judge/` - Extrinsic quality metric (H-09)
+  - `pointcloud_image_overlay/` - Projects the cloud onto the image for visual verification
+  - `filter_box_tuner/` - Interactive crop-box tuning for the board detector
+  - `lctk_autoware_export/` - Exports a solved extrinsic into Autoware `sensor_kit_calibration.yaml`
+  - `lctk_sample_data/` - Sample data playback (pcap + avi; there are **no rosbags** in this repo)
+  - `conflux/` - Git submodule (jerry73204/conflux): message synchronizer used by all solvers
+    (`conflux_cpp` builds `libconflux_ffi.so`, `conflux_py` wraps it via ctypes)
 - **`setup/`**: Development environment setup scripts
 - **`book/`**: Documentation (mdbook with mermaid diagrams)
+- **`docs/`**: Engineering docs — `issues/` (tracker: one file per finding; closed ones move to
+  `issues/archive/`), `roadmap/` (phase docs), `superpowers/specs/` (design docs)
 
 ## Build System
 
@@ -50,6 +62,10 @@ just
       --cargo-args --profile=test-release
   ```
 - To build a single package, use: `just build` with `--packages-select <pkg>` appended manually if needed, but prefer building all packages
+- `just build` depends on `just build-conflux` (builds `conflux_cpp` + `conflux_py` first; the rest
+  of the conflux submodule is excluded because its git rclrs conflicts with our crates.io rclrs)
+- Binding generation runs once per `build/` tree, guarded by `build/.colcon/bindgen.lock` — see
+  Known Issue 7 before deleting anything under `build/`
 
 ## Key Commands
 
@@ -118,6 +134,7 @@ just serve-public   # Serve on 0.0.0.0
    ```bash
    pkill -9 -f "<node_name>"
    rm -rf build/<package> install/<package>
+   rm -f build/.colcon/bindgen.lock   # see Known Issue 7
    just build
    ```
 
@@ -131,6 +148,22 @@ just serve-public   # Serve on 0.0.0.0
    ```
    Alternatively, run play_launch in its own process group and use Ctrl+C for clean shutdown.
 
+7. **Stale rosidl bindings after deleting a build dir** (bit us 2026-07-16): the Rust binding
+   generation for interface packages runs **once** per `build/` tree and then marks itself done
+   with `build/.colcon/bindgen.lock`. If you `rm -rf build/lctk_interfaces` (e.g. after changing
+   or removing a `.msg`), the next `just build` will **skip regeneration** because the lock still
+   exists, and every Rust package fails with:
+   ```
+   failed to read `.../build/lctk_interfaces/rosidl_cargo/lctk_interfaces/Cargo.toml`
+   ```
+   Relatedly, changing/removing a message without cleaning leaves stale generated C sources that
+   fail at link time (`undefined reference to lctk_interfaces__msg__...__create`). Fix for both:
+   ```bash
+   rm -rf build/lctk_interfaces install/lctk_interfaces
+   rm -f build/.colcon/bindgen.lock
+   just build
+   ```
+
 ## Coding Guidelines
 
 - **Temporary files**: Create temporary files and scripts in `$project/tmp/` directory, not `/tmp/`
@@ -141,6 +174,19 @@ just serve-public   # Serve on 0.0.0.0
 - Don't use Pokemon exception handling (`try: except Exception: pass`)
 - Prefer functional struct initialization in Rust
 - When running sudo commands, show command to user instead of executing
+
+## Docs & Issue Tracking Practices
+
+- Findings/bugs are filed as one markdown file per issue under `docs/issues/` and indexed in its
+  `README.md` status table (🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix)
+- When an issue closes, **move the file to `docs/issues/archive/`** and repair every relative
+  link that crosses the move (both directions). Verify with a link check: every `](...*.md)`
+  target under `docs/` must exist
+- Larger remediations get a phase doc in `docs/roadmap/` and, when designed up front, a design
+  doc in `docs/superpowers/specs/`
+- Fixes land on a `fix/...` or `feat/...` branch, then `git checkout main && git merge --ff-only`
+- Multiple agents may work this repo concurrently: before starting an issue, check the tracker
+  for 🟡 (in-progress) markers, and always `git fetch` + rebase before pushing
 
 ## ROS 2 Conventions
 
@@ -197,8 +243,12 @@ The calibration pipeline supports two processing modes controlled by the `mode` 
 
 | Mode | QoS | Sync Window | Buffer Size | Drop Policy | Use Case |
 |------|-----|-------------|-------------|-------------|----------|
-| `offline` (default) | RELIABLE | infinite | 100 | reject_new | Processing recorded rosbags. No time-based dropping, preserves all data. |
+| `offline` (default) | RELIABLE | infinite | 100 | reject_new | Recorded data (rosbags or the pcap/avi sample playback). No time-based dropping, preserves all data. |
 | `realtime` | BEST_EFFORT | 50ms | 2 | drop_oldest | Live sensor data. Low latency, always processes latest. |
+
+Note: the repo ships no rosbags — the only recorded data is `lctk_sample_data`'s pcap + avi
+(datasets 1–5; dataset 3 is the lidar-camera default, dataset 4 the second lidar). To get a real
+bag, record one during playback: `ros2 bag record -a` alongside `just sample-data`.
 
 **Settings derived from mode:**
 - **QoS Reliability**: RELIABLE (offline) vs BEST_EFFORT (realtime)
@@ -212,7 +262,7 @@ The calibration pipeline supports two processing modes controlled by the `mode` 
 
 **Usage:**
 ```bash
-just demo mode=offline    # For rosbag playback (default)
+just demo mode=offline    # For recorded/sample-data playback (default)
 just demo mode=realtime   # For live sensors
 ```
 
@@ -239,10 +289,8 @@ Profiling conducted on sample data (2026-01-18):
 - ICP quality is consistent across modes (loss: 0.026-0.029). **This is the noise floor, not a bad
   fit** — a VLP-32C is spec'd at ~±3 cm range accuracy, so a ~2.6 cm mean point-to-model residual is
   as good as the sensor gets. `icp_good_fit_threshold` must sit *above* this; it was once set to
-  0.012 and the detector then silently accepted nothing (see `docs/issues/C-04`).
+  0.012 and the detector then silently accepted nothing (see `docs/issues/archive/C-04-board-detector-gate-unreachable.md`).
 - Realtime mode has higher latency variance due to message skipping
-
-**Profiling scripts:** `tmp/profile_modes.sh`, `tmp/analyze_logs.py`, `tmp/profile_latency.py`
 
 ### Config-Driven Calibration (Preferred)
 
@@ -363,10 +411,10 @@ The `advanced_extrinsic_solver` node provides multi-pose calibration with manual
 - `reset_transform` - Reset manual adjustments (re-solve from buffer)
 - `get_pose_info` - Get solved pose, current pose, and adjustment delta
 
-**Detection File Format** (version 2):
+**Detection File Format** (version 3):
 ```json
 {
-  "version": 2,
+  "version": 3,
   "num_detections": 5,
   "detections": [...],
   "transform": {
@@ -375,6 +423,10 @@ The `advanced_extrinsic_solver` node provides multi-pose calibration with manual
   }
 }
 ```
+Version 3 (H-10) persists the real ArUco corner pixels inside each 2D detection's `results`;
+v1/v2 files reload but fall back to the axis-aligned bbox — a biased (C-01) solve — and the
+loader warns loudly. `transform` is the raw solver output (`T_optical←lidar`), the input the
+Autoware exporter consumes. A saved calibration also carries its own quality record (H-09).
 
 ### Interactive Solver Controller
 
@@ -398,3 +450,30 @@ Exit:       ESC
 - Pose Information: Three columns showing Solved (PnP), Adjustment (delta), Current (final)
 - Step Size: Current translation (mm) and rotation (deg) step sizes
 - Key Bindings: Quick reference for all controls
+
+### Exporting to Autoware
+
+`lctk_autoware_export` patches one entry of an Autoware `sensor_kit_calibration.yaml` with a
+solved extrinsic. Full guide: `book/src/user-guide/autoware-export.md`; design:
+`docs/superpowers/specs/2026-07-16-autoware-export-design.md`.
+
+```bash
+ros2 run lctk_autoware_export export \
+  --detections ~/detections.json \
+  --target .../sensor_kit_calibration.yaml \
+  --camera-frame camera0/camera_link \
+  --lidar-frame velodyne_top_base_link \
+  --dry-run    # preview; drop to write (comment-preserving, creates .bak)
+```
+
+**Frame pitfalls the exporter owns — do not "fix" these ad hoc elsewhere:**
+- Input is the dump JSON's raw `rvec`/`tvec` (`T_optical←lidar`), **never** the TF topic —
+  the published frame labels are inverted (issue M-01)
+- Autoware's `camera*/camera_link` is the REP-103 body frame (x forward); PnP solves the
+  optical frame (z forward). Fixed rotation `T(camera_link→optical)` = RPY `(-π/2, 0, -π/2)`
+- The exported entry is `T(kit→camera_link) = T(kit→lidar) · inv(solve) · inv(optical-in-link)`,
+  with `T(kit→lidar)` read from the target YAML's existing lidar entry
+- Autoware YAML schema is `parent: {child: {x,y,z,roll,pitch,yaw}}`, meters, radians, URDF
+  fixed-axis RPY. Same schema in every Autoware version; only the file's location moved
+  (`autoware_individual_params` per-`$VEHICLE_ID` dirs ≤ 2024.11; folded into
+  `autoware_launch/sensor_kit/<kit>_launch/<kit>_description/config/` since 0.45.1)

@@ -19,7 +19,7 @@ ros2 run lctk_autoware_export export \
 ```
 
 - `--detections`: JSON from the advanced solver's `dump_detections` service
-  (version 2, contains the raw solver `rvec`/`tvec`). The re-labeled TF topic is
+  (version 3, contains the raw solver `rvec`/`tvec`). The re-labeled TF topic is
   deliberately not accepted as input (M-01).
 - `--lidar-frame`: existing entry in the target YAML, used as the
   `sensor_kit_base_link -> lidar` anchor of the chain.
