@@ -46,7 +46,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-06](./archive/L-06-pokemon-exceptions.md) | Low | Pervasive `except Exception: pass` against project guideline | 🟢 |
 | [L-07](./archive/L-07-tf-broadcaster-qos.md) | Low | tf_tree_broadcaster QoS may be incompatible with realtime publishers | 🟢 |
 | [L-08](./archive/L-08-stale-readme-docs.md) | Low | Stale README & docs misdirect new users | 🟢 |
-| [L-09](./L-09-setup-fragility-export-labeling.md) | Low | Setup fragility, no export tooling, dump JSON mislabeled | 🟡 |
+| [L-09](./archive/L-09-setup-fragility-export-labeling.md) | Low | Setup fragility, no export tooling, dump JSON mislabeled | 🟢 |
 | [L-10](./archive/L-10-solver-float32-precision.md) | Low | PnP correspondences and intrinsics cast to `float32` | 🟢 |
 | [L-11](./archive/L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🟢 |
 | [L-12](./archive/L-12-dead-solver-crates.md) | Low | Dead crates (`pnp-solver`, `calibration-quality`) better than the live code | 🟢 |

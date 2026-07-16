@@ -11,10 +11,18 @@ if [[ -d "/usr/local/cuda" ]]; then
     echo "CUDA is already installed."
 else
     echo "Adding NVIDIA package repositories..."
+    # Keyring version is pinned (L-09). Override with CUDA_KEYRING_VERSION if NVIDIA
+    # retires this artifact.
+    CUDA_KEYRING_VERSION="${CUDA_KEYRING_VERSION:-1.0-1}"
     cd /tmp
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb
-    sudo dpkg -i cuda-keyring_1.0-1_all.deb
-    rm cuda-keyring_1.0-1_all.deb
+    if ! wget -nv --tries=3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb"; then
+        echo "error: failed to download cuda-keyring ${CUDA_KEYRING_VERSION}." >&2
+        echo "       Check https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/" >&2
+        echo "       and rerun with CUDA_KEYRING_VERSION=<current> if the pin has gone stale." >&2
+        exit 1
+    fi
+    sudo dpkg -i "cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb"
+    rm "cuda-keyring_${CUDA_KEYRING_VERSION}_all.deb"
 
     echo "Updating apt cache..."
     sudo apt-get update
