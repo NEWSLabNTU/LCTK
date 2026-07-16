@@ -37,6 +37,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-13](./archive/M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🟢 |
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
+| [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -50,6 +51,9 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-11](./archive/L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🟢 |
 | [L-12](./archive/L-12-dead-solver-crates.md) | Low | Dead crates (`pnp-solver`, `calibration-quality`) better than the live code | 🟢 |
 | [L-13](./archive/L-13-calibration-metrics-msg-dead.md) | Low | `CalibrationMetrics.msg` built, unused, and IoU-shaped rather than residual-shaped | 🟢 |
+| [L-14](./L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🔴 |
+| [L-15](./L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🔴 |
+| [L-16](./L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🔴 |
 
 ## Three headline gaps
 

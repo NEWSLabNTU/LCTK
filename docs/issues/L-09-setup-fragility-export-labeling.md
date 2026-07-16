@@ -37,3 +37,11 @@ removed at setup time, matching the build's `_check-python-env` guard. The remai
 runtime-fetched installer version-pinning (curl `releases/latest`) is still tracked
 under Phase-4; the dump-JSON "not an extract" clarification remains in
 [gap-autoware-export.md](./archive/gap-autoware-export.md).
+
+## Update (2026-07-16) — third pip-shadowing instance: scipy
+
+A user-pip scipy 1.15 (requires numpy >= 1.23) over apt numpy 1.21 broke every
+`scipy.optimize` import with `TypeError: 'numpy._DTypeMeta' object is not subscriptable`,
+failing the M-13 pose-weighting test. Fixed the same way as the previous two instances:
+removed the pip package, and extended the `_check-python-env` guard, the installer
+(`install-colcon-rust.sh`), and the CLAUDE.md table to cover scipy.
