@@ -2,7 +2,7 @@
 
 - **Severity:** Low (but cost a broken-build debugging session)
 - **Area:** build tooling (colcon-cargo-ros2, upstream)
-- **Status:** Open
+- **Status:** Fixed (2026-07-16, in-repo guard; upstream fix still worthwhile)
 - **Verified:** 2026-07-16, reproduced twice during the lctk_interfaces CalibrationMetrics cleanup
 
 ## Problem
@@ -33,3 +33,15 @@ Upstream in colcon-cargo-ros2 (we control the pin): make `should_generate()` val
 not just check existence — regenerate if any expected `build/<pkg>/rosidl_cargo/<pkg>/Cargo.toml`
 is missing, or key the lock on a hash of the interface packages' `msg/srv/action` files so
 message changes invalidate it. Until then the CLAUDE.md workaround stands.
+
+## Resolution (2026-07-16)
+
+In-repo guard in the `just build` recipe: before invoking colcon, if
+`build/.colcon/bindgen.lock` exists but any binding path pinned in `.cargo/config.toml`
+is missing its `Cargo.toml`, the lock is deleted so generation reruns. Verified by hiding
+`build/lctk_interfaces/rosidl_cargo` and watching the guard fire.
+
+This makes the CLAUDE.md Known Issue 7 manual step unnecessary for the partial-clean case.
+The message-set-change case (stale generated C sources) still needs the manual
+`rm -rf build/lctk_interfaces`, and the proper fix remains upstream in colcon-cargo-ros2
+(validate outputs, or key the lock on a hash of the msg/srv/action files).

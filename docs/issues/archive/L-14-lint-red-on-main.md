@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** build system / CI hygiene
-- **Status:** Open
+- **Status:** Fixed (2026-07-16)
 - **Verified:** 2026-07-16, `ruff format --check ros/` on a clean main checkout
 
 ## Problem
@@ -26,3 +26,8 @@ dir, so quick `just lint` runs time out casual use; consider a `lint-py` shortcu
 `ruff format ros/lctk_launch/launch/calibrate.launch.py`, commit, and keep main green from
 then on. (One line of reformatting; the file was touched by the M-13 work without running
 the formatter.)
+
+## Resolution (2026-07-16)
+
+Formatted `calibrate.launch.py`; `ruff format --check ros/` is green. Also added a
+`just lint-py` recipe (ruff only) so quick checks don't pay the multi-minute clippy cost.

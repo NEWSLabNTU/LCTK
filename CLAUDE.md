@@ -163,6 +163,9 @@ just serve-public   # Serve on 0.0.0.0
    rm -f build/.colcon/bindgen.lock
    just build
    ```
+   The partial-clean case is now auto-guarded: `just build` deletes the lock itself when any
+   binding path from `.cargo/config.toml` is missing (L-16). The manual clean is still needed
+   after changing/removing a `.msg`/`.srv`.
 
 ## Coding Guidelines
 

@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** build system / git hygiene
-- **Status:** Open
+- **Status:** Fixed (2026-07-16)
 - **Verified:** 2026-07-16, `git status` after any `just build`
 
 ## Problem
@@ -37,3 +37,18 @@ Pick one deliberately:
 
 Option 2/3 trades lockfile reproducibility for a clean worktree; whichever way, the current
 "always dirty" state is the worst of both.
+
+## Resolution (2026-07-16)
+
+Two-part fix, matching options 1 and 3:
+
+- **Root `Cargo.lock`**: committed the post-build state. The churn was the committed lock
+  predating the current apt interface-package versions (e.g. `geometry_msgs` 4.2.4 → 4.9.1);
+  once committed, repeat builds leave it untouched. It will legitimately change again when
+  apt upgrades the msg packages — commit that too.
+- **conflux submodule**: `ignore = dirty` in `.gitmodules`. The lockfile churn there is
+  LCTK-workspace contamination (entries like `lctk_interfaces` injected by building inside
+  this workspace) and must never be committed upstream, so it is now hidden from
+  status/diff. Real conflux work is done by committing inside `ros/conflux` explicitly.
+
+`git status` after a full `just build` is now clean.

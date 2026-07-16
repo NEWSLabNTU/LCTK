@@ -51,9 +51,9 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-11](./archive/L-11-detector-param-block-bugs.md) | Low | Detector param block sets a field twice; tunes a disabled refiner | 🟢 |
 | [L-12](./archive/L-12-dead-solver-crates.md) | Low | Dead crates (`pnp-solver`, `calibration-quality`) better than the live code | 🟢 |
 | [L-13](./archive/L-13-calibration-metrics-msg-dead.md) | Low | `CalibrationMetrics.msg` built, unused, and IoU-shaped rather than residual-shaped | 🟢 |
-| [L-14](./L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🔴 |
-| [L-15](./L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🔴 |
-| [L-16](./L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🔴 |
+| [L-14](./archive/L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🟢 |
+| [L-15](./archive/L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🟢 |
+| [L-16](./archive/L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🟢 |
 
 ## Three headline gaps
 

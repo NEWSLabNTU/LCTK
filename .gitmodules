@@ -4,3 +4,7 @@
 [submodule "ros/conflux"]
 	path = ros/conflux
 	url = https://github.com/jerry73204/conflux.git
+	# L-15: building inside the LCTK workspace injects workspace-specific entries
+	# (e.g. lctk_interfaces) into conflux's Cargo.lock files. Those must never be
+	# committed upstream, so hide generated-file churn from status/diff.
+	ignore = dirty

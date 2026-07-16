@@ -26,6 +26,20 @@ build: build-conflux
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
+    # L-16 guard: colcon-cargo-ros2 generates Rust bindings once, then marks itself done
+    # with build/.colcon/bindgen.lock and never re-checks its outputs. After a partial
+    # clean (rm -rf build/<pkg>) the lock survives, generation is skipped, and every
+    # Rust package fails with "failed to read .../rosidl_cargo/.../Cargo.toml".
+    # Drop the lock whenever any binding path pinned in .cargo/config.toml is missing.
+    if [[ -f build/.colcon/bindgen.lock ]]; then
+        while read -r path; do
+            if [[ ! -f "$path/Cargo.toml" ]]; then
+                echo "bindgen output missing ($path); removing stale bindgen.lock"
+                rm -f build/.colcon/bindgen.lock
+                break
+            fi
+        done < <(grep -oP 'path = "\K[^"]+' .cargo/config.toml)
+    fi
     colcon build \
         --base-paths ros \
         --packages-ignore conflux conflux_cpp conflux_py \
@@ -108,6 +122,11 @@ format:
 lint:
     cargo +nightly fmt --check
     cargo clippy --all-targets --
+    ruff check ros/
+    ruff format --check ros/
+
+# Fast Python-only lint (skips the multi-minute clippy step)
+lint-py:
     ruff check ros/
     ruff format --check ros/
 

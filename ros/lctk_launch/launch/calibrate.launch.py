@@ -47,9 +47,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # L-05: fail on an unknown mode instead of silently falling back to offline
     # (a typo like "realtim" would otherwise ship offline QoS to a live sensor).
     if mode not in ("offline", "realtime"):
-        raise RuntimeError(
-            f"Invalid mode '{mode}'; expected 'offline' or 'realtime'."
-        )
+        raise RuntimeError(f"Invalid mode '{mode}'; expected 'offline' or 'realtime'.")
     use_advanced_solver = (
         LaunchConfiguration("use_advanced_solver").perform(context) == "true"
     )
