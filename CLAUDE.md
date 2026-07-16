@@ -91,20 +91,22 @@ just serve-public   # Serve on 0.0.0.0
    pip3 uninstall colcon-cargo colcon-ros-cargo
    ```
 
-3. **pip packages shadowing apt ones** (this has bitten twice — `just build` now guards both):
+3. **pip packages shadowing apt ones** (this has bitten three times — `just build` now guards all three):
 
    A pip `--user` install lands in `~/.local/lib/python3.10/site-packages`, which **precedes**
    `/usr/lib/python3/dist-packages` on `sys.path` and silently shadows the apt package that ROS 2
-   Humble and apt's OpenCV were built against. Both known cases fail far from the cause:
+   Humble and apt's OpenCV were built against. All known cases fail far from the cause:
 
    | symptom | when | fix |
    |---------|------|-----|
    | `error: option --editable not recognized` (kills `conflux_py` and every ament_python package) | **build** time | `pip3 uninstall -y setuptools` |
    | `ImportError: numpy.core.multiarray failed to import` (kills every solver node at startup, after a clean build) | **run** time | `pip3 uninstall -y numpy` |
+   | `TypeError: 'numpy._DTypeMeta' object is not subscriptable` inside scipy (kills any test/node importing `scipy.optimize`) | **test/run** time | `pip3 uninstall -y scipy` |
 
    setuptools >= 80 removed the `setup.py develop --editable` step colcon uses for
-   `--symlink-install`; numpy >= 2 breaks the ABI apt's `cv2` was compiled against.
-   **Never `pip3 install --user` setuptools or numpy on this machine** — and note that
+   `--symlink-install`; numpy >= 2 breaks the ABI apt's `cv2` was compiled against;
+   scipy >= 1.15 requires numpy >= 1.23 while apt ships 1.21.
+   **Never `pip3 install --user` setuptools, numpy, or scipy on this machine** — and note that
    installing *anything else* with pip can drag them in as dependencies.
 
 4. **ROS2 daemon issues**: Kill unresponsive daemon:

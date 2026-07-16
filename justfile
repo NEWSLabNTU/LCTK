@@ -50,7 +50,7 @@ build-conflux: _check-python-env
 # Guard: this project runs against the SYSTEM python that ROS 2 Humble and apt's OpenCV were
 # built against. A pip `--user` install lands in ~/.local/lib/python3.10/site-packages, which
 # precedes /usr/lib/python3/dist-packages on sys.path and silently shadows the apt package.
-# Two of these have already cost us a day each, and both fail far from the cause:
+# Three of these have already bitten, and all fail far from the cause:
 #
 #   setuptools >= 80  removed the `setup.py develop --editable` step colcon uses for
 #                     --symlink-install  ->  "error: option --editable not recognized",
@@ -58,14 +58,17 @@ build-conflux: _check-python-env
 #   numpy >= 2        breaks the ABI apt's cv2 was compiled against  ->  "ImportError:
 #                     numpy.core.multiarray failed to import", which kills every solver
 #                     node at RUN time, after a clean build.
+#   scipy >= 1.15     requires numpy >= 1.23 (apt has 1.21)  ->  "TypeError:
+#                     'numpy._DTypeMeta' object is not subscriptable" inside scipy at
+#                     TEST/RUN time, wherever scipy.optimize is imported.
 #
-# Never `pip3 install --user` setuptools or numpy on this machine.
+# Never `pip3 install --user` setuptools, numpy, or scipy on this machine.
 _check-python-env:
     #!/usr/bin/env bash
     set -eo pipefail
     fail=0
 
-    for pkg in setuptools numpy; do
+    for pkg in setuptools numpy scipy; do
         location=$(python3 -c "import $pkg; print($pkg.__file__)" 2>/dev/null) || continue
         version=$(python3 -c "import $pkg; print($pkg.__version__)" 2>/dev/null) || continue
         if [[ "$location" != /usr/lib/python3/dist-packages/* ]]; then
@@ -114,7 +117,7 @@ test:
     set -eo pipefail
     cargo nextest run --cargo-profile test-release --no-fail-fast
     source install/setup.bash
-    pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ -v --no-header
+    pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
 lidar-camera:

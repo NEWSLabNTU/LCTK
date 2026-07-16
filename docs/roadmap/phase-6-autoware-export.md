@@ -46,7 +46,7 @@ Design: [2026-07-16-autoware-export-design.md](../superpowers/specs/2026-07-16-a
 
 ## Status
 
-- [ ] 1. Frame-algebra core + tests
-- [ ] 2. CLI + golden-file tests
+- [x] 1. Frame-algebra core + tests (`ros/lctk_autoware_export/lctk_autoware_export/frames.py`)
+- [x] 2. CLI + golden-file tests (`ros2 run lctk_autoware_export export`)
 - [ ] 3. xacro round-trip e2e
 - [ ] 4. Book page

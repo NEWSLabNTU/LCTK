@@ -42,4 +42,10 @@ pip3 uninstall -y setuptools 2>/dev/null || true
 echo "Removing pip-installed numpy if present (use apt numpy for Humble)..."
 pip3 uninstall -y numpy 2>/dev/null || true
 
+# Same again for scipy: a user-pip scipy (>=1.15) requires numpy >= 1.23 while apt ships
+# 1.21, so importing scipy.optimize dies with "TypeError: 'numpy._DTypeMeta' object is
+# not subscriptable". Use apt's python3-scipy.
+echo "Removing pip-installed scipy if present (use apt scipy for Humble)..."
+pip3 uninstall -y scipy 2>/dev/null || true
+
 echo "Colcon Rust integration installation complete."

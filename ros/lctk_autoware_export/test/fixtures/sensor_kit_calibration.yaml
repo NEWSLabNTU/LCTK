@@ -1,0 +1,25 @@
+# Sensor kit calibration for the sample kit.
+# Angles are radians, URDF fixed-axis RPY.
+sensor_kit_base_link:
+  camera0/camera_link:
+    x: 0.10731
+    y: 0.56343
+    z: -0.27697
+    roll: -0.025
+    pitch: 0.315
+    yaw: 1.035
+  # top lidar is the kit reference: origin, yaw only
+  velodyne_top_base_link:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    roll: 0.0
+    pitch: 0.0
+    yaw: 1.575
+  gnss_link:
+    x: -0.1
+    y: 0.0
+    z: -0.2
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
