@@ -214,7 +214,7 @@ for CI to exist; Dependabot verification requires the GitHub UI.
 ### Success criteria status
 
 - [x] `cargo update` sequence completes inside the build env
-- [ ] Dependabot high-severity count drops to 0 — verify in the GitHub UI after push
+- [x] Dependabot high-severity count drops to 0 — verified via API after push: **23 open alerts -> 1** (the documented thrift blocker, medium)
 - [x] Moderate/low reduced to documented major-bump blockers (thrift, quick-xml)
 - [x] `just build` and `just test` pass after the bump
 - [x] `cargo audit` runs clean apart from tracked blockers (`just audit`)
