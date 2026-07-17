@@ -1900,3 +1900,73 @@ Fill "## Stage 3 Results" in the phase doc: recall per dataset vs stage-1/2,
 timing, jitter (with n), pose sanity vs bbox reference on ds3, false-positive
 check (stance 0.5 active), overlay inspection notes, honest narrative +
 Decision update.
+
+---
+
+# Stage 4 Addendum (2026-07-17): Stripe-Tolerant Scorer
+
+Stage-3 finding: anisotropic clustering delivers a board-region candidate to the
+scorer on 31% of ds3 frames (vs 5%), but they score ~0.07 — the square 5×5
+morphological close cannot bridge multi-cm ring stripes in the occupancy
+raster, so fill/contour collapse. Stage 4 mirrors the anisotropic fix in
+raster space: close with a vertically-elongated kernel, oriented by gravity.
+
+### Task 16: Gravity-oriented anisotropic closing in the scorer
+
+**Files:**
+- Modify: `experiments/board-detection-2d/src/boarddet/scorer.py`
+- Modify: `experiments/board-detection-2d/src/boarddet/detector.py`
+- Test: `experiments/board-detection-2d/tests/test_scorer.py`
+
+**Interfaces:**
+- `score_candidate(coords_2d, board, up_2d: np.ndarray | None = None, close_height_m: float | None = None) -> ScoreResult | None`
+  - `up_2d`: unit 2D vector — direction in plane coords along which ring
+    stripes are separated (projection of world +z onto the plane basis).
+    None → stage-3 behavior (square kernel, no rotation).
+  - `close_height_m`: physical vertical closing reach. None → stage-3 5×5.
+- Internals when both provided: rotate coords so `up_2d` → +y (rotation
+  matrix from the 2D vector), rasterize in rotated frame, morph close with
+  kernel width 3 px, height `ceil(close_height_m / cell) | odd, min 5`,
+  contour + minAreaRect in rotated frame, rotate quad corners BACK to
+  original plane coords, then side-refit on the ORIGINAL raw coords_2d as
+  today. `ScoreResult.raster`/`origin` may be in the rotated frame — add
+  field `rot_2d: np.ndarray | None` (2×2) so viz can map corners; viz update
+  optional (acceptable: overlay quad drawn from corners_2d in original frame;
+  raster panel quad via rot_2d when present).
+- Detector: for every candidate, compute `up_2d = normalize([z·u, z·v])`
+  from `cand.plane` (skip/None if board plane near-horizontal — norm < 0.2)
+  and `close_height_m = 2 * mean(horizontal range of cand.points) *
+  tan(radians(board.vertical_gap_deg))`; pass both when
+  `board.vertical_gap_deg > 0` (reuses the stage-3 flag; 0 disables both
+  anisotropic stages). Applies to ALL generators (scorer stage is shared).
+- Fill ratio: unchanged formula (occupied/total inside quad on the CLOSED
+  raster) — the elongated kernel is what raises it on striped boards.
+
+**Tests (TDD):**
+- Striped 2D fixture: diamond points sampled in horizontal bands (gap ≈
+  0.12 m > 5·cell) in a plane frame where stripes are NOT axis-aligned
+  (apply a known in-plane rotation to the fixture, pass the matching up_2d).
+  Assert: score with (up_2d, close_height_m=0.15) ≥ 2× score without;
+  corners still within cell_m of truth (rotation round-trip exact).
+- up_2d=None / close_height_m=None → byte-identical ScoreResult to stage 3
+  on the standard dense fixture (regression pin).
+- Degenerate: near-horizontal plane path (detector skips) — unit-test the
+  detector helper that computes up_2d returns None when |proj| < 0.2.
+- All existing tests green (defaults preserve old behavior at the scorer
+  level; detector now passes the new args when vertical_gap_deg > 0 —
+  existing detector tests run on synthetic dense boards where the elongated
+  kernel must not change outcomes materially; investigate any flip).
+
+### Task 17: Stage-4 benchmark + phase doc
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --out results/run6-stripe
+uv run python -m boarddet.benchmark --datasets 3 --generators b \
+  --stance-weight 0.5 --vertical-gap-deg 0 --out results/run6-control
+```
+
+Fill "## Stage 4 Results": recall vs stage-3 (expect the 31% candidate-reach
+to convert), score distribution shift on board-region candidates, false-positive
+impact (does the elongated kernel inflate clutter scores too? check ds5),
+timing, overlays, honest narrative + Decision update.
