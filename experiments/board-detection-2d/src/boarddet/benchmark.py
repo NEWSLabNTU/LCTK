@@ -9,8 +9,27 @@ import numpy as np
 
 from .board_config import BoardConfig
 from .detector import GENERATORS, DetectOutcome, detect
-from .ingest import load_frames
+from .ingest import Frame, load_frames
 from .viz import save_overlay
+
+
+def accumulate_frames(frames: list[Frame], n: int) -> list[np.ndarray]:
+    """Chunk consecutive frames into non-overlapping windows of n, xyz-concat.
+
+    Matches the "hold the board static for a few seconds" workflow: a
+    calibration pose spans several frames, so accumulating them thickens a
+    single scan into a denser one instead of averaging across poses. The
+    trailing partial window is kept only if it has at least n/2 frames;
+    n=1 reproduces stage-1 (one window per frame) exactly.
+    """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    windows: list[np.ndarray] = []
+    for i in range(0, len(frames), n):
+        chunk = frames[i:i + n]
+        if len(chunk) >= n / 2:
+            windows.append(np.concatenate([f.xyz for f in chunk], axis=0))
+    return windows
 
 
 def summarize(outcomes: list[DetectOutcome]) -> dict:
@@ -79,14 +98,16 @@ def _md_tables(all_results: dict) -> str:
 
 
 def run(datasets: list[int], generators: list[str], board: BoardConfig,
-        max_frames: int | None, out_dir: Path) -> dict:
+        max_frames: int | None, out_dir: Path, accumulate: int = 1) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     all_results: dict = {}
+    label = "win" if accumulate > 1 else "frame"
     for ds in datasets:
         frames = load_frames(ds, max_frames=max_frames)
+        windows = accumulate_frames(frames, accumulate)
         all_results[ds] = {}
         for g in generators:
-            outcomes = [detect(f.xyz, board, generator=g) for f in frames]
+            outcomes = [detect(w, board, generator=g) for w in windows]
             all_results[ds][g] = summarize(outcomes)
             det_idx = [i for i, o in enumerate(outcomes)
                        if o.detection is not None]
@@ -94,14 +115,19 @@ def run(datasets: list[int], generators: list[str], board: BoardConfig,
                      if det_idx else {0, len(outcomes) // 2,
                                       len(outcomes) - 1})
             for i in sorted(picks):
-                save_overlay(frames[i].xyz, outcomes[i],
-                             out_dir / f"ds{ds}_{g}_frame{i:04d}.png")
+                save_overlay(windows[i], outcomes[i],
+                             out_dir / f"ds{ds}_{g}_{label}{i:04d}.png")
             print(f"dataset {ds} gen {g}: "
                   f"rate={all_results[ds][g]['detection_rate']:.0%} "
                   f"median={all_results[ds][g]['median_total_ms']:.0f}ms")
-    (out_dir / "summary.json").write_text(json.dumps(all_results, indent=2))
+    summary = {
+        "accumulate": accumulate,
+        "stance_weight": board.stance_weight,
+        "datasets": all_results,
+    }
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     (out_dir / "summary.md").write_text(_md_tables(all_results))
-    return all_results
+    return summary
 
 
 def main() -> None:
@@ -112,10 +138,15 @@ def main() -> None:
                     choices=list(GENERATORS))
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--side", type=float, default=1.0)
+    ap.add_argument("--accumulate", type=int, default=1,
+                    help="frames per window (1 = stage-1 behavior)")
+    ap.add_argument("--stance-weight", type=float, default=0.0,
+                    help="diamond-stance score blend weight (0 = off)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
-    run(args.datasets, args.generators, BoardConfig(side_m=args.side),
-        args.max_frames, args.out)
+    run(args.datasets, args.generators,
+        BoardConfig(side_m=args.side, stance_weight=args.stance_weight),
+        args.max_frames, args.out, accumulate=args.accumulate)
 
 
 if __name__ == "__main__":

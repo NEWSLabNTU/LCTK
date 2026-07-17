@@ -1,6 +1,7 @@
 """Glue: downsample -> candidate generator -> shared scorer -> best pose."""
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass
 
@@ -26,6 +27,25 @@ class DetectOutcome:
     detection: BoardDetection | None
     timings_ms: dict[str, float]
     n_candidates: int
+    best_rejected: BoardDetection | None = None
+
+
+_UP = np.array([0.0, 0.0, 1.0])
+
+
+def _stance(corners_3d: np.ndarray) -> float:
+    """Diamond-stance score: how gravity-aligned is either diagonal.
+
+    corners_3d is CCW-ordered (see pose.board_pose), so corners[2]-corners[0]
+    and corners[3]-corners[1] are the two diagonals. A board standing on a
+    corner has one diagonal ~vertical (stance ~1); an axis-aligned flat
+    panel has both diagonals at ~45 deg off vertical (stance ~0.71).
+    """
+    d1 = corners_3d[2] - corners_3d[0]
+    d2 = corners_3d[3] - corners_3d[1]
+    d1 = d1 / np.linalg.norm(d1)
+    d2 = d2 / np.linalg.norm(d2)
+    return float(max(abs(d1 @ _UP), abs(d2 @ _UP)))
 
 
 def detect(points: np.ndarray, board: BoardConfig, generator: str,
@@ -37,14 +57,26 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     cands = gen(dn, board)
     t2 = time.perf_counter()
     best: BoardDetection | None = None
+    best_rejected: BoardDetection | None = None
     for cand in cands:
         res = score_candidate(project_to_plane(cand.points, cand.plane),
                               board)
-        if res is None or res.score < board.min_score:
+        if res is None:
             continue
         det = board_pose(cand.plane, res)
+        if board.stance_weight > 0:
+            stance = _stance(det.corners_3d)
+            w = board.stance_weight
+            blended = res.score * ((1 - w) + w * stance)
+            det = dataclasses.replace(det, score=blended)
+        if det.score < board.min_score:
+            if best_rejected is None or det.score > best_rejected.score:
+                best_rejected = det
+            continue
         if best is None or det.score > best.score:
             best = det
+    if best is not None:
+        best_rejected = None
     t3 = time.perf_counter()
     return DetectOutcome(
         detection=best,
@@ -55,4 +87,5 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             "total": (t3 - t0) * 1e3,
         },
         n_candidates=len(cands),
+        best_rejected=best_rejected,
     )
