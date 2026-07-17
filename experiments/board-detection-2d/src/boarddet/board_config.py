@@ -14,3 +14,10 @@ class BoardConfig:
     # to prefer candidates standing on a corner (gravity-aligned diagonal)
     # over axis-aligned flat panels that would otherwise false-positive.
     stance_weight: float = 0.0
+    # Worst-case adjacent-channel vertical spacing of the LiDAR, in degrees.
+    # Generator B (cluster_after_ground) uses this to widen its DBSCAN
+    # vertical tolerance with range (anisotropic/DAC-style clustering) so
+    # ring gaps don't fragment a single physical surface into several
+    # clusters. VLP-32C worst adjacent-channel spacing is ~3 deg. 0 disables
+    # the anisotropic scaling (plain isotropic DBSCAN).
+    vertical_gap_deg: float = 3.0

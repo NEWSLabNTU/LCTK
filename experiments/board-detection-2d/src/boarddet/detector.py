@@ -54,7 +54,13 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     t0 = time.perf_counter()
     dn = downsample(points, voxel)
     t1 = time.perf_counter()
-    cands = gen(dn, board)
+    # Generator B alone takes anisotropic clustering tolerance; A and C keep
+    # their stage-1 signatures (gen(points, board)) unchanged this stage, so
+    # this is an explicit special-case rather than a shared kwarg.
+    if generator == "b":
+        cands = gen(dn, board, vertical_gap_deg=board.vertical_gap_deg)
+    else:
+        cands = gen(dn, board)
     t2 = time.perf_counter()
     best: BoardDetection | None = None
     best_rejected: BoardDetection | None = None

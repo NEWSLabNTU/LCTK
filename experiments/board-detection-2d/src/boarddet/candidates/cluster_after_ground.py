@@ -9,8 +9,40 @@ from ..board_config import BoardConfig
 from ..geometry import extent_2d, fit_plane, project_to_plane
 
 
+def _anisotropic_scaled(points: np.ndarray, eps_h: float,
+                        vertical_gap_deg: float) -> np.ndarray:
+    """Return a z-compressed COPY of `points` for clustering only.
+
+    A VLP-32C's vertical ring gap at horizontal range r is ~r*tan(gap_deg),
+    which grows multi-cm at just a few metres -- well past a fixed isotropic
+    DBSCAN eps -- while adjacent points *within* a ring stay tight. Scaling
+    each point's z by eps_h / eps_v(r) (eps_v the range-scaled vertical
+    tolerance) turns that into an elliptical neighbourhood: horizontal
+    tolerance stays eps_h, vertical tolerance widens with range, so a plain
+    isotropic DBSCAN call on the scaled cloud reconnects ring-gap-fragmented
+    surfaces. eps_v is clamped to >= eps_h so nearby/dense clouds are
+    unaffected (r small -> eps_v == eps_h -> z unscaled); this is direction-
+    of-range-dependent, not density-dependent, so it applies equally to a
+    solid-state (non-rotating, non-ring) sensor's uniform cloud -- for those,
+    r is simply always small enough that eps_v clamps to eps_h and nothing
+    changes.
+
+    Labels produced by clustering the returned array index back into the
+    original (unscaled) `points` by position -- callers must clock cluster
+    labels against `points`, never against this scaled copy.
+    """
+    if vertical_gap_deg <= 0.0:
+        return points.copy()
+    r = np.hypot(points[:, 0], points[:, 1])
+    eps_v = np.maximum(eps_h, 2.0 * r * np.tan(np.radians(vertical_gap_deg)))
+    scaled = points.copy()
+    scaled[:, 2] = points[:, 2] * (eps_h / eps_v)
+    return scaled
+
+
 def _remove_big_planes(points: np.ndarray, board: BoardConfig,
-                       dist: float, min_frac: float) -> np.ndarray:
+                       dist: float, min_frac: float,
+                       vertical_gap_deg: float = 3.0) -> np.ndarray:
     """Iteratively strip planes whose inlier patch is far larger than a board."""
     diag = board.side_m * np.sqrt(2.0)
     remaining = points.astype(np.float64)
@@ -40,8 +72,10 @@ def _remove_big_planes(points: np.ndarray, board: BoardConfig,
         # board-scale even though the plane itself is huge. Use a looser eps
         # here (bridges ring gaps) purely to judge big-vs-board-scale; the
         # final candidate clustering below stays at the tighter cluster_eps.
+        scaled_in = _anisotropic_scaled(inliers.astype(np.float64), 0.20,
+                                        vertical_gap_deg)
         pc_in = o3d.geometry.PointCloud(
-            o3d.utility.Vector3dVector(inliers.astype(np.float64)))
+            o3d.utility.Vector3dVector(scaled_in))
         labels = np.asarray(pc_in.cluster_dbscan(eps=0.20, min_points=10))
         valid = labels[labels >= 0]
         if len(valid) == 0:
@@ -131,7 +165,8 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
                                   big_plane_dist: float = 0.05,
                                   big_plane_min_frac: float = 0.08,
                                   cluster_eps: float = 0.15,
-                                  cluster_min_points: int = 30
+                                  cluster_min_points: int = 30,
+                                  vertical_gap_deg: float = 3.0
                                   ) -> list[Candidate]:
     # big_plane_min_frac was 0.15 in the synthetic-only design; real VLP-32C
     # scenes carry far more non-ground clutter (background structures, poles,
@@ -141,7 +176,7 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
     # ground/wall planes while still well above what a board-sized patch
     # could ever contribute.
     rest = _remove_big_planes(points, board, big_plane_dist,
-                              big_plane_min_frac)
+                              big_plane_min_frac, vertical_gap_deg)
     if len(rest) < cluster_min_points:
         return []
     # cluster_eps was 0.10 in the synthetic-only design. Real VLP-32C rings
@@ -149,8 +184,13 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
     # ground), which fragmented a single 1 m board into 2-3 DBSCAN pieces
     # below the plausible-patch extent floor. 0.15 bridges that without
     # merging the board into unrelated nearby clutter in the observed frames.
-    pc = o3d.geometry.PointCloud(
-        o3d.utility.Vector3dVector(rest.astype(np.float64)))
+    # Anisotropic (DAC-style) scaling widens that same eps with range along z
+    # only (see _anisotropic_scaled) so it keeps working past the ~2 m regime
+    # this comment was written for; vertical_gap_deg=0 reproduces the plain
+    # isotropic call exactly.
+    scaled = _anisotropic_scaled(rest.astype(np.float64), cluster_eps,
+                                 vertical_gap_deg)
+    pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scaled))
     labels = np.asarray(pc.cluster_dbscan(eps=cluster_eps,
                                           min_points=cluster_min_points))
     out: list[Candidate] = []
