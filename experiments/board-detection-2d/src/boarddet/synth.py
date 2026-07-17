@@ -47,7 +47,7 @@ def make_board(side, center, normal, up_hint, spacing, noise, rng,
     inside = np.abs(coords[:, 0]) + np.abs(coords[:, 1]) <= half_diag
     coords = coords[inside]
     pts = center + coords[:, :1] * u + coords[:, 1:] * v
-    pts = pts + rng.normal(0.0, noise, size=pts.shape) * n
+    pts = pts + rng.normal(0.0, noise, size=(len(pts), 1)) * n
     corners = np.stack([
         center + half_diag * v,   # top
         center + half_diag * u,   # right
