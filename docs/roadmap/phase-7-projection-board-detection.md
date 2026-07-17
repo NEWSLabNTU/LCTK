@@ -315,6 +315,175 @@ pipeline assumes ring/grid structure. Real spinning-LiDAR data is the *hard*
 case here, not the easy one: the synthetic uniform scenes lack ring stripes,
 which are the root cause of most real-frame failures above.
 
+## Stage 2 Results
+
+Stage 2 added two candidate mechanisms (commit `8bba8cc`) meant to attack the
+two stage-1 failure modes directly: `--accumulate N` concatenates N
+consecutive frames into one non-overlapping window, hypothesized to densify
+the board past the ring-gap fragmentation that stalls A/B; `--stance-weight W`
+blends in a gravity-alignment score term (`_stance` in `detector.py`),
+hypothesized to separate the true diamond-mounted board (one diagonal near
+vertical) from the axis-aligned clutter panels C locks onto. Suite is
+42/42 green (`uv run pytest -q`) before and after this benchmark.
+
+Three runs per the stage-2 plan, `results/run4-*` (not committed —
+`results/` is gitignored; numbers below are the full record):
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --accumulate 10 --stance-weight 0.0 --out results/run4-acc
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --accumulate 10 --stance-weight 0.5 --out results/run4-acc-stance
+uv run python -m boarddet.benchmark --datasets 3 --generators c \
+  --accumulate 10 --stance-weight 0.5 --max-frames 60 --out results/run4-c-check
+```
+
+### Recall per window (windows detected / windows total)
+
+| Dataset | B, acc=10, stance=0 | B, acc=10, stance=0.5 | C, acc=10, stance=0.5 (ds3 only, 60-frame cap) |
+|---------|---|---|---|
+| 1 | 0/10 | 0/10 | — |
+| 2 | 0/10 | 0/10 | — |
+| 3 | 0/11 | 0/11 | 0/6 |
+| 4 | 0/11 | 0/11 | — |
+| 5 | 0/10 | 0/10 | — |
+
+**Headline: accumulation did not lift recall — it collapsed it to 0% across
+every dataset**, including on dataset 3 where stage-1 B found the real board
+on 2/113 single frames. This falsifies hypothesis 1 as tested and is reported
+as-is, not smoothed over.
+
+### Timing (median ms per window, p95 in parentheses)
+
+| Run | median (p95) | budget (N×100 ms, N=10) |
+|---|---|---|
+| B, acc=10, stance=0 | 173–193 ms | 1000 ms |
+| B, acc=10, stance=0.5 | 180–183 ms | 1000 ms |
+| C, acc=10, stance=0.5 (ds3) | 561 ms (609 ms) | 1000 ms |
+
+All three runs stay comfortably inside the accumulated budget — a 10-frame
+window costs roughly the same as ~1.5 single frames for B (not 10×, since
+`downsample` and `candidates` both collapse near-duplicate points from a
+static scene) and ~2× a single frame for C. Timing was never the risk here;
+recall was.
+
+### Jitter
+
+Not computable — jitter requires ≥ 2 detections per dataset/generator cell
+(`summarize()`'s gate), and every cell above has 0 detections. No jitter
+table for stage 2.
+
+### `best_rejected` score distribution (how close were the misses)
+
+Per-window `best_rejected` scores (the highest-scoring candidate that still
+failed `min_score=0.5`) cluster well below threshold, not just-barely-missed:
+
+- B, acc=10, stance=0: scores 0.100–0.326 across all 52 windows (mean ≈ 0.15,
+  vs. `min_score`=0.5 — roughly a 3× gap, not a close call).
+- B, acc=10, stance=0.5: scores 0.053–0.260 (same windows, scaled down by the
+  stance blend as expected).
+- C, acc=10, stance=0.5 (ds3, 6 windows): scores 0.094–0.220.
+
+None of the rejected candidates in any accumulated run sit near the bbox
+reference location (~2.6, 0, 0.35) or ds3's frame-5 true-board location
+(2.10, ‑0.18, ‑0.05, the one confirmed stage-1 B hit). Their centers are
+almost all at the same clutter coordinates the stage-1 narrative already
+named — e.g. B's ds3/ds4 rejects repeatedly land at (5.8, 1.6, 0.2) and
+(4.7, 2.6, 0.15), and C's ds3 rejects land at (4.7, 2.6) / (5.8, 1.2) — the
+same two background panels documented in stage 1. Accumulation did not even
+produce a *near-miss* board candidate; the true-board region simply stopped
+generating a board-shaped candidate at all (see diagnosis below).
+
+### Diagnosis: why accumulation collapsed recall instead of raising it
+
+Traced directly on the one window known to contain a confirmed true-board
+hit — ds3 window 0 (frames 0–9), which contains stage-1's single-frame hit
+at frame 5:
+
+| | single frame 5 | accumulated window 0 (frames 0–9) |
+|---|---|---|
+| downsampled points (0.03 m voxel) | 27,386 | 53,456 (1.95×, not ~10×) |
+| gen-B clusters found | 7 | 22 |
+| board-region cluster | 472 pts @ (2.10, ‑0.18, ‑0.05) → scored 0.538, **DET** | 81 pts @ (2.07, ‑0.30, ‑0.32) → 0.59 m × 0.13 m sliver, fails the scorer's size gate outright (`score_candidate` returns `None`) |
+
+Two compounding causes:
+
+1. **The capture is static, so accumulation adds density, not coverage.**
+   VLP-32C's 32 ring elevation angles are fixed by the sensor; a scene and
+   board that don't move between frames re-sample nearly the same physical
+   points every sweep. 10 accumulated frames only pushed the downsampled
+   point count up 1.95× (not the naive 10×), meaning the voxel grid
+   collapsed most of the "new" points right back into cells the single frame
+   already had. The ring gaps stage 1 identified as the root cause of A/B's
+   failure (`"Why A/B miss the board on most frames"` above) are a function
+   of sensor geometry, not scan diversity, and a static hold-the-board-still
+   capture cannot fill them by concatenation. Accumulation would only
+   plausibly help if the board or sensor moved slightly between frames
+   (natural hand jitter during a real calibration hold, which this canned
+   sample data lacks) or if paired with elevation-angle-aware interpolation.
+2. **`cluster_after_ground`'s DBSCAN `cluster_eps=0.15`** — already loosened
+   once in stage 1 specifically to bridge single-frame ring gaps (see the
+   code comment at `candidates/cluster_after_ground.py:147`) — does not scale
+   with the accumulated window. Once the surrounding scene's point density
+   and cluster topology shift (22 candidates in the window vs. 7 in the
+   single frame — more of the *background* also densifies and starts
+   competing for the same eps-neighborhoods), the previously-cohesive
+   472-point board cluster fragments into pieces; only an 81-point strip
+   fragment remains near the board's location, and it doesn't pass the
+   scorer's board-size gate. This is a **candidate-generation regression**,
+   not a scorer problem — the 2D scorer never even sees a board-shaped input
+   to reject or accept.
+
+Net: accumulation, at least as implemented (naive frame concatenation, no
+eps re-tuning, tested only on static sample captures), is not the ring-gap
+fix hypothesized. The bottleneck stays exactly where stage 1 left it —
+candidate generation on ring-striped clouds — and accumulation as tested
+makes that bottleneck worse, not better.
+
+### Stance term: does it kill C's clutter false positives without hurting B's true board?
+
+The brief's C-check command (`--accumulate 10 --stance-weight 0.5`) bundles
+accumulation and stance together, and since accumulation alone already
+collapsed C's recall to 0/6 on ds3, that run cannot isolate the stance
+effect — every candidate is "not-a-detection" for the accumulation reason
+above, stance or not. To actually test hypothesis 2, a supplementary
+single-frame (`--accumulate 1`, i.e. stage-1-equivalent) check reusing
+cached frames was run outside the brief's three commands, directly
+comparing `stance_weight=0.0` vs `0.5` on ds3's first 30 frames (matching
+stage 1's C scope exactly):
+
+| stance_weight | detection rate | detections at clutter panel A (4.7, 2.6) | detections at clutter panel B (‑3.3, 3.4) |
+|---|---|---|---|
+| 0.0 (stage-1 baseline, reproduced) | 28/30 | 18 | 10 |
+| 0.5 | 10/30 | **0** | 10 |
+
+Stance **fully eliminates panel A** (18 → 0) but leaves **panel B fully
+intact** (10 → 10, same scores shifted up rather than suppressed — e.g.
+frame 29 goes 0.641 → 0.557, still comfortably above `min_score`). This is a
+partial, not a full, fix for C: whichever axis-aligned panel happens to sit
+closer to vertical-diagonal alignment (or which the region-growing generator
+happens to fit a near-diamond-oriented quad to) survives the stance gate.
+**The stance term is not a general axis-aligned-panel rejector; it only
+catches panels whose fitted quad orientation the term happens to penalize.**
+
+The B-side check (does stance hurt the one confirmed true-board hit) was
+also run standalone: ds3 frame 5 (generator B, the stage-1 verified hit at
+the bbox reference location) scores 0.538 at `stance_weight=0.0` and 0.536
+at `stance_weight=0.5` — a 0.002 drop, negligible. The diamond board's
+gravity-aligned corner stance is correctly near-1, so the blend does not
+punish it. **Stance does not regress the one true-board detection
+available to check it against.**
+
+### What the overlays show
+
+Overlay PNGs for the accumulated windows (`results/run4-acc/ds3_b_win0000.png`
+etc.) confirm the diagnosis visually: the top-down scatter shows the same
+sparse, ring-gapped board silhouette as the stage-1 single-frame overlays —
+denser in absolute point count but not visibly more "filled in" as a shape,
+consistent with the 1.95× (not 10×) downsampled-point growth measured above.
+Every accumulated-window overlay is labeled "NO DETECTION"; none show a
+fitted quad.
+
 ## Decision
 
 Partial success — no winner yet, and the numbers as they stand do not justify
@@ -335,9 +504,53 @@ an integration phase:
   across frames, would separate the true board from the two clutter panels
   that C locks onto.
 
+### Stage-2 verdict
+
+Neither stage-2 mechanism moves the needle enough to change the call above —
+if anything, stage 2 sharpens *why* the stage-1 verdict was right to hold off
+on integration:
+
+- **Accumulation (hypothesis 1) is rejected as tested.** It did not densify
+  the board past ring-gap fragmentation; it collapsed B's already-marginal
+  2% single-frame recall to 0% on every dataset, and did the same to C. The
+  root cause is structural, not a tuning gap: a static capture re-samples
+  the same fixed ring elevation angles every frame, so concatenation adds
+  redundant density (1.95×, not 10×) rather than new coverage, and the
+  existing DBSCAN `cluster_eps` — already loosened once to bridge
+  single-frame gaps — fragments the board further once the surrounding
+  scene's density and cluster topology shift under the larger window. This
+  reinforces stage 1's conclusion that the bottleneck is candidate
+  generation on ring-striped clouds, not the scorer, and shows that
+  "throw more frames at it" is not a free fix without either real
+  board/sensor motion between frames or window-size-aware re-tuning of the
+  clustering parameters (neither tested here).
+- **Stance (hypothesis 2) is a partial win, isolated by a supplementary
+  single-frame check** (the brief's bundled accumulate+stance C-check
+  command couldn't isolate it, since accumulation alone already zeroed
+  C's recall). Stance fully suppresses one of the two clutter panels
+  (18/30 → 0/30) without touching the one confirmed true-board detection
+  (0.538 → 0.536, negligible). But it leaves the second clutter panel
+  fully intact (10/30 → 10/30) — it discriminates by fitted-quad
+  orientation, not by "is this the board," so it is not a general
+  axis-aligned-panel rejector. Worth keeping as a score input (it is
+  free, and it helped on one of two panels with no measured downside),
+  but it does not by itself solve C's discrimination problem.
+- **The core discrimination problem stage 1 identified is unresolved.**
+  Stage 2 confirms the border-alone cue is still not enough: even with
+  stance, C would still false-positive on panel B in this data. The
+  hole pattern (present on the recorded board, never used as a cue so
+  far) remains the most promising untested lever.
+
 Next steps if the phase continues: (1) stripe-aware candidate merging done
-properly (the current coplanar merge helps but under-recovers); (2) add the
-hole pattern as an optional score term; (3) re-run; only then decide
-pick/combine/reject. Integration design (Rust port, ROS node, replacing vs
-front-ending ICP) stays out of scope until a generator clears a usable
-detection rate on the real recordings.
+properly (the current coplanar merge helps but under-recovers) — stage 2's
+diagnosis shows this needs to hold even as `cluster_eps` and window
+composition change, not just at single-frame scale; (2) add the hole
+pattern as an optional score term, now the leading candidate for closing
+C's remaining discrimination gap after stance's partial result; (3) if
+accumulation is revisited, test it against a capture with real board/sensor
+motion (a genuine calibration hold, not a static sample) before concluding
+it can't help, since the static-scene failure mode diagnosed here may not
+generalize; (4) re-run; only then decide pick/combine/reject. Integration
+design (Rust port, ROS node, replacing vs front-ending ICP) stays out of
+scope until a generator clears a usable detection rate on the real
+recordings.
