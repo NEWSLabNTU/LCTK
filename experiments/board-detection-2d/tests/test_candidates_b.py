@@ -1,7 +1,7 @@
 import numpy as np
 from boarddet.board_config import BoardConfig
 from boarddet.candidates.cluster_after_ground import \
-    _merge_coplanar_clusters, generate_cluster_after_ground
+    _merge_coplanar_clusters, _remove_big_planes, generate_cluster_after_ground
 from boarddet.geometry import downsample
 from boarddet.synth import make_scene
 
@@ -71,3 +71,41 @@ def test_merge_coplanar_clusters_rejoins_ring_gap_stripes():
     # (z == 0.5) never entered it
     assert np.allclose(merged[:, 2], 0.0)
     assert np.allclose(decoy_group[:, 2], 0.5)
+
+
+def test_remove_big_planes_continues_after_noise_dbscan():
+    """When a big plane's inliers DBSCAN entirely to noise (sparse, below
+    the eps=0.20/min_points=10 density needed for any cluster), the strip
+    loop must keep going and still strip the *next* big plane -- not
+    `break` out of the whole loop (which used to leave every later big
+    plane unstripped)."""
+    # plane1: sparse grid, spacing 0.22 m > cluster eps (0.20 m), so every
+    # point is DBSCAN noise (no point has >=10 neighbours within eps).
+    xs1 = np.arange(-5.0, 5.01, 0.22)
+    yy1, xx1 = np.meshgrid(xs1, xs1)
+    plane1 = np.stack([xx1.ravel(), yy1.ravel(), np.zeros(xx1.size)],
+                      axis=1).astype(np.float32)
+
+    # plane2: dense grid (genuinely big, extent >> board diag), offset in z
+    # so it never mixes with plane1 within dist_thresh=0.05.
+    xs2 = np.arange(-2.0, 2.01, 0.1)
+    yy2, xx2 = np.meshgrid(xs2, xs2)
+    plane2 = np.stack([xx2.ravel(), yy2.ravel(), np.full(xx2.size, 1.0)],
+                      axis=1).astype(np.float32)
+
+    # plane1 must have more points than plane2 so open3d's RANSAC (which
+    # picks the largest-consensus model) extracts it *first*, reproducing
+    # the "noise-DBSCAN plane processed before the genuine big plane" order
+    # the bug depended on.
+    assert len(plane1) > len(plane2)
+
+    points = np.concatenate([plane1, plane2], axis=0)
+    board = BoardConfig(side_m=1.0)
+
+    remaining = _remove_big_planes(points, board, dist=0.05, min_frac=0.08)
+
+    # both big planes must be stripped: plane1 via the noise-DBSCAN branch,
+    # plane2 via the normal extent check on the next iteration. Under the
+    # old `break`-on-noise bug, plane2 (dense, clearly board-scale-plus)
+    # would have survived untouched in `remaining`.
+    assert len(remaining) < 50
