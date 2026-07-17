@@ -48,6 +48,6 @@ def test_rejects_wrong_size():
 
 def test_rejects_sparse_garbage():
     rng = np.random.default_rng(5)
-    junk = rng.uniform(-1, 1, size=(40, 2)).astype(np.float32)
+    junk = rng.uniform(-1, 1, size=(150, 2)).astype(np.float32)
     res = score_candidate(junk, BoardConfig(side_m=1.0))
     assert res is None or res.score < 0.5
