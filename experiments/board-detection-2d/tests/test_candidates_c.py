@@ -18,8 +18,14 @@ def test_finds_board_region():
 
 
 def test_separates_board_leaning_near_wall():
-    # board 0.3 m in front of the wall, tilted 30 deg from wall normal:
-    # clustering by distance would merge, normals must separate
+    # board ~0.4 m in front of a large wall patch, at a shallow ~9 deg tilt
+    # from the wall's normal (make_scene's fixed board normal vs. the wall's
+    # own normal -- not the 30 deg once claimed here, and not far enough off
+    # to bridge via kNN; that gap-bridging scenario has its own dedicated
+    # test below, test_normal_gate_separates_touching_perpendicular_patches).
+    # This test instead covers region growing finding the board candidate
+    # when a large, nearby, near-coplanar background structure (the wall) is
+    # also present in the scene -- a plain "is the board still found" check.
     rng = np.random.default_rng(12)
     pts, truth = make_scene(board_center=(7.6, 0.5, 0.3),
                             rng=rng)
