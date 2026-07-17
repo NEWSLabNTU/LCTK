@@ -12,9 +12,22 @@ def generate_ransac_iterative(points: np.ndarray, board: BoardConfig,
                               max_planes: int = 8,
                               dist_thresh: float = 0.02,
                               min_inliers: int = 60,
-                              component_eps: float = 0.10) -> list[Candidate]:
+                              component_eps: float = 0.20) -> list[Candidate]:
+    # component_eps was 0.10 in the synthetic-only design. Same real-data
+    # cause as generator B (see cluster_after_ground.py): VLP-32C ring gaps
+    # cross the board face itself at ~2 m range and fragment a single RANSAC
+    # plane's inliers into several disconnected components at eps=0.10, each
+    # too small/thin to pass plausible_board_patch. 0.20 bridges that; it's
+    # looser than B's 0.15 because this eps also has to reconnect a full
+    # RANSAC-fit plane (not a pre-clustered candidate), which spans a larger
+    # area per component on this data.
     remaining = points.astype(np.float64)
     out: list[Candidate] = []
+    # open3d's RANSAC plane segmentation draws from a global RNG with no
+    # per-call seed argument; seed once so repeated calls on identical input
+    # are deterministic (see the identical fix + rationale in
+    # cluster_after_ground.py's _remove_big_planes).
+    o3d.utility.random.seed(0)
     for _ in range(max_planes):
         if len(remaining) < min_inliers:
             break

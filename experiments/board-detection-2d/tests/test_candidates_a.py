@@ -27,3 +27,24 @@ def test_gate_rejects_huge_patch():
     patch = np.c_[g[:, 0], g[:, 1], rng.normal(0, 0.005, 4000)]
     assert plausible_board_patch(patch.astype(np.float32),
                                  BoardConfig(side_m=1.0)) is None
+
+
+def test_flatness_gate_clears_real_vlp32c_noise_floor():
+    """CLAUDE.md documents the VLP-32C's own range noise pushing ICP loss on
+    the recorded board to 0.026-0.029 m (icp_good_fit_threshold=0.035 to
+    clear it with margin). This gate's plane-fit RMS on real board clusters
+    measured in the same 0.029-0.031 m band, so it must accept patches noisy
+    up to that floor, not just noiseless synthetic ones."""
+    rng = np.random.default_rng(3)
+    g = rng.uniform(-0.5, 0.5, size=(200, 2))
+    patch = np.c_[g[:, 0], g[:, 1], rng.normal(0, 0.029, 200)]
+    assert plausible_board_patch(patch.astype(np.float32),
+                                 BoardConfig(side_m=1.0)) is not None
+
+
+def test_flatness_gate_still_rejects_non_planar_patch():
+    rng = np.random.default_rng(3)
+    g = rng.uniform(-0.5, 0.5, size=(200, 2))
+    patch = np.c_[g[:, 0], g[:, 1], rng.normal(0, 0.08, 200)]
+    assert plausible_board_patch(patch.astype(np.float32),
+                                 BoardConfig(side_m=1.0)) is None
