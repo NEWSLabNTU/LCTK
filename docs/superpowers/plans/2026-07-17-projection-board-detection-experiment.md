@@ -1837,3 +1837,66 @@ Fill a "Stage 2 Results" section in the phase doc: recall per dataset
 budget is N×100 ms, still realtime for the workflow), jitter, whether
 stance kills C's ds3 false positives, best_rejected score distribution
 (how close the misses are). Honest narrative + updated Decision section.
+
+---
+
+# Stage 3 Addendum (2026-07-17): Anisotropic (DAC-style) Clustering
+
+Stage-2 diagnosis: recall bottleneck is board-cluster fragmentation in DBSCAN
+(fixed eps 0.15 vs multi-cm, range-proportional VLP-32C ring gaps). Related-work
+survey: successful sparse-lidar methods never use fixed-eps Euclidean
+clustering; the minimal drop-in fix is an elliptical neighborhood whose
+vertical tolerance scales with range × vertical angular gap (DAC, Electronics
+2021). Gravity-aware but ring-agnostic → solid-state-safe.
+
+### Task 14: Anisotropic clustering in generator B
+
+**Files:**
+- Modify: `experiments/board-detection-2d/src/boarddet/candidates/cluster_after_ground.py`
+- Test: `experiments/board-detection-2d/tests/test_candidates_b.py`
+
+**Interfaces:**
+- New helper `_anisotropic_scaled(points: np.ndarray, eps_h: float, vertical_gap_deg: float) -> np.ndarray`:
+  returns a scaled COPY for clustering only — z compressed per point by
+  `eps_h / eps_v(r_i)` where `r_i = sqrt(x²+y²)` (horizontal range) and
+  `eps_v(r) = max(eps_h, 2.0 * r * tan(radians(vertical_gap_deg)))`.
+  Nearby points share similar range → locally consistent metric. Original
+  coordinates untouched downstream (labels map back by index).
+- `generate_cluster_after_ground` gains `vertical_gap_deg: float = 3.0`
+  (0 disables → stage-2 behavior; VLP-32C worst adjacent-channel spacing ≈3°).
+  Apply the scaling to BOTH the main DBSCAN clustering stage and the
+  component-split DBSCAN inside `_remove_big_planes` (same fragmentation
+  physics). The coplanar stripe-merge stage stays (harmless; may become
+  mostly inactive).
+- `detect()`/benchmark: pass-through — add `vertical_gap_deg` to BoardConfig
+  (default 3.0) and thread it into generator B only (A/C unchanged this stage).
+  CLI flag `--vertical-gap-deg` (0 = off).
+
+**Tests (TDD):**
+- Synthetic ring-striped board: sample the diamond in horizontal stripes with
+  ~4° vertical angular gaps at ~3 m range (gaps ≈ 0.21 m > eps 0.15 so plain
+  DBSCAN fragments it). Assert: with `vertical_gap_deg=0` generator B finds NO
+  candidate matching the true plane (fragmentation reproduced — discrimination),
+  with `vertical_gap_deg=3.5+` it DOES find the board candidate.
+- Horizontal separation still tight: two boards side by side 0.5 m apart
+  horizontally at same elevation must remain separate clusters under
+  anisotropic scaling (no horizontal over-merge).
+- Existing suite green (defaults must not break the synthetic-scene tests —
+  note scene spacing 0.03 grid: anisotropic scaling at 3° only widens vertical
+  tolerance beyond 0.15 for r > ~1.4 m, scene board at 4 m → verify tests
+  still pass; if a stage-1 test breaks, investigate before touching it).
+
+### Task 15: Stage-3 benchmark + phase doc
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --out results/run5-aniso
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --vertical-gap-deg 0 --out results/run5-control
+```
+(control isolates the anisotropic effect; single-frame, no accumulation.)
+
+Fill "## Stage 3 Results" in the phase doc: recall per dataset vs stage-1/2,
+timing, jitter (with n), pose sanity vs bbox reference on ds3, false-positive
+check (stance 0.5 active), overlay inspection notes, honest narrative +
+Decision update.
