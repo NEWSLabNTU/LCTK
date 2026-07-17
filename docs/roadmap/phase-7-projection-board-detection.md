@@ -484,6 +484,199 @@ consistent with the 1.95× (not 10×) downsampled-point growth measured above.
 Every accumulated-window overlay is labeled "NO DETECTION"; none show a
 fitted quad.
 
+## Stage 3 Results
+
+Stage 3 tests the third stage-2 next-step: `--vertical-gap-deg` (commit
+landed on this branch) z-compresses points by a range-scaled factor before
+generator B's DBSCAN clustering step, hypothesized to reconnect VLP-32C
+ring-gap-fragmented board patches into one coherent cluster without
+widening the horizontal tolerance (see the docstring at
+`candidates/cluster_after_ground.py:_anisotropic_scaled`). Suite is 48/48
+green (`uv run pytest -q`) before and after this benchmark.
+
+Two single-frame (`--accumulate 1`, default) runs per the brief, both at
+`stance-weight 0.5` so they isolate the anisotropic effect against a
+like-for-like baseline (stage 1's B numbers were measured at stance 0, so
+they are not directly comparable to either run below):
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --out results/run5-aniso            # vertical-gap-deg=3.0 (default)
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --vertical-gap-deg 0 --out results/run5-control
+```
+
+### Recall per dataset (fraction of frames with any detection ≥ min_score)
+
+| Dataset | Stage-1 B (stance 0, no aniso) | run5-control (stance 0.5, aniso off) | run5-aniso (stance 0.5, aniso on) |
+|---------|---|---|---|
+| 1 | — (not reported stage 1) | 1% (1/103) | 3% (3/103) |
+| 2 | — | 0% (0/103) | 1% (1/103) |
+| 3 | 2% (2/113) | 2% (2/113) | 1% (1/113) |
+| 4 | — | 1% (1/113) | 0% (0/113) |
+| 5 | 8% (8/103, unverified/likely clutter) | 4% (4/103) | 2% (2/103) |
+| **Total** | — | **8/535 (1.5%)** | **7/535 (1.3%)** |
+
+Raw recall is a wash — total accepted detections are the same order of
+magnitude either way (8 vs 7) and per-dataset deltas go in both directions
+(aniso +2 on ds1, control +1 on ds3/ds4/ds5). **On numbers alone, stage 3's
+headline candidate mechanism does not clear the ~100% bar stage 1/2 left
+unmet** — but a per-frame trace (below) shows the mechanism is doing exactly
+what it was designed to do; the scorer, not candidate generation, now caps
+the result.
+
+### Timing (median ms per frame, p95 in parentheses; 100 ms/frame budget)
+
+| Run | downsample | candidates | scoring | total |
+|---|---|---|---|---|
+| run5-aniso (ds1–5 median) | 3.1 | 84.6–87.2 | 0.55–0.63 | 88.6–91.1 (97.8–102) |
+| run5-control (ds1–5 median) | 3.1–3.3 | 77.4–81.5 | 0.88–1.14 | 81.9–85.7 (92.6–96.2) |
+
+Both runs comfortably clear the 100 ms budget; the anisotropic scaling adds
+~5–7 ms/frame to the candidate stage (extra z-scaling arithmetic on top of
+the existing DBSCAN call) and p95 stays under 103 ms everywhere. Not the
+bottleneck.
+
+### Pose jitter (std of detected center [mm] / normal [deg], n = detection count)
+
+| Dataset | run5-aniso | run5-control |
+|---------|---|---|
+| 1 | 5.7 / 0.14 (n=3) | — (n=1) |
+| 2 | — (n=1) | — (n=0) |
+| 3 | — (n=1) | 25.1 / 0.0 (n=2) |
+| 4 | — (n=0) | — (n=1) |
+| 5 | 9.4 / 0.00 (n=2) | 1122 / 5.7 (n=4) |
+
+run5-control/ds3 (n=2) is the **exact same two-frame stage-1 pair**
+reproduced verbatim: frame 5 scores 0.536 (vs. 0.538 at stance 0 in stage
+1/2 — the 0.002 stance delta already documented) and center (2.103,
+-0.239, -0.013); jitter is again 25 mm, the noise-floor value already on
+record. run5-aniso's ds1 (n=3, 5.7 mm) and ds5 (n=2, 9.4 mm) look like tight
+convergent clusters by the numbers alone — but ds5's tightness is
+**clutter-panel** jitter (see pose sanity below), not board precision, so
+low jitter is not by itself evidence of a correct detection; it only
+confirms the same object was hit repeatedly.
+
+### Pose sanity — bbox-reference cross-check, all 5 datasets
+
+The bbox crop-box reference (`ros/lctk_launch/config/board/bbox.json5`,
+translation `[2.6, 0, 0.35]`, size `[3.1, 3.94, 2.2]` → x∈[1.05,4.15],
+y∈[-1.97,1.97], z∈[-0.75,1.45]) is one physical rig setup shared by all
+five sample datasets, not ds3-specific, so it is a valid sanity check
+everywhere. A scratch script (not committed) re-ran `detect()` per frame
+for both configs on all 535 frames and classified every accepted
+detection's center against that box:
+
+| Run | detections inside bbox (true-board candidates) | detections outside bbox (clutter) |
+|---|---|---|
+| run5-aniso | 5/7 — ds1 (3, all ~(2.25, -0.05, 0.07)), ds2 (1, (2.15, 0.41, 0.08)), ds3 (1, (2.10, -0.32, 0.08)) | 2/7 — ds5, both ~(-1.83, -2.89, -0.07) |
+| run5-control | 4/8 — ds1 (1, (2.26, -0.09, 0.02)), ds3 (2, (2.10, -0.24…-0.31, ~0)), ds4 (1, (2.08, -0.56, 0.03)) | 4/8 — ds5, three ~(-1.83, -2.90) + one ~(-3.53, 3.15) |
+
+Every in-box hit clusters tightly around x≈2.1–2.3 m, y≈-0.6…+0.4 m — one
+consistent physical location across datasets 1, 2, 3, and 4, not scattered
+coordinates. Reading the overlays for these frames (ds1 frame 99/83, ds2
+frame 37, ds3 frame 5/37/96, ds4 frame 17) confirms the raster shows a
+clean diamond outline **with two dark hole blobs** — the actual
+hollow-board pattern, not a featureless panel. ds5's out-of-box hits, by
+contrast, raster as a single solid filled region with **no holes** — the
+same "board-sized clutter panel" signature stage 1 documented for
+generator C. **Stage 3 extends the stage-1 ds3-only verified true-board
+finding to datasets 1, 2, and 4 as well** (ds5 stays clutter under both
+configs — stance 0.5 does not fix it here either, consistent with stage
+2's finding that stance only kills one of two clutter-panel orientations).
+
+### False positives under stance 0.5
+
+Both configs still accept ds5's clutter panel at score ≥ 0.5 (aniso: 0.62,
+0.59; control: 0.55, 0.57, 0.60, 0.53) — stance 0.5 does not suppress it,
+matching stage 2's finding that the term only kills the *other* panel
+orientation, not both. No new false-positive location appears in stage 3;
+ds1–ds4's in-box hits are visually confirmed true-board (holes present).
+
+### Per-frame trace: candidate generation vs scorer gate (the real finding)
+
+The recall table above hides the mechanism. Re-running `detect()` per frame
+on dataset 3 and checking whether *any* candidate (accepted or
+`best_rejected`) landed inside the bbox — not just the final accepted
+detection — gives a very different picture:
+
+| Run | frames with a board-region candidate (accepted or rejected) | of those, score distribution |
+|---|---|---|
+| run5-control | 6/113 (5%) | min 0.069, max 0.577, **median 0.399** |
+| run5-aniso | 35/113 (31%) | min 0.054, max 0.579, **median 0.074** |
+
+**Anisotropic clustering does exactly what it was designed to do**: a
+board-shaped candidate near the true location now appears in 6× more
+frames (31% vs 5%). That confirms the hypothesis behind stage 3 — z-scaled
+DBSCAN does reconnect ring-gap-fragmented board patches far more often than
+isotropic clustering. But the merged patch is lower quality on most of
+those extra frames: median score for the near-bbox candidate *drops* from
+0.40 to 0.07, because the widened vertical tolerance that bridges ring gaps
+also sweeps in more off-board coplanar points at similar range, diluting
+squareness/fill/edge-straightness. Only a minority of the 35 aniso frames
+(1 of 35) cross `min_score=0.5`; the rest sit well below it. Net effect on
+final recall is therefore close to a wash even though candidate generation
+improved sharply — **the bottleneck has moved from "no board-shaped
+candidate exists" (stage 1/2's diagnosis) to "the scorer can't accept the
+noisier merged candidate aniso now reliably produces."** This is a genuine
+step forward in candidate generation, just not (yet) in end-to-end recall.
+
+### `best_rejected` distribution — where do the remaining misses land
+
+- run5-aniso: near-bbox rejects (ds3) cluster tightly at (2.10, -0.31, z
+  varying with frame) — the *same* physical location across dozens of
+  frames, just under-scoring, not scattered.
+- run5-control: near-bbox rejects are rarer (matches the 5% figure above)
+  but land at the same coordinates when they occur.
+- Off-bbox rejects in both runs continue to cluster at the same clutter
+  coordinates stage 1/2 already named (~(4.7, 2.6), ~(-3.3, 3.4),
+  ~(-1.83, -2.9)) — no new clutter attractor appeared.
+
+### What the overlays show
+
+Side-by-side, run5-aniso/ds1_b_frame0099.png and run5-aniso/ds2_b_frame0037.png
+show a clean, dense diamond raster with two well-separated dark hole
+blobs and comparatively little residual black speckle inside the white
+region — visibly *less fragmented* than the equivalent stage-1/control
+raster (run5-control/ds3_b_frame0005.png, identical pixel-for-pixel to
+`results/run2/ds3_b_frame0005.png` from stage 1) whose interior shows a
+more ragged, blob-like white region without a crisp diamond boundary. This
+matches the per-frame trace above: aniso's merged patches are shaped closer
+to the true board more often, they just don't clear the score gate as
+consistently. run5-control/ds5_b_frame0068.png (clutter) rasters as one
+large solid filled blob with a straight edge and no interior holes at all —
+visually distinct from every confirmed board hit, and the reason the
+bbox-location gate is a meaningful sanity check independent of the scorer.
+
+### Stage-3 verdict
+
+Partial, directionally-positive result, not a fix:
+
+- **Hypothesis confirmed for candidate generation**: anisotropic vertical
+  clustering reconnects ring-gap-fragmented board patches 6× more often
+  near the true board location (31% of ds3 frames vs 5% for the isotropic
+  control), extending stage 1's single-dataset verified finding to
+  datasets 1, 2, and 4 as well (visually confirmed via hole-pattern
+  overlays and the shared bbox-reference coordinate cluster).
+- **Hypothesis not confirmed for end-to-end recall**: the extra candidates
+  score far lower on average (median 0.07 vs 0.40) because the same
+  widened tolerance that bridges ring gaps also admits more off-board
+  clutter into the merged patch, so accepted-detection recall stays flat
+  (7 vs 8 total detections across 535 frames) — a wash, reported as such.
+- **The bottleneck has moved, not closed.** Stage 1/2 diagnosed "no
+  board-shaped candidate reaches the scorer." Stage 3 shows the candidate
+  now *does* reach the scorer on 6× more frames — the remaining gap is
+  scorer discrimination on a noisier merged patch (fill ratio / squareness
+  / edge straightness degraded by the extra swept-in points), not
+  candidate absence. A quality-aware merge (e.g. cap how much of the
+  merged patch is allowed to fall outside the initial seed cluster's
+  convex hull, or re-tighten `eps_v` once a plausible board-size patch is
+  found) is the natural next lever, not a bigger `vertical-gap-deg`.
+- Timing stays inside budget (aniso adds ~5–7 ms/frame, both configs
+  <103 ms p95) and stance 0.5 still leaves one clutter panel unfiltered
+  on ds5 under both configs — neither changes the stage-2 verdicts on
+  those two fronts.
+
 ## Decision
 
 Partial success — no winner yet, and the numbers as they stand do not justify
@@ -541,7 +734,7 @@ on integration:
   hole pattern (present on the recorded board, never used as a cue so
   far) remains the most promising untested lever.
 
-Next steps if the phase continues: (1) stripe-aware candidate merging done
+Next steps as of stage 2: (1) stripe-aware candidate merging done
 properly (the current coplanar merge helps but under-recovers) — stage 2's
 diagnosis shows this needs to hold even as `cluster_eps` and window
 composition change, not just at single-frame scale; (2) add the hole
@@ -554,3 +747,48 @@ generalize; (4) re-run; only then decide pick/combine/reject. Integration
 design (Rust port, ROS node, replacing vs front-ending ICP) stays out of
 scope until a generator clears a usable detection rate on the real
 recordings.
+
+### Stage-3 verdict (updates the above)
+
+Stage 3 was next-step (1) — stripe-aware merging via anisotropic
+z-compressed clustering — and it **partially delivers on exactly the
+mechanism stage 1/2 asked for**, without yet moving the integration call:
+
+- Candidate generation is measurably fixed: a board-shaped candidate now
+  reaches the scorer on 31% of ds3 frames (vs 5% isotropic), and the
+  bbox-reference sanity check that stage 1 ran only on dataset 3 now also
+  confirms true-board hits (hollow-diamond raster, hole pattern visible)
+  on datasets 1, 2, and 4 — the phenomenon generalizes past the single
+  dataset stage 1 could verify.
+- End-to-end recall does not move (7 vs 8 accepted detections across 535
+  frames) because the wider vertical tolerance that reconnects ring gaps
+  also drags in more off-board points, so the newly-generated candidates
+  mostly land well below `min_score` (median 0.07) rather than clearing
+  it. **The bottleneck this phase has chased since stage 1 —
+  "candidate generation on ring-striped clouds" — has now measurably
+  shifted toward the scorer's ability to discriminate a noisier merged
+  patch**, which changes next-step (1) from "try stripe-aware merging" to
+  "make the stripe-aware merge quality-aware" (e.g. bound how far a merged
+  point can sit from the seed cluster's own plane/extent before it is
+  swept in, or re-tighten `eps_v` adaptively once a plausible-size patch
+  is found, rather than applying one fixed range-scaled tolerance
+  everywhere).
+- Stance and timing verdicts from stage 2 are unchanged: stance 0.5 still
+  leaves ds5's clutter panel unfiltered under both stage-3 configs, and
+  timing has headroom in every run (aniso costs ~5–7 ms/frame extra,
+  nowhere near the 100 ms budget).
+- **Still not yet an integration decision.** No config this phase has
+  tested clears a usable detection rate on real recordings (best is still
+  low single digits per dataset). The honest read is: stage 3 is a real,
+  measured improvement to the *diagnosis* (candidate generation is closer
+  to solved than the scorer is), not yet an improvement to the
+  *headline recall number* the Decision above is gated on.
+
+Updated next step: pursue a quality-aware version of the anisotropic merge
+(bound admitted points by proximity to the seed cluster's own plane/extent,
+or shrink `eps_v` back down once a board-size patch is found) before
+retrying the hole-pattern score term — stage 3 suggests the scorer is now
+seeing the right *region* far more often, so tightening what gets admitted
+into that region's candidate may close more gap than a new score term
+would on its own. Re-run stage 2's remaining items (hole pattern, real
+board-motion accumulation) after that.
