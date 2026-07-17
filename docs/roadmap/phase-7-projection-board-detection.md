@@ -510,10 +510,10 @@ uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
 
 | Dataset | Stage-1 B (stance 0, no aniso) | run5-control (stance 0.5, aniso off) | run5-aniso (stance 0.5, aniso on) |
 |---------|---|---|---|
-| 1 | — (not reported stage 1) | 1% (1/103) | 3% (3/103) |
-| 2 | — | 0% (0/103) | 1% (1/103) |
+| 1 | 1% (1/103, not bbox-verified) | 1% (1/103) | 3% (3/103) |
+| 2 | 0% (0/103, not bbox-verified) | 0% (0/103) | 1% (1/103) |
 | 3 | 2% (2/113) | 2% (2/113) | 1% (1/113) |
-| 4 | — | 1% (1/113) | 0% (0/113) |
+| 4 | 1% (1/113, not bbox-verified) | 1% (1/113) | 0% (0/113) |
 | 5 | 8% (8/103, unverified/likely clutter) | 4% (4/103) | 2% (2/103) |
 | **Total** | — | **8/535 (1.5%)** | **7/535 (1.3%)** |
 
@@ -574,14 +574,19 @@ detection's center against that box:
 
 Every in-box hit clusters tightly around x≈2.1–2.3 m, y≈-0.6…+0.4 m — one
 consistent physical location across datasets 1, 2, 3, and 4, not scattered
-coordinates. Reading the overlays for these frames (ds1 frame 99/83, ds2
-frame 37, ds3 frame 5/37/96, ds4 frame 17) confirms the raster shows a
+coordinates. Reading the overlays for confirmed in-box frames (ds1 frame 99/83, ds2
+frame 37, ds3 frames 37/96) shows a
 clean diamond outline **with two dark hole blobs** — the actual
-hollow-board pattern, not a featureless panel. ds5's out-of-box hits, by
+hollow-board pattern, not a featureless panel. ds3 frame 5, though also at the
+bbox location, rasters as a more ragged blob-like region without crisp diamond
+boundary — present in the region but not confirmed to the hole-pattern standard.
+ds4 frame 17 similarly clusters at the bbox location but rasters as visually
+ragged, not confirming the hollow-diamond pattern. ds5's out-of-box hits, by
 contrast, raster as a single solid filled region with **no holes** — the
 same "board-sized clutter panel" signature stage 1 documented for
 generator C. **Stage 3 extends the stage-1 ds3-only verified true-board
-finding to datasets 1, 2, and 4 as well** (ds5 stays clutter under both
+finding to datasets 1, 2, and 3 as well** (ds4 is location-consistent but
+not confirmed to the hole-pattern standard; ds5 stays clutter under both
 configs — stance 0.5 does not fix it here either, consistent with stage
 2's finding that stance only kills one of two clutter-panel orientations).
 
@@ -591,7 +596,9 @@ Both configs still accept ds5's clutter panel at score ≥ 0.5 (aniso: 0.62,
 0.59; control: 0.55, 0.57, 0.60, 0.53) — stance 0.5 does not suppress it,
 matching stage 2's finding that the term only kills the *other* panel
 orientation, not both. No new false-positive location appears in stage 3;
-ds1–ds4's in-box hits are visually confirmed true-board (holes present).
+ds1–ds3's in-box hits are visually confirmed true-board (holes present), and
+ds4's in-box hit is at the correct location but visually ragged (not
+confirmed to hole-pattern standard).
 
 ### Per-frame trace: candidate generation vs scorer gate (the real finding)
 
