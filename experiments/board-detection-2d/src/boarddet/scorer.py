@@ -20,6 +20,7 @@ class ScoreResult:
     angle_err_deg: float
     raster: np.ndarray        # uint8 debug image
     origin: np.ndarray        # (2,) plane coords of raster pixel (0,0)
+    cell_m: float              # raster cell size used (board.cell_m)
 
 
 def _rasterize(coords_2d: np.ndarray, cell: float):
@@ -130,4 +131,5 @@ def score_candidate(coords_2d: np.ndarray,
 
     return ScoreResult(score=float(score), corners_2d=corners,
                        side_lengths=sides, fill_ratio=fill,
-                       angle_err_deg=angle_err, raster=closed, origin=origin)
+                       angle_err_deg=angle_err, raster=closed, origin=origin,
+                       cell_m=cell)
