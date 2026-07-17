@@ -187,50 +187,79 @@ different things — see the narrative below.
 
 ### Detection rate (fraction of frames with any detection ≥ min_score)
 
+**A was re-run** (`results/run3a`, all 5 datasets, full frames) after a review fix to
+`dist_thresh` (0.02 → 0.05 m; see "A's RANSAC threshold fix" below). B and C numbers below are
+unchanged from the original `run2`/`run2c` run.
+
 | Dataset | A: iterative RANSAC | B: cluster | C: region growing (30-frame cap) |
 |---------|--------------------|------------|-------------------|
-| 1 | 1% | 1% | 83% |
+| 1 | 0% | 1% | 83% |
 | 2 | 0% | 0% | 53% |
-| 3 | 1% | 2% | 93% |
-| 4 | 1% | 1% | 87% |
-| 5 | 1% | 8% | 90% |
+| 3 | 0% | 2% | 93% |
+| 4 | 0% | 1% | 87% |
+| 5 | 0% | 8% | 90% |
 
 ### Timing (median ms per frame, dataset 3; p95 in parentheses)
 
-| Stage | A | B | C |
+| Stage | A (run3a) | B | C |
 |-------|---|---|---|
-| downsample (0.03 voxel) | 3.2 | 3.2 | 3.0 |
-| candidate generation | 104.7 | 77.5 | 285.2 |
-| 2D scoring | 3.9 | 1.1 | 5.0 |
-| total | 111.6 (119.7) | 82.4 (91.8) | 293.0 (306.9) |
+| downsample (0.03 voxel) | 3.1 | 3.2 | 3.0 |
+| candidate generation | 103.8 | 77.5 | 285.2 |
+| 2D scoring | 5.5 | 1.1 | 5.0 |
+| total | 112.5 (121.1) | 82.4 (91.8) | 293.0 (306.9) |
 
-Timing is stable across datasets (A 109–112 ms, B 82–86 ms, C 293–301 ms
-median). **B fits the ~100 ms realtime budget; A is borderline; C is 3×
-over** — and C's cost is a pure-Python BFS, so a compiled port would change
-its constant dramatically.
+Timing is stable across datasets (A 111–114 ms in run3a, B 82–86 ms, C
+293–301 ms median) and essentially unchanged by the `dist_thresh` fix (A was
+109–112 ms in run2; the looser threshold shifted median candidate count from
+unrecorded to 43–56/frame but cost the same RANSAC + DBSCAN work). **B fits
+the ~100 ms realtime budget; A is borderline; C is 3× over** — and C's cost
+is a pure-Python BFS, so a compiled port would change its constant
+dramatically.
 
-### Pose jitter (std of detected center [mm] / normal [deg])
+### Pose jitter (std of detected center [mm] / normal [deg], n = detection count)
 
-| Dataset | A | B | C |
+| Dataset | A | B | C (30-frame cap) |
 |---------|---|---|---|
-| 1 | — | — | 1468 / 1.4 |
-| 2 | — | — | 977 / 6.4 |
-| 3 | — | 25 / 0.0 | 1411 / 9.5 |
-| 4 | — | — | 1468 / 2.7 |
-| 5 | — | 862 / 6.5 | 2090 / 3.4 |
+| 1 | — (n=1) | — (n=1) | 1468 / 1.4 (n=25) |
+| 2 | — (n=0) | — (n=0) | 977 / 6.4 (n=16) |
+| 3 | — (n=0)\* | 25 / 0.0 (n=2) | 1411 / 9.5 (n=28) |
+| 4 | — (n=1) | — (n=1) | 1468 / 2.7 (n=26) |
+| 5 | — (n=1) | 862 / 6.5 (n=8) | 2090 / 3.4 (n=27) |
 
-Jitter is only defined where ≥ 2 frames detected. The metre-scale center
+\* A's ds3 count is from the `run3a` re-run (see "A's RANSAC threshold fix"
+below); it dropped from n=1 to n=0 there. All other A/B counts above are
+from the original `run2` (unchanged by the fix).
+
+Jitter is only defined where ≥ 2 frames detected — that's a single cell in
+this table (**B/ds3, n=2**). A std computed from 2 samples is not a
+meaningful precision estimate; 25 mm / 0.0° there is consistent with the
+sensor noise floor but should be read as "these two detections landed close
+together," not as a converged jitter statistic. Every other populated cell
+(n=1) has no defined jitter at all — shown as "—" — and C's n≈16–28 cells
+are the only ones with enough samples for the std to mean much
+statistically, though (see below) those detections are largely not the
+board itself, so even C's numbers describe clutter-panel jitter, not board
+jitter. The metre-scale center
 jitter is itself a finding: those "detections" are **not the same object from
 frame to frame** (see below). B on dataset 3 — the one case verified to be the
 real board — jitters by 25 mm, in line with the sensor noise floor.
 
 ### What the overlays show (narrative)
 
-- **B's rare detections are the real board.** On dataset 3 every B detection
-  sits at the `bbox.json5` reference location (~2.1 m ahead), the raster
-  clearly shows the hollow-diamond outline, and center jitter is 25 mm. This
-  is the honest headline: **crop-box-free detection of the true board was
-  achieved, but only on ~2% of frames.**
+- **B's rare detections are the real board — verified on dataset 3 only.**
+  On dataset 3 every B detection sits at the `bbox.json5` reference location
+  (~2.1 m ahead), the raster clearly shows the hollow-diamond outline, and
+  center jitter is 25 mm (n=2 — see the jitter table note above; not a
+  converged statistic, but consistent with the noise floor). This is the
+  honest headline: **crop-box-free detection of the true board was achieved
+  on dataset 3, but only on ~2% of its frames.** This claim does **not**
+  extend to the other datasets: dataset 5's 8% rate (n=8) was *not*
+  spot-checked against `bbox.json5` the way ds3 was, and its 862 mm / 6.5°
+  jitter is on the same order as C's clutter-panel jitter elsewhere in this
+  table — plausible evidence that B latches onto a board-sized clutter
+  object on ds5 rather than the board, the same failure mode documented for
+  C below. Treat ds5's B detections as unverified, likely clutter, not a
+  second confirmed "found the board" result.
 - **C's high rate is board-sized clutter, not the board.** On dataset 3,
   0 of 28 C detections are at the board location; they alternate between two
   background objects (~(4.7, 2.6) and ~(−3.3, 3.4)) that are genuinely flat
@@ -247,6 +276,27 @@ real board — jitters by 25 mm, in line with the sensor noise floor.
   points), the minAreaRect over the partial patch lands outside the ±20% side
   gate, or coplanar clutter merges in and skews the quad. Frame 5-style
   "clean" captures pass; the rest fail one gate or another.
+- **A's RANSAC threshold fix made things worse, not better (honest result).**
+  A review flagged `dist_thresh=0.02` as a synthetic-era value never
+  adjusted for the ~0.03 m real-data noise floor (the same floor that
+  motivated the 0.035 m flatness gate), and raising it to 0.05 m was
+  expected to *admit* more genuine board inliers per RANSAC plane. Re-run
+  (`results/run3a`, all 5 datasets, full frames): **A's detection rate
+  dropped from 1% to 0% on every dataset**, while median candidate count
+  per frame actually rose to 43–56 (up from an unrecorded but visibly lower
+  count in run2) and per-frame timing stayed flat (111–114 ms). The looser
+  threshold pulls more board-adjacent clutter into each RANSAC plane's
+  inlier set before the `component_eps` clustering step ever runs, so more
+  *candidates* survive the DBSCAN component split but each one is noisier
+  and less board-shaped — they clear the flatness gate more easily but fail
+  the 2D quad-fit's side-length/squareness score more often. Net effect:
+  more attempts, lower yield. The change is kept because it is the
+  scientifically correct value (consistent with the flatness gate and
+  gen B's `big_plane_dist`), but it does **not** rescue generator A — A's
+  bottleneck is candidate *shape* quality from RANSAC-on-a-mixed-plane, not
+  an overly strict distance threshold. This reinforces the existing verdict
+  below: A's problem is structural (board surfaces late, mixed with
+  clutter), not a tuning gap.
 - **Failure of the fill term on the hollow board** (found in smoke, fixed):
   the recorded board's three 15 cm holes plus ring-gap sparsity give
   fill_ratio ≈ 0.44 for a *perfect* fit; the linear fill weight rejected it.

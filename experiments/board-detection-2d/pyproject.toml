@@ -1,7 +1,7 @@
 [project]
 name = "boarddet"
 version = "0.1.0"
-description = "Add your description here"
+description = "Phase 7 experiment: crop-box-free LiDAR board detection via plane-fit + 2D projection scoring"
 readme = "README.md"
 authors = [
     { name = "aeon", email = "jerry73204@gmail.com" }
