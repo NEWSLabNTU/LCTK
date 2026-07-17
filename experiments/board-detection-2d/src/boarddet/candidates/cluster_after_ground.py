@@ -45,7 +45,15 @@ def _remove_big_planes(points: np.ndarray, board: BoardConfig,
         labels = np.asarray(pc_in.cluster_dbscan(eps=0.20, min_points=10))
         valid = labels[labels >= 0]
         if len(valid) == 0:
-            break
+            # This plane's inliers DBSCAN entirely to noise (no component
+            # has >= 10 points at eps=0.20) -- an unmeasurable, fragmented
+            # patch is not the board, so it's safe to strip and keep looking
+            # for other big planes rather than aborting the whole strip loop
+            # (a `break` here left every later big plane unstripped).
+            mask = np.ones(len(remaining), dtype=bool)
+            mask[idx] = False
+            remaining = remaining[mask]
+            continue
         biggest = inliers[labels == np.bincount(valid).argmax()]
         ext = extent_2d(project_to_plane(biggest, fit_plane(biggest)))
         if ext <= 2.0 * diag:

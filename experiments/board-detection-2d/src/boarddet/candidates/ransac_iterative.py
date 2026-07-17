@@ -10,9 +10,16 @@ from ..board_config import BoardConfig
 
 def generate_ransac_iterative(points: np.ndarray, board: BoardConfig,
                               max_planes: int = 8,
-                              dist_thresh: float = 0.02,
+                              dist_thresh: float = 0.05,
                               min_inliers: int = 60,
                               component_eps: float = 0.20) -> list[Candidate]:
+    # dist_thresh was 0.02 in the synthetic-only design (sigma=0.01 noise).
+    # Real VLP-32C board patches fit a plane with RMS ~0.03 m (the noise
+    # floor CLAUDE.md documents from the ICP history, C-04) -- the flatness
+    # gate in plausible_board_patch was raised to 0.035 m for exactly this
+    # reason. 0.05 m keeps RANSAC's own inlier threshold consistent with that
+    # noise floor instead of rejecting genuine board-plane inliers before
+    # they ever reach the flatness gate. Matches gen B's big_plane_dist=0.05.
     # component_eps was 0.10 in the synthetic-only design. Same real-data
     # cause as generator B (see cluster_after_ground.py): VLP-32C ring gaps
     # cross the board face itself at ~2 m range and fragment a single RANSAC
