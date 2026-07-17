@@ -173,33 +173,121 @@ detected?, pose, per-stage wall time.
 
 ## Results
 
-Pending — tables below are filled in as experiments run.
+First benchmark run 2026-07-17 (`experiments/board-detection-2d/results/run2*`;
+board side 1.0 m from `board_detector.json5`, `min_score` 0.5). A and B ran
+**all frames** of every dataset (103–113/dataset); **C was capped at 30
+frames/dataset** because its per-point Python BFS is ~3.5× slower than A —
+noted per the protocol's no-silent-caps rule.
 
-### Detection rate
+**Read the detection-rate table with care.** There is no ground truth, and the
+rate counts *any* accepted detection. Spot-checking detections against the
+only sanity reference available (the legacy `bbox.json5` crop-box centre,
+never used by the algorithm) shows the three generators' rates mean very
+different things — see the narrative below.
 
-| Dataset | A: iterative RANSAC | B: cluster | C: region growing |
+### Detection rate (fraction of frames with any detection ≥ min_score)
+
+| Dataset | A: iterative RANSAC | B: cluster | C: region growing (30-frame cap) |
 |---------|--------------------|------------|-------------------|
-| 1 | — | — | — |
-| 2 | — | — | — |
-| 3 | — | — | — |
-| 4 | — | — | — |
-| 5 | — | — | — |
+| 1 | 1% | 1% | 83% |
+| 2 | 0% | 0% | 53% |
+| 3 | 1% | 2% | 93% |
+| 4 | 1% | 1% | 87% |
+| 5 | 1% | 8% | 90% |
 
-### Timing (median / p95 ms per frame)
+### Timing (median ms per frame, dataset 3; p95 in parentheses)
 
 | Stage | A | B | C |
 |-------|---|---|---|
-| candidate generation | — | — | — |
-| 2D scoring | — | — | — |
-| total | — | — | — |
+| downsample (0.03 voxel) | 3.2 | 3.2 | 3.0 |
+| candidate generation | 104.7 | 77.5 | 285.2 |
+| 2D scoring | 3.9 | 1.1 | 5.0 |
+| total | 111.6 (119.7) | 82.4 (91.8) | 293.0 (306.9) |
 
-### Pose jitter (per-dataset std of center / normal / in-plane rotation)
+Timing is stable across datasets (A 109–112 ms, B 82–86 ms, C 293–301 ms
+median). **B fits the ~100 ms realtime budget; A is borderline; C is 3×
+over** — and C's cost is a pure-Python BFS, so a compiled port would change
+its constant dramatically.
 
-Pending.
+### Pose jitter (std of detected center [mm] / normal [deg])
+
+| Dataset | A | B | C |
+|---------|---|---|---|
+| 1 | — | — | 1468 / 1.4 |
+| 2 | — | — | 977 / 6.4 |
+| 3 | — | 25 / 0.0 | 1411 / 9.5 |
+| 4 | — | — | 1468 / 2.7 |
+| 5 | — | 862 / 6.5 | 2090 / 3.4 |
+
+Jitter is only defined where ≥ 2 frames detected. The metre-scale center
+jitter is itself a finding: those "detections" are **not the same object from
+frame to frame** (see below). B on dataset 3 — the one case verified to be the
+real board — jitters by 25 mm, in line with the sensor noise floor.
+
+### What the overlays show (narrative)
+
+- **B's rare detections are the real board.** On dataset 3 every B detection
+  sits at the `bbox.json5` reference location (~2.1 m ahead), the raster
+  clearly shows the hollow-diamond outline, and center jitter is 25 mm. This
+  is the honest headline: **crop-box-free detection of the true board was
+  achieved, but only on ~2% of frames.**
+- **C's high rate is board-sized clutter, not the board.** On dataset 3,
+  0 of 28 C detections are at the board location; they alternate between two
+  background objects (~(4.7, 2.6) and ~(−3.3, 3.4)) that are genuinely flat
+  and ~1 m square — hence the metre-scale jitter. The scorer, keyed on the
+  square border alone (by design: works without holes), cannot distinguish a
+  1 m square panel from the 1 m board. C *does* generate the true-board
+  candidate, but VLP-32C normal noise splits the board into two
+  normal-coherent regions, each of which fails the size gate.
+- **Why A/B miss the board on most frames:** at ~2 m range the 32 rings put
+  only a handful of stripes on the board; after 0.03 m voxel downsampling the
+  board cluster is 300–600 points with plane-fit RMS of 0.029–0.031 m —
+  *at* the sensor noise floor (cf. `icp_good_fit_threshold` history, C-04).
+  On most frames either DBSCAN clips part of the board (mixed-pixel edge
+  points), the minAreaRect over the partial patch lands outside the ±20% side
+  gate, or coplanar clutter merges in and skews the quad. Frame 5-style
+  "clean" captures pass; the rest fail one gate or another.
+- **Failure of the fill term on the hollow board** (found in smoke, fixed):
+  the recorded board's three 15 cm holes plus ring-gap sparsity give
+  fill_ratio ≈ 0.44 for a *perfect* fit; the linear fill weight rejected it.
+  Score now uses `sqrt(fill)` with the side-error weight rebalanced, with
+  covering tests (`test_scores_hollow_board_high`,
+  `test_scores_sparse_hollow_board_above_min_score`). Other real-data tuning
+  (ring-gap DBSCAN eps, plane-strip fraction, flatness gate at 0.035 m,
+  seeding open3d's RANSAC RNG for reproducibility) is documented in commit
+  `6b197ce`.
+
+### Solid-state stretch check (synthetic uniform sampling)
+
+All three generators detect 5/5 uniform-pattern (Livox-like, no ring
+structure) synthetic scenes with center error < 5 cm — nothing in the
+pipeline assumes ring/grid structure. Real spinning-LiDAR data is the *hard*
+case here, not the easy one: the synthetic uniform scenes lack ring stripes,
+which are the root cause of most real-frame failures above.
 
 ## Decision
 
-Pending experiment results. Options on the table: pick one generator, combine
-(e.g. B with A fallback), or reject the 2D approach. Integration design (Rust
-port, ROS node, replacing vs front-ending ICP) is out of scope for this phase
-and will be a separate phase once a winner exists.
+Partial success — no winner yet, and the numbers as they stand do not justify
+an integration phase:
+
+- The **projection + 2D scorer core is sound**: when a clean board candidate
+  reaches it, it produces a tight quad (25 mm jitter) at the right place, at
+  millisecond cost. The bottleneck is **candidate generation on ring-striped
+  clouds**, not the 2D idea.
+- **B** is the only generator that found the real board and the only one
+  inside the 100 ms budget, but a 2% frame rate is unusable as-is.
+- **C**'s recall on *flat square objects* is high even through ring stripes —
+  but it cannot tell the board from board-sized clutter, and is 3× over
+  budget in Python.
+- **Discrimination needs a stronger cue than the border alone** in scenes
+  containing other ~1 m planar objects: the hole pattern (present on the
+  recorded board) as an optional-but-scoring cue, or temporal consistency
+  across frames, would separate the true board from the two clutter panels
+  that C locks onto.
+
+Next steps if the phase continues: (1) stripe-aware candidate merging done
+properly (the current coplanar merge helps but under-recovers); (2) add the
+hole pattern as an optional score term; (3) re-run; only then decide
+pick/combine/reject. Integration design (Rust port, ROS node, replacing vs
+front-ending ICP) stays out of scope until a generator clears a usable
+detection rate on the real recordings.
