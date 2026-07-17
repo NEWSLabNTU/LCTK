@@ -123,6 +123,7 @@ def run(datasets: list[int], generators: list[str], board: BoardConfig,
     summary = {
         "accumulate": accumulate,
         "stance_weight": board.stance_weight,
+        "vertical_gap_deg": board.vertical_gap_deg,
         "datasets": all_results,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -142,10 +143,14 @@ def main() -> None:
                     help="frames per window (1 = stage-1 behavior)")
     ap.add_argument("--stance-weight", type=float, default=0.0,
                     help="diamond-stance score blend weight (0 = off)")
+    ap.add_argument("--vertical-gap-deg", type=float, default=3.0,
+                    help="generator B anisotropic vertical clustering "
+                         "tolerance, LiDAR ring-gap degrees (0 = off)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     run(args.datasets, args.generators,
-        BoardConfig(side_m=args.side, stance_weight=args.stance_weight),
+        BoardConfig(side_m=args.side, stance_weight=args.stance_weight,
+                   vertical_gap_deg=args.vertical_gap_deg),
         args.max_frames, args.out, accumulate=args.accumulate)
 
 
