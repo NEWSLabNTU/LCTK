@@ -120,7 +120,18 @@ def score_candidate(coords_2d: np.ndarray,
                 + abs(float(np.mean(sides)) - board.side_m) / board.side_m)
     if abs(float(np.mean(sides)) - board.side_m) > board.side_tol * board.side_m:
         return None
-    score = fill * float(np.exp(-4.0 * side_err)) \
+    # The recorded board is a hollow diamond (3 punched holes, see
+    # board_detector.json5's hole_radius/hole_center_shift): even a perfect,
+    # fully-observed fit never reaches fill_ratio ~= 1, and on real VLP-32C
+    # returns ring-gap sparsity pushes it well below the holes-only ceiling
+    # (observed as low as ~0.44 on frames where the outer-border fit and
+    # side lengths are otherwise excellent). A linear fill weight then
+    # rejected genuine board fits below min_score. sqrt(fill) keeps fill
+    # discriminative against low-fill non-board clutter while not punishing
+    # the board's structural (not-a-defect) hole area as hard as a linear
+    # term does. side_err's weight is loosened to match (-4 -> -2) since it
+    # was tuned against the old, more fill-dominated score scale.
+    score = float(np.sqrt(fill)) * float(np.exp(-2.0 * side_err)) \
         * float(np.exp(-angle_err / 15.0))
 
     # CCW order

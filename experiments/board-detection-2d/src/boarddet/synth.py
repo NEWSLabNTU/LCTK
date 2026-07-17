@@ -38,7 +38,11 @@ def _sample_plane_patch(extent_u, extent_v, spacing, pattern, rng):
 
 
 def make_board(side, center, normal, up_hint, spacing, noise, rng,
-               pattern="grid"):
+               pattern="grid", holes=None):
+    """holes: optional list of ((hu, hv), radius) circular cutouts in the
+    board's own (u, v) plane coords, modelling the recorded hollow-diamond
+    board's punched holes (see board_detector.json5 hole_radius /
+    hole_center_shift)."""
     u, v, n = _plane_basis(np.asarray(normal, float), np.asarray(up_hint, float))
     center = np.asarray(center, float)
     half_diag = side / np.sqrt(2.0)
@@ -46,6 +50,12 @@ def make_board(side, center, normal, up_hint, spacing, noise, rng,
     # diamond: |u| + |v| <= half_diag (square rotated 45 deg)
     inside = np.abs(coords[:, 0]) + np.abs(coords[:, 1]) <= half_diag
     coords = coords[inside]
+    if holes:
+        keep = np.ones(len(coords), dtype=bool)
+        for (hu, hv), radius in holes:
+            d = np.hypot(coords[:, 0] - hu, coords[:, 1] - hv)
+            keep &= d > radius
+        coords = coords[keep]
     pts = center + coords[:, :1] * u + coords[:, 1:] * v
     pts = pts + rng.normal(0.0, noise, size=(len(pts), 1)) * n
     corners = np.stack([
