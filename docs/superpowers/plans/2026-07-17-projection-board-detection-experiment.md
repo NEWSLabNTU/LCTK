@@ -1766,3 +1766,74 @@ git commit -m "docs(phase-7): benchmark results for generators A/B/C on datasets
 - Spec coverage: projection choice (Task 3–4), three generators (6–8), shared scorer (4), pose (5), benchmark protocol incl. jitter + overlays (10–11), solid-state synthetic check (Task 11 Step 4 + `pattern="uniform"` in Task 2), phase-doc results fill (11). Stage-2 ICP comparison is explicitly deferred in the phase doc — no task, by design.
 - Real-data unknowns are isolated in Task 11 with explicit debugging guidance rather than pretending thresholds are final.
 - Type consistency: `Candidate.points` (3D) → `project_to_plane(cand.points, cand.plane)` in detector; `ScoreResult.corners_2d` → `board_pose`; `DetectOutcome.timings_ms` keys used by `summarize` match detector.
+
+---
+
+# Stage 2 Addendum (2026-07-17): Accumulation + Emit-Best + Diamond-Stance
+
+Approved follow-up after stage-1 results (B finds the true board but recall 0–8%;
+border-only scoring passes board-sized flat panels). User confirmed the capture
+workflow holds the board static for a few seconds per pose — temporal
+accumulation is legitimate.
+
+### Task 12: Frame accumulation + always-emit-best + diamond-stance score term
+
+**Files:**
+- Modify: `experiments/board-detection-2d/src/boarddet/detector.py`
+- Modify: `experiments/board-detection-2d/src/boarddet/board_config.py`
+- Modify: `experiments/board-detection-2d/src/boarddet/benchmark.py`
+- Test: `experiments/board-detection-2d/tests/test_detector.py`, `tests/test_benchmark.py`
+
+**Interfaces:**
+- `accumulate_frames(frames: list[Frame], n: int) -> list[np.ndarray]` (in
+  `benchmark.py` or a small helper module): chunk consecutive frames into
+  windows of n, concatenating xyz. Non-overlapping windows (matches "hold pose
+  a few seconds" workflow). Last partial window kept if ≥ n/2 frames.
+- `BoardConfig` gains `stance_weight: float = 0.0` (0 = term off; >0 blends).
+- `detect(...)` unchanged signature; after `board_pose`, if
+  `board.stance_weight > 0` compute stance and blend:
+  `score *= (1 - w) + w * stance` where stance =
+  `max(|d1 . z|, |d2 . z|)` over the two corner diagonals (unit vectors,
+  z = [0,0,1] sensor-up). A diamond standing on its corner has one diagonal
+  gravity-aligned → stance ≈ 1; an axis-aligned panel quad → both diagonals
+  ~45° → stance ≈ 0.71. Best-candidate selection uses the blended score;
+  `DetectOutcome.detection.score` carries it.
+- `detect` gains `min_score` override behavior: keep gate, but `DetectOutcome`
+  gains `best_rejected: BoardDetection | None` — the best candidate that
+  scored below `min_score` (None if none or if a detection was accepted).
+  Benchmark records its score so "emit best always" analysis is possible
+  without changing the accept semantics.
+- Benchmark CLI gains `--accumulate N` (default 1 = stage-1 behavior) and
+  `--stance-weight W` (default 0.0). With `--accumulate N`, detection runs
+  per window; summarize/jitter operate over windows. Overlay filenames gain
+  window index instead of frame index. summary.json gains
+  `accumulate`/`stance_weight` echo fields.
+
+**Tests (TDD):**
+- stance: build a synthetic scene, run detect with stance_weight=0.5 —
+  detection still found, score finite; construct an axis-aligned square quad
+  candidate synthetically and assert its stance < diamond stance (unit-test the
+  stance function directly — factor it as `_stance(corners_3d) -> float`).
+- accumulate_frames: 7 frames, n=3 → windows [3,3] (last 1 < n/2 dropped);
+  window xyz length = sum of parts.
+- best_rejected: scene with min_score forced to 0.99 → detection None,
+  best_rejected not None, best_rejected.score < 0.99.
+
+### Task 13: Stage-2 benchmark + phase doc results
+
+Run on real data, B primarily (A/C one confirming run each):
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --accumulate 10 --stance-weight 0.0 --out results/run4-acc
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --accumulate 10 --stance-weight 0.5 --out results/run4-acc-stance
+uv run python -m boarddet.benchmark --datasets 3 --generators c \
+  --accumulate 10 --stance-weight 0.5 --max-frames 60 --out results/run4-c-check
+```
+
+Fill a "Stage 2 Results" section in the phase doc: recall per dataset
+(windows detected / windows), timing per window (note: window = N frames →
+budget is N×100 ms, still realtime for the workflow), jitter, whether
+stance kills C's ds3 false positives, best_rejected score distribution
+(how close the misses are). Honest narrative + updated Decision section.
