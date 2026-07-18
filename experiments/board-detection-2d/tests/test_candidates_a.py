@@ -48,3 +48,33 @@ def test_flatness_gate_still_rejects_non_planar_patch():
     patch = np.c_[g[:, 0], g[:, 1], rng.normal(0, 0.08, 200)]
     assert plausible_board_patch(patch.astype(np.float32),
                                  BoardConfig(side_m=1.0)) is None
+
+
+def _near_miss_patch(seed: int = 21) -> np.ndarray:
+    """A synthetic planar patch with plane-fit RMS ~0.040 m -- inside the
+    27%-of-frames "near-miss" band (0.035-0.048) the stage6 diagnosis found
+    between the old 0.035 gate and real VLP-32C board noise."""
+    rng = np.random.default_rng(seed)
+    g = rng.uniform(-0.5, 0.5, size=(200, 2))
+    return np.c_[g[:, 0], g[:, 1], rng.normal(0, 0.040, 200)].astype(np.float32)
+
+
+def test_flatness_rms_max_param_configurable_and_discriminates():
+    """Task 20: flatness_rms_max is a real, discriminating parameter -- the
+    same ~0.040 RMS patch is rejected at 0.035 (current default) and
+    accepted at 0.045 (the sweep value the diagnosis recommends)."""
+    patch = _near_miss_patch()
+    board = BoardConfig(side_m=1.0)
+    assert plausible_board_patch(patch, board, flatness_rms_max=0.035) is None
+    assert plausible_board_patch(
+        patch, board, flatness_rms_max=0.045) is not None
+
+
+def test_flatness_rms_max_default_none_reads_board_config():
+    """When flatness_rms_max=None (the default), the gate must read
+    board.flatness_rms_max rather than silently using the module constant."""
+    patch = _near_miss_patch()
+    strict_board = BoardConfig(side_m=1.0, flatness_rms_max=0.035)
+    loose_board = BoardConfig(side_m=1.0, flatness_rms_max=0.045)
+    assert plausible_board_patch(patch, strict_board) is None
+    assert plausible_board_patch(patch, loose_board) is not None

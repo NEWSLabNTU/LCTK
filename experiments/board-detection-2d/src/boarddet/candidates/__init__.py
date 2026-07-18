@@ -27,13 +27,23 @@ class Candidate:
     plane: PlaneModel
 
 
-def plausible_board_patch(points_3d: np.ndarray,
-                          board: BoardConfig) -> Candidate | None:
-    """Gate a 3D patch: enough points, flat, board-sized. None if implausible."""
+def plausible_board_patch(points_3d: np.ndarray, board: BoardConfig,
+                          flatness_rms_max: float | None = None
+                          ) -> Candidate | None:
+    """Gate a 3D patch: enough points, flat, board-sized. None if implausible.
+
+    flatness_rms_max=None (default) reads board.flatness_rms_max (Task 20),
+    falling back to the module constant if board lacks that attribute --
+    board.flatness_rms_max itself defaults to _FLATNESS_RMS_MAX, so the
+    default call path is byte-identical to pre-Task-20 behavior.
+    """
     if len(points_3d) < _MIN_PATCH_POINTS:
         return None
+    threshold = flatness_rms_max
+    if threshold is None:
+        threshold = getattr(board, "flatness_rms_max", _FLATNESS_RMS_MAX)
     plane = fit_plane(points_3d)
-    if plane_rms(points_3d, plane) > _FLATNESS_RMS_MAX:
+    if plane_rms(points_3d, plane) > threshold:
         return None
     ext = extent_2d(project_to_plane(points_3d, plane))
     diag = board.side_m * np.sqrt(2.0)

@@ -83,3 +83,85 @@ def test_stance_gate_flag_sets_only_stance_floor(monkeypatch, tmp_path):
     assert board.strict_squareness is False
     assert board.edge_support_min == 0.0
     assert board.side_tol == BoardConfig().side_tol  # unchanged default
+
+
+def test_stance_floor_flag_overrides_stance_gate(monkeypatch, tmp_path):
+    """Task 21 needs to sweep stance_floor independently of --stance-gate's
+    fixed 0.9 while keeping the rest of that flag's config (strict_squareness
+    and edge_support_min stay off). --stance-floor must win when both are
+    given."""
+    captured: dict = {}
+
+    def fake_run(datasets, generators, board, max_frames, out_dir,
+                accumulate=1):
+        captured["board"] = board
+        return {}
+
+    monkeypatch.setattr(benchmark_mod, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["benchmark", "--stance-gate", "--stance-floor", "0.85",
+         "--out", str(tmp_path)],
+    )
+    main()
+    board = captured["board"]
+    assert board.stance_floor == 0.85
+    assert board.strict_squareness is False
+    assert board.edge_support_min == 0.0
+    assert board.side_tol == BoardConfig().side_tol
+
+
+def test_stance_floor_flag_without_stance_gate_sets_only_stance_floor(
+        monkeypatch, tmp_path):
+    """--stance-floor alone (no --stance-gate/--strict-diamond) still
+    overrides the BoardConfig default of 0.0."""
+    captured: dict = {}
+
+    def fake_run(datasets, generators, board, max_frames, out_dir,
+                accumulate=1):
+        captured["board"] = board
+        return {}
+
+    monkeypatch.setattr(benchmark_mod, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["benchmark", "--stance-floor", "0.5", "--out", str(tmp_path)],
+    )
+    main()
+    board = captured["board"]
+    assert board.stance_floor == 0.5
+
+
+def test_flatness_rms_max_flag_sets_board_field(monkeypatch, tmp_path):
+    """Task 20: --flatness-rms-max threads into BoardConfig for the recall
+    sweep; default (unset) must preserve the 0.035 current-behavior value."""
+    captured: dict = {}
+
+    def fake_run(datasets, generators, board, max_frames, out_dir,
+                accumulate=1):
+        captured["board"] = board
+        return {}
+
+    monkeypatch.setattr(benchmark_mod, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["benchmark", "--flatness-rms-max", "0.045", "--out", str(tmp_path)],
+    )
+    main()
+    assert captured["board"].flatness_rms_max == 0.045
+
+
+def test_flatness_rms_max_default_preserves_current_behavior(
+        monkeypatch, tmp_path):
+    captured: dict = {}
+
+    def fake_run(datasets, generators, board, max_frames, out_dir,
+                accumulate=1):
+        captured["board"] = board
+        return {}
+
+    monkeypatch.setattr(benchmark_mod, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv", ["benchmark", "--out", str(tmp_path)])
+    main()
+    assert captured["board"].flatness_rms_max == BoardConfig().flatness_rms_max
