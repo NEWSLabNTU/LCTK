@@ -1036,7 +1036,7 @@ original 68, as the residual characterization below confirms.
 | Operating point | median range (ds1–5) | p95 range (ds1–5) |
 |---|---|---|
 | baseline (run6-stripe) | 58–63 ms | 72–77 ms |
-| `--stance-gate` (run7-stance) | 57.4–62.9 ms | 71.5–76.7 ms |
+| `--stance-gate` (run7-stance) | 57.4–62.9 ms | 72.5–76.7 ms |
 | `--strict-diamond` (run7-strict) | 57.4–59.8 ms | 70.3–75.5 ms |
 
 All three operating points are essentially indistinguishable in cost and
@@ -1060,12 +1060,12 @@ sensor-noise-floor precedent set in stage 3 on every axis but y/z for
 datasets 1/4/5, where the board's own orientation spread (not sensor noise)
 dominates. `--strict-diamond`'s surviving population is visibly tighter on
 every dataset (1.2–2.6 mm) — unsurprising, since only the most cleanly-fit
-candidates clear `edge_support_min=0.6`. ds4's jitter changes slightly
-between baseline and `--stance-gate` (same n=34, different std) and ds5's
-changes with the same n=7 in both — evidence that the live stance gate
-occasionally swaps in a different accepted candidate for the same frame
-rather than only ever adding/removing whole detections, consistent with the
-Part-A/live-gate distinction noted above.
+candidates clear `edge_support_min=0.6`. ds5's jitter changes with the same
+n=7 in both baseline and `--stance-gate` (different std) — evidence that the
+live stance gate occasionally swaps in a different accepted candidate for the
+same frame rather than only ever adding/removing whole detections, consistent
+with the Part-A/live-gate distinction noted above. ds4 shows n=33→34 (+1
+detection, not a candidate swap).
 
 ### Residual clutter characterization (15 detections, `--stance-gate`)
 
@@ -1075,7 +1075,7 @@ stage 1):
 
 | Attractor | Count | % of 15 | Datasets | Example center |
 |---|---|---|---|---|
-| ds5 persistent panel (within ≤0.1 m of ref) | **13** | **87%** | ds2 (1), ds5 (12) | (-1.851, -2.883, -0.120) |
+| ds5 persistent panel (same physical panel; 12 within ≤0.1 m of ref, one ds2 outlier at 0.21 m) | **13** | **87%** | ds2 (1), ds5 (12) | (-1.851, -2.883, -0.120) |
 | second attractor (y≈3.5, z≈-0.5…-0.6 band) | 2 | 13% | ds1 (1), ds5 (1) | (0.638, 3.527, -0.507) |
 
 **13 of 15 (87%) are the same persistent near-vertical panel** stage 1–4
