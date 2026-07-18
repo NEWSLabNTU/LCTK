@@ -684,6 +684,224 @@ Partial, directionally-positive result, not a fix:
   on ds5 under both configs — neither changes the stage-2 verdicts on
   those two fronts.
 
+## Stage 4 Results
+
+Stage 4 tests the stripe-tolerant scorer hypothesis: a gravity-oriented
+anisotropic morphological closing (`score_candidate`'s `up_2d` /
+`close_height_m` path, `scorer.py`) closes ring-stripe gaps in the fill-ratio
+raster along the true vertical direction, while the coarse quad is now fit
+with `cv2.minAreaRect` directly on the raw projected points (not the closed,
+corner-bulged raster) so corner accuracy is unaffected by the tall kernel.
+Suite is 55/55 green (`uv run pytest -q`) before this benchmark.
+
+Two runs per the brief:
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --out results/run6-stripe          # vertical-gap-deg=3.0 (default): stage-4 scorer + stage-3 clustering
+uv run python -m boarddet.benchmark --datasets 3 --generators b \
+  --stance-weight 0.5 --vertical-gap-deg 0 --out results/run6-control  # both anisotropic stages off (stage-1-equivalent)
+```
+
+A scratch script (not committed) re-ran `detect()` per frame on all 535
+frames of run6-stripe's config and classified every accepted detection's
+center against the same bbox reference stage 3 used
+(`ros/lctk_launch/config/board/bbox.json5`), to separate true-board hits
+from clutter — the question this stage's numbers hinge on.
+
+### Recall per dataset (fraction of frames with any detection ≥ min_score)
+
+| Dataset | Stage-1 B (stance 0, no aniso) | Stage-3 aniso (run5-aniso, stance 0.5) | Stage-4 stripe (run6-stripe, stance 0.5, aniso clustering + aniso closing) |
+|---------|---|---|---|
+| 1 | 1% (1/103) | 3% (3/103) | **34% (35/103) — 31 in-bbox / 4 clutter** |
+| 2 | 0% (0/103) | 1% (1/103) | **51% (53/103) — 45 in-bbox / 8 clutter** |
+| 3 | 2% (2/113) | 1% (1/113) | **47% (53/113) — 46 in-bbox / 7 clutter** |
+| 4 | 1% (1/113) | 0% (0/113) | **33% (37/113) — 33 in-bbox / 4 clutter** |
+| 5 | 8% (8/103, unverified) | 2% (2/103) | **50% (52/103) — only 7 in-bbox / 45 clutter** |
+| **Total** | — | **7/535 (1.3%)** | **230/535 (43.0%) — 162 in-bbox (30.3%) / 68 clutter (12.7%)** |
+
+The headline recall jump is real, but reading it as a single number would be
+wrong: it is two very different stories layered on top of each other, and
+they must be reported separately (see the false-positive section below
+before treating the "43%" figure as good news).
+
+### Timing (median ms per frame, p95 in parentheses; 100 ms/frame budget)
+
+| Run | downsample | candidates | scoring | total |
+|---|---|---|---|---|
+| run6-stripe (ds1–5 median) | 2.8–3.1 | 54.3–58.6 | 0.71–0.83 | 58–63 (72–77) |
+| run6-control (ds3) | 3.0 | 48.7 | 1.05 | 53 (71) |
+| *for reference* stage-3 run5-aniso (ds1–5 median) | 3.1 | 84.6–87.2 | 0.55–0.63 | 88.6–91.1 (97.8–102) |
+
+Both stage-4 runs stay comfortably inside the 100 ms budget, with headroom
+to spare. The `scoring` stage itself — the part stage 4 actually changed
+(rotation, tall-kernel close, `minAreaRect` on raw points) — costs about the
+same as stage 3's isotropic close (0.7–1.1 ms both before and after), so the
+new geometry work is not measurably more expensive. The `candidates` stage
+median dropped from ~85 ms (stage 3) to ~55 ms (stage 4) even though
+`cluster_after_ground.py` was not touched by either stage-4 commit
+(`8209e2d`, `8805919` only edit `scorer.py`/`detector.py`/`viz.py`) — this is
+most likely machine-load variance between two separate benchmark
+invocations on a shared 32-core box (`nproc`, 25 logged-in users, `time`
+showed >1600% CPU during both runs, i.e. heavy internal threading whose wall
+time is sensitive to contention), not a code effect. Reported as observed,
+not claimed as a speedup.
+
+### Pose jitter — read this number with the false-positive section, not alone
+
+| Dataset | run6-stripe (all accepted, mixed population) |
+|---------|---|
+| 1 | 887 mm / 26.1° |
+| 2 | 1113 mm / 28.4° |
+| 3 | 903 mm / 26.2° |
+| 4 | 851 mm / 23.8° |
+| 5 | 1455 mm / 22.4° |
+
+Taken at face value these look like a huge regression from stage 3's 25 mm
+noise floor — and they would be, if these were jitter of one detected
+object. They are not: the benchmark's jitter formula pools every accepted
+detection in a dataset into one std, and stage 4 now accepts both the true
+board and several different clutter attractors in the same dataset (next
+section), so this number measures *the spread between different physical
+objects*, not the precision of any one of them. Splitting the same
+detections by the bbox classification (below) gives the real per-object
+precision:
+
+| Dataset | in-bbox (true-board candidate) center std | n |
+|---------|---|---|
+| 1 | 3 / 21 / 16 mm (x/y/z) | 31 |
+| 2 | 2 / 6 / 6 mm | 45 |
+| 3 | 2 / 4 / 5 mm | 46 |
+| 4 | 2 / 15 / 16 mm | 33 |
+| 5 | 6 / 40 / 43 mm | 7 |
+
+These are as tight as, or tighter than, stage 3's already-good 25 mm
+noise-floor figure — strong independent evidence that the in-bbox population
+really is repeat detections of one static object, not scattered noise.
+
+### Pose sanity — bbox-reference cross-check, all 5 datasets
+
+Per-dataset in-bbox center means (score range in brackets), compared against
+stage 3's confirmed true-board coordinates:
+
+| Dataset | run6-stripe in-bbox mean center | stage-3 confirmed coordinate | match? |
+|---------|---|---|---|
+| 1 | (2.256, -0.059, 0.074), [0.517, 0.778] | ~(2.25, -0.05, 0.07) | yes, near-exact |
+| 2 | (2.147, 0.420, 0.076), [0.543, 0.790] | (2.15, 0.41, 0.08) | yes, near-exact |
+| 3 | (2.101, -0.314, 0.074), [0.556, 0.768] | (2.10, -0.32, 0.08) | yes, near-exact |
+| 4 | (2.077, -0.605, 0.066), [0.520, 0.751] | (2.08, -0.56, location-only) | yes, same location |
+| 5 | (2.090, -0.829, 0.039), [0.514, 0.758] | not previously confirmed on ds5 | new, plausible (same x-band) |
+
+Overlays for a spread of in-bbox frames across all datasets
+(`ds1_b_frame0008.png` score 0.67, `ds2_b_frame0000.png` score 0.78,
+`ds3_b_frame0000.png` score 0.72, `ds3_b_frame0110.png` score 0.69,
+`ds4_b_frame0003.png` score 0.73) all show a clean, filled diamond raster
+**with two distinct dark hole blobs** — the hollow-board pattern, matching
+stage 3's verified signature exactly, now recurring across roughly a third
+to a half of each dataset's frames instead of 1–3 isolated frames. **This is
+a genuine, verified recall conversion for the true board on 4 of 5
+datasets** (ds5's true-board population is small — 7/103 — see below).
+
+### False positives — CRITICAL: does the elongated kernel inflate clutter scores too? Yes.
+
+This is the headline finding, and it is a regression, not a footnote:
+
+- **ds5's already-known clutter panel** (the flat, hole-less board-sized
+  panel stage 1/2/3 all documented at center ≈ (-1.83, -2.89, -0.1)) is
+  accepted on **35 of ds5's 45 out-of-bbox detections** (34% of all ds5
+  frames), at scores up to **0.72** — up from stage 3's max 0.62 on the same
+  panel, and from a 2% acceptance rate to 34%. `stance-weight 0.5` does
+  **not** hold the line here (consistent with stage 2's finding that stance
+  only kills one of the two clutter-panel orientations — this is the other
+  one). Overlays `ds5_b_frame0006.png` (score 0.51) and
+  `ds5_b_frame0046.png` (score 0.59) both show a solid filled diamond-ish
+  blob with **no interior holes** — visually the same clutter signature as
+  every prior stage, just scored far higher and accepted far more often.
+- **New clutter attractors appear on datasets 1–4**, which had ~0
+  out-of-bbox false positives under stance 0.5 in stage 3. Stage 4 accepts
+  4–8 per dataset (23 total, excluding ds5) at scores 0.50–0.67, and they
+  are not scattered noise: they recur at a handful of shared, scene-fixed
+  coordinates across multiple datasets (all 5 share one physical rig/room,
+  as stage 3 noted) — e.g. ~(0.2–0.6, 3.5–3.95, 0.5–0.6) appears in ds1, 3,
+  4, 5; ~(-4.5, 3.68, 0.5) appears in ds1, 2, 3; ~(0.1, -4.0, -0.1…-0.4)
+  appears in ds1, 2, 3, 5. These read as static room structures (walls,
+  fixtures) that happen to be near-vertical, planar, and roughly board-sized
+  — exactly the kind of object the border-only cue was already known
+  (stage 1/2) not to discriminate against, now newly crossing threshold
+  because the anisotropic closing also fills *their* fill-ratio gaps.
+  `ds3_b_frame0051.png` (score 0.51, center (-2.31, 3.32, -0.24)) shows the
+  overlay for one of these: a lopsided, non-diamond quadrilateral fit to a
+  mostly-filled black region from a scattered building/wall scene, with no
+  hole pattern — visually distinguishable from a true-board hit by eye, but
+  not by the current score/stance gate.
+- **Net effect**: total accepted clutter went from 2/535 (0.4%, stage-3
+  aniso) to 68/535 (12.7%, stage-4 stripe). On ds5 specifically, clutter now
+  *outnumbers* true-board detections roughly 6.4-to-1 (45 vs 7) — so ds5's
+  raw "50% detection rate" in the top-line table is misleading read alone;
+  it is overwhelmingly the clutter panel, not the board.
+- run6-control (ds3, both anisotropic stages off) reproduces stage 3's
+  control number almost exactly — 2% (2/113), jitter 25.1 mm / 0.00° — and
+  its overlay (`ds3_b_frame0005.png`, score 0.54) is the same fragmented,
+  non-diamond raster stage 1/3 already documented. This confirms the
+  stage-4 code changes (raw-point coarse quad, `_refine_sides` skip on the
+  anisotropic path) left the isotropic path byte-identical, as the
+  `8805919` commit claims — the false-positive expansion above is
+  attributable to the anisotropic closing specifically, not a side effect
+  of the surrounding refactor.
+
+### What the overlays show
+
+Side by side, the true-board overlays (`ds1_b_frame0008.png`,
+`ds2_b_frame0000.png`, `ds3_b_frame0000.png`/`ds3_b_frame0110.png`,
+`ds4_b_frame0003.png`) are visually uniform: a dense, filled diamond with
+crisp edges and two well-separated dark holes, essentially the same shape
+stage 3 showed only on 1–3 hand-picked frames, now the modal outcome across
+each dataset. The clutter overlays (`ds5_b_frame0006.png`,
+`ds5_b_frame0046.png`, `ds3_b_frame0051.png`) share a different, consistent
+signature: a mostly- or fully-filled region (no holes) fit by a skewed,
+often non-diamond quadrilateral — visually distinguishable by eye from the
+true-board hits in every case inspected, but that distinction is exactly
+the cue (hole pattern) the scorer still does not use.
+
+### Stage-4 verdict
+
+A real, substantial win for the true board, bundled with a comparably-sized
+new false-positive problem — report both, not the net number:
+
+- **The stage-4 hypothesis is confirmed for the true board**: stage 3's
+  diagnosis ("candidate reaches the scorer on 31% of ds3 frames but scores
+  ~0.07, well below threshold") is exactly what the stripe-tolerant closing
+  fixes. True-board recall converts from stage 3's ~1–3% to **30–47% on
+  datasets 1–4**, at the same physical location stage 3 already confirmed
+  (mm-level agreement on center coordinates), with mm-tight jitter (2–21 mm)
+  as good as or better than stage 3's 25 mm noise floor, and the hole
+  pattern visibly present on every inspected overlay. This is the clearest
+  positive result the phase has produced.
+- **The same mechanism also inflates clutter scores**, exactly as the task
+  brief warned it might. ds5's known clutter panel goes from a 2%
+  nuisance to the dominant signal in that dataset (34% of frames, score up
+  to 0.72, outnumbering true-board hits 6.4:1), and 4 new scene-fixed
+  clutter attractors appear across datasets 1–4 that stage 3 never
+  triggered. `stance-weight 0.5` does not catch any of this — it was never
+  designed to (it targets panel *orientation*, not fill/squareness
+  inflation from stripe-closing).
+- **The bottleneck has moved again, not closed.** Stage 1/2 diagnosed "no
+  board-shaped candidate reaches the scorer." Stage 3 diagnosed "the
+  candidate reaches the scorer but the merge is too noisy to score above
+  threshold." Stage 4 fixes exactly that noisy-merge scoring gap for the
+  true board — but the same fix removes the fill-ratio penalty that was
+  incidentally also suppressing clutter, so **the open problem is now pure
+  discrimination**: fill ratio, squareness, and stance all move together for
+  true board and clutter alike once ring-stripe/gap tolerance is added to
+  all of them. A cue that is *absent from the clutter panels* is needed —
+  the hole pattern (flagged as the leading candidate since stage 1/2,
+  still not implemented) is the natural next lever, since every clutter
+  overlay inspected this stage lacks holes while every true-board overlay
+  has them.
+- Timing stays inside budget in both configs (58–63 ms median, 72–77 ms
+  p95, vs the 100 ms budget), and the isotropic control path is confirmed
+  unaffected by the stage-4 refactor.
+
 ## Decision
 
 Partial success — no winner yet, and the numbers as they stand do not justify
@@ -799,3 +1017,42 @@ seeing the right *region* far more often, so tightening what gets admitted
 into that region's candidate may close more gap than a new score term
 would on its own. Re-run stage 2's remaining items (hole pattern, real
 board-motion accumulation) after that.
+
+### Stage-4 verdict (updates the above)
+
+Stage 4 was the "make the scorer stripe-tolerant" alternative to stage 3's
+planned next step (a quality-aware merge), and it **converts stage 3's
+diagnosis into real recall for the true board — but at the cost of a
+comparably-sized new false-positive problem that changes what "done" means
+here**:
+
+- **The projection + 2D scorer + anisotropic candidate pipeline now finds
+  the real board on 30–47% of frames on 4 of 5 datasets**, at the exact
+  physical location stage 1/3 already confirmed, with mm-level jitter and
+  the hole pattern visible on every inspected overlay. This is the first
+  stage in the phase where "usable detection rate" is even plausible —
+  stage 1–3 topped out at single digits.
+- **It is not usable as shipped.** The same anisotropic closing that
+  rescues the true board's fill ratio also rescues clutter's: ds5's known
+  clutter panel now dominates that dataset (34% of frames, up from 2%,
+  outnumbering true-board hits 6:1), and four new scene-fixed clutter
+  attractors appear on datasets 1–4 that stage 3 never triggered. Total
+  clutter false positives rose from 0.4% to 12.7% of all frames. Nothing
+  in the current score (fill ratio, squareness, edge straightness) or the
+  stance term discriminates board from clutter once both get the same
+  stripe/gap tolerance — they were never designed to.
+- **Verdict: still not an integration decision, but the shape of the
+  remaining gap has changed.** Stage 1–3 were blocked on candidate
+  generation and scorer sensitivity (not enough signal reaching the gate).
+  Stage 4 shows the gate can be made sensitive enough — the open problem
+  is now purely discrimination against board-sized planar clutter, which
+  border/fill/squareness/stance cannot solve because clutter shares all of
+  those properties with the real board. The hole pattern — flagged as the
+  next lever since stage 1, still unimplemented — is the one cue in this
+  dataset that visually separates every true-board overlay from every
+  clutter overlay inspected across all four stages, and is now the clear
+  next step rather than one option among several.
+- Recommended next step: add the hole pattern as a score term (or hard
+  gate) before any further candidate-generation or closing-kernel tuning —
+  further raising recall without discrimination only grows the
+  false-positive count in lockstep, as stage 4 just demonstrated.
