@@ -1970,3 +1970,82 @@ Fill "## Stage 4 Results": recall vs stage-3 (expect the 31% candidate-reach
 to convert), score distribution shift on board-region candidates, false-positive
 impact (does the elongated kernel inflate clutter scores too? check ds5),
 timing, overlays, honest narrative + Decision update.
+
+---
+
+# Stage 5 Addendum (2026-07-18): Hole-Free Discrimination
+
+Board will be a plain diamond WITHOUT holes (fabrication ease) — decided by
+the user. Stage 4 left the bottleneck at pure discrimination: geometry-only
+scorer cannot separate a 1 m diamond board from a 1 m flat background panel,
+and the hole pattern (the strongest current cue) is being removed. Stage 5
+attacks discrimination with hole-free cues and honestly bounds the
+single-frame floor.
+
+Constraint reminder: all cues must be sensor-generic (no ring field) and
+gravity-aware at most — the design must survive on a solid-state lidar.
+
+### Task 18: Characterize false positives + strict-diamond discriminator
+
+**Files:**
+- Modify: `experiments/board-detection-2d/src/boarddet/scorer.py`
+  (strengthen squareness/size/edge-support terms; expose weights)
+- Modify: `experiments/board-detection-2d/src/boarddet/board_config.py`
+- Test: `experiments/board-detection-2d/tests/test_scorer.py`
+
+**Part A — characterization (report only, no code):**
+Using the committed run6-stripe config, classify each of the 68 stage-4
+false-positive detections into:
+  (i) non-diamond — fails a *strict* squareness (per-corner angle within
+      ±8° of 90°) OR stance (|best diagonal · up| > 0.9, i.e. within ~25° of
+      gravity-vertical) OR size (mean side within ±8% of board.side_m);
+  (ii) board-like — passes all three yet is not the true board (genuinely
+      ambiguous single-frame).
+Report the (i)/(ii) split per dataset. This quantifies the killable majority
+vs the irreducible core BEFORE tuning.
+
+**Part B — discriminator (implement, targeting the (i) group):**
+Add to the scorer an `edge_support` term: for each of the 4 quad sides,
+fraction of the side's length that has raw projected points within
+`0.5·cell` of the side line (a real board has all 4 edges physically
+present; a minAreaRect fit to a blob fragment has 1–2 unsupported sides).
+Combine into the score alongside the existing fill/squareness/angle terms.
+Expose `BoardConfig`:
+  - `strict_squareness: bool = False` (off = stage-4 behavior; on = the ±8°
+    angle gate + tightened size band `size_tol` and stance floor)
+  - `stance_floor: float = 0.0` (0 = off; e.g. 0.9 = reject quads whose best
+    diagonal is > ~25° off vertical — the diamond stands on a corner)
+  - `edge_support_min: float = 0.0` (0 = off; e.g. 0.6 = each side ≥60%
+    supported)
+All new gates DEFAULT OFF so every existing test stays byte-identical; they
+activate only when the benchmark sets them.
+
+**Tests (TDD):**
+- edge_support: synthetic full diamond → all 4 sides ~1.0; synthetic
+  "fragment" (diamond with one side's points deleted) → that side ≈0, term
+  rejects at edge_support_min=0.6.
+- stance_floor: axis-aligned square quad (diagonals at 45°, |diag·up|≈0.707)
+  rejected at stance_floor=0.9; true diamond (one diagonal vertical) passes.
+- strict_squareness: a 15°-skewed quad rejected; a clean diamond passes.
+- All defaults-off gates: existing suite byte-identical (regression pin).
+
+### Task 19: Stage-5 benchmark + phase doc + honest floor
+
+```bash
+# baseline (stage-4 config) already exists as run6-stripe; new strict run:
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --strict-diamond --out results/run7-strict
+```
+(add `--strict-diamond` CLI flag setting strict_squareness=True,
+stance_floor=0.9, edge_support_min=0.6, size_tol tightened to 0.08.)
+
+Fill "## Stage 5 Results": precision/recall vs stage 4 (true-board recall
+retained? clutter killed?), the Part-A (i)/(ii) split, per-cue ablation if
+cheap (which gate kills what), the residual board-like-clutter count that no
+single-frame geometry cue removes, timing. Then a DECISION subsection:
+state plainly whether single-frame hole-free detection reaches usable
+precision, or whether the multi-pose/session cue (board is the object that
+MOVES between fixed poses; scene clutter does not) is REQUIRED — the latter
+is a capture-protocol change (record board at ≥2 positions) and a future
+phase, not implementable on the current single-static-capture datasets.
+Update the top-level Decision.
