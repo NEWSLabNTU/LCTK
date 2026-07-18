@@ -21,3 +21,18 @@ class BoardConfig:
     # clusters. VLP-32C worst adjacent-channel spacing is ~3 deg. 0 disables
     # the anisotropic scaling (plain isotropic DBSCAN).
     vertical_gap_deg: float = 3.0
+    # --- Task 18: hole-free "strict diamond" discriminator gates ---
+    # The recorded board is becoming a plain (hole-free) diamond, so
+    # hole-pattern discrimination is off the table; these gates instead
+    # exploit the diamond's *stance* (square standing on a corner) and the
+    # fact that a real board's edges are physically present all the way
+    # around, unlike a minAreaRect fit to a flat-panel/clutter fragment.
+    # ALL default off/0 so stage-4 (run6-stripe) behavior, and every test
+    # pinned against it, stays byte-identical; `--strict-diamond` (Task 19)
+    # turns all four on together (see benchmark.py).
+    strict_squareness: bool = False   # reject if any corner angle > 8 deg off 90
+    stance_floor: float = 0.0         # 0 = off; e.g. 0.9 = reject if best
+                                      # diagonal is > ~25 deg off vertical
+    edge_support_min: float = 0.0     # 0 = off; e.g. 0.6 = each of the 4
+                                      # sides must be >=60% backed by raw
+                                      # points near the side line

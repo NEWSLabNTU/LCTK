@@ -124,6 +124,10 @@ def run(datasets: list[int], generators: list[str], board: BoardConfig,
         "accumulate": accumulate,
         "stance_weight": board.stance_weight,
         "vertical_gap_deg": board.vertical_gap_deg,
+        "strict_squareness": board.strict_squareness,
+        "stance_floor": board.stance_floor,
+        "edge_support_min": board.edge_support_min,
+        "side_tol": board.side_tol,
         "datasets": all_results,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -146,11 +150,21 @@ def main() -> None:
     ap.add_argument("--vertical-gap-deg", type=float, default=3.0,
                     help="generator B anisotropic vertical clustering "
                          "tolerance, LiDAR ring-gap degrees (0 = off)")
+    ap.add_argument("--strict-diamond", action="store_true",
+                    help="enable Task 18's hole-free strict-diamond "
+                         "discriminator gates together: strict_squareness, "
+                         "stance_floor=0.9, edge_support_min=0.6, "
+                         "size_tol=0.08 (all off by default)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
-    run(args.datasets, args.generators,
-        BoardConfig(side_m=args.side, stance_weight=args.stance_weight,
-                   vertical_gap_deg=args.vertical_gap_deg),
+    board_kwargs: dict = dict(
+        side_m=args.side, stance_weight=args.stance_weight,
+        vertical_gap_deg=args.vertical_gap_deg,
+    )
+    if args.strict_diamond:
+        board_kwargs.update(strict_squareness=True, stance_floor=0.9,
+                            edge_support_min=0.6, side_tol=0.08)
+    run(args.datasets, args.generators, BoardConfig(**board_kwargs),
         args.max_frames, args.out, accumulate=args.accumulate)
 
 
