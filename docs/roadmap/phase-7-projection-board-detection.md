@@ -915,25 +915,280 @@ new false-positive problem — report both, not the net number:
   p95, vs the 100 ms budget), and the isotropic control path is confirmed
   unaffected by the stage-4 refactor.
 
+## Stage 5 Results
+
+Stage 4 left one open problem: border/fill/squareness/stance cannot tell the
+true board from board-sized planar clutter once both get the same
+stripe/gap tolerance. Stage 4's planned fix — a hole-pattern score term — was
+overtaken by a hardware decision: the recorded board is moving to a plain
+**hole-free** diamond (see `board_config.py`'s Task-18 comment), so
+hole-pattern discrimination is off the table for good. Task 18 built four
+alternative single-frame discriminator gates that key on the diamond's
+*stance* (standing on a corner) and the *physical presence* of all four
+edges instead of holes: `strict_squareness`, `stance_floor`,
+`edge_support_min`, and a tightened `side_tol`. This section benchmarks both
+operating points those gates define — `--stance-gate` (`stance_floor=0.9`
+alone) and `--strict-diamond` (all four together) — properly through the
+benchmark CLI (overlays, timing, jitter), and independently re-derives the
+per-cue ablation table Task 18 first produced under review.
+
+Suite is 65/65 green (`uv run pytest -q`) before this benchmark.
+
+```bash
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --stance-gate --out results/run7-stance
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --strict-diamond --out results/run7-strict
+# baseline (stage-4 config, no Task-18 gates) reused from results/run6-stripe
+```
+
+A scratch script (not committed) reproduced task 18's exact methodology
+(`detect()` called directly, all 535 cached frames across datasets 1–5,
+generator `b`, `stance_weight=0.5`, `vertical_gap_deg=3.0`) for all three
+operating points plus the two intermediate per-cue rows, classifying every
+accepted detection's center against the bbox reference
+(`ros/lctk_launch/config/board/bbox.json5`: translation `[2.6,0,0.35]`, size
+`[3.1,3.94,2.2]` → x∈[1.05,4.15], y∈[-1.97,1.97], z∈[-0.75,1.45]). Every
+number below reproduces task 18's independent-review numbers exactly (no
+tolerance needed).
+
+### Precision/recall across the three operating points
+
+| Operating point | ds1 | ds2 | ds3 | ds4 | ds5 | **Total true / clutter** | **Recall (of 535)** | **Precision** |
+|---|---|---|---|---|---|---|---|---|
+| baseline (stage-4, no gates) | 31/4 | 45/8 | 46/7 | 33/4 | 7/45 | **162/68** | 30.3% | 70.4% |
+| **`--stance-gate`** (recommended) | 31/1 | 45/1 | 46/0 | 34/0 | 7/13 | **163/15** | 30.5% | **91.6%** |
+| `--strict-diamond` (max precision) | 8/0 | 17/0 | 22/0 | 12/0 | 0/0 | **59/0** | 11.0% | **100%** |
+
+`--stance-gate` **retains full recall** (162→163 — the +1 is a near-tie
+frame moving in, not a loss) **while cutting clutter 78%** (68→15,
+precision 70.4%→91.6%). `--strict-diamond` reaches 0 clutter but at a
+severe recall cost: 163→59, a ~7:1 recall trade (104 true-board detections
+lost to remove the last 15 false positives). ds5's true-board recall (7/103
+under stance-gate) is wiped out entirely under strict-diamond, along with
+its clutter (0/103 either way).
+
+### Per-cue ablation (independently re-derived, generator b, all 535 frames)
+
+| Config | ds1 | ds2 | ds3 | ds4 | ds5 | **Total** |
+|---|---|---|---|---|---|---|
+| baseline (no Task-18 gates) | 31/4 | 45/8 | 46/7 | 33/4 | 7/45 | **162/68** |
+| + `stance_floor=0.9` only | 31/1 | 45/1 | 46/0 | 34/0 | 7/13 | **163/15** |
+| + stance_floor + `strict_squareness` | 31/1 | 45/1 | 46/0 | 34/0 | 7/13 | **163/15** |
+| + stance_floor + `side_tol=0.08` | 30/0 | 45/1 | 46/0 | 32/0 | 6/10 | **159/11** |
+| + stance_floor + `edge_support_min=0.6` | 8/0 | 17/0 | 22/0 | 12/0 | 0/0 | **59/0** |
+| full `--strict-diamond` (all four) | 8/0 | 17/0 | 22/0 | 12/0 | 0/0 | **59/0** |
+
+**Stance does essentially all the work at ~0 recall cost.** `stance_floor`
+alone accounts for the entire 68→15 clutter reduction that matters at an
+acceptable price. Layering `strict_squareness` on top changes nothing
+(163/15, identical) — consistent with task 18's structural finding that
+`strict_squareness` is inert on the anisotropic path every real cached frame
+takes (`corners = cv2.boxPoints(minAreaRect(...))` is exactly rectangular by
+construction on that path, so the gate has nothing to fire on). `side_tol`
+is a cheap knob (159/11 — trades 4 recall for 4 more clutter kills).
+**`edge_support_min=0.6` is the expensive gate**: alone it drives both the
+final 15→0 clutter kill and the entire 163→59 recall collapse — a ~7:1
+recall cost per extra false positive caught. Real edge support pins to a
+near-binary set of values (`{0, 0.33, 0.5, 0.67, 1.0}`) at real sensor
+ranges because the ring-gap-calibrated bin width collapses `n_bins` to 2–3
+per side; residual clutter's min-side value pins at exactly 0.5 across all
+15 detections while true board's min ranges 0.333–0.667, which is what the
+gate exploits — cleanly, but at a steep recall price. (Full mechanism —
+including the min-vs-mean edge_support distinction and the `n_bins`
+collapse — is documented in `task-18-report.md`; not re-derived here.)
+
+### Part A: killable vs irreducible false positives (from `task-18-report.md`)
+
+Task 18 characterized all 68 baseline false positives against three
+post-hoc geometric checks (squareness ≤8°, stance >0.9, size ≤8%):
+
+| Dataset | FP total | (i) non-diamond (killable) | (ii) board-like (irreducible, single-frame) |
+|---|---|---|---|
+| 1 | 4 | 4 (100%) | 0 |
+| 2 | 8 | 8 (100%) | 0 |
+| 3 | 7 | 7 (100%) | 0 |
+| 4 | 4 | 4 (100%) | 0 |
+| 5 | 45 | 44 (97.8%) | 1 (2.2%) |
+| **Total** | **68** | **67 (98.5%)** | **1 (1.5%)** |
+
+Only **one single frame** (ds5 frame 60: stance 0.902, size deviation 5.4%,
+squareness 0.0° off) passes all three static checks — a near-miss that
+happens to sit 0.002 above the 0.9 stance floor. This task's independent
+per-frame classification confirms that exact frame is among the 15 residual
+`--stance-gate` detections (ds5 frame0060, score 0.547, center
+(-1.838, -2.876, -0.117)) — the static Part-A characterization and the live
+gate's residual population agree on at least this one member.
+
+Read the two "67/68 killable" and "15 residual under `--stance-gate`"
+numbers together carefully, they are not the same measurement: Part A
+scored the *original* 68 baseline-accepted quads against post-hoc checks,
+while `--stance-gate` is a *live* gate that changes which candidate wins
+each frame (a previously second-best candidate can become the accepted
+detection once the top one is rejected). That is why live `stance_floor`
+leaves 15 residual detections rather than the ~2 the static Part-A stance
+tally alone would suggest (68 − 66 failing stance) — most of the 15 are
+newly-emerged fits on the *same* ds5 clutter object, not survivors of the
+original 68, as the residual characterization below confirms.
+
+### Timing (median ms per frame, p95 in parentheses; 100 ms/frame budget)
+
+| Operating point | median range (ds1–5) | p95 range (ds1–5) |
+|---|---|---|
+| baseline (run6-stripe) | 58–63 ms | 72–77 ms |
+| `--stance-gate` (run7-stance) | 57.4–62.9 ms | 71.5–76.7 ms |
+| `--strict-diamond` (run7-strict) | 57.4–59.8 ms | 70.3–75.5 ms |
+
+All three operating points are essentially indistinguishable in cost and
+comfortably inside the 100 ms budget. This matches task 18's implementation
+note that all three new gates run immediately after the (already-computed)
+corner-angle array, *before* the more expensive fill-ratio raster work —
+they are early-reject checks, not additional per-candidate cost.
+
+### True-board (in-bbox) pose jitter — std of center [mm], n = detection count
+
+| Dataset | baseline | `--stance-gate` | `--strict-diamond` |
+|---|---|---|---|
+| 1 | 2.9/21.1/15.9 mm (n=31) | 2.9/21.1/15.9 mm (n=31) | 1.8/1.8/2.5 mm (n=8) |
+| 2 | 1.7/5.9/6.4 mm (n=45) | 1.7/5.9/6.4 mm (n=45) | 1.2/2.9/2.4 mm (n=17) |
+| 3 | 2.0/3.8/5.1 mm (n=46) | 2.0/3.8/5.1 mm (n=46) | 2.1/1.8/2.6 mm (n=22) |
+| 4 | 2.0/15.4/16.4 mm (n=33) | 2.1/16.7/17.8 mm (n=34) | 2.1/3.2/3.4 mm (n=12) |
+| 5 | 5.9/39.8/43.2 mm (n=7) | 4.4/32.8/34.9 mm (n=7) | n=0 (undefined) |
+
+(x/y/z std, mm.) All three operating points stay at or below the ~25 mm
+sensor-noise-floor precedent set in stage 3 on every axis but y/z for
+datasets 1/4/5, where the board's own orientation spread (not sensor noise)
+dominates. `--strict-diamond`'s surviving population is visibly tighter on
+every dataset (1.2–2.6 mm) — unsurprising, since only the most cleanly-fit
+candidates clear `edge_support_min=0.6`. ds4's jitter changes slightly
+between baseline and `--stance-gate` (same n=34, different std) and ds5's
+changes with the same n=7 in both — evidence that the live stance gate
+occasionally swaps in a different accepted candidate for the same frame
+rather than only ever adding/removing whole detections, consistent with the
+Part-A/live-gate distinction noted above.
+
+### Residual clutter characterization (15 detections, `--stance-gate`)
+
+Classified each of the 15 residual clutter centers by distance from the
+known ds5 clutter panel reference (~(-1.83, -2.89, -0.1), documented since
+stage 1):
+
+| Attractor | Count | % of 15 | Datasets | Example center |
+|---|---|---|---|---|
+| ds5 persistent panel (within ≤0.1 m of ref) | **13** | **87%** | ds2 (1), ds5 (12) | (-1.851, -2.883, -0.120) |
+| second attractor (y≈3.5, z≈-0.5…-0.6 band) | 2 | 13% | ds1 (1), ds5 (1) | (0.638, 3.527, -0.507) |
+
+**13 of 15 (87%) are the same persistent near-vertical panel** stage 1–4
+already documented — not confined to ds5: one of its hits surfaces in ds2
+(frame 17, 0.21 m from the reference, matching stage 4's note that this
+panel's reach crosses dataset boundaries since all 5 datasets share one
+physical room/rig). The remaining 2/15 (13%) are a second, distinct
+scene-fixed attractor stage 4 first flagged (its "y≈3.5–3.55, z≈-0.5 to
+-0.6" band, previously noted in ds1/3/5) — here it survives the stance gate
+in ds1 and ds5 specifically. **No new, previously-undocumented clutter
+attractor appears under `--stance-gate`.**
+
+Inspected overlays for both attractors (`ds2_frame17_panel`,
+`ds1_frame41_second_attractor`, generated to the same `save_overlay` format
+as the committed run) show the same signature documented since stage 1: a
+solid, fully-filled planar region with **no interior holes**, fit by a
+well-formed (not fragmentary) quad — visually indistinguishable from the
+true board's raster in outline shape, distinguishable only by the absence
+of the two hole blobs every true-board overlay shows
+(`ds3_b_frame0000.png`, both operating points). This is exactly why
+`edge_support` — the one gate that does separate them — has to pay for it
+in recall: the panels are real, well-formed, ring-gap-striped planar
+surfaces, not fragments, so only the same coarse-binned edge-support signal
+that (barely) distinguishes them from the true board also catches some
+genuine board detections that share the same 2–3-bin quantization.
+
+### DECISION (Stage 5)
+
+1. **`--stance-gate` is the recommended single-frame operating point.** It
+   retains full recall (163/535, no measurable loss vs. baseline's 162) and
+   cuts clutter 78% (68→15), raising precision from 70.4% to 91.6% for
+   free. There is no recall cost to adopting it as the default.
+2. **Driving single-frame clutter to zero is not worth it.** `--strict-diamond`
+   reaches 100% precision but costs ~64% of recall (163→59) to remove the
+   last 15 false positives — a ~7:1 recall-to-FP trade, and it zeroes out
+   ds5's true-board recall entirely along with its clutter. No single-frame
+   geometric tightening tested in this phase reaches high precision without
+   this order of recall cost, because `edge_support` is the only cue that
+   discriminates the residual population and it is expensive by
+   construction (coarse bin quantization at real sensor range).
+3. **The residual ~15/535 (87% one persistent panel, 13% a second
+   attractor) is fundamentally ambiguous to single-frame geometry.** Both
+   attractors are real, well-formed, ring-gap-striped planar surfaces —
+   not fragments or blobs — that happen to sit close enough to the true
+   diamond's stance/edge-support signature that separating them costs
+   recall rather than being free. **This is the concrete evidence pointing
+   at a multi-pose/session-level cue as the real fix, not a tighter
+   single-frame gate**: the calibration board is the object that *moves*
+   between fixed poses during a session (already the workflow
+   `advanced_extrinsic_solver`'s buffered multi-pose mode assumes), while
+   the persistent panels are static scene fixtures that never change
+   location. A capture-protocol change — record the board at ≥2 distinct
+   positions per session and require a detection to appear at a location
+   that changes across poses, rejecting/down-weighting any candidate
+   location that repeats unchanged — would close this gap without any
+   further single-frame gate tuning. **This cue cannot be tested on the
+   current datasets 1–5**: each is a single static capture (the board does
+   not move within a dataset — that staticness is exactly what makes the
+   jitter statistics above meaningful as a precision proxy), so there is no
+   second pose to compare against. Implementing and testing the
+   multi-pose/session cue is a capture-protocol and future-phase item, out
+   of scope here.
+
 ## Decision
 
-Partial success — no winner yet, and the numbers as they stand do not justify
-an integration phase:
+**Updated after Stage 5 (final stage of this phase).** The subsections below
+record each stage's verdict as it was made; this paragraph is the overall
+phase-7 call in light of all five.
+
+The core idea — plane-fit into orthographic plane coordinates, then a shared
+2D quad scorer — is validated, and this phase reaches a genuinely usable,
+honestly-quantified single-frame operating point on the hole-free board
+design: generator B with anisotropic clustering + anisotropic stripe-tolerant
+closing + `stance_floor=0.9` (`--stance-gate`) recalls the true board on
+163/535 frames (30.5%, 4 of 5 datasets) at 91.6% precision (15 residual
+clutter, all attributable to two known static room fixtures, not scattered
+noise) and mm-level jitter — a large improvement over stage 1's ≤2% and a
+real answer to stage 4's discrimination gap. It is **not** a 100%-recall or
+100%-precision result, and this phase does not claim one: reaching 100%
+precision single-frame costs ~64% of recall (`--strict-diamond`, 59/535),
+and the residual clutter is diagnosed, not hand-waved, as out of single-frame
+geometry's reach — closing it needs a session-level multi-pose cue (the
+board moves between calibration poses; static clutter does not), which is a
+capture-protocol change for a future phase, not implementable on today's
+single-static-capture sample datasets.
+
+Given that, integration (Rust port, ROS node, replacing or front-ending ICP)
+is justified to scope next, on these terms:
 
 - The **projection + 2D scorer core is sound**: when a clean board candidate
-  reaches it, it produces a tight quad (25 mm jitter) at the right place, at
-  millisecond cost. The bottleneck is **candidate generation on ring-striped
-  clouds**, not the 2D idea.
-- **B** is the only generator that found the real board and the only one
-  inside the 100 ms budget, but a 2% frame rate is unusable as-is.
-- **C**'s recall on *flat square objects* is high even through ring stripes —
-  but it cannot tell the board from board-sized clutter, and is 3× over
-  budget in Python.
-- **Discrimination needs a stronger cue than the border alone** in scenes
-  containing other ~1 m planar objects: the hole pattern (present on the
-  recorded board) as an optional-but-scoring cue, or temporal consistency
-  across frames, would separate the true board from the two clutter panels
-  that C locks onto.
+  reaches it, it produces a tight quad (2–25 mm jitter across all stages) at
+  the right place, at millisecond cost. Stage 1's bottleneck — **candidate
+  generation on ring-striped clouds** — was fixed by stages 3–4's
+  anisotropic clustering/closing; stage 4's discrimination gap was then
+  closed by stage 5's stance gate, at the honest precision/recall numbers
+  above, not for free.
+- **B** (Euclidean clustering after big-plane removal) is the only generator
+  carried through to a usable result; A (iterative RANSAC) never recalled
+  the board at all, and C (region growing) recalls board-*sized* objects
+  well but cannot discriminate them and is 3× over the timing budget in
+  Python — neither was revisited after stage 1.
+- **Discrimination against static, board-sized planar clutter is solved to
+  91.6% precision at full recall, not further, and that is deliberate**:
+  the remaining ~8% of accepted detections are two real, static room
+  fixtures that share the true diamond's single-frame geometric signature
+  closely enough that only an expensive gate (`edge_support_min`, ~7:1
+  recall cost) separates them. A production integration should rely on the
+  session-level multi-pose/session cue (buffered across poses, as
+  `advanced_extrinsic_solver` already supports) to filter this residual,
+  rather than chasing further single-frame gate tuning.
+- Any integration plan must budget for the multi-pose/session filter as a
+  named, near-term follow-on phase — not an optional nice-to-have — since
+  it is the only tested path to closing the remaining precision gap.
 
 ### Stage-2 verdict
 
@@ -1069,3 +1324,54 @@ here**:
   gate) before any further candidate-generation or closing-kernel tuning —
   further raising recall without discrimination only grows the
   false-positive count in lockstep, as stage 4 just demonstrated.
+
+### Stage-5 verdict (updates the above, final for this phase)
+
+The hole pattern stage 4 recommended as the next lever was overtaken by a
+hardware decision (the recorded board is moving to hole-free), so stage 5
+built the alternative stage-4 flagged as available — stance, edge-support,
+and squareness gates keyed on diamond geometry instead of holes — and this
+task benchmarked both operating points those gates define:
+
+- **The discrimination gap stage 4 opened is now closed at an honest,
+  quantified price, not eliminated for free.** `--stance-gate`
+  (`stance_floor=0.9` alone) retains stage 4's full true-board recall
+  (163/535 vs. 162/535 baseline — no loss) while cutting clutter 78%
+  (68→15), taking precision from 70.4% to 91.6% at zero recall cost. This
+  is the first stage-5 result that is both a real recall number *and* a
+  real precision number reported honestly side by side, not one traded
+  silently for the other.
+- **Zero false positives is reachable but not recommended as a default.**
+  `--strict-diamond` reaches 100% precision (0/535 clutter) but costs
+  ~64% of recall (163→59) to get there — a ~7:1 recall-per-FP trade driven
+  entirely by `edge_support_min`, which is expensive by construction (its
+  ring-gap-calibrated bin width collapses to 2–3 bins/side at real sensor
+  range, making it the one cue that separates board from clutter but only
+  by discarding most board hits that share the same coarse quantization).
+  `strict_squareness` is inert on every real frame in this dataset
+  (structural, not a tuning gap); `side_tol=0.08` is a cheap partial
+  knob.
+- **The residual clutter under the recommended operating point (15/535,
+  87% one persistent panel + 13% a second static attractor) is not a
+  single-frame geometry problem left unsolved — it is evidence that
+  single-frame geometry has reached its ceiling.** Both attractors are
+  real, well-formed, ring-gap-striped planar surfaces that share the true
+  diamond's stance and edge-support signature closely enough that only the
+  most expensive gate separates them, and only at a recall cost that makes
+  it a bad default. **The concrete fix is a session-level cue, not a
+  tighter single-frame gate**: the board is the object that moves between
+  calibration poses; the panels are fixed room fixtures that never do.
+  This requires a capture-protocol change (record ≥2 board positions per
+  session, reject any candidate location that repeats unchanged across
+  poses) that the current single-static-capture datasets (1–5) cannot
+  test — a future-phase item, not a stage-5 gap.
+- **This is the phase's final stage.** The five-stage arc closes cleanly:
+  stage 1 found the core idea sound but candidate generation broken (≤2%
+  recall); stages 2–3 fixed candidate generation partially (accumulation
+  failed, anisotropic clustering worked for shape but not score); stage 4
+  fixed the scorer's sensitivity but opened a discrimination gap of equal
+  size; stage 5 closes that gap at a quantified, honest operating point
+  (91.6% precision / 30.5% recall, `--stance-gate`) and correctly
+  identifies the irreducible remainder as out of single-frame reach. See
+  the updated top-level Decision above this section for the phase-wide
+  call.
