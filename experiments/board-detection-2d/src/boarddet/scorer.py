@@ -29,6 +29,11 @@ class ScoreResult:
     # (2,2) original plane coords -> rotated (up_2d-along-+y) raster frame.
     # None when the isotropic (stage-3) path was used.
     rot_2d: np.ndarray | None = None
+    # Task 18: per-side (4,) fraction of each quad side backed by raw
+    # projected points near the side line -- see `_edge_support`. Always
+    # populated (cheap) regardless of `board.edge_support_min`, so tests and
+    # callers can inspect it even when the gate/score-blend is off.
+    edge_support: np.ndarray | None = None
 
 
 def _rasterize(coords_2d: np.ndarray, cell: float):
@@ -85,6 +90,70 @@ def _refine_sides(coords_2d, quad_plane, cell):
         s = np.linalg.solve(m, p2 - p1)
         corners.append(p1 + s[0] * d1)
     return np.array(corners)
+
+
+def _diamond_stance_2d(corners: np.ndarray, up_2d: np.ndarray) -> float:
+    """How gravity-aligned is either diagonal of a CCW/CW-cyclic quad, in
+    the same (in-plane) frame as `up_2d`.
+
+    Mirrors detector.py's `_stance`, but works on the 2D quad and the
+    in-plane `up_2d` direction so the strict-diamond gate can reject a
+    candidate inside the scorer, before a 3D pose is ever computed. corners
+    need only be in cyclic (CW or CCW) order for corners[i]/corners[i+2] to
+    be diagonal opposites -- winding direction doesn't matter here.
+    """
+    d1 = corners[2] - corners[0]
+    d2 = corners[3] - corners[1]
+    d1 = d1 / np.linalg.norm(d1)
+    d2 = d2 / np.linalg.norm(d2)
+    return float(max(abs(d1 @ up_2d), abs(d2 @ up_2d)))
+
+
+def _edge_support(coords_2d: np.ndarray, corners: np.ndarray, cell: float,
+                  close_height_m: float | None = None) -> np.ndarray:
+    """Per-side fraction of a quad's side length backed by raw projected
+    points within 0.5*cell of the side line.
+
+    A real board's boundary is a physical edge scanned along its whole
+    length, so all 4 sides come back near 1.0. A minAreaRect fit to a
+    fragment (e.g. a partial blob, or clutter that only looks board-sized
+    from a couple of edges) has 1-2 sides with no physical edge behind them
+    at all, and those read near 0.
+
+    Each side is binned into >= 2 bins along its length; a bin counts as
+    covered if >=1 raw point projects into it within the perpendicular
+    tolerance. Bin width must be coarse enough to bridge a LiDAR ring-gap
+    stripe (else a genuinely-present, fully-scanned real board reads as
+    fragmented purely from its own sensor sparsity -- confirmed empirically
+    on real dataset 3/5 frames, see task-18-report.md): with `close_height_m`
+    given (the same world-vertical ring-to-ring spacing `score_candidate`
+    uses to size the closing kernel), bin width is 2x that spacing, a
+    safety-margined stand-in for the up-to-1/cos(45deg) worst-case
+    projection of a world-vertical gap onto a diamond side (which sits ~45
+    deg off vertical). Without it (isotropic path / no board plane orientation
+    known), falls back to a fixed ~4*cell bin -- fine enough to catch an
+    entirely-missing side, coarse enough not to over-fragment a dense
+    synthetic/near-continuous point set.
+    """
+    bin_width = max(4 * cell, 2.0 * close_height_m) if close_height_m else 4 * cell
+    supports = np.zeros(4)
+    for i in range(4):
+        a, b = corners[i], corners[(i + 1) % 4]
+        ab = b - a
+        length = float(np.linalg.norm(ab))
+        if length < 1e-9:
+            continue
+        ab_hat = ab / length
+        rel = coords_2d - a
+        t = (rel @ ab_hat) / length
+        perp = np.abs(rel[:, 0] * ab_hat[1] - rel[:, 1] * ab_hat[0])
+        near = (perp < 0.5 * cell) & (t > -0.02) & (t < 1.02)
+        if not np.any(near):
+            continue
+        n_bins = max(2, int(np.ceil(length / bin_width)))
+        bin_idx = np.clip((t[near] * n_bins).astype(np.int64), 0, n_bins - 1)
+        supports[i] = len(np.unique(bin_idx)) / n_bins
+    return supports
 
 
 def _closing_kernel(cell: float, close_height_m: float | None) -> np.ndarray:
@@ -197,6 +266,34 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
         angs.append(np.degrees(np.arccos(np.clip(cosang, -1, 1))))
     angle_err = float(np.mean(np.abs(np.array(angs) - 90.0)))
 
+    # --- Task 18: hole-free strict-diamond discriminator gates (all off by
+    # default -- see BoardConfig). These run before the more expensive fill
+    # computation below and reject candidates score_candidate would
+    # otherwise have scored.
+    if board.strict_squareness:
+        max_ang_dev = float(np.max(np.abs(np.array(angs) - 90.0)))
+        if max_ang_dev > 8.0:
+            return None
+
+    if board.stance_floor > 0 and up_2d is not None:
+        # Reuse the caller-supplied up_2d (same one used for the
+        # anisotropic rotation above): the direction in THIS plane's
+        # original frame along which gravity's +z projects. `corners` is
+        # already in that original frame (quad_plane/refined, never
+        # rotated), so no extra transform is needed. A near-horizontal
+        # plane has no meaningful "stand on a corner" direction -- up_2d is
+        # None there (see detector._up_2d) and the gate is skipped rather
+        # than guessing.
+        if _diamond_stance_2d(corners, up_2d) <= board.stance_floor:
+            return None
+
+    # Always computed (cheap) so callers/tests can inspect it even with the
+    # gate off; only gates/blends into score when edge_support_min > 0.
+    edge_support = _edge_support(coords_2d, corners, cell, close_height_m)
+    if (board.edge_support_min > 0
+            and float(edge_support.min()) < board.edge_support_min):
+        return None
+
     # fill ratio: fraction of raster cells inside the quad that are occupied.
     # `closed` lives in the work (rotated, when anisotropic) frame, so the
     # quad has to be mapped there too.
@@ -225,14 +322,22 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
     # was tuned against the old, more fill-dominated score scale.
     score = float(np.sqrt(fill)) * float(np.exp(-2.0 * side_err)) \
         * float(np.exp(-angle_err / 15.0))
+    if board.edge_support_min > 0:
+        # Same sqrt() treatment as fill: discriminative against genuinely
+        # unsupported sides without punishing a real board's normal partial
+        # coverage (stripe gaps, occlusion) as hard as a linear term would.
+        score = score * float(np.sqrt(edge_support.mean()))
 
     # CCW order
     c = corners.mean(axis=0)
     order = np.argsort(np.arctan2(*(corners - c).T[::-1]))
     corners = corners[order]
     sides = np.linalg.norm(np.roll(corners, -1, axis=0) - corners, axis=1)
+    # Reindex to keep edge_support[k] associated with the same physical side
+    # as before, just relabeled under the new (CCW) corner order.
+    edge_support = edge_support[order]
 
     return ScoreResult(score=float(score), corners_2d=corners,
                        side_lengths=sides, fill_ratio=fill,
                        angle_err_deg=angle_err, raster=closed, origin=origin,
-                       cell_m=cell, rot_2d=rot_2d)
+                       cell_m=cell, rot_2d=rot_2d, edge_support=edge_support)
