@@ -1,5 +1,6 @@
+import boarddet.benchmark as benchmark_mod
 import numpy as np
-from boarddet.benchmark import accumulate_frames, summarize
+from boarddet.benchmark import accumulate_frames, main, summarize
 from boarddet.board_config import BoardConfig
 from boarddet.detector import detect
 from boarddet.ingest import Frame
@@ -56,3 +57,29 @@ def test_accumulate_frames_n1_reproduces_stage1():
     assert len(windows) == 4
     for w, f in zip(windows, frames, strict=True):
         assert np.array_equal(w, f.xyz)
+
+
+def test_stance_gate_flag_sets_only_stance_floor(monkeypatch, tmp_path):
+    """`--stance-gate` (Task 19's recommended operating point, per the
+    reproduced ablation in task-18-report.md: full recall retention + 78%
+    clutter reduction) must set stance_floor=0.9 and leave every other
+    Task 18 gate at its off default -- unlike `--strict-diamond`, which
+    turns all four on together."""
+    captured: dict = {}
+
+    def fake_run(datasets, generators, board, max_frames, out_dir,
+                accumulate=1):
+        captured["board"] = board
+        return {}
+
+    monkeypatch.setattr(benchmark_mod, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["benchmark", "--stance-gate", "--out", str(tmp_path)],
+    )
+    main()
+    board = captured["board"]
+    assert board.stance_floor == 0.9
+    assert board.strict_squareness is False
+    assert board.edge_support_min == 0.0
+    assert board.side_tol == BoardConfig().side_tol  # unchanged default
