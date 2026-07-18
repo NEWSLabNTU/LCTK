@@ -21,6 +21,13 @@ class BoardConfig:
     # clusters. VLP-32C worst adjacent-channel spacing is ~3 deg. 0 disables
     # the anisotropic scaling (plain isotropic DBSCAN).
     vertical_gap_deg: float = 3.0
+    # Plane-fit RMS gate in plausible_board_patch (candidates/__init__.py):
+    # a 3D patch flatter than this (in meters) is accepted as board-shaped.
+    # Default matches the module's own _FLATNESS_RMS_MAX -- current
+    # stage-1..6 behavior is unchanged. Task 20 exposes this as a CLI/config
+    # field so Task 21's recall sweep can raise it (stage6 diagnosis found
+    # 0.045 recovers +19% recall on real VLP-32C near-misses at 0.035-0.048).
+    flatness_rms_max: float = 0.035
     # --- Task 18: hole-free "strict diamond" discriminator gates ---
     # The recorded board is becoming a plain (hole-free) diamond, so
     # hole-pattern discrimination is off the table; these gates instead
