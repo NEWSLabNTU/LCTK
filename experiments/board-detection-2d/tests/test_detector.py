@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 from boarddet.board_config import BoardConfig
-from boarddet.detector import GENERATORS, _stance, detect
+from boarddet.detector import GENERATORS, _stance, _up_2d, detect
+from boarddet.geometry import PlaneModel
 from boarddet.synth import make_scene
 
 
@@ -68,3 +69,27 @@ def test_best_rejected_none_when_detection_accepted():
     out = detect(pts, BoardConfig(side_m=1.0), generator="a")
     assert out.detection is not None
     assert out.best_rejected is None
+
+
+def test_up_2d_none_for_near_horizontal_plane():
+    """A near-horizontal plane (normal ~= world z) has u, v spanning a
+    near-horizontal patch, so world +z projects to ~zero in-plane -- no
+    privileged "up" stripe direction to rotate onto. _up_2d must signal
+    this (None) so the detector falls back to the isotropic kernel rather
+    than rotating by a near-arbitrary, noise-dominated direction."""
+    horizontal = PlaneModel(center=np.zeros(3), normal=np.array([0.0, 0.0, 1.0]),
+                            u=np.array([1.0, 0.0, 0.0]),
+                            v=np.array([0.0, 1.0, 0.0]))
+    assert _up_2d(horizontal) is None
+
+
+def test_up_2d_present_for_vertical_plane():
+    """Sanity check on the other side of the gate: a vertical plane (world
+    z lies entirely in-plane) must return a unit vector, not None."""
+    vertical = PlaneModel(center=np.zeros(3), normal=np.array([1.0, 0.0, 0.0]),
+                          u=np.array([0.0, 1.0, 0.0]),
+                          v=np.array([0.0, 0.0, 1.0]))
+    up = _up_2d(vertical)
+    assert up is not None
+    np.testing.assert_allclose(np.linalg.norm(up), 1.0)
+    np.testing.assert_allclose(up, [0.0, 1.0], atol=1e-12)
