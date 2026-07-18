@@ -2088,3 +2088,76 @@ fixed poses; scene clutter does not) is REQUIRED to close that gap. The
 latter is a capture-protocol change (record board at ≥2 positions) and a
 future phase, not implementable on the current single-static-capture
 datasets. Update the top-level Decision.
+
+---
+
+# Stage 6 Addendum (2026-07-19): Recall Recovery — Flatness Gate + Stance Floor
+
+Stage-6 failure diagnosis (`.superpowers/sdd/stage6-failure-diagnosis.md`,
+ds1-4, 432 frames, --stance-gate): recall misses are dominated by
+C_FLATNESS (27.3%, a pure near-miss population RMS 0.035-0.048 vs the 0.035
+gate) and F_SCORER_REJECT (22.9%, of which ~50% are killed by stance_floor).
+Board is never stripped/merged/outscored (0%). The flatness gate
+`_FLATNESS_RMS_MAX=0.035` is set right at the bottom of the real board's
+planarity distribution — the C-04 "gate below the noise floor" mistake.
+Diagnostic replay: raising it to 0.045 recovers 84/118 C_FLATNESS frames
+(+19.4% absolute recall through the real downstream scorer/stance). Precision
+cost UNMEASURED — a looser flatness gate admits flatter clutter too.
+
+### Task 20: Make the flatness gate configurable + sweep-ready
+
+**Files:**
+- Modify: `experiments/board-detection-2d/src/boarddet/candidates/__init__.py`
+  (make `_FLATNESS_RMS_MAX` a `plausible_board_patch` parameter defaulting to
+  a `BoardConfig` field)
+- Modify: `experiments/board-detection-2d/src/boarddet/board_config.py`
+  (`flatness_rms_max: float = 0.035` — default unchanged = current behavior)
+- Modify: `experiments/board-detection-2d/src/boarddet/candidates/*.py`
+  (thread `board.flatness_rms_max` into the `plausible_board_patch` calls in
+  all three generators — the gate is shared)
+- Modify: `experiments/board-detection-2d/src/boarddet/benchmark.py`
+  (`--flatness-rms-max FLOAT` CLI flag → BoardConfig; echo in summary.json)
+- Test: `experiments/board-detection-2d/tests/test_candidates_a.py` (or the
+  gate's test home)
+
+**Interfaces:**
+- `plausible_board_patch(points_3d, board, flatness_rms_max=None)` — None →
+  use `board.flatness_rms_max`; keeps the module constant as the ultimate
+  default so nothing silently changes. Default 0.035 → every existing test
+  byte-identical.
+- CLI default 0.035 (current behavior); the sweep sets it explicitly.
+
+**Tests (TDD):**
+- a patch with RMS 0.040 is REJECTED at flatness_rms_max=0.035 but ACCEPTED
+  at 0.045 (the gate is actually configurable and discriminates at the new
+  value); default-None path uses the config field.
+- existing suite byte-identical at the 0.035 default.
+
+### Task 21: Stage-6 precision/recall sweep + phase doc + new-default decision
+
+Sweep the two recall levers against precision on all 5 datasets, generator b:
+
+```bash
+# flatness sweep at the recommended stance-gate point:
+for F in 0.035 0.040 0.045 0.050; do
+  uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+    --stance-weight 0.5 --stance-gate --flatness-rms-max $F \
+    --out results/run8-flat$F
+done
+# stance-floor recall lever at the best flatness (set best F from above):
+# (stance_floor is set by --stance-gate=0.9; to sweep it, add a
+#  --stance-floor FLOAT override to benchmark.py in Task 20 if not already,
+#  OR run the sweep in a scratch script over detect() — document which.)
+```
+
+For each (flatness, stance_floor) point compute true-board recall (in-bbox
+/535), clutter FP count (out-of-bbox), precision. Classify residual clutter
+(is the flatness relaxation admitting NEW clutter attractors, or just more
+hits on the known ds5 panel?). Timing check (looser gate = more candidates
+reach the scorer = more cost — measure it against the 100 ms budget). Fill
+"## Stage 6 Results" in the phase doc: the precision/recall curve over the
+sweep, the recommended new operating point (flatness value + stance_floor)
+with its precision/recall/timing, and an honest statement of the
+precision-for-recall trade. Update the top-level Decision. If the +19%
+recall costs unacceptable precision, say so and keep 0.035 — report the
+Pareto front, don't force a win.
