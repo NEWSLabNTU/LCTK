@@ -156,6 +156,28 @@ def test_anisotropic_closing_beats_isotropic_on_striped_board():
         )
 
 
+def test_anisotropic_coarse_quad_exact_on_rotated_striped_board():
+    """Tight rotation-exactness check (Task 16 corner-accuracy fix): with an
+    un-bulged coarse quad -- fit directly to the raw, rotated, striped point
+    set rather than to a raster closed with the tall gravity-oriented
+    kernel -- corners must land within 1*cell_m of truth, not the old 3x
+    slack that was only needed to tolerate the bulge. A wider tolerance here
+    would silently let a bulge-sized error back in.
+    """
+    board = BoardConfig(side_m=1.0)
+    coords, up_2d, truth_corners = _striped_diamond_2d()
+    res = score_candidate(coords, board, up_2d=up_2d, close_height_m=0.15)
+    assert res is not None
+    assert res.rot_2d is not None
+    cell = board.cell_m
+    for truth in truth_corners:
+        d = np.linalg.norm(res.corners_2d - truth, axis=1)
+        assert d.min() < 1.0 * cell, (
+            f"corner {truth} not matched within 1*cell_m "
+            f"(closest {d.min():.4f}, cell_m {cell})"
+        )
+
+
 def test_isotropic_path_byte_identical_to_pre_task16():
     """Regression pin: up_2d=None/close_height_m=None must reproduce the
     exact stage-3 (pre-Task-16) numbers on the standard dense fixture --
