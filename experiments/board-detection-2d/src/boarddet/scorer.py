@@ -1,4 +1,6 @@
-"""Shared 2D scorer: occupancy raster -> contour -> quad -> refined corners."""
+"""Shared 2D scorer: coarse quad from raw points -> refined corners; a
+separate closed occupancy raster (rotated to gravity "up" when anisotropic)
+is used only to measure fill_ratio."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,7 +16,10 @@ _MIN_POINTS = 60
 @dataclass
 class ScoreResult:
     score: float
-    corners_2d: np.ndarray   # (4,2) refined, CCW order, ORIGINAL plane coords
+    # (4,2) CCW order, ORIGINAL plane coords. Isotropic path: TLS-refined
+    # (_refine_sides). Anisotropic path: raw-point minAreaRect coarse quad,
+    # unrefined -- see score_candidate for why refine is skipped there.
+    corners_2d: np.ndarray
     side_lengths: np.ndarray  # (4,)
     fill_ratio: float
     angle_err_deg: float
@@ -39,22 +44,22 @@ def _px_to_plane(pts_px: np.ndarray, origin: np.ndarray, cell: float):
     return origin + (pts_px + 0.5) * cell
 
 
-def _refine_sides(coords_2d, quad_plane, cell, near_tol=None):
+def _refine_sides(coords_2d, quad_plane, cell):
     """TLS line fit per side on raw points near it, intersect adjacent lines.
 
-    `near_tol` (m): perpendicular search band around each coarse edge. Default
-    (None) is the stage-3 2.5*cell -- tight, because the coarse quad there
-    sits within a cell or two of the true edge. The anisotropic path's tall
-    closing kernel is *extensive* (morphological closing only ever grows a
-    shape and is not exactly invertible for tapered regions): near a diamond
-    corner it can permanently bulge the closed contour outward along the
-    "up" axis by up to about half the kernel height, so the coarse quad
-    handed in here can be that far from the true edge. Callers pass a wider
-    `near_tol` (derived from close_height_m) in that case so real edge
-    points are still captured; the fit itself is unaffected by the widening
-    beyond which points it sees.
+    Only used on the isotropic (stage-3) path, where `quad_plane` comes from
+    a raster closed with the small 5x5 square kernel: that quad sits within
+    a cell or two of the true edge (not bulged -- the square kernel isn't
+    directionally biased), so a tight 2.5*cell search band safely refines it
+    with raw, non-quantized points without pulling in an adjacent edge's
+    points near a corner.
+
+    Not used on the anisotropic path: there the coarse quad is already fit
+    directly to raw points (see score_candidate) and this fit's own
+    per-side averaging is systematically biased -- see the comment at its
+    call site.
     """
-    tol = 2.5 * cell if near_tol is None else near_tol
+    tol = 2.5 * cell
     lines = []
     for i in range(4):
         a, b = quad_plane[i], quad_plane[(i + 1) % 4]
@@ -110,24 +115,50 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
         rot_2d = None
         work_coords = coords_2d
 
+    # `img`/`closed` (raster, in the work frame, closed with the tall
+    # gravity-oriented kernel when anisotropic) exist to compute fill_ratio
+    # below -- bridging ring-stripe gaps so a real, sparsely-seen board reads
+    # as filled. On the anisotropic path they must never drive corner
+    # geometry: closing with a kernel elongated along "up" is extensive
+    # (only ever grows the shape, and is not exactly invertible for a
+    # tapered region), so near a diamond's pointed corners it permanently
+    # bulges the closed blob outward along the up axis. A coarse quad fit to
+    # that bulge is offset by up to ~half the kernel height, and would
+    # poison _refine_sides into pulling in points from the adjacent edge.
     img, origin = _rasterize(work_coords, cell)
     if img.shape[0] > 4000 or img.shape[1] > 4000:
         return None  # candidate far larger than any board
     kernel = _closing_kernel(cell, close_height_m if anisotropic else None)
     closed = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
-    contours, _ = cv2.findContours(
-        closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-    contour = max(contours, key=cv2.contourArea)
-    rect = cv2.minAreaRect(contour)  # ((cx,cy),(w,h),angle)
-    (rw, rh) = rect[1]
-    if min(rw, rh) < 3:
-        return None
-    quad_px = cv2.boxPoints(rect)
-    quad_work = _px_to_plane(quad_px, origin, cell)
-    # rotated (work) frame -> original plane frame
-    quad_plane = quad_work @ rot_2d if anisotropic else quad_work
+
+    if anisotropic:
+        # Coarse quad: fit directly to the RAW point set, in the ORIGINAL
+        # (un-rotated) plane frame -- no rotation needed for this step at
+        # all. cv2.minAreaRect on a point set is bulge-free: even sparse
+        # ring-stripe endpoints still sit on all four true edges, so the
+        # coarse box is ~the true board rectangle regardless of gaps.
+        rect = cv2.minAreaRect(coords_2d.astype(np.float32))  # ((cx,cy),(w,h),angle)
+        (rw, rh) = rect[1]
+        if min(rw, rh) < 3 * cell:
+            return None
+        quad_plane = cv2.boxPoints(rect)
+    else:
+        # Isotropic (stage-3) path: unchanged from pre-Task-16. The 5x5
+        # square kernel isn't directionally biased, so fitting the coarse
+        # quad to its closed contour is safe here and this branch is pinned
+        # byte-identical to pre-Task-16 output (see
+        # test_isotropic_path_byte_identical_to_pre_task16).
+        contours, _ = cv2.findContours(
+            closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        contour = max(contours, key=cv2.contourArea)
+        rect = cv2.minAreaRect(contour)  # ((cx,cy),(w,h),angle) in px
+        (rw, rh) = rect[1]
+        if min(rw, rh) < 3:
+            return None
+        quad_px = cv2.boxPoints(rect)
+        quad_plane = _px_to_plane(quad_px, origin, cell)
 
     # size gate on the coarse quad
     sides = np.linalg.norm(np.roll(quad_plane, -1, axis=0) - quad_plane,
@@ -137,16 +168,24 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
             < board.side_m * (1 + 2 * board.side_tol)):
         return None
 
-    # A closing kernel elongated along the "up" axis is extensive: near a
-    # diamond corner (its edges sit at ~45 deg to up_2d) it can permanently
-    # bulge the closed contour outward by up to ~half the kernel height,
-    # i.e. ~close_height_m/2, whose component perpendicular to a 45-deg
-    # edge is that times cos(45 deg) = ~0.35*close_height_m. 0.4 keeps a
-    # small margin above that (measured against both a dense synthetic
-    # board and a striped one; see test_scorer.py).
-    near_tol = max(2.5 * cell, 0.4 * close_height_m) if anisotropic else None
-    refined = _refine_sides(coords_2d, quad_plane, cell, near_tol=near_tol)
-    corners = refined if refined is not None else quad_plane
+    if anisotropic:
+        # _refine_sides fits each side to the mean of raw points within a
+        # perpendicular band of the coarse edge. That average is unbiased
+        # only when points straddle the true edge on both sides; a solid
+        # scanned surface never has points beyond its own true edge, so the
+        # band is one-sided and the mean sits systematically ~tol/2 INSIDE
+        # the true edge (confirmed empirically: refining a raw-point
+        # minAreaRect quad here made corners *worse*, not better). That bias
+        # was previously masked on the isotropic path because the raster's
+        # closing kernel dilates the coarse quad outward by a similar
+        # amount first, so the two roughly cancelled -- a coincidence, not a
+        # property to rely on. The anisotropic coarse quad is fit directly
+        # to raw points (no dilation to cancel against), so it is already
+        # the more accurate estimate; skip refine and use it as-is.
+        corners = quad_plane
+    else:
+        refined = _refine_sides(coords_2d, quad_plane, cell)
+        corners = refined if refined is not None else quad_plane
     sides = np.linalg.norm(np.roll(corners, -1, axis=0) - corners, axis=1)
 
     # angles at each corner

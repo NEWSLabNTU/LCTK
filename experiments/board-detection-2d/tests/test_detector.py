@@ -83,6 +83,60 @@ def test_up_2d_none_for_near_horizontal_plane():
     assert _up_2d(horizontal) is None
 
 
+def _match_corner_errors(corners_a, corners_b):
+    """Nearest-neighbour per-corner distance from each row of `corners_a` to
+    the closest row of `corners_b` (both (4,3))."""
+    return np.array([
+        np.linalg.norm(corners_b - c, axis=1).min() for c in corners_a
+    ])
+
+
+def test_anisotropic_path_corners_match_isotropic_on_default_scene():
+    """Reproduces the reviewer's corner-accuracy regression: the stage-4
+    anisotropic path's tall gravity-oriented closing kernel bulges the
+    diamond's pointed corners in the occupancy raster, and (pre-fix) the
+    coarse quad was fit to that bulged raster -- ~4x corner-accuracy
+    regression at vertical_gap_deg=3.0 on this exact scene (0.03 m -> 0.12
+    m). With the coarse quad fit to raw points instead, the anisotropic
+    path must not degrade corners relative to the isotropic path on a
+    dense, well-observed board."""
+    pts, truth = make_scene(rng=np.random.default_rng(13))
+    board_iso = BoardConfig(side_m=1.0, vertical_gap_deg=0.0)
+    board_aniso = BoardConfig(side_m=1.0, vertical_gap_deg=3.0)
+    out_iso = detect(pts, board_iso, generator="a")
+    out_aniso = detect(pts, board_aniso, generator="a")
+    assert out_iso.detection is not None
+    assert out_aniso.detection is not None
+    cell = board_aniso.cell_m
+    errs = _match_corner_errors(out_aniso.detection.corners_3d,
+                                out_iso.detection.corners_3d)
+    assert errs.max() < cell, (
+        f"anisotropic corners diverge from isotropic by up to {errs.max():.4f} m "
+        f"(cell_m {cell}): {errs}"
+    )
+
+
+def test_long_range_anisotropic_detection_has_accurate_corners():
+    """Long-range guard: the pre-fix bug produced an ACCEPTED detection
+    (score > min_score) at range ~10 m with corners off by ~0.5 m on a 1 m
+    board (center_err stayed ~0.01 m because center averages the bulge out
+    across all four corners). Any detection returned here must have
+    genuinely accurate corners; silently accepting a badly-fit quad is
+    worse than rejecting it outright."""
+    board = BoardConfig(side_m=1.0, vertical_gap_deg=3.0)
+    pts, truth = make_scene(board_center=(10.0, 0.5, 0.3),
+                            rng=np.random.default_rng(13))
+    out = detect(pts, board, generator="a")
+    if out.detection is None:
+        return  # no detection is an acceptable outcome
+    cell = board.cell_m
+    errs = _match_corner_errors(out.detection.corners_3d, truth.corners)
+    assert errs.max() < 2.0 * cell, (
+        f"accepted long-range detection has corner error up to "
+        f"{errs.max():.4f} m (2*cell_m {2 * cell}): {errs}"
+    )
+
+
 def test_up_2d_present_for_vertical_plane():
     """Sanity check on the other side of the gate: a vertical plane (world
     z lies entirely in-plane) must return a unit vector, not None."""
