@@ -128,6 +128,7 @@ def run(datasets: list[int], generators: list[str], board: BoardConfig,
         "stance_floor": board.stance_floor,
         "edge_support_min": board.edge_support_min,
         "side_tol": board.side_tol,
+        "flatness_rms_max": board.flatness_rms_max,
         "datasets": all_results,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -162,17 +163,32 @@ def main() -> None:
                          " -- retains ~full recall while cutting most "
                          "clutter (see task-18-report.md's reproduced "
                          "ablation); off by default")
+    ap.add_argument("--flatness-rms-max", type=float, default=0.035,
+                    help="plausible_board_patch plane-fit RMS gate, meters "
+                         "(Task 20 recall-sweep lever; 0.035 keeps current "
+                         "behavior, the stage6 diagnosis found 0.045 "
+                         "recovers +19%% recall on real VLP-32C near-misses)")
+    ap.add_argument("--stance-floor", type=float, default=None,
+                    help="override stance_floor directly (Task 20 sweep "
+                         "lever); wins over --stance-gate/--strict-diamond "
+                         "when both are given, so the rest of that flag's "
+                         "config is kept while only stance_floor is swept "
+                         "(default: unset, so those flags' own value stands"
+                         "; overall BoardConfig default is 0.0/off)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     board_kwargs: dict = dict(
         side_m=args.side, stance_weight=args.stance_weight,
         vertical_gap_deg=args.vertical_gap_deg,
+        flatness_rms_max=args.flatness_rms_max,
     )
     if args.strict_diamond:
         board_kwargs.update(strict_squareness=True, stance_floor=0.9,
                             edge_support_min=0.6, side_tol=0.08)
     elif args.stance_gate:
         board_kwargs.update(stance_floor=0.9)
+    if args.stance_floor is not None:
+        board_kwargs.update(stance_floor=args.stance_floor)
     run(args.datasets, args.generators, BoardConfig(**board_kwargs),
         args.max_frames, args.out, accumulate=args.accumulate)
 
