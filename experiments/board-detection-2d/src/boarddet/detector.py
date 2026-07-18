@@ -11,7 +11,7 @@ from .board_config import BoardConfig
 from .candidates.cluster_after_ground import generate_cluster_after_ground
 from .candidates.ransac_iterative import generate_ransac_iterative
 from .candidates.region_growing import generate_region_growing
-from .geometry import downsample, project_to_plane
+from .geometry import PlaneModel, downsample, project_to_plane
 from .pose import BoardDetection, board_pose
 from .scorer import score_candidate
 
@@ -31,6 +31,30 @@ class DetectOutcome:
 
 
 _UP = np.array([0.0, 0.0, 1.0])
+_MIN_UP_PROJ = 0.2  # below this, the plane is near-horizontal: no privileged
+                    # "up" stripe direction, fall back to the isotropic kernel
+
+
+def _up_2d(plane: PlaneModel) -> np.ndarray | None:
+    """Direction in plane (u, v) coords along which horizontal ring stripes
+    are separated: the projection of world +z onto the plane's in-plane
+    basis, normalized. None when the plane is near-horizontal (u, v then
+    span a ~horizontal patch, so +z projects to near-zero in-plane and there
+    is no meaningful "up" direction to rotate stripes onto)."""
+    proj = np.array([_UP @ plane.u, _UP @ plane.v])
+    norm = np.linalg.norm(proj)
+    if norm < _MIN_UP_PROJ:
+        return None
+    return proj / norm
+
+
+def _close_height_m(cand_points: np.ndarray, board: BoardConfig) -> float:
+    """Physical vertical closing reach: twice the mean horizontal range of
+    the candidate's points times the worst-case adjacent-channel vertical
+    angular gap (board.vertical_gap_deg)."""
+    horiz_range = np.hypot(cand_points[:, 0], cand_points[:, 1])
+    return float(2.0 * horiz_range.mean()
+                * np.tan(np.radians(board.vertical_gap_deg)))
 
 
 def _stance(corners_3d: np.ndarray) -> float:
@@ -65,8 +89,15 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     best: BoardDetection | None = None
     best_rejected: BoardDetection | None = None
     for cand in cands:
+        up_2d = None
+        close_height_m = None
+        if board.vertical_gap_deg > 0:
+            up_2d = _up_2d(cand.plane)
+            if up_2d is not None:
+                close_height_m = _close_height_m(cand.points, board)
         res = score_candidate(project_to_plane(cand.points, cand.plane),
-                              board)
+                              board, up_2d=up_2d,
+                              close_height_m=close_height_m)
         if res is None:
             continue
         det = board_pose(cand.plane, res)
