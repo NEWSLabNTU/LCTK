@@ -1139,28 +1139,268 @@ genuine board detections that share the same 2–3-bin quantization.
    multi-pose/session cue is a capture-protocol and future-phase item, out
    of scope here.
 
+## Stage 6 Results
+
+Stage 5 landed `--stance-gate` (`stance_floor=0.9`) at 30.5% recall / 91.6%
+precision and named the *recall* ceiling — half the frames are lost — as the
+next thing to attack. Stage 6 does that by sweeping the two recall levers the
+per-frame failure diagnosis
+(`.superpowers/sdd/stage6-failure-diagnosis.md`) identified, and — crucially —
+measures what each costs in **precision** (clutter admitted), the question the
+diagnosis explicitly left open because it replayed only the board's own
+candidate, never the clutter.
+
+Suite is 71/71 green (`uv run pytest -q`) before this benchmark (65 from
+stage 5 + 6 from Task 20's configurable-gate CLI).
+
+### Failure-mode diagnosis summary (the recall levers this stage sweeps)
+
+The diagnosis bucketed every non-detected frame on ds1–4 (432 frames, the
+`--stance-gate` operating point, generator b) by *first* failure cause, using
+the real `detect()` path with per-stage instrumentation (methodology and the
+full per-dataset table in `stage6-failure-diagnosis.md`):
+
+| Bucket | Overall (n=432) | Meaning |
+|---|---|---|
+| DETECTED | 156 / 36.1% | (baseline for the diagnosis subset) |
+| **C_FLATNESS** | **118 / 27.3%** | board plane-fit RMS in 0.035–0.048 m, rejected by the 0.035 gate |
+| **F_SCORER_REJECT** | **99 / 22.9%** | `score_candidate` hard-gate/low-score; **50/99 killed by the 2D stance gate** |
+| A_FRAGMENTED | 56 / 13.0% | board split across ≥2 clusters, none holding a majority |
+| H_NO_BOARD_POINTS | 3 / 0.7% | occlusion/range data limit |
+| B_STRIPPED, D_SIZE, E_MERGED, G_OUTSCORED | 0 / 0.0% each | not loss mechanisms here |
+
+C_FLATNESS and F_SCORER_REJECT are 50.2% of frames combined and are the two
+levers swept below. C_FLATNESS is a pure **near-miss** population (every
+failing frame's RMS is within 37% of the 0.035 threshold; min 0.0351, median
+0.0390, max 0.0481); the diagnosis's board-candidate-only replay projected
+that raising the gate 0.035→0.045 recovers 84/118 of them (+19.4% absolute
+recall) **but could not say what clutter that admits**. F_SCORER_REJECT is
+dominated (50/99) by the `stance_floor=0.9` 2D diamond-stance hard gate — the
+diagnosis flagged relaxing it as a *re-tune-and-re-measure* task, not a
+one-line change, precisely because that gate was purpose-built in Task 19 to
+buy precision. Stage 6 runs both re-measures across all 535 frames (ds1–5,
+generator b), the missing precision check the diagnosis gated its
+recommendations on.
+
+Method: `boarddet.benchmark` for the sweep runs (`results/run8-flat*`, not
+committed — `results/` is gitignored), plus a scratch script (not committed)
+that calls the real `detect()` per frame on all 535 cached frames and
+classifies every accepted detection's center against the bbox reference
+(`ros/lctk_launch/config/board/bbox.json5`: translation `[2.6,0,0.35]`, size
+`[3.1,3.94,2.2]` → x∈[1.05,4.15], y∈[-1.97,1.97], z∈[-0.75,1.45]) into
+true-board (in-bbox) vs clutter (out-of-bbox), the same rule stages 4–5 used.
+The `flat0.035` sweep point reproduces stage 5's `--stance-gate` baseline
+exactly (163 true / 15 clutter), confirming the harness is faithful.
+
+```bash
+for F in 0.035 0.040 0.045 0.050; do
+  uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+    --stance-weight 0.5 --stance-gate --flatness-rms-max $F --out results/run8-flat$F
+done
+# stance_floor lever at the best flatness:
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --stance-gate --stance-floor 0.85 --flatness-rms-max 0.045 \
+  --out results/run8-stance085   # + 0.88, 0.90 points
+```
+
+### Flatness sweep (stance_floor=0.9 fixed; true/clutter per dataset)
+
+| flatness | ds1 | ds2 | ds3 | ds4 | ds5 | **true / clutter** | **recall** | **precision** | median ms (p95) |
+|---|---|---|---|---|---|---|---|---|---|
+| **0.035** (stage-5 baseline) | 31/1 | 45/1 | 46/0 | 34/0 | 7/13 | **163 / 15** | 30.5% | 91.6% | 59.6 (71.0) |
+| 0.040 | 45/1 | 58/2 | 65/1 | 42/1 | 15/12 | **225 / 17** | 42.1% | 93.0% | 58.9 (73.1) |
+| **0.045** (recommended) | 56/1 | 65/2 | 66/3 | 53/1 | 24/13 | **264 / 20** | **49.3%** | **93.0%** | 60.2 (73.0) |
+| 0.050 | 57/1 | 65/2 | 66/3 | 54/1 | 28/13 | **270 / 20** | 50.5% | 93.1% | 60.0 (75.9) |
+
+**Headline: raising the flatness gate 0.035→0.045 is a strict Pareto
+improvement — recall rises 30.5%→49.3% (+18.8 pts absolute, +62% relative)
+while precision *also* rises 91.6%→93.0%.** The precision-for-recall trade the
+task set out to quantify **did not occur**: true detections grow far faster
+(163→264, +101) than clutter (15→20, +5), so precision goes *up* even as a few
+more false positives are admitted. This matches the diagnosis's +19.4%
+board-candidate-only projection closely (it predicted the recall gain; the new
+result is that the gain does not cost precision). 0.040 already captures most
+of it (+11.6 pts recall at +1.4 pts precision); 0.045 is the sweet spot the
+diagnosis identified (diminishing returns past it) and is where recall
+plateaus for ds1–4. 0.050 buys only +1.2 pts more recall (270 vs 264), and
+almost entirely on ds5 (24→28), the clutter-heavy dataset — while pushing the
+gate deeper into VLP-32C sensor-noise territory (the floor that motivated 0.035
+in the first place). 0.045 is preferred; 0.050 is a marginal, defensible
+alternative if ds5-style captures dominate.
+
+### Stance-floor sweep (flatness=0.045 fixed; does relaxing it recover the stance-gated frames?)
+
+The diagnosis found 50 genuine board frames die on the `stance_floor=0.9`
+hard gate and asked whether relaxing it recovers them. Swept at the chosen
+flatness (0.045):
+
+| stance_floor | ds1 | ds2 | ds3 | ds4 | ds5 | **true / clutter** | **recall** | **precision** | median ms (p95) |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.85 | 56/4 | 65/3 | 66/6 | 53/2 | 25/25 | **265 / 40** | 49.5% | 86.9% | 61.0 (77.5) |
+| 0.88 | 56/2 | 65/2 | 66/3 | 53/1 | 24/17 | **264 / 25** | 49.3% | 91.3% | 62.1 (77.8) |
+| **0.90** (recommended) | 56/1 | 65/2 | 66/3 | 53/1 | 24/13 | **264 / 20** | 49.3% | 93.0% | 61.1 (75.8) |
+
+**Relaxing stance_floor is refuted as a recall lever — keep 0.9.** Dropping it
+to 0.85 barely moves recall (+1 true frame, 264→265) but craters precision
+(93.0%→86.9%) by doubling clutter (20→40, +17 of them NEW). The diagnosis's
+hypothesis — that ~50 stance-gated board frames would return as accepted
+true detections — does **not** hold on the full scene: those board
+candidates do not re-emerge above threshold, but a flood of previously
+stance-rejected *clutter* does. This is exactly the precision cost the
+diagnosis warned it could not see (board-candidate-only replay), now measured.
+0.88 is an unremarkable midpoint (91.3%, no recall gain). The
+`stance0.90@flat0.045` row reproduces the flatness-sweep 0.045 row
+byte-for-byte (264/20), an internal consistency check on the two independent
+sweep harnesses.
+
+### Pareto front
+
+Plotting recall (x) vs precision (y) across all seven points, the
+non-dominated front is:
+
+- **(0.035, sf 0.9): 30.5% / 91.6%** — dominated (0.045 beats it on *both* axes)
+- **(0.045, sf 0.9): 49.3% / 93.0%** — on the front, the knee
+- **(0.050, sf 0.9): 50.5% / 93.1%** — on the front, marginal extension
+
+Every stance-floor-relaxation point (0.85, 0.88) is strictly dominated: lower
+precision at equal-or-lower recall than (0.045, sf 0.9). The front is
+remarkably flat in precision (91.6–93.1%) and spans 30.5–50.5% recall entirely
+along the flatness axis. There is no genuine precision/recall *tension* to
+trade off in this sweep — the recall gain from flatness comes for free (indeed
+with a slight precision bonus), and the one lever that *would* trade precision
+for recall (stance_floor) buys no recall for the precision it spends.
+
+### Added-clutter characterization (where do the extra 5 false positives at 0.045 come from?)
+
+Between 0.035 (15 clutter) and 0.045 (20 clutter), the +5 net is not more hits
+on the known ds5 persistent panel — that count actually *drops* (13→11,
+because the true board now wins more ds5 frames outright). The composition
+shifts:
+
+| clutter kind | flat 0.035 | flat 0.045 |
+|---|---|---|
+| ds5 persistent panel (≈(-1.83,-2.89,-0.1)) | 13 | 11 |
+| second attractor (y≈3.5, z≈-0.5 band) | 2 | 2 |
+| **NEW (flatness-relaxation admits)** | **0** | **7** |
+
+The 7 NEW false positives at 0.045 are board-shaped planar clutter whose plane
+RMS sat in the 0.035–0.045 band and now clears the gate. Their centers are
+**not** a new unexplained population — they cluster at scene-fixed room
+structures of exactly the family stages 1–5 documented:
+
+```
+ds2 (4.67, 2.68, -0.09)   <- "panel A" at ~(4.7, 2.6), named in stage 1
+ds3 (0.26, 3.95, 0.45)    <- the y≈3.5-3.95 positive-z band, named in stage 4
+ds3 (3.64, -3.16, 0.51)
+ds3 (2.42, -3.22, 0.53)  ┐  one shared fixture at ~(2.4-2.6, -3.1..-3.2, z≈0.55)
+ds4 (2.42, -3.22, 0.57)  ├  recurring across ds3/ds4/ds5 (all 5 share one room)
+ds5 (2.59, -3.07, 0.55)  ┘
+ds5 (-0.79, 3.31, 0.01)
+```
+
+So the flatness relaxation admits **more of the same static, board-sized
+planar room fixtures** the phase has flagged since stage 1 (a shared
+~(2.4,-3.2,0.55) fixture accounts for 3 of the 7), not a novel failure mode.
+This is consistent with stage 5's finding that the residual clutter is
+static-scene structure a session-level multi-pose cue would remove; raising
+flatness widens the net slightly for that same population, at the small,
+measured precision cost above (which the recall gain more than offsets).
+
+### Timing — looser gate does not blow the budget
+
+Median total stays flat at ~60 ms across every flatness value (59.6→60.2 ms)
+and every stance_floor value (61–62 ms), with p95 71–78 ms — comfortably
+inside the 100 ms/frame realtime budget. Relaxing the flatness gate lets more
+candidates reach the 2D scorer, but the flatness test is a cheap plane-fit RMS
+and per-candidate scoring is sub-millisecond, so the extra candidates cost no
+measurable wall time. Timing was never the constraint on this lever.
+
+### True-board pose jitter at the recommended point (flatness 0.045, stance_floor 0.9)
+
+Per-dataset in-bbox center std (mm), n = true-board detections:
+
+| Dataset | 0.035 baseline | **0.045 recommended** | n (0.045) |
+|---|---|---|---|
+| 1 | 2.9 / 21.1 / 15.9 | 3.5 / 17.7 / 14.7 | 56 |
+| 2 | 1.7 / 5.9 / 6.4 | 2.5 / 6.9 / 7.6 | 65 |
+| 3 | 2.0 / 3.8 / 5.1 | 2.5 / 4.3 / 5.6 | 66 |
+| 4 | 2.1 / 16.7 / 17.8 | 2.7 / 17.9 / 15.7 | 53 |
+| 5 | 4.4 / 32.8 / 34.9 | 5.3 / 27.2 / 27.5 | 24 |
+
+(x/y/z std, mm.) The larger 0.045 populations (n up 1.7–3.4×) hold the same
+mm-level precision as stage 5's baseline — x-jitter 2.5–5.3 mm on every
+dataset, at or below the ~25 mm sensor-noise floor established in stage 3. The
+y/z spread on ds1/4/5 is the board's own orientation spread across the
+capture, not sensor noise (same pattern stage 4/5 documented). The +101 recall
+frames the flatness relaxation adds are therefore genuine repeat detections of
+the one static board, not scattered noise — the jitter would blow up if they
+were spurious, and it does not.
+
+### DECISION (Stage 6)
+
+1. **Adopt `flatness_rms_max=0.045` on top of `--stance-gate` as the new
+   recommended operating point.** It is a *strict Pareto improvement* over
+   stage 5's 0.035: recall 30.5%→49.3% (+18.8 pts) **and** precision
+   91.6%→93.0% (+1.4 pts), at unchanged ~60 ms timing and unchanged mm-level
+   jitter. There is no precision-for-recall tradeoff to confess — the feared
+   cost did not materialize, because at this scale true-board detections
+   dominate the count and grow much faster than the few extra static-fixture
+   clutter hits. The honesty mandate here cuts the other way from usual: the
+   result is *better* than the diagnosis dared project, and it is reported
+   straight, not hedged.
+2. **Keep `stance_floor=0.9`; do not relax it.** The diagnosis's second lever
+   is refuted on the full scene: lowering it to 0.85 buys +1 true frame for
+   −6.1 pts precision (+17 NEW clutter). The 50 stance-gated board frames the
+   board-candidate-only replay hoped to recover do not return as accepted
+   detections; only clutter does. `stance_floor=0.9` remains the right value.
+3. **0.045 over 0.050.** 0.050 adds only +1.2 pts recall (almost all on
+   ds5) for no precision change while sitting deeper in the sensor-noise
+   floor; 0.045 is the diagnosis-identified sweet spot and where ds1–4 recall
+   plateaus. 0.045 is recommended; 0.050 is a defensible alternative only if
+   ds5-style clutter-heavy scenes dominate.
+4. **The residual 20/535 clutter is the same static-scene population stage 5
+   diagnosed** — the ds5 persistent panel (11), a second attractor (2), and 7
+   more hits on board-sized room fixtures the flatness relaxation newly
+   admits, all at scene-fixed locations documented since stage 1. This does
+   not change stage 5's conclusion that the real fix for the residual is a
+   session-level multi-pose cue (the board moves between poses; the fixtures
+   do not), which remains a capture-protocol/future-phase item untestable on
+   the single-static-capture datasets 1–5. Raising flatness widens the true-
+   board recall substantially without changing the *character* of the
+   residual clutter, which is why it is a clean win now and the multi-pose cue
+   is still the eventual precision closer.
+
 ## Decision
 
-**Updated after Stage 5 (final stage of this phase).** The subsections below
+**Updated after Stage 6 (final stage of this phase).** The subsections below
 record each stage's verdict as it was made; this paragraph is the overall
-phase-7 call in light of all five.
+phase-7 call in light of all six.
 
 The core idea — plane-fit into orthographic plane coordinates, then a shared
 2D quad scorer — is validated, and this phase reaches a genuinely usable,
 honestly-quantified single-frame operating point on the hole-free board
 design: generator B with anisotropic clustering + anisotropic stripe-tolerant
-closing + `stance_floor=0.9` (`--stance-gate`) recalls the true board on
-163/535 frames (30.5%, 4 of 5 datasets) at 91.6% precision (15 residual
-clutter, all attributable to two known static room fixtures, not scattered
-noise) and mm-level jitter — a large improvement over stage 1's ≤2% and a
-real answer to stage 4's discrimination gap. It is **not** a 100%-recall or
-100%-precision result, and this phase does not claim one: reaching 100%
-precision single-frame costs ~64% of recall (`--strict-diamond`, 59/535),
-and the residual clutter is diagnosed, not hand-waved, as out of single-frame
-geometry's reach — closing it needs a session-level multi-pose cue (the
-board moves between calibration poses; static clutter does not), which is a
-capture-protocol change for a future phase, not implementable on today's
-single-static-capture sample datasets.
+closing + `stance_floor=0.9` (`--stance-gate`) + **`flatness_rms_max=0.045`
+(stage 6)** recalls the true board on **264/535 frames (49.3%, all 5
+datasets) at 93.0% precision** (20 residual clutter, all attributable to the
+same known static room fixtures, not scattered noise) and mm-level jitter.
+Stage 6 raised recall from stage 5's 30.5% to 49.3% by relaxing the flatness
+gate 0.035→0.045 — and, unusually, did so as a *strict Pareto improvement*:
+precision rose too (91.6%→93.0%), because true-board detections dominate the
+count and grow far faster than the handful of extra static-fixture false
+positives the looser gate admits. The other recall lever the failure
+diagnosis flagged (relaxing `stance_floor`) was refuted — it buys no recall
+for the precision it spends — and is not adopted. This is a large improvement
+over stage 1's ≤2% and a real answer to stage 4's discrimination gap. It is
+**not** a 100%-recall or 100%-precision result, and this phase does not claim
+one: reaching 100% precision single-frame costs ~64% of recall
+(`--strict-diamond`, 59/535), the recall ceiling is still ~50% (half the
+frames lose the board to fragmentation or hard scorer gates), and the residual
+clutter is diagnosed, not hand-waved, as out of single-frame geometry's reach
+— closing it needs a session-level multi-pose cue (the board moves between
+calibration poses; static clutter does not), which is a capture-protocol
+change for a future phase, not implementable on today's single-static-capture
+sample datasets.
 
 Given that, integration (Rust port, ROS node, replacing or front-ending ICP)
 is justified to scope next, on these terms:
@@ -1170,20 +1410,21 @@ is justified to scope next, on these terms:
   the right place, at millisecond cost. Stage 1's bottleneck — **candidate
   generation on ring-striped clouds** — was fixed by stages 3–4's
   anisotropic clustering/closing; stage 4's discrimination gap was then
-  closed by stage 5's stance gate, at the honest precision/recall numbers
-  above, not for free.
+  closed by stage 5's stance gate, and stage 6 nearly doubled recall
+  (30.5%→49.3%) by relaxing the flatness gate to 0.045 without any precision
+  cost — all at the honest precision/recall numbers above, not for free.
 - **B** (Euclidean clustering after big-plane removal) is the only generator
   carried through to a usable result; A (iterative RANSAC) never recalled
   the board at all, and C (region growing) recalls board-*sized* objects
   well but cannot discriminate them and is 3× over the timing budget in
   Python — neither was revisited after stage 1.
 - **Discrimination against static, board-sized planar clutter is solved to
-  91.6% precision at full recall, not further, and that is deliberate**:
-  the remaining ~8% of accepted detections are two real, static room
-  fixtures that share the true diamond's single-frame geometric signature
-  closely enough that only an expensive gate (`edge_support_min`, ~7:1
-  recall cost) separates them. A production integration should rely on the
-  session-level multi-pose/session cue (buffered across poses, as
+  93.0% precision (stage 6) at 49.3% recall, not further, and that is
+  deliberate**: the remaining ~7% of accepted detections are the same real,
+  static room fixtures that share the true diamond's single-frame geometric
+  signature closely enough that only an expensive gate (`edge_support_min`,
+  ~7:1 recall cost) separates them. A production integration should rely on
+  the session-level multi-pose/session cue (buffered across poses, as
   `advanced_extrinsic_solver` already supports) to filter this residual,
   rather than chasing further single-frame gate tuning.
 - Any integration plan must budget for the multi-pose/session filter as a
@@ -1325,7 +1566,7 @@ here**:
   further raising recall without discrimination only grows the
   false-positive count in lockstep, as stage 4 just demonstrated.
 
-### Stage-5 verdict (updates the above, final for this phase)
+### Stage-5 verdict (updates the above)
 
 The hole pattern stage 4 recommended as the next lever was overtaken by a
 hardware decision (the recorded board is moving to hole-free), so stage 5
@@ -1365,13 +1606,52 @@ task benchmarked both operating points those gates define:
   session, reject any candidate location that repeats unchanged across
   poses) that the current single-static-capture datasets (1–5) cannot
   test — a future-phase item, not a stage-5 gap.
-- **This is the phase's final stage.** The five-stage arc closes cleanly:
-  stage 1 found the core idea sound but candidate generation broken (≤2%
-  recall); stages 2–3 fixed candidate generation partially (accumulation
-  failed, anisotropic clustering worked for shape but not score); stage 4
-  fixed the scorer's sensitivity but opened a discrimination gap of equal
-  size; stage 5 closes that gap at a quantified, honest operating point
-  (91.6% precision / 30.5% recall, `--stance-gate`) and correctly
-  identifies the irreducible remainder as out of single-frame reach. See
-  the updated top-level Decision above this section for the phase-wide
-  call.
+- **Stage 5 closed the discrimination gap; the open lever it left was
+  recall** (30.5% — half the frames still lose the board). The five-stage
+  arc to here: stage 1 found the core idea sound but candidate generation
+  broken (≤2% recall); stages 2–3 fixed candidate generation partially
+  (accumulation failed, anisotropic clustering worked for shape but not
+  score); stage 4 fixed the scorer's sensitivity but opened a discrimination
+  gap of equal size; stage 5 closes that gap at a quantified, honest
+  operating point (91.6% precision / 30.5% recall, `--stance-gate`) and
+  correctly identifies the irreducible remainder as out of single-frame
+  reach. Stage 6 (below) then attacks the recall ceiling stage 5 left open.
+
+### Stage-6 verdict (updates the above, final for this phase)
+
+Stage 6 swept the two recall levers the per-frame failure diagnosis
+(`.superpowers/sdd/stage6-failure-diagnosis.md`) identified — the
+`flatness_rms_max` plane-fit gate and `stance_floor` — against precision
+across all 535 frames, resolving the precision question the diagnosis
+explicitly left open (it replayed only the board's own candidate, never
+clutter):
+
+- **The flatness lever is a clean, strict Pareto win.** Raising the gate
+  0.035→0.045 lifts recall 30.5%→49.3% (+18.8 pts, +62% relative) while
+  precision *also* rises 91.6%→93.0%. The precision-for-recall trade this
+  stage set out to quantify did not exist: true-board detections dominate
+  the count and grow far faster (163→264) than the extra clutter (15→20), so
+  precision improves even as a few more false positives are admitted. Timing
+  (~60 ms) and mm-level jitter are unchanged. 0.045 is adopted as the new
+  recommended operating point; 0.050 buys only +1.2 pts more recall (mostly
+  ds5) at no precision gain and deeper in the sensor-noise floor.
+- **The stance-floor lever is refuted.** Relaxing `stance_floor` 0.9→0.85
+  buys +1 true frame for −6.1 pts precision (+17 new clutter). The 50
+  stance-gated board frames the board-candidate-only replay hoped to recover
+  do not return as accepted detections on the full scene; only clutter does.
+  `stance_floor=0.9` is kept. This is the honesty mandate working as
+  intended — a projected recovery that evaporates once the clutter it also
+  admits is measured.
+- **The residual clutter (20/535) is unchanged in character** from stage 5:
+  the ds5 persistent panel (11), a second attractor (2), and 7 more hits on
+  board-sized static room fixtures at scene-fixed locations documented since
+  stage 1. Raising flatness widens the true-board net substantially without
+  changing what the residual *is*, so stage 5's conclusion stands — the
+  eventual precision closer is a session-level multi-pose cue, not a tighter
+  single-frame gate.
+- **This is the phase's final stage.** The six-stage arc closes with a
+  single-frame operating point of **49.3% recall / 93.0% precision**
+  (`--stance-gate --flatness-rms-max 0.045`) — nearly double stage 5's
+  recall at slightly higher precision — and a correctly-diagnosed,
+  session-level path for the irreducible remainder. See the updated
+  top-level Decision above this section for the phase-wide call.
