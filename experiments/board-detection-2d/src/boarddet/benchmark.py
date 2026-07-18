@@ -154,7 +154,7 @@ def main() -> None:
                     help="enable Task 18's hole-free strict-diamond "
                          "discriminator gates together: strict_squareness, "
                          "stance_floor=0.9, edge_support_min=0.6, "
-                         "size_tol=0.08 (all off by default)")
+                         "side_tol=0.08 (all off by default)")
     ap.add_argument("--stance-gate", action="store_true",
                     help="Task 19's recommended precision/recall operating "
                          "point: stance_floor=0.9 alone (strict_squareness "
