@@ -817,23 +817,36 @@ This is the headline finding, and it is a regression, not a footnote:
   `ds5_b_frame0046.png` (score 0.59) both show a solid filled diamond-ish
   blob with **no interior holes** — visually the same clutter signature as
   every prior stage, just scored far higher and accepted far more often.
+  Under stage 4 this panel's reach also widens beyond ds5: 2 of ds2's 8
+  clutter detections (frames 17/18) hit the same panel at ~(-2.0, -2.8,
+  -0.1) — a location previously confined to ds5 now also crosses threshold
+  in ds2.
 - **New clutter attractors appear on datasets 1–4**, which had ~0
   out-of-bbox false positives under stance 0.5 in stage 3. Stage 4 accepts
   4–8 per dataset (23 total, excluding ds5) at scores 0.50–0.67, and they
   are not scattered noise: they recur at a handful of shared, scene-fixed
   coordinates across multiple datasets (all 5 share one physical rig/room,
-  as stage 3 noted) — e.g. ~(0.2–0.6, 3.5–3.95, 0.5–0.6) appears in ds1, 3,
-  4, 5; ~(-4.5, 3.68, 0.5) appears in ds1, 2, 3; ~(0.1, -4.0, -0.1…-0.4)
-  appears in ds1, 2, 3, 5. These read as static room structures (walls,
-  fixtures) that happen to be near-vertical, planar, and roughly board-sized
-  — exactly the kind of object the border-only cue was already known
-  (stage 1/2) not to discriminate against, now newly crossing threshold
-  because the anisotropic closing also fills *their* fill-ratio gaps.
-  `ds3_b_frame0051.png` (score 0.51, center (-2.31, 3.32, -0.24)) shows the
-  overlay for one of these: a lopsided, non-diamond quadrilateral fit to a
-  mostly-filled black region from a scattered building/wall scene, with no
-  hole pattern — visually distinguishable from a true-board hit by eye, but
-  not by the current score/stance gate.
+  as stage 3 noted). The (x, y) footprint ~(0.2–0.65, 3.5–3.95) turns out to
+  span two different z-bands rather than one shared fixture: a
+  **negative-z** band (z ≈ -0.5 to -0.6, at y ≈ 3.5–3.55) appears in ds1, 3,
+  5, while a **positive-z** band (z ≈ +0.58 to +0.61, at y ≈ 3.95) appears
+  in ds3, 4 — ds3 alone hits both bands. A ±0.5 m z flip at essentially the
+  same (x, y) is more consistent with two different scene objects than one
+  physical fixture. A separate attractor at ~(-4.5, 3.68, 0.5) appears in
+  ds1, 2, 3, and another at ~(0.1, -4.0, -0.1…-0.4) appears in ds1, 2, 3, 5.
+  These read as static room structures (walls, fixtures) that happen to be
+  near-vertical, planar, and roughly board-sized — exactly the kind of
+  object the border-only cue was already known (stage 1/2) not to
+  discriminate against, now newly crossing threshold because the
+  anisotropic closing also fills *their* fill-ratio gaps. A further,
+  distinct attractor sits at ~(-2.2 to -2.3, 3.32–3.34) in ds3 (z -0.24) and
+  ds4 (z -0.62). `ds3_b_frame0051.png` (score 0.51, center (-2.31, 3.32,
+  -0.24)) shows the overlay for this one — its coordinates match none of
+  the clusters above, so it's this separate attractor, not an example of
+  them: a lopsided, non-diamond quadrilateral fit to a mostly-filled black
+  region from a scattered building/wall scene, with no hole pattern —
+  visually distinguishable from a true-board hit by eye, but not by the
+  current score/stance gate.
 - **Net effect**: total accepted clutter went from 2/535 (0.4%, stage-3
   aniso) to 68/535 (12.7%, stage-4 stripe). On ds5 specifically, clutter now
   *outnumbers* true-board detections roughly 6.4-to-1 (45 vs 7) — so ds5's
