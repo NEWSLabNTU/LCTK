@@ -2031,21 +2031,60 @@ activate only when the benchmark sets them.
 
 ### Task 19: Stage-5 benchmark + phase doc + honest floor
 
+Task 18's reproduced gate ablation (see task-18-report.md's "Post-review
+correction" section) found **two** operating points worth benchmarking, not
+one — `--strict-diamond` alone tells only the max-precision/low-recall
+half of the story:
+
 ```bash
-# baseline (stage-4 config) already exists as run6-stripe; new strict run:
+# baseline (stage-4 config) already exists as run6-stripe.
+
+# Operating point 1 (recommended): stance_floor=0.9 alone.
+uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
+  --stance-weight 0.5 --stance-gate --out results/run7-stance-gate
+
+# Operating point 2: all four Task 18 gates together (max precision).
 uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
   --stance-weight 0.5 --strict-diamond --out results/run7-strict
 ```
-(add `--strict-diamond` CLI flag setting strict_squareness=True,
-stance_floor=0.9, edge_support_min=0.6, size_tol tightened to 0.08.)
+(`--stance-gate` and `--strict-diamond` CLI flags both already exist —
+`--stance-gate` sets `stance_floor=0.9` alone; `--strict-diamond` sets
+`strict_squareness=True, stance_floor=0.9, edge_support_min=0.6,
+size_tol=0.08` together.)
 
-Fill "## Stage 5 Results": precision/recall vs stage 4 (true-board recall
-retained? clutter killed?), the Part-A (i)/(ii) split, per-cue ablation if
-cheap (which gate kills what), the residual board-like-clutter count that no
-single-frame geometry cue removes, timing. Then a DECISION subsection:
-state plainly whether single-frame hole-free detection reaches usable
-precision, or whether the multi-pose/session cue (board is the object that
-MOVES between fixed poses; scene clutter does not) is REQUIRED — the latter
-is a capture-protocol change (record board at ≥2 positions) and a future
-phase, not implementable on the current single-static-capture datasets.
-Update the top-level Decision.
+Fill "## Stage 5 Results" with **both** runs side by side as a
+precision/recall curve (baseline → stance-gate → strict-diamond), the
+Part-A (i)/(ii) split, per-cue ablation (already reproduced once in
+task-18-report.md — re-derive independently rather than copying), the
+residual board-like-clutter count no single-frame geometry cue removes,
+timing. Report plainly that:
+- **`--stance-gate` retains full recall** (162→163/535 true-board
+  detections — no measurable loss) **while cutting clutter 78%**
+  (68→15/535), and is the recommended default operating point for
+  single-frame precision/recall trade-offs — not `--strict-diamond`.
+- **`--strict-diamond` reaches max precision (0 clutter) at a severe
+  recall cost** (163→59/535, ~7:1 recall lost per extra FP caught,
+  entirely attributable to `edge_support_min` — `strict_squareness`
+  contributes nothing measured on real data, `side_tol=0.08` is cheap).
+  ds5's true-board recall (7/103 under stance-gate) is wiped out
+  entirely under strict-diamond, along with its clutter.
+- The residual ~15 clutter detections under `--stance-gate` are
+  dominated by ds5's persistent near-vertical clutter panel (a real,
+  well-formed, ring-gap-striped planar surface — not a fragment/blob —
+  which is why `edge_support` can eventually catch it but only by also
+  catching genuine board detections that share the same coarse-binned
+  edge-support signature). This is the concrete evidence pointing at the
+  multi-pose/session cue (the panel is static across poses; the board
+  moves between them) as the real fix, rather than a tighter single-frame
+  geometric gate.
+
+Then a DECISION subsection: state plainly whether single-frame hole-free
+detection reaches usable precision at an acceptable recall cost — the
+ablation says `--stance-gate` is usable *as a recall-preserving clutter
+filter*, but does not fully solve precision (residual ~15/535, ds5-
+dominated) without `--strict-diamond`'s much steeper recall cost — or
+whether the multi-pose/session cue (board is the object that MOVES between
+fixed poses; scene clutter does not) is REQUIRED to close that gap. The
+latter is a capture-protocol change (record board at ≥2 positions) and a
+future phase, not implementable on the current single-static-capture
+datasets. Update the top-level Decision.

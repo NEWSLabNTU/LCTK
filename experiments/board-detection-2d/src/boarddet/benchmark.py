@@ -155,6 +155,13 @@ def main() -> None:
                          "discriminator gates together: strict_squareness, "
                          "stance_floor=0.9, edge_support_min=0.6, "
                          "size_tol=0.08 (all off by default)")
+    ap.add_argument("--stance-gate", action="store_true",
+                    help="Task 19's recommended precision/recall operating "
+                         "point: stance_floor=0.9 alone (strict_squareness "
+                         "and edge_support_min stay off, side_tol unchanged)"
+                         " -- retains ~full recall while cutting most "
+                         "clutter (see task-18-report.md's reproduced "
+                         "ablation); off by default")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     board_kwargs: dict = dict(
@@ -164,6 +171,8 @@ def main() -> None:
     if args.strict_diamond:
         board_kwargs.update(strict_squareness=True, stance_floor=0.9,
                             edge_support_min=0.6, side_tol=0.08)
+    elif args.stance_gate:
+        board_kwargs.update(stance_floor=0.9)
     run(args.datasets, args.generators, BoardConfig(**board_kwargs),
         args.max_frames, args.out, accumulate=args.accumulate)
 
