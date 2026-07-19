@@ -73,31 +73,17 @@ def _stance(corners_3d: np.ndarray) -> float:
     return float(max(abs(d1 @ _UP), abs(d2 @ _UP)))
 
 
-def _quad_seed(res: ScoreResult) -> tuple[np.ndarray, float]:
-    """Center + theta seed for `fit_fixed_square` read off an already-scored
-    2D quad's corners (ORIGINAL plane coords -- see `ScoreResult`). theta is
-    a corner's angle from the quad centroid minus 45 deg: `fit_fixed_square`
-    treats theta=0 as an axis-aligned square (corners at +/-45 deg from its
-    center), and since theta is only meaningful mod 90 deg (4-fold
-    symmetry), any one of the 4 corners gives an equivalent estimate."""
-    center = res.corners_2d.mean(axis=0)
-    v = res.corners_2d[0] - center
-    theta = float(np.arctan2(v[1], v[0]) - np.pi / 4.0)
-    return center, theta
-
-
-def _pca_seed(coords_2d: np.ndarray) -> tuple[np.ndarray, float]:
-    """Centroid + principal-axis-angle seed for `fit_fixed_square`, used on
-    rescue (the 2D quad was rejected outright by `score_candidate`, so
-    there's no quad-based center/theta to refine from -- see the module's
-    `square_icp` handling in `detect`)."""
-    center = coords_2d.mean(axis=0)
-    q = coords_2d - center
-    cov = (q.T @ q) / len(q)
-    evals, evecs = np.linalg.eigh(cov)
-    principal = evecs[:, int(np.argmax(evals))]
-    theta = float(np.arctan2(principal[1], principal[0]))
-    return center, theta
+def _quad_center(res: ScoreResult) -> np.ndarray:
+    """Center seed for `fit_fixed_square` read off an already-scored 2D
+    quad's corners (ORIGINAL plane coords -- see `ScoreResult`). Center only:
+    the quad's angle is NOT used as a theta seed (see `square_icp` handling
+    in `detect` -- the raw-point quad's angle is untrustworthy on sparse
+    frames regardless of whether the quad itself was accepted or rejected,
+    so `fit_fixed_square` always gets `init_theta=None` and does its own
+    full mod-90 sweep instead); the quad's center is still a reasonable
+    localization seed since `fit_fixed_square`'s center estimate is
+    per-theta closed-form and comparatively robust."""
+    return res.corners_2d.mean(axis=0)
 
 
 def detect(points: np.ndarray, board: BoardConfig, generator: str,
@@ -129,22 +115,28 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
                               close_height_m=close_height_m)
 
         if board.square_icp:
-            # Refine-after-quad (Task 23): seed from the quad's own
-            # center/theta when score_candidate accepted it (refine); when
-            # it was rejected outright -- including by its internal stance
-            # gate on the quad's own (possibly near-random, see
-            # stage7-stance-cause.md) angle -- fall back to a PCA/centroid
-            # seed (rescue). Either way the fixed-side fit gets a real shot
-            # at recovering theta, and the stance gate below re-judges the
-            # REFINED pose rather than trusting the quad's.
-            if res is not None:
-                seed_center, seed_theta = _quad_seed(res)
-            else:
-                seed_center, seed_theta = _pca_seed(coords)
+            # Refine-after-quad (Task 23, corrected): the raw-point quad's
+            # angle is untrustworthy on sparse frames PERIOD -- whether the
+            # quad was accepted by score_candidate (refine) or rejected
+            # outright, including by its own internal stance gate on that
+            # same untrustworthy angle (rescue; see
+            # stage7-stance-cause.md) -- so it is never used to seed theta.
+            # `init_theta=None` always, so `fit_fixed_square` does its own
+            # coarse-to-fine full [0, 90 deg) sweep (mod-90 square symmetry,
+            # so that range is the whole period): the one mechanism that
+            # actually covers the range a bad quad seed can land in. This is
+            # only ~37 coarse evals per candidate -- negligible against the
+            # ~60ms budget -- and is strictly more robust than any narrower
+            # window while not regressing an already-good quad (the sweep
+            # still finds the true theta there too).
+            # The quad's CENTER (when available) is still used to localize
+            # the fit -- center is a robust closed-form estimate per theta,
+            # unlike the angle, so seeding it costs nothing.
+            seed_center = _quad_center(res) if res is not None \
+                else coords.mean(axis=0)
             fit = fit_fixed_square(
                 coords, board.side_m, init_center=seed_center,
-                init_theta=seed_theta,
-                theta_window_deg=board.square_icp_theta_window_deg)
+                init_theta=None)
             if fit is None or fit.residual >= board.square_icp_residual_max:
                 continue
             refined_score = 1.0 / (1.0 + fit.residual)

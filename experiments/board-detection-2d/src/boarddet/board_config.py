@@ -56,10 +56,13 @@ class BoardConfig:
     square_icp: bool = False
     # Acceptance threshold on the square fit's coverage residual (lower is
     # better, ~0 is an exact fully-covered fit); Task 24 tunes this against
-    # real data. Chosen here as a sane starting point: dense/well-covered
-    # synthetic boards fit near 0, a same-extent non-square blob's coverage
-    # penalty alone pushes residual well past this.
-    square_icp_residual_max: float = 0.35
-    # Bounded search window (+/- this many degrees) fit_fixed_square uses
-    # around the quad's (or, on rescue, the PCA/centroid seed's) theta.
-    square_icp_theta_window_deg: float = 20.0
+    # real data. Raised from the original 0.35 (see Task 23's wiring bug --
+    # a narrow theta_window pinned onto an untrustworthy quad seed, fixed by
+    # always sweeping the full mod-90 range instead): a genuinely-recovered
+    # pose on a candidate that legitimately never observed 2 opposite
+    # corners (a real partial-view/occlusion case, not a bad fit) reads a
+    # stable ~0.40 residual purely from the resulting perimeter-coverage
+    # gap, which the old 0.35 default falsely rejected outright. 0.45 keeps
+    # a >0.10 margin below a same-extent non-board clutter blob (measured
+    # ~0.55) while accepting that genuine partial-coverage recovery.
+    square_icp_residual_max: float = 0.45

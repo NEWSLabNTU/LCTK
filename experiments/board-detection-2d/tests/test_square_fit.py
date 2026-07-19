@@ -243,3 +243,48 @@ def test_no_regress_good_init_theta_stays_put():
 def test_returns_none_for_too_few_points():
     pts = np.zeros((5, 2))
     assert fit_fixed_square(pts, 1.0) is None
+
+
+# --- residual gate vs board_config.square_icp_residual_max (Task 23 fix) ---
+
+def test_residual_gate_discriminates_board_recovery_from_clutter_blob():
+    """The detector's square_icp_residual_max (board_config.py) must accept
+    a genuinely-recovered PARTIAL-COVERAGE board fit (a real partial-view/
+    occlusion case -- two opposite corners never observed at all, e.g. a
+    mounting bracket or grazing-angle self-shadowing on a diamond-mounted
+    board -- see test_detector.py's _make_clipped_diamond for the full 3D
+    fixture this is the flat 2D analogue of) while rejecting a same-extent
+    non-board clutter blob that never reaches the box's own edges at all.
+    Guards the Task 23 fix's residual_max bump (0.35 -> 0.45): a correct
+    fit on the missing-corners fixture reads a stable ~0.40 (pure
+    perimeter-coverage-gap penalty, not a bad fit), which the old 0.35
+    default falsely rejected."""
+    from boarddet.board_config import BoardConfig
+
+    side = 1.0
+    threshold = BoardConfig().square_icp_residual_max
+
+    rng = np.random.default_rng(21)
+    half = side / 2.0
+    spacing = 0.008
+    xs = np.arange(-half, half, spacing)
+    ys = np.arange(-half, half, spacing)
+    xx, yy = np.meshgrid(xs, ys)
+    sq_local = np.stack([xx.ravel(), yy.ravel()], axis=1)
+    d1 = np.array([1.0, 1.0]) / np.sqrt(2.0)
+    sq_local = sq_local[np.abs(sq_local @ d1) < 0.34]
+    board_pts = sq_local @ _rot2d(np.radians(45.0)).T
+    board_pts = board_pts + rng.normal(0.0, 0.004, board_pts.shape)
+    board_fit = fit_fixed_square(board_pts, side, init_theta=None)
+
+    clump = rng.normal(0.0, 0.15, size=(3000, 2))
+    clump_fit = fit_fixed_square(clump, side, init_theta=None)
+
+    assert board_fit is not None and clump_fit is not None
+    assert board_fit.residual < threshold, (
+        f"genuine partial-coverage board recovery (residual "
+        f"{board_fit.residual:.3f}) should clear square_icp_residual_max "
+        f"({threshold})")
+    assert clump_fit.residual > threshold, (
+        f"non-board clutter blob (residual {clump_fit.residual:.3f}) should "
+        f"NOT clear square_icp_residual_max ({threshold})")
