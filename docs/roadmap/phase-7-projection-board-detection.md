@@ -1587,6 +1587,26 @@ compute.
    gate and 56-frame fragmentation) remain open, and — as stages 5–6 already
    concluded — the residual-precision closer is a session-level multi-pose
    cue, not a heavier single-frame fitter.
+5. **Caveat on (a): the naive salvage — refine only the already-selected
+   candidate — is itself likely non-viable, for a reason upstream of the
+   fitter entirely.** Directly measured (generator b, ds1–4, stage-6
+   operating point): of the 61 frames where an in-bbox board candidate
+   exists, passes every non-stance hard gate, and only fails the ≤0.9
+   diamond-stance floor, that board candidate is the frame's own top
+   2D-score candidate (`score_candidate`'s `.score`, i.e. shape/fill/angle,
+   computed *before* any residual ranking) just 19.7% (12/61) of the time —
+   a same-size compact clutter candidate already outscores it in the other
+   80.3% (49/61). "Refine only the selected candidate" presupposes selection
+   already picked the board; on this population it mostly picks clutter, so
+   the salvage would mostly refine clutter, not rescue the board. Board-vs-
+   clutter discrimination is therefore a selection problem that exists
+   independently at all three single-frame gates — the 2D score, the fit
+   residual, and the stance floor — not one introduced by the fitter's
+   ranking step, so no fitter design change fixes it. This sharpens stages
+   5–6's standing conclusion: the session-level multi-pose cue (the board
+   moves between poses, clutter doesn't) is the prerequisite for closing
+   *both* the precision gap (stage 5) and this recall path, not a precision-
+   only nicety.
 
 ## Decision
 
@@ -1621,7 +1641,12 @@ clutter is diagnosed, not hand-waved, as out of single-frame geometry's reach
 — closing it needs a session-level multi-pose cue (the board moves between
 calibration poses; static clutter does not), which is a capture-protocol
 change for a future phase, not implementable on today's single-static-capture
-sample datasets.
+sample datasets. Stage 7 found the same multi-pose cue is also the
+prerequisite for the recall path, not only precision: on the stance-rejected
+recall population, a compact clutter candidate already outscores the sparse
+board at the 2D-score selection step ~80% of the time (measured, see Stage 7
+Results), so no single-frame fitter or gate retune can pick the board over
+clutter without it.
 
 Given that, integration (Rust port, ROS node, replacing or front-ending ICP)
 is justified to scope next, on these terms:
