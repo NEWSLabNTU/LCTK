@@ -43,3 +43,23 @@ class BoardConfig:
     edge_support_min: float = 0.0     # 0 = off; e.g. 0.6 = each of the 4
                                       # sides must be >=60% backed by raw
                                       # points near the side line
+    # --- Task 23: fixed-size square fitter (refine-after-quad) -----------
+    # The 2D quad's angle (raw-point minAreaRect) is near-random on sparse
+    # frames (stage7-stance-cause.md: median 43 deg error), which is what
+    # makes the stance gate wrongly reject an upright board. A fixed-side
+    # (side_m pinned, not fit from data) square fit spends its DOF purely on
+    # pose (center, theta) and recovers a median 7 deg error instead. When
+    # on, the detector refines (or, if the quad was rejected, rescues) each
+    # candidate's pose with `square_fit.fit_fixed_square` and judges the
+    # stance gate on the REFINED pose -- see detector.py. Off by default so
+    # square_icp=False reproduces stage-6 behavior byte-identical.
+    square_icp: bool = False
+    # Acceptance threshold on the square fit's coverage residual (lower is
+    # better, ~0 is an exact fully-covered fit); Task 24 tunes this against
+    # real data. Chosen here as a sane starting point: dense/well-covered
+    # synthetic boards fit near 0, a same-extent non-square blob's coverage
+    # penalty alone pushes residual well past this.
+    square_icp_residual_max: float = 0.35
+    # Bounded search window (+/- this many degrees) fit_fixed_square uses
+    # around the quad's (or, on rescue, the PCA/centroid seed's) theta.
+    square_icp_theta_window_deg: float = 20.0

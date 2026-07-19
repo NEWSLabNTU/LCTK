@@ -129,6 +129,8 @@ def run(datasets: list[int], generators: list[str], board: BoardConfig,
         "edge_support_min": board.edge_support_min,
         "side_tol": board.side_tol,
         "flatness_rms_max": board.flatness_rms_max,
+        "square_icp": board.square_icp,
+        "square_icp_residual_max": board.square_icp_residual_max,
         "datasets": all_results,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -175,12 +177,23 @@ def main() -> None:
                          "config is kept while only stance_floor is swept "
                          "(default: unset, so those flags' own value stands"
                          "; overall BoardConfig default is 0.0/off)")
+    ap.add_argument("--square-icp", action="store_true",
+                    help="Task 23: refine (or, if the quad is rejected, "
+                         "rescue) each candidate's pose with a fixed-size "
+                         "square fit before scoring/stance -- see "
+                         "square_fit.fit_fixed_square (off by default)")
+    ap.add_argument("--square-icp-residual-max", type=float, default=0.35,
+                    help="acceptance threshold on the square fit's "
+                         "coverage residual, lower is better (Task 24 "
+                         "tunes this; 0.35 is a sane starting point)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     board_kwargs: dict = dict(
         side_m=args.side, stance_weight=args.stance_weight,
         vertical_gap_deg=args.vertical_gap_deg,
         flatness_rms_max=args.flatness_rms_max,
+        square_icp=args.square_icp,
+        square_icp_residual_max=args.square_icp_residual_max,
     )
     if args.strict_diamond:
         board_kwargs.update(strict_squareness=True, stance_floor=0.9,

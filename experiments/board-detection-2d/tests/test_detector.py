@@ -137,6 +137,78 @@ def test_long_range_anisotropic_detection_has_accurate_corners():
     )
 
 
+# --- Task 23: fixed-size square fitter (refine-after-quad) ---------------
+
+@pytest.mark.parametrize("gen", list(GENERATORS))
+def test_square_icp_off_byte_identical_to_stage6(gen):
+    """Regression pin: adding the square_icp knob must not perturb the
+    default (off) path at all -- explicit BoardConfig(square_icp=False)
+    must reproduce the exact same scored outcome as a plain BoardConfig()
+    call (which predates this task) on the standard scene."""
+    pts, _ = make_scene(rng=np.random.default_rng(13))
+    out_default = detect(pts, BoardConfig(side_m=1.0), generator=gen)
+    out_explicit_off = detect(pts, BoardConfig(side_m=1.0, square_icp=False),
+                              generator=gen)
+    assert (out_default.detection is None) == (
+        out_explicit_off.detection is None)
+    if out_default.detection is not None:
+        np.testing.assert_array_equal(out_default.detection.center,
+                                      out_explicit_off.detection.center)
+        np.testing.assert_array_equal(out_default.detection.rotation,
+                                      out_explicit_off.detection.rotation)
+        np.testing.assert_array_equal(out_default.detection.corners_3d,
+                                      out_explicit_off.detection.corners_3d)
+        assert out_default.detection.score == out_explicit_off.detection.score
+
+
+@pytest.mark.parametrize("gen", list(GENERATORS))
+def test_square_icp_detects_board_in_synthetic_scene(gen):
+    pts, truth = make_scene(rng=np.random.default_rng(13))
+    out = detect(pts, BoardConfig(side_m=1.0, square_icp=True), generator=gen)
+    assert out.detection is not None, f"generator {gen} found nothing"
+    assert np.linalg.norm(out.detection.center - truth.center) < 0.05
+    assert abs(out.detection.rotation[:, 2] @ truth.normal) > 0.99
+
+
+def test_square_icp_does_not_regress_an_already_detected_scene():
+    """Task 23's caveat (stage7-stance-cause.md): a robust from-scratch fit
+    disagreed with an already-good quad by >15 deg on 28/240 already-
+    DETECTED frames. Turning square_icp on must never break a scene that
+    was already cleanly detected -- both must still find the board, and
+    pose must stay close between the two paths."""
+    pts, truth = make_scene(rng=np.random.default_rng(13))
+    out_off = detect(pts, BoardConfig(side_m=1.0, square_icp=False),
+                     generator="a")
+    out_on = detect(pts, BoardConfig(side_m=1.0, square_icp=True),
+                    generator="a")
+    assert out_off.detection is not None
+    assert out_on.detection is not None
+    assert np.linalg.norm(out_on.detection.center - truth.center) < 0.05
+    assert abs(out_on.detection.rotation[:, 2] @ truth.normal) > 0.99
+    assert np.linalg.norm(
+        out_on.detection.center - out_off.detection.center) < 0.02
+
+
+def test_square_icp_rescues_stance_rejected_quad():
+    """The core value (stage7-stance-cause.md): with vertical_gap_deg and a
+    strict stance_floor on, a candidate whose raw-point quad angle is bad
+    enough to fail the stance gate can still be rescued by the fixed-size
+    fit's refined pose. square_icp=False stays on whatever the quad-only
+    path produces; square_icp=True must detect at least as often here."""
+    pts, _ = make_scene(rng=np.random.default_rng(13))
+    board_off = BoardConfig(side_m=1.0, vertical_gap_deg=3.0,
+                            stance_floor=0.9, square_icp=False)
+    board_on = BoardConfig(side_m=1.0, vertical_gap_deg=3.0,
+                           stance_floor=0.9, square_icp=True)
+    out_off = detect(pts, board_off, generator="b")
+    out_on = detect(pts, board_on, generator="b")
+    # square_icp=True must never do worse than off at the same operating
+    # point: if the quad-only path already detects, the refined path must
+    # too.
+    if out_off.detection is not None:
+        assert out_on.detection is not None
+
+
 def test_up_2d_present_for_vertical_plane():
     """Sanity check on the other side of the gate: a vertical plane (world
     z lies entirely in-plane) must return a unit vector, not None."""

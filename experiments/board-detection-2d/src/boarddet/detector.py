@@ -13,7 +13,8 @@ from .candidates.ransac_iterative import generate_ransac_iterative
 from .candidates.region_growing import generate_region_growing
 from .geometry import PlaneModel, downsample, project_to_plane
 from .pose import BoardDetection, board_pose
-from .scorer import score_candidate
+from .scorer import ScoreResult, score_candidate
+from .square_fit import fit_fixed_square
 
 GENERATORS = {
     "a": generate_ransac_iterative,
@@ -72,6 +73,33 @@ def _stance(corners_3d: np.ndarray) -> float:
     return float(max(abs(d1 @ _UP), abs(d2 @ _UP)))
 
 
+def _quad_seed(res: ScoreResult) -> tuple[np.ndarray, float]:
+    """Center + theta seed for `fit_fixed_square` read off an already-scored
+    2D quad's corners (ORIGINAL plane coords -- see `ScoreResult`). theta is
+    a corner's angle from the quad centroid minus 45 deg: `fit_fixed_square`
+    treats theta=0 as an axis-aligned square (corners at +/-45 deg from its
+    center), and since theta is only meaningful mod 90 deg (4-fold
+    symmetry), any one of the 4 corners gives an equivalent estimate."""
+    center = res.corners_2d.mean(axis=0)
+    v = res.corners_2d[0] - center
+    theta = float(np.arctan2(v[1], v[0]) - np.pi / 4.0)
+    return center, theta
+
+
+def _pca_seed(coords_2d: np.ndarray) -> tuple[np.ndarray, float]:
+    """Centroid + principal-axis-angle seed for `fit_fixed_square`, used on
+    rescue (the 2D quad was rejected outright by `score_candidate`, so
+    there's no quad-based center/theta to refine from -- see the module's
+    `square_icp` handling in `detect`)."""
+    center = coords_2d.mean(axis=0)
+    q = coords_2d - center
+    cov = (q.T @ q) / len(q)
+    evals, evecs = np.linalg.eigh(cov)
+    principal = evecs[:, int(np.argmax(evals))]
+    theta = float(np.arctan2(principal[1], principal[0]))
+    return center, theta
+
+
 def detect(points: np.ndarray, board: BoardConfig, generator: str,
            voxel: float = 0.03) -> DetectOutcome:
     gen = GENERATORS[generator]
@@ -88,6 +116,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     t2 = time.perf_counter()
     best: BoardDetection | None = None
     best_rejected: BoardDetection | None = None
+    best_residual = np.inf
     for cand in cands:
         up_2d = None
         close_height_m = None
@@ -95,9 +124,54 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             up_2d = _up_2d(cand.plane)
             if up_2d is not None:
                 close_height_m = _close_height_m(cand.points, board)
-        res = score_candidate(project_to_plane(cand.points, cand.plane),
-                              board, up_2d=up_2d,
+        coords = project_to_plane(cand.points, cand.plane)
+        res = score_candidate(coords, board, up_2d=up_2d,
                               close_height_m=close_height_m)
+
+        if board.square_icp:
+            # Refine-after-quad (Task 23): seed from the quad's own
+            # center/theta when score_candidate accepted it (refine); when
+            # it was rejected outright -- including by its internal stance
+            # gate on the quad's own (possibly near-random, see
+            # stage7-stance-cause.md) angle -- fall back to a PCA/centroid
+            # seed (rescue). Either way the fixed-side fit gets a real shot
+            # at recovering theta, and the stance gate below re-judges the
+            # REFINED pose rather than trusting the quad's.
+            if res is not None:
+                seed_center, seed_theta = _quad_seed(res)
+            else:
+                seed_center, seed_theta = _pca_seed(coords)
+            fit = fit_fixed_square(
+                coords, board.side_m, init_center=seed_center,
+                init_theta=seed_theta,
+                theta_window_deg=board.square_icp_theta_window_deg)
+            if fit is None or fit.residual >= board.square_icp_residual_max:
+                continue
+            refined_score = 1.0 / (1.0 + fit.residual)
+            if res is not None:
+                refined_res = dataclasses.replace(
+                    res, corners_2d=fit.corners_2d, score=refined_score)
+            else:
+                # No quad-derived ScoreResult to refine -- build a minimal
+                # one; board_pose only reads corners_2d/score off it, and
+                # the rest (raster, fill_ratio, ...) are debug-only fields
+                # with no real value to report on a rescued candidate.
+                refined_res = ScoreResult(
+                    score=refined_score, corners_2d=fit.corners_2d,
+                    side_lengths=np.full(4, board.side_m), fill_ratio=0.0,
+                    angle_err_deg=0.0,
+                    raster=np.zeros((1, 1), dtype=np.uint8),
+                    origin=np.zeros(2), cell_m=board.cell_m)
+            det = board_pose(cand.plane, refined_res)
+            det = dataclasses.replace(det, score=refined_score)
+            if board.stance_floor > 0:
+                if _stance(det.corners_3d) <= board.stance_floor:
+                    continue
+            if fit.residual < best_residual:
+                best_residual = fit.residual
+                best = det
+            continue
+
         if res is None:
             continue
         det = board_pose(cand.plane, res)
