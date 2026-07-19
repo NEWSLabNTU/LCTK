@@ -2161,3 +2161,117 @@ with its precision/recall/timing, and an honest statement of the
 precision-for-recall trade. Update the top-level Decision. If the +19%
 recall costs unacceptable precision, say so and keep 0.035 — report the
 Pareto front, don't force a win.
+
+---
+
+# Stage 7 Addendum (2026-07-19): Generator B + Fixed-Size Square ICP Fitter
+
+Direction (user): combine generator B's crop-box-free candidate segmentation
+with a model-fit board fitter (the robustness trick the existing LCTK
+crop-box+ICP pipeline uses), to recover the recall our 2D
+rasterize-and-fit-shape loses on sparse frames. Board is a PLAIN SQUARE
+(diamond, no holes). ICP is compute-heavy — bound it. Quick Python, no ROS.
+
+Design decisions (fixed):
+- **Refine-after-quad**: generator B → 2D quad (fast, localizes the easy
+  frames + gives an init pose) → fixed-size square fit refines pose and
+  rescues quad-rejected candidates. Reuses the whole pipeline; bounds compute.
+- **Recall play, not precision**: a flat panel fits a square too, so the fit
+  residual won't separate board from panel — stance + multi-pose still own
+  discrimination. Success metric is recall gain at acceptable compute.
+- **Fixed-size oriented-square fit, NOT literal filled-square ICP.** Literal
+  ICP against a filled square stalls: interior points have zero
+  point-to-model residual, so an enclosing init is a zero-gradient fixed
+  point. Instead fit 3 DOF (center cx,cy, rotation θ) of a square whose side
+  is HARD-PINNED to `board.side_m`, minimizing a coverage residual
+  (points outside the square + square-edge band not reached by points). The
+  known size is the strong low-DOF prior that makes sparse edge points pin
+  the pose. Runs on raw plane-projected points — no raster, no contour, so no
+  shape-recovery failure.
+
+### Task 22: Re-diagnose recall failures at the stage-6 operating point (GATING)
+
+Read-only analysis (no committed code). At the recommended operating point
+(`vertical_gap_deg=3.0, stance_weight=0.5, stance_floor=0.9,
+flatness_rms_max=0.045`), reproduce the stage-6 failure-bucket classification
+(methodology in `.superpowers/sdd/stage6-failure-diagnosis.md`) over datasets
+1–4. Report the bucket distribution NOW (post-stage-6), and specifically
+size:
+- **F_SCORER_REJECT** (candidate cluster exists + reaches the scorer + 2D fit
+  rejected) — the bucket the square fitter can rescue.
+- **A_FRAGMENTED** (no single cluster holds enough of the board) — upstream;
+  the fitter CANNOT help.
+- H_NO_BOARD_POINTS (data limit).
+
+**Go/no-go**: if F_SCORER_REJECT is a substantial share of the remaining
+misses, proceed to Task 23. If the remaining misses are dominated by
+A_FRAGMENTED / H_NO_BOARD_POINTS, STOP and re-plan (the lever is clustering
+or capture, not a fitter) — report that honestly. Write findings to
+`.superpowers/sdd/stage7-rediagnosis.md`.
+
+### Task 23: Fixed-size square fitter + refine-after-quad wiring
+
+**Files:**
+- Create: `experiments/board-detection-2d/src/boarddet/square_fit.py`
+- Modify: `experiments/board-detection-2d/src/boarddet/detector.py`
+  (rescue/refine path), `board_config.py` (config knobs)
+- Test: `experiments/board-detection-2d/tests/test_square_fit.py`,
+  `tests/test_detector.py`
+
+**Interfaces:**
+- `fit_fixed_square(coords_2d, side, init_center=None, init_theta=None,
+  theta_window_deg=20.0) -> SquareFit | None` where
+  `SquareFit = {center: (2,), theta: float, residual: float,
+  corners_2d: (4,2)}`. Fits 3 DOF (center, θ) of a fixed-side-`side` square
+  to the 2D points minimizing the coverage residual; θ searched in a bounded
+  window around `init_theta` (from the quad) or, when init is None, from a
+  coarse full sweep / PCA principal direction. Center is closed-form per θ
+  (align the fixed-size box to the points' robust extent). None if too few
+  points.
+- Coverage residual (define precisely in impl): mean per-point distance
+  *outside* the square (points should lie on the board) plus a coverage
+  penalty = fraction of the square's perimeter band with no nearby point
+  (the board should reach its own edges). Lower = better; this is both the
+  ranking score and the acceptance metric.
+- `BoardConfig`: `square_icp: bool = False` (off = stage-6 behavior),
+  `square_icp_residual_max: float` (acceptance threshold, tune in Task 24).
+- Detector integration (refine-after-quad), when `square_icp` on: for each
+  candidate — run the 2D quad as today; if it yields a pose, seed
+  `fit_fixed_square` with the quad's center/θ (refine); if the quad is
+  rejected, seed from the candidate's PCA/centroid (rescue). Accept a
+  detection when the square fit's residual < `square_icp_residual_max` AND
+  the stance gate passes on the refined pose. Best candidate ranked by
+  (lower) residual. `board_pose` builds the 3D pose from the refined
+  `corners_2d` via the candidate's plane (same `unproject` path). All
+  existing behavior byte-identical when `square_icp=False`.
+- CLI `--square-icp` (+ `--square-icp-residual-max FLOAT`) in benchmark.py,
+  echoed in summary.json.
+
+**Tests (TDD):**
+- fit_fixed_square recovers a known square's pose from full dense points
+  (center/θ within tolerance, residual ~0).
+- **sparse rescue**: points sampled only in a few horizontal stripes of the
+  square (the sparse-ring failure case) — fit still recovers pose within
+  tolerance where a free-size minAreaRect would under-estimate size; assert
+  the fixed-size fit's recovered corners match the true square (not the
+  shrunk point-extent).
+- stall-avoidance: an init square already enclosing the points but rotated
+  10° off — the fit corrects θ (proves it's not a filled-square-ICP
+  fixed-point stall).
+- residual discriminates: a genuine square vs a random blob of the same
+  extent → blob residual >> square residual.
+- detector: `square_icp=False` byte-identical to stage 6; `square_icp=True`
+  finds the board on a synthetic scene.
+
+### Task 24: Stage-7 benchmark + phase doc + decision
+
+Benchmark recall + timing at the stage-6 operating point WITH `--square-icp`
+(sweep `--square-icp-residual-max`) vs the stage-6 2D-only baseline, all 5
+datasets, generator b. Per point: true-board recall (in-bbox/535), clutter
+FP, precision, per-frame timing (measure the ICP compute cost against the
+100 ms budget — this is the flagged pitfall), pose jitter (with n). Confirm
+the recall gain comes from the F_SCORER_REJECT bucket Task 22 identified.
+Fill "## Stage 7 Results": the recall/precision/timing comparison, how much
+of the addressable bucket was recovered, the compute cost of ICP-refine,
+honest tradeoff, recommended operating point, top-level Decision update. If
+the fitter doesn't beat 2D-only, or the compute cost blows the budget, say so.
