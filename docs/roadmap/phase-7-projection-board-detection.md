@@ -1182,15 +1182,25 @@ buy precision. Stage 6 runs both re-measures across all 535 frames (ds1–5,
 generator b), the missing precision check the diagnosis gated its
 recommendations on.
 
-Method: `boarddet.benchmark` for the sweep runs (`results/run8-flat*`, not
-committed — `results/` is gitignored), plus a scratch script (not committed)
-that calls the real `detect()` per frame on all 535 cached frames and
-classifies every accepted detection's center against the bbox reference
-(`ros/lctk_launch/config/board/bbox.json5`: translation `[2.6,0,0.35]`, size
-`[3.1,3.94,2.2]` → x∈[1.05,4.15], y∈[-1.97,1.97], z∈[-0.75,1.45]) into
-true-board (in-bbox) vs clutter (out-of-bbox), the same rule stages 4–5 used.
-The `flat0.035` sweep point reproduces stage 5's `--stance-gate` baseline
-exactly (163 true / 15 clutter), confirming the harness is faithful.
+Method: the **flatness sweep** (`0.035`/`0.040`/`0.045`/`0.050`) was run
+through `boarddet.benchmark --out` and each point's `results/run8-flat*`
+directory (not committed — `results/` is gitignored) holds a persisted
+`summary.json` with per-dataset detection rate, timing, and jitter — verified
+against the actual files on disk. The **stance-floor sweep** (`0.85`/`0.88`/
+`0.90`), despite the command block below showing the same `benchmark.py --out
+results/run8-stance085` invocation shape, was **not** persisted this way — no
+`results/run8-stance*` directory exists. Its true/clutter, recall, and
+precision numbers in the table further below come entirely from a scratch
+script (not committed) that calls the real `detect()` per frame on all 535
+cached frames and classifies every accepted detection's center against the
+bbox reference (`ros/lctk_launch/config/board/bbox.json5`: translation
+`[2.6,0,0.35]`, size `[3.1,3.94,2.2]` → x∈[1.05,4.15], y∈[-1.97,1.97],
+z∈[-0.75,1.45]) into true-board (in-bbox) vs clutter (out-of-bbox), the same
+rule stages 4–5 used. The same scratch script also produced the flatness
+sweep's bbox classification (the true/clutter split in that table), layered
+on top of the persisted `benchmark.py` runs. The `flat0.035` sweep point
+reproduces stage 5's `--stance-gate` baseline exactly (163 true / 15
+clutter), confirming the harness is faithful.
 
 ```bash
 for F in 0.035 0.040 0.045 0.050; do
@@ -1202,6 +1212,12 @@ uv run python -m boarddet.benchmark --datasets 1 2 3 4 5 --generators b \
   --stance-weight 0.5 --stance-gate --stance-floor 0.85 --flatness-rms-max 0.045 \
   --out results/run8-stance085   # + 0.88, 0.90 points
 ```
+
+Note: unlike the flatness-sweep invocations above, these `--out
+results/run8-stance*` runs were not actually persisted — no such directory
+exists under `results/`. The stance-floor sweep table below is sourced
+entirely from the scratch `detect()`+bbox harness described above, not from
+a committed (or gitignored-but-present) `summary.json`.
 
 ### Flatness sweep (stance_floor=0.9 fixed; true/clutter per dataset)
 
@@ -1314,6 +1330,25 @@ inside the 100 ms/frame realtime budget. Relaxing the flatness gate lets more
 candidates reach the 2D scorer, but the flatness test is a cheap plane-fit RMS
 and per-candidate scoring is sub-millisecond, so the extra candidates cost no
 measurable wall time. Timing was never the constraint on this lever.
+
+*(Two provenance notes on the figures above. First — absolute latency, not
+the relationship, is machine-load-sensitive: these numbers come from the
+committed `results/run8-flat*/summary.json` runs, captured on this machine at
+benchmark time. An independent re-measurement of the same code path on a
+heavily-loaded host (load average ≈12 on a 32-core box) measured ~85–90 ms
+median, materially closer to the 100 ms/frame budget than the ~60 ms above
+suggests. The *robust* claim is the relative one — timing stays flat across
+flatness/stance values regardless of absolute load — which held in both
+measurements; the *margin* to the 100 ms budget is real but thinner under
+contention than "comfortably inside" implies taken alone. Second, the
+per-point p95 values quoted in the flatness and stance-floor tables are
+pooled percentiles over all 535 frames from the scratch harness, not the
+per-dataset `p95_total_ms` fields inside `summary.json` — e.g. the
+`flat0.050` row's reported 75.9 ms p95 exceeds every individual dataset's
+`p95_total_ms` in `run8-flat0.050/summary.json` (max 73.3 ms, dataset 1).
+Expect this mismatch when diffing a single dataset's `summary.json` against
+the tables above — it reflects pooled-vs-per-dataset percentiles, not a
+data error.)*
 
 ### True-board pose jitter at the recommended point (flatness 0.045, stance_floor 0.9)
 
