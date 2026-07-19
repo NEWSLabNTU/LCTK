@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 from boarddet.board_config import BoardConfig
+from boarddet.candidates import Candidate
 from boarddet.detector import GENERATORS, _stance, _up_2d, detect
-from boarddet.geometry import PlaneModel
-from boarddet.synth import make_scene
+from boarddet.geometry import PlaneModel, fit_plane, project_to_plane
+from boarddet.synth import SceneTruth, _plane_basis, make_scene
 
 
 @pytest.mark.parametrize("gen", list(GENERATORS))
@@ -139,6 +140,82 @@ def test_long_range_anisotropic_detection_has_accurate_corners():
 
 # --- Task 23: fixed-size square fitter (refine-after-quad) ---------------
 
+def _rot2d(theta):
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, -s], [s, c]])
+
+
+def _make_clipped_diamond(side, center, normal, up_hint, depth, spacing,
+                          noise, rng):
+    """A dense diamond board (see synth.make_board) with TWO OPPOSITE
+    corners of its underlying square clipped off -- models a real partial
+    occlusion (e.g. a mounting bracket, or grazing-angle self-shadowing on a
+    diamond-mounted board) that removes an entire physical corner region,
+    not just a ring-gap.
+
+    This is what actually fools cv2.minAreaRect's angle: it's driven purely
+    by the convex hull's extreme points, so sparse-but-still-corner-complete
+    sampling (e.g. missing whole LiDAR rings, still spanning the full
+    extent) does NOT fool it -- verified empirically while building this
+    fixture, ring-gap sparsity alone left minAreaRect's angle error under
+    1 deg even at very low point counts. Only removing an entire corner
+    REGION (not just individual points near it) changes which convex-hull
+    edge direction minAreaRect's rotating-calipers search prefers.
+
+    `depth` is the half-side fraction kept along the (1,1)-diagonal of the
+    UNDERLYING axis-aligned square (before the +45 deg rotation that turns
+    it into make_board's diamond shape): depth ~0.32-0.34 is the measured
+    critical band where cv2.minAreaRect's own angle flips from ~0 deg error
+    to the ~45 deg (worst-case mod-90) error, while `fit_fixed_square`'s
+    full sweep still recovers the true theta cleanly (its coverage residual
+    stays a stable ~0.40 -- a real perimeter-coverage gap from the missing
+    corners, not evidence of a bad fit; see board_config.py's
+    square_icp_residual_max comment and test_square_fit.py's
+    test_residual_gate_discriminates_board_recovery_from_clutter_blob).
+    """
+    u, v, n = _plane_basis(np.asarray(normal, float), np.asarray(up_hint, float))
+    center = np.asarray(center, float)
+    half = side / 2.0
+    xs = np.arange(-half, half, spacing)
+    ys = np.arange(-half, half, spacing)
+    xx, yy = np.meshgrid(xs, ys)
+    sq_local = np.stack([xx.ravel(), yy.ravel()], axis=1)
+    d1 = np.array([1.0, 1.0]) / np.sqrt(2.0)
+    sq_local = sq_local[np.abs(sq_local @ d1) < depth]
+    # make_board's diamond IS the underlying square rotated 45 deg in (u,v)
+    # (diamond corners sit on the u/v axes; see make_board's own docstring).
+    local = sq_local @ _rot2d(np.radians(45.0)).T
+    pts = center + local[:, :1] * u + local[:, 1:] * v
+    pts = pts + rng.normal(0.0, noise, size=(len(pts), 1)) * n
+    half_diag = side / np.sqrt(2.0)
+    corners = np.stack([
+        center + half_diag * v, center + half_diag * u,
+        center - half_diag * v, center - half_diag * u,
+    ])
+    return pts.astype(np.float32), SceneTruth(center=center, normal=n,
+                                              corners=corners)
+
+
+def _theta_mod90_err_deg(corners_a, corners_b):
+    """Circular mod-90 deg error (square's 4-fold symmetry) between the
+    in-plane orientations of two coplanar 4-corner (4,3) arrays. Fits ITS
+    OWN common plane from `corners_a` (any 4 coplanar points determine a
+    plane) so the comparison doesn't depend on either corner set's own
+    originating candidate/plane fit -- just a consistent shared frame to
+    measure both thetas in."""
+    plane = fit_plane(corners_a)
+
+    def theta(corners):
+        c2 = project_to_plane(corners, plane)
+        c = c2.mean(axis=0)
+        v = c2[0] - c
+        return np.arctan2(v[1], v[0]) - np.pi / 4.0
+
+    d = abs(theta(corners_a) - theta(corners_b)) % (np.pi / 2)
+    d = min(d, np.pi / 2 - d)
+    return float(np.degrees(d))
+
+
 @pytest.mark.parametrize("gen", list(GENERATORS))
 def test_square_icp_off_byte_identical_to_stage6(gen):
     """Regression pin: adding the square_icp knob must not perturb the
@@ -174,8 +251,12 @@ def test_square_icp_does_not_regress_an_already_detected_scene():
     """Task 23's caveat (stage7-stance-cause.md): a robust from-scratch fit
     disagreed with an already-good quad by >15 deg on 28/240 already-
     DETECTED frames. Turning square_icp on must never break a scene that
-    was already cleanly detected -- both must still find the board, and
-    pose must stay close between the two paths."""
+    was already cleanly detected -- both must still find the board, pose
+    must stay close between the two paths, AND (post full-sweep fix)
+    in-plane theta specifically must not have wandered: the full [0,90 deg)
+    sweep is only really "safe" if it reliably re-finds an already-correct
+    quad's theta rather than occasionally drifting to some other coverage-
+    residual local minimum."""
     pts, truth = make_scene(rng=np.random.default_rng(13))
     out_off = detect(pts, BoardConfig(side_m=1.0, square_icp=False),
                      generator="a")
@@ -187,26 +268,71 @@ def test_square_icp_does_not_regress_an_already_detected_scene():
     assert abs(out_on.detection.rotation[:, 2] @ truth.normal) > 0.99
     assert np.linalg.norm(
         out_on.detection.center - out_off.detection.center) < 0.02
+    theta_err = _theta_mod90_err_deg(out_on.detection.corners_3d,
+                                     out_off.detection.corners_3d)
+    assert theta_err < 3.0, (
+        f"square_icp's full sweep moved an already-good quad's theta by "
+        f"{theta_err:.2f} deg relative to the quad-only path")
 
 
-def test_square_icp_rescues_stance_rejected_quad():
-    """The core value (stage7-stance-cause.md): with vertical_gap_deg and a
-    strict stance_floor on, a candidate whose raw-point quad angle is bad
-    enough to fail the stance gate can still be rescued by the fixed-size
-    fit's refined pose. square_icp=False stays on whatever the quad-only
-    path produces; square_icp=True must detect at least as often here."""
-    pts, _ = make_scene(rng=np.random.default_rng(13))
-    board_off = BoardConfig(side_m=1.0, vertical_gap_deg=3.0,
-                            stance_floor=0.9, square_icp=False)
-    board_on = BoardConfig(side_m=1.0, vertical_gap_deg=3.0,
-                           stance_floor=0.9, square_icp=True)
-    out_off = detect(pts, board_off, generator="b")
-    out_on = detect(pts, board_on, generator="b")
-    # square_icp=True must never do worse than off at the same operating
-    # point: if the quad-only path already detects, the refined path must
-    # too.
-    if out_off.detection is not None:
-        assert out_on.detection is not None
+def test_square_icp_flips_stance_rejected_quad_to_accepted_rescue():
+    """THE test that proves square_icp's value (Task 23 fix): a candidate
+    whose raw-point quad angle is bad enough (cv2.minAreaRect itself picks a
+    totally different-oriented, non-square box -- see
+    _make_clipped_diamond) that score_candidate's OWN internal stance gate
+    rejects it outright (res is None in detect()'s non-square_icp branch).
+
+    square_icp=False must NOT produce any detection at all here (not just
+    "loses to a better candidate" -- the fixture has exactly one candidate,
+    injected directly via a stubbed generator, so a None here is a genuine
+    fail-closed, verified by construction rather than assumed).
+
+    square_icp=True -- now always calling fit_fixed_square with
+    init_theta=None (full mod-90 sweep) instead of seeding a narrow window
+    from the untrustworthy quad angle -- must recover the true pose: theta
+    within ~10 deg mod-90, stance passing, at the true location.
+    """
+    rng = np.random.default_rng(21)
+    side = 1.0
+    center = np.array([4.0, 0.5, 0.3])
+    normal = np.array([-1.0, 0.15, 0.05])
+    up_hint = np.array([0.0, 0.0, 1.0])
+    pts, truth = _make_clipped_diamond(side, center, normal, up_hint,
+                                       depth=0.34, spacing=0.008,
+                                       noise=0.004, rng=rng)
+
+    def fake_gen(dn, board, **kwargs):
+        return [Candidate(points=pts, plane=fit_plane(pts))]
+
+    GENERATORS["_clipped_diamond"] = fake_gen
+    try:
+        board_off = BoardConfig(side_m=side, vertical_gap_deg=3.0,
+                                stance_floor=0.9, square_icp=False)
+        board_on = BoardConfig(side_m=side, vertical_gap_deg=3.0,
+                               stance_floor=0.9, square_icp=True)
+        out_off = detect(pts, board_off, generator="_clipped_diamond")
+        out_on = detect(pts, board_on, generator="_clipped_diamond")
+    finally:
+        del GENERATORS["_clipped_diamond"]
+
+    # OFF: fails closed. score_candidate's own stance gate rejects the raw
+    # quad (res is None), so the candidate is skipped before a BoardDetection
+    # is ever built -- no detection AND no best_rejected.
+    assert out_off.detection is None, (
+        "quad-only path should have failed on this fixture's bad quad angle "
+        "-- fixture is not exercising the intended failure mode")
+    assert out_off.best_rejected is None
+
+    # ON: the full sweep recovers the true pose and passes stance.
+    assert out_on.detection is not None, (
+        "square_icp=True should rescue the stance-rejected candidate")
+    det = out_on.detection
+    center_err = float(np.linalg.norm(det.center - truth.center))
+    theta_err = _theta_mod90_err_deg(det.corners_3d, truth.corners)
+    assert center_err < 0.05, f"center error {center_err:.4f} m too large"
+    assert theta_err < 10.0, f"theta error {theta_err:.2f} deg too large"
+    assert abs(det.rotation[:, 2] @ truth.normal) > 0.99
+    assert _stance(det.corners_3d) > 0.9, "rescued pose must pass stance too"
 
 
 def test_up_2d_present_for_vertical_plane():
