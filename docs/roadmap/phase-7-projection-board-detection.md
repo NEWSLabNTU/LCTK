@@ -1405,11 +1405,197 @@ were spurious, and it does not.
    residual clutter, which is why it is a clean win now and the multi-pose cue
    is still the eventual precision closer.
 
+## Stage 7 Results
+
+Stage 6 left the recall ceiling at 49.3% and named the two largest remaining
+miss populations as out of the flatness/stance levers' reach. Stage 7 built
+and benchmarked a **fixed-size square fitter** (`--square-icp`,
+`--square-icp-residual-max`) aimed squarely at the larger of the two — the 86
+frames the 2D diamond-stance gate rejects — after a two-step diagnosis
+concluded the fitter should recover most of them. **The real-data benchmark
+refutes that conclusion outright: the fitter is a strict regression on every
+axis.** This section reports that straight, per the honesty mandate, and
+diagnoses why the diagnosed gain evaporated.
+
+### The diagnostic chain that said GO (and why it was wrong)
+
+Two read-only diagnostics set the hypothesis:
+
+- `.superpowers/sdd/stage7-rediagnosis.md` re-bucketed the 432 ds1–4 misses
+  at the stage-6 operating point (`vertical_gap_deg=3.0, stance_weight=0.5,
+  stance_floor=0.9, flatness_rms_max=0.045`). It found F_SCORER_REJECT now the
+  dominant bucket (123/432), of which **86 die on the 2D stance gate** and 37
+  on shape/size gates a fitter could address. Its first call was **NO-GO** —
+  the fitter reaches only 37 frames (a +8.6-pt ceiling), smaller than either
+  other miss population.
+- `.superpowers/sdd/stage7-stance-cause.md` then reversed that to **GO**. A
+  throwaway 180-step θ-sweep fit on the 86 stance-rejected frames' *board
+  candidates* classified **66/86 as BAD_POSE**: the raw-point `minAreaRect`
+  quad's θ error was a median 43.4° (essentially uncorrelated with truth on
+  sparse frames), while the robust fixed-size fit recovered θ to a median 7.4°
+  — comfortably inside the stance gate's ~26° slack around the true 45° mount.
+  With the board's true orientation essentially constant (44.75–45.10°, std
+  <2°) across all four datasets, the stance gate was ruled a pose-*measurement*
+  artifact, not a genuine-tilt guard, and the fitter rehabilitated as a
+  **pose-accuracy play** worth a diagnosed **55.6%→79.4% ds1–4 recall ceiling**
+  (+66 BAD_POSE flips on top of the +37 shape fixes).
+
+**The critical flaw, visible only in hindsight from the real-data run:** the
+stance-cause diagnostic fit its throwaway square to the board candidate's
+points *in isolation* and asked only "can a robust fit recover θ on these
+points?" It never modelled the two things the production detector actually
+does — (a) fit *every* candidate and rank by fit residual, so the board
+competes against clutter, and (b) gate on an absolute residual threshold. Both
+turned out to be where the mechanism dies on real data.
+
+### Benchmark: recall / precision / timing (all 535 frames, generator b, stage-6 operating point)
+
+Each row is the real `detect()` path over every frame, the accepted
+detection's center classified in/out of the true-board bbox
+(`ros/lctk_launch/config/board/bbox.json5`, trans `[2.6,0,0.35]`, size
+`[3.1,3.94,2.2]`) exactly as stages 4–6 did. Baseline is stage 6's adopted
+operating point (`--stance-gate --flatness-rms-max 0.045`, no square-icp),
+reproducing its 264/20 split byte-for-byte. Timing is a **clean isolated
+re-measurement** (single process, nothing else running) pooled over ds1–4 —
+the sweep's own timing was contaminated by two concurrent benchmark processes
+and is not quoted.
+
+| config | true / clutter | recall (535) | precision | ds1–4 recall | median ms | p95 ms |
+|---|---|---|---|---|---|---|
+| **base (stage 6, no icp)** | **264 / 20** | **49.3%** | **93.0%** | **55.6%** | **59.6** | **73.9** |
+| square-icp R=0.40 | 166 / 28 | 31.0% | 85.6% | 35.2% | — | — |
+| square-icp R=0.45 | 196 / 50 | 36.6% | 79.7% | 41.9% | — | — |
+| square-icp R=0.50 | 210 / 72 | 39.3% | 74.5% | 44.9% | 118.1 | 150.4 |
+| square-icp R=0.55 | 217 / 102 | 40.6% | 68.0% | 46.5% | — | — |
+
+**Headline: every square-icp threshold loses recall AND precision versus the
+stage-6 baseline.** The best square-icp recall (40.6% at R=0.55) is still
+**8.7 points below** the 49.3% baseline — and buys that by admitting *five
+times* the clutter (20→102), collapsing precision from 93.0% to 68.0%.
+Tightening the gate to cut clutter only sheds more true detections (R=0.40:
+recall 31.0%, precision 85.6%). There is no operating point on this sweep that
+matches the baseline on either axis, let alone the diagnosed 79.4% ceiling.
+The diagnosed +23.8-pt gain did not merely fall short — recall moved the wrong
+way.
+
+### CRITICAL: did the 66 BAD_POSE stance-flips materialize? No.
+
+Cross-checking each config's newly-detected-true frames against the baseline's
+per-frame failure bucket (ds1–4):
+
+| config | newly-recovered TRUE (vs base) | of which BAD_POSE stance-flips | regressions (base-true now lost) |
+|---|---|---|---|
+| R=0.40 | 0 | 0 | 88 |
+| R=0.45 | 0 | 0 | 59 |
+| R=0.50 | 0 | 0 | 46 |
+| R=0.55 | 2 | 2 | 41 |
+
+**The pose-fix channel is essentially inert.** Across the whole sweep it flips
+at most **2 of the diagnosed 66** BAD_POSE frames to accepted true-board
+detections, and every config *loses* far more baseline-true frames (41–88)
+than it gains. Drilling into just the 66 BAD_POSE frames, what the production
+detector actually returns:
+
+| threshold | None | true-board | clutter |
+|---|---|---|---|
+| R=0.40 | 63 | 0 | 3 |
+| R=0.45 | 60 | 0 | 6 |
+| R=0.50 | 55 | 0 | 11 |
+| R=0.55 | 47 | 2 | 17 |
+
+So the rescue *mechanism does fire* on some of these frames (17/66 produce a
+detection at R=0.55) — but it lands on **clutter, not the board**, and the
+rest (47/66) produce nothing. This is the exact failure the brief flagged as a
+risk ("is the fit landing on clutter? is the residual gate rejecting real
+recoveries?") — both, confirmed:
+
+1. **Residual gate rejects the real board.** A genuine sparse VLP-32C board
+   patch, ring-gap-striped, has poor perimeter coverage, so its own
+   fixed-size-fit residual runs high — above a tight gate. That is why 47–63
+   of the 66 return `None`: the board's true fit is thrown out by the
+   threshold. The synthetic tests' "genuine recovery reads ~0.40 residual"
+   margin (Task 23) was measured on clean fixtures and does not hold on real
+   ring-gapped board points.
+2. **Residual ranking prefers clutter.** `detect()`'s square-icp branch
+   replaces the score-based candidate ranking with **lowest-residual-wins
+   across all candidates**. A compact planar clutter blob fills its own
+   fixed-size box's perimeter better than the sparse board fills its box, so
+   it posts a *lower* residual and wins the frame — turning a formerly-correct
+   detection into a clutter false-positive (the mechanism behind both the
+   102-frame clutter explosion and many of the 41–88 regressions).
+
+The stance-cause diagnostic missed both because it scored the board's points
+in isolation, never against the field of competing candidates or the absolute
+gate — a textbook case of a synthetic mechanism that works in a unit test
+(Task 23's fixtures pass) failing to survive the full real-data pipeline.
+
+### Timing — the flagged pitfall is real and severe
+
+Clean isolated measurement, ds1–4 pooled:
+
+| config | total median | total p95 | max | scoring-stage median (θ-sweep lives here) |
+|---|---|---|---|---|
+| base | 59.6 ms | 73.9 ms | 93.6 ms | 1.3 ms |
+| square-icp | 118.1 ms | 150.4 ms | 180.5 ms | 58.3 ms |
+
+**Square-icp nearly doubles per-frame latency (+58.5 ms, +98%) and pushes the
+median *over* the 100 ms realtime budget** (p95 150 ms, well over). The cost is
+the full [0°,90°) θ-sweep (~37 coarse + fine evals) run per candidate: it
+inflates the scoring stage ~45× (1.3→58 ms). This alone would be
+budget-disqualifying even if the recall/precision numbers were neutral — and
+they are strongly negative. (Absolute base latency here, ~60 ms, matches stage
+6's unloaded figure; the sweep's ~170 ms medians were concurrency-inflated and
+are not the honest number.)
+
+### Pose jitter — the one thing that got better, and why it doesn't rescue the result
+
+At R=0.50 the true-board center jitter is actually *tighter* than baseline
+(y/z std ~4–7 mm vs baseline's 4–27 mm), because a fixed-size model fit yields
+a cleaner pose than the raw quad *when it lands on the board*. But this is cold
+comfort: it is measured over a smaller, clutter-polluted true population
+(194 vs 264 frames), and a better pose on fewer, less-trustworthy detections
+is not a usable trade against −10 pts recall, −18.5 pts precision, and 2× the
+compute.
+
+### DECISION (Stage 7)
+
+1. **Do NOT adopt `--square-icp`. It is refuted on real data.** At every
+   residual threshold it loses recall (best 40.6% vs 49.3% baseline), loses
+   precision (best 85.6% vs 93.0%), and nearly doubles per-frame latency past
+   the 100 ms budget. There is no operating point that is not strictly
+   dominated by the stage-6 baseline.
+2. **The diagnosed pose-fix channel did not materialize** — ≤2 of 66 BAD_POSE
+   stance-flips became true detections; the mechanism fires but lands on
+   clutter (residual ranking prefers compact clutter over the sparse board)
+   or is rejected outright (the real board's ring-gapped perimeter posts a
+   residual above the gate). This reverses `stage7-stance-cause.md`'s GO: its
+   79.4% ceiling was an artifact of scoring the board candidate *in isolation*,
+   never against the competing-candidate field or the absolute residual gate
+   the production detector uses.
+3. **The stage-6 operating point stands unchanged as the phase's final
+   single-frame result** (`--stance-gate --flatness-rms-max 0.045`, 264/535 =
+   49.3% recall / 93.0% precision, ~60 ms). The square fitter is retained in
+   the codebase behind its default-off flag (all 87 unit tests pass and the
+   synthetic mechanism is real), but is **not** part of any recommended
+   configuration and should not be enabled in an integration build.
+4. **The honest lesson for a future pose-refinement attempt:** a fixed-size
+   fit can only help if it (a) refines the *already-selected* board candidate
+   rather than re-ranking all candidates by residual, and (b) is gated on a
+   residual threshold calibrated to real ring-gapped board coverage, not
+   synthetic dense fixtures. Both were the diagnosis's blind spots. The two
+   larger miss populations stage-7 set out to attack (the 86-frame stance
+   gate and 56-frame fragmentation) remain open, and — as stages 5–6 already
+   concluded — the residual-precision closer is a session-level multi-pose
+   cue, not a heavier single-frame fitter.
+
 ## Decision
 
-**Updated after Stage 6 (final stage of this phase).** The subsections below
+**Updated after Stage 7 (final stage of this phase).** The subsections below
 record each stage's verdict as it was made; this paragraph is the overall
-phase-7 call in light of all six.
+phase-7 call in light of all seven. Stage 7 built and benchmarked a fixed-size
+square fitter aimed at the recall ceiling and **refuted it on real data** — it
+loses recall and precision and doubles compute at every threshold — so the
+recommended operating point is unchanged from stage 6.
 
 The core idea — plane-fit into orthographic plane coordinates, then a shared
 2D quad scorer — is validated, and this phase reaches a genuinely usable,
@@ -1652,7 +1838,7 @@ task benchmarked both operating points those gates define:
   correctly identifies the irreducible remainder as out of single-frame
   reach. Stage 6 (below) then attacks the recall ceiling stage 5 left open.
 
-### Stage-6 verdict (updates the above, final for this phase)
+### Stage-6 verdict (updates the above)
 
 Stage 6 swept the two recall levers the per-frame failure diagnosis
 (`.superpowers/sdd/stage6-failure-diagnosis.md`) identified — the
@@ -1684,9 +1870,42 @@ clutter):
   changing what the residual *is*, so stage 5's conclusion stands — the
   eventual precision closer is a session-level multi-pose cue, not a tighter
   single-frame gate.
-- **This is the phase's final stage.** The six-stage arc closes with a
-  single-frame operating point of **49.3% recall / 93.0% precision**
-  (`--stance-gate --flatness-rms-max 0.045`) — nearly double stage 5's
-  recall at slightly higher precision — and a correctly-diagnosed,
-  session-level path for the irreducible remainder. See the updated
-  top-level Decision above this section for the phase-wide call.
+- **Stage 6 reached a single-frame operating point of 49.3% recall / 93.0%
+  precision** (`--stance-gate --flatness-rms-max 0.045`) — nearly double stage
+  5's recall at slightly higher precision — and a correctly-diagnosed,
+  session-level path for the irreducible remainder. Stage 7 then made one more
+  attempt at the recall ceiling (below) and failed; this operating point is
+  the phase's final single-frame result. See the updated top-level Decision
+  above this section for the phase-wide call.
+
+### Stage-7 verdict (updates the above, final for this phase)
+
+Stage 7 built a fixed-size square fitter (`--square-icp`) to attack the
+largest remaining miss population — the 86 frames the 2D stance gate rejects —
+after a two-step diagnosis (`stage7-rediagnosis.md` NO-GO →
+`stage7-stance-cause.md` GO, on a diagnosed 55.6%→79.4% ds1–4 recall ceiling).
+**The real-data benchmark refuted it on every axis; nothing was adopted.** Full
+numbers and mechanism are in the *Stage 7 Results* section above the top-level
+Decision; the verdict:
+
+- **Strict regression, no viable operating point.** Every residual threshold
+  lost recall (best 40.6% vs 49.3% baseline), lost precision (best 85.6% vs
+  93.0%; worst 68.0% at 5× the clutter), and nearly doubled per-frame latency
+  (60→118 ms median, +98%) past the 100 ms budget. Every square-icp point is
+  strictly dominated by the stage-6 baseline.
+- **The diagnosed pose-fix channel did not materialize.** At most 2 of the
+  diagnosed 66 BAD_POSE stance-flips became true detections; the fitter's
+  rescue fires but lands on clutter (its residual ranking prefers compact
+  clutter over the sparse board) or is rejected outright (a real ring-gapped
+  board patch posts a residual above the gate). `stage7-stance-cause.md`'s GO
+  was an artifact of scoring the board candidate *in isolation*, never against
+  the competing-candidate field or the absolute residual gate the production
+  detector actually uses — the same isolation blind-spot the honesty mandate
+  caught twice before in this phase.
+- **This is the phase's final stage.** The seven-stage arc closes where stage 6
+  left it: `--stance-gate --flatness-rms-max 0.045`, **49.3% recall / 93.0%
+  precision, ~60 ms**. The square fitter stays in-tree behind its default-off
+  flag (mechanism proven synthetically, 87/87 tests green) but is in no
+  recommended configuration. The recall ceiling and residual clutter remain
+  where stages 5–6 diagnosed them: closable only by a session-level multi-pose
+  cue, not a heavier single-frame fitter.
