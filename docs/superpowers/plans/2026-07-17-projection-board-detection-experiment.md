@@ -2275,3 +2275,63 @@ Fill "## Stage 7 Results": the recall/precision/timing comparison, how much
 of the addressable bucket was recovered, the compute cost of ICP-refine,
 honest tradeoff, recommended operating point, top-level Decision update. If
 the fitter doesn't beat 2D-only, or the compute cost blows the budget, say so.
+
+---
+
+# Stage 8 Addendum (2026-07-20): Isolation / Depth-Discontinuity Discriminator
+
+Stage 7 proved single-frame geometry can't SELECT the sparse board over compact
+clutter by shape/residual/stance. Research (stage-7 follow-up survey): the one
+unexploited, structurally-sound geometry signal is ISOLATION — a calibration
+board is free-standing, so it has no coplanar continuation beyond its edges,
+while clutter panels embedded in walls/structure do. Nobody packages this as a
+detector; we assemble it. Diagnostic-first (stage-7 lesson: verify the
+discriminator on REAL clutter before building).
+
+### Task 25: Isolation-signal diagnostic (GATING, read-only)
+
+For the true board and the known residual-clutter attractors (the ds5
+persistent panel ~(-1.83,-2.89,-0.1), the second attractor y≈3.5/z≈-0.5, and
+any others in the stage-4/5/7 residual lists), measure an ISOLATION SCORE and
+test whether it separates board (isolated) from clutter (embedded).
+
+Isolation score for a candidate (its fitted plane + 2D quad boundary):
+- Work in the ORIGINAL voxel-downsampled cloud (BEFORE `_remove_big_planes` —
+  the merged neighborhood, not the post-cluster remainder; embedded clutter's
+  backing wall may have been stripped by clustering, so we must look at the
+  raw cloud).
+- Coplanar-continuation test: count/fraction of raw points that are (a)
+  within ~2-3 cm of the fitted plane AND (b) just OUTSIDE the fitted quad
+  boundary (an in-plane band, e.g. 0.05-0.30 m beyond each edge). Board →~0
+  (nothing beyond its edges on its plane); embedded panel →many (the wall
+  continues coplanar). Report as an exterior-band coplanar-point density and
+  as a per-edge "fraction of the 4 edges with coplanar continuation."
+- Secondary (per-ring depth-jump): for rings crossing the candidate, is there
+  a range discontinuity at the angular boundary (board→background jump)?
+  Report if cheap; the coplanar test is primary.
+
+Deliverable → `.superpowers/sdd/stage8-isolation-diagnosis.md`: the isolation
+score distribution for the true board (sample many frames/datasets) vs each
+clutter attractor. GO/NO-GO: is there a threshold separating board (isolated)
+from the clutter that currently beats us (embedded)? Quantify separation
+(e.g. board exterior-density < X, clutter > Y, margin). If the clutter is ALSO
+isolated (free-standing objects, not wall-embedded), NO-GO — say so plainly and
+we pivot (background subtraction / hardware). Honesty mandate as always.
+
+### Task 26 (if GO): Isolation score as a discrimination dimension
+
+Add an `isolation` term to the detector: for each candidate, compute the
+exterior-band coplanar density against the original downsampled cloud; fold
+into acceptance (reject candidates with coplanar continuation = embedded) +
+ranking. `BoardConfig.isolation: bool=False` (off=byte-identical) +
+threshold knob. CLI `--isolation`. Detector must retain/pass the original
+pre-cluster downsampled cloud to the scorer (new plumbing). Unit tests:
+free-standing synthetic board (isolated, passes) vs a board flush against a
+big coplanar wall (embedded, rejected). Byte-identical when off.
+
+### Task 27 (if GO): Stage-8 benchmark + phase doc
+
+Benchmark isolation ON vs the stage-6 operating point, all 5 datasets. Does
+it kill the residual clutter (the ds5 panel etc.) while retaining board
+recall? Precision/recall/timing. Fill "## Stage 8 Results" + Decision.
+Honest: if it doesn't separate on real data, report the null.
