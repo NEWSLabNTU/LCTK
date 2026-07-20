@@ -216,12 +216,57 @@ def _theta_mod90_err_deg(corners_a, corners_b):
     return float(np.degrees(d))
 
 
+# Generators whose candidate step routes through open3d's `segment_plane`
+# RANSAC: "a" (ransac_iterative) directly, "b" (cluster_after_ground)
+# internally for its ground/big-plane removal. That call is multi-threaded
+# and NOT bit-deterministic across process invocations even with
+# `o3d.utility.random.seed(0)` -- repeated runs on identical input vary by
+# ~1e-4 in the resulting pose, independent of any BoardConfig flag. "c"
+# (region_growing) never calls segment_plane and stays exactly reproducible.
+_NONDETERMINISTIC_GENERATORS = {"a", "b"}
+
+
+def _assert_detection_matches(det_a, det_b, gen):
+    """Compare two BoardDetections that a byte-identical regression pin
+    expects to be (near-)identical. For generators routed through o3d's
+    segment_plane RANSAC (see `_NONDETERMINISTIC_GENERATORS`), exact
+    equality is unsafe -- use a tight atol=1e-3 m (1 mm) tolerance instead:
+    far above the ~1e-4 o3d run-to-run noise, but far below any tolerance a
+    real behavioral change in the "off" path would need. Other generators
+    keep the original exact-equality check.
+    """
+    if gen in _NONDETERMINISTIC_GENERATORS:
+        np.testing.assert_allclose(det_a.center, det_b.center,
+                                   atol=1e-3, rtol=0)
+        np.testing.assert_allclose(det_a.rotation, det_b.rotation,
+                                   atol=1e-3, rtol=0)
+        np.testing.assert_allclose(det_a.corners_3d, det_b.corners_3d,
+                                   atol=1e-3, rtol=0)
+        np.testing.assert_allclose(det_a.score, det_b.score,
+                                   atol=1e-3, rtol=0)
+    else:
+        np.testing.assert_array_equal(det_a.center, det_b.center)
+        np.testing.assert_array_equal(det_a.rotation, det_b.rotation)
+        np.testing.assert_array_equal(det_a.corners_3d, det_b.corners_3d)
+        assert det_a.score == det_b.score
+
+
 @pytest.mark.parametrize("gen", list(GENERATORS))
 def test_square_icp_off_byte_identical_to_stage6(gen):
     """Regression pin: adding the square_icp knob must not perturb the
     default (off) path at all -- explicit BoardConfig(square_icp=False)
     must reproduce the exact same scored outcome as a plain BoardConfig()
-    call (which predates this task) on the standard scene."""
+    call (which predates this task) on the standard scene.
+
+    Generators "a" (ransac_iterative) and "b" (cluster_after_ground) both
+    call open3d's `segment_plane`, which is multi-threaded and NOT
+    bit-deterministic across process calls even with
+    `o3d.utility.random.seed(0)` -- runs vary by ~1e-4 independent of any
+    config flag. Exact equality is too strict for those two generators, so
+    they get a tight (atol=1e-3, i.e. 1 mm -- far above the ~1e-4 o3d noise
+    but far below any real behavioral change) numeric tolerance instead;
+    "c" (region_growing) doesn't touch segment_plane and stays exact.
+    """
     pts, _ = make_scene(rng=np.random.default_rng(13))
     out_default = detect(pts, BoardConfig(side_m=1.0), generator=gen)
     out_explicit_off = detect(pts, BoardConfig(side_m=1.0, square_icp=False),
@@ -229,13 +274,8 @@ def test_square_icp_off_byte_identical_to_stage6(gen):
     assert (out_default.detection is None) == (
         out_explicit_off.detection is None)
     if out_default.detection is not None:
-        np.testing.assert_array_equal(out_default.detection.center,
-                                      out_explicit_off.detection.center)
-        np.testing.assert_array_equal(out_default.detection.rotation,
-                                      out_explicit_off.detection.rotation)
-        np.testing.assert_array_equal(out_default.detection.corners_3d,
-                                      out_explicit_off.detection.corners_3d)
-        assert out_default.detection.score == out_explicit_off.detection.score
+        _assert_detection_matches(out_default.detection,
+                                  out_explicit_off.detection, gen)
 
 
 @pytest.mark.parametrize("gen", list(GENERATORS))
@@ -354,7 +394,12 @@ def test_isolation_off_byte_identical_to_stage6(gen):
     """Regression pin: adding the isolation knob must not perturb the
     default (off) path at all -- explicit BoardConfig(isolation=False) must
     reproduce the exact same scored outcome as a plain BoardConfig() call
-    (which predates this task) on the standard scene."""
+    (which predates this task) on the standard scene.
+
+    See `_assert_detection_matches` docstring: generators "a"/"b" go through
+    open3d's non-bit-deterministic `segment_plane` RANSAC, so they get a
+    tight numeric tolerance instead of exact equality; "c" stays exact.
+    """
     pts, _ = make_scene(rng=np.random.default_rng(13))
     out_default = detect(pts, BoardConfig(side_m=1.0), generator=gen)
     out_explicit_off = detect(pts, BoardConfig(side_m=1.0, isolation=False),
@@ -362,13 +407,8 @@ def test_isolation_off_byte_identical_to_stage6(gen):
     assert (out_default.detection is None) == (
         out_explicit_off.detection is None)
     if out_default.detection is not None:
-        np.testing.assert_array_equal(out_default.detection.center,
-                                      out_explicit_off.detection.center)
-        np.testing.assert_array_equal(out_default.detection.rotation,
-                                      out_explicit_off.detection.rotation)
-        np.testing.assert_array_equal(out_default.detection.corners_3d,
-                                      out_explicit_off.detection.corners_3d)
-        assert out_default.detection.score == out_explicit_off.detection.score
+        _assert_detection_matches(out_default.detection,
+                                  out_explicit_off.detection, gen)
 
 
 @pytest.mark.parametrize("gen", list(GENERATORS))
