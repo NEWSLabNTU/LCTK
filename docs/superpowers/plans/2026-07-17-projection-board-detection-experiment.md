@@ -2390,3 +2390,56 @@ that can't see the board or can't transfer from synth is not worth building.
 ### Task 29 (if GO): synthetic range-image data pipeline + lightweight CNN
 ### Task 30 (if GO): train on synth, evaluate recall/precision on real 535 frames
 (Detailed only if Task 28 says GO.)
+
+---
+
+# Stage 9 continued: Ray-Based LiDAR Simulator (unblocks the CNN)
+
+Gate-2 failed because `synth.py` grid-samples in object space → range-image
+aliasing. Fix: a ray-based VLP-32C simulator casting along the REAL beam angles
+(VeloView-VLP-32C.yaml: 32 `vert_correction` elevations + `rot_correction`
+azimuth offsets, copied into `experiments/board-detection-2d/VeloView-VLP-32C.yaml`).
+Produces realistic range images + point clouds + per-board labels for CNN
+training (and better synthetic tests for all prior stages). numpy-only; PyTorch
+is later + separate.
+
+### Task 29: Core simulator (sensor + primitives + ray-caster) — gated on Gate-2 re-test
+
+**Files:** new subpackage `experiments/board-detection-2d/src/boarddet/sim/`:
+`sensor.py` (beam model), `primitives.py` (rect/box/cylinder + ray-intersect),
+`raycast.py` (scene → range image + point cloud). Tests `tests/test_sim.py`.
+
+- `sensor.py`: load the 32 (elevation, az-offset) pairs from the yaml (parse
+  once, or hardcode the 32 pairs as a constant with the yaml as provenance);
+  `beam_directions(azimuth_steps) -> (32*N, 3)` unit ray dirs; config: azimuth
+  resolution (~0.2°), min/max range.
+- `primitives.py`: `Rect(center, normal, u_axis, half_u, half_v, holes=[])`
+  (holes = list of (center_2d, radius) for hollow boards; empty = plain
+  square), `Box(center, R, half_sizes)`, `Cylinder(base, axis, radius,
+  height)`. Each: `intersect(ray_origins, ray_dirs) -> t array` (inf where no
+  hit; respect bounds/holes). Vectorized over rays.
+- `raycast.py`: `render(scene: list[primitive], sensor, noise, dropout) ->
+  {range_image: (32,N), points: (M,3), hit_prim_id: ...}`. Nearest valid hit
+  per ray; gaussian range noise; angle-dependent dropout (grazing incidence)
+  + random dropout; min/max clip. Reuse the spike's range-image layout.
+- **Acceptance = Gate-2 re-test**: build a scene approximating a real dataset
+  (board ~1m at ~(2.1,-0.2), a ground plane + wall + a couple clutter panels),
+  render, and compare the synthetic range image to a real one (save PNG).
+  The synth image MUST now look smooth/coherent (no vertical-stripe aliasing),
+  the board a coherent near-range region with a clean discontinuity border.
+  A unit test asserts basic fidelity (board region present, footprint in the
+  ~15-25 row range the spike measured, no all-empty-column aliasing pattern).
+  If it still aliases, iterate before proceeding. Report the visual result.
+
+Tests (TDD): ray-rect intersection correctness (known ray hits/misses a
+positioned square + respects holes + bounds); ray-box, ray-cylinder;
+nearest-hit selection over multiple primitives; dropout/noise statistics;
+the Gate-2 fidelity assertion.
+
+### Task 30: Scene generation + labeled dataset
+Domain-randomized `scenegen.py` (multi-board + embedded/free-standing panel
+clutter + boxes/poles), per-board labels (mask/bbox/pose), dataset dump.
+(Detailed after Task 29's Gate-2 passes.)
+
+### Tasks 31+: lightweight CNN train-on-synth / eval-on-real
+(Detailed after a labeled dataset exists.)
