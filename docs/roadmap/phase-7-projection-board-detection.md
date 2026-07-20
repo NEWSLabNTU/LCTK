@@ -1608,14 +1608,201 @@ compute.
    *both* the precision gap (stage 5) and this recall path, not a precision-
    only nicety.
 
+## Stage 8 Results
+
+Stage 8 added an **isolation discriminator**: a real calibration board is
+free-standing, so nothing coplanar continues past its fitted edges, while
+clutter that beats every other gate (the ds5 wall panel) is a *patch of a
+larger surface* whose backing plane continues past the fitted quad.
+`isolation.isolation_density(dn, plane, corners_2d)` counts raw
+voxel-downsampled points (against the full **pre-strip** cloud, before
+`_remove_big_planes`) that are coplanar (`|residual| < 0.03 m`) AND just
+outside the quad (in-plane band `0.05–0.30 m` beyond the nearest edge),
+normalized to points-per-metre of perimeter. `--isolation
+--isolation-max-density T` rejects candidates over `T`.
+
+The Stage 8 gating diagnostic
+(`.superpowers/sdd/stage8-isolation-diagnosis.md`) projected, on the
+stage-6 accepted detections: **89% of true boards measure density exactly 0,
+0/20 residual-clutter samples ever did** (min 0.485, dominated by the ds5
+panel), with a 28–29-frame board tail (density 7–22) overlapping the low
+clutter range. Predicted gate at T≈0.3: precision 93.0%→100% (clutter 20→0),
+recall 49.3%→43.9% (~28 board false-rejects). This stage measures whether
+that holds in the **live detector** (stage 7's lesson: a per-candidate
+diagnostic can look good and fail in live candidate competition) and tests
+the **compound hypothesis** — if isolation now handles clutter, can we drop
+the stance gate and recover the 86 stance-rejected true frames?
+
+Method: the real `detect()` over all 535 frames × a stance × isolation grid,
+each accepted detection's center classified in/out of the true-board bbox
+(`bbox.json5`, same rule as stages 4–7). Fixed at the stage-6 operating point
+(`vertical_gap_deg=3.0, flatness_rms_max=0.045`, generator b). Base reproduces
+stage 6's 264/20 byte-for-byte (harness faithful). Scratch analysis under the
+session scratchpad (not committed); `results/` gitignored.
+
+### The isolation × stance grid — recall / precision (board / clutter of 535)
+
+| stance ↓  iso → | **off** | iso 0.2 | **iso 0.3** | iso 0.5 | iso 1.0 |
+|---|---|---|---|---|---|
+| **gate** (floor 0.9, stage-6) | **264/20 · 49.3% / 93.0%** | 235/0 · 43.9% / 100% | **236/0 · 44.1% / 100%** | 236/1 · 44.1% / 99.6% | 236/2 · 44.1% / 99.2% |
+| relaxed (floor 0.85) | 265/40 · 49.5% / 86.9% | 235/0 · 43.9% / 100% | 236/0 · 44.1% / 100% | 236/1 · 44.1% / 99.6% | 236/2 · 44.1% / 99.2% |
+| soft-only (blend 0.5, floor off) | 262/78 · 49.0% / 77.1% | 235/0 · 43.9% / 100% | 236/0 · 44.1% / 100% | 236/1 · 44.1% / 99.6% | 236/2 · 44.1% / 99.2% |
+| none (no stance at all) | 252/140 · 47.1% / 64.3% | 235/1 · 43.9% / 99.6% | 236/5 · 44.1% / 97.9% | 236/8 · 44.1% / 96.7% | 236/14 · 44.1% / 94.4% |
+
+### Isolation-alone reproduces the diagnostic — and holds up live
+
+The direct benchmark (`gate` + `iso 0.3`) is **236 board / 0 clutter = 44.1%
+recall / 100.0% precision**. This matches the diagnostic's projection almost
+exactly (43.9% recall / 100% precision predicted; the 1-frame difference is a
+single board frame whose density sits between 0.2 and 0.3). Precision → 100%
+(residual clutter **20 → 0**), recall 49.3% → 44.1% (−5.2 pts absolute, −11%
+relative — the 28-frame near-wall board tail the diagnostic flagged, rejected
+as designed). **Unlike stage 7, the discriminator survives live candidate
+competition**: the isolation gate fires against the same accepted candidate
+the rest of the pipeline committed to, not a re-scored one, so the diagnostic
+transferred faithfully.
+
+Residual clutter under `gate`+isolation (from the full residual list):
+
+- **T=0.3: zero clutter across all 5 datasets** — the entire stage-6 residual
+  (11 ds5-panel + 2 second-attractor + 7 other = 20) is eliminated.
+- **T=0.5: 1 leak** — the single lowest-density ds5-panel frame (ds5 f64,
+  density just under 0.5; the diagnostic's ds5-panel min was 0.485).
+- **T=1.0: 2 leaks** (both ds5-panel). Confirms the diagnostic's ds5-panel
+  density floor (~0.485) is what sets the safe threshold ceiling; **0.3 sits
+  cleanly below it**.
+
+### COMPOUND hypothesis — REFUTED. The 86 frames do not come back.
+
+The prize this stage set out to test — drop/relax stance, let isolation hold
+precision, recover the 86 stance-rejected true frames for a Pareto win over
+stage 6 — **did not materialize.** Two independent mechanisms kill it, both
+readable straight off the grid:
+
+1. **Dropping stance recovers no net board recall.** `gate` off → `soft-only`
+   off → `none` off moves board *down*, not up: **264 → 262 → 252**. The 86
+   frames the stance floor rejects do **not** become board detections when the
+   floor is lifted — they become **clutter**. This is exactly stage 7's
+   finding (measured there directly: on the stance-rejected population a
+   compact clutter candidate already outscores the sparse board at the
+   2D-score selection step ~80% of the time), reproduced here at the whole-
+   detector level. Relaxing stance only floods clutter: off-column clutter
+   **20 → 40 → 78 → 140** as the floor goes 0.9 → 0.85 → off → none.
+
+2. **Isolation cannot catch the clutter that dropping stance admits.**
+   Adding `iso 0.3` on top of *any* stance setting collapses board recall back
+   to the **same ~236 ceiling** (isolation rejects the same near-wall board
+   tail regardless of stance) — so the compound buys no recall. Worse, the
+   clutter it fails to clean is diagnostic: `none`+`iso 0.3` leaves **5
+   survivors, all `other_clutter` at ≈(4.7, 2.6, −0.1)** — the free-standing
+   axis-aligned "panel A" that **stage 2 showed the stance term kills**
+   (18→0). Isolation is blind to it *by construction* (a free-standing panel
+   is isolated — no coplanar continuation), which is the whole point: **the
+   two gates are complementary, not substitutes.** Stance kills free-standing
+   panels; isolation kills wall-embedded panels; only together do they reach
+   0 clutter. Dropping either re-admits its own clutter class.
+
+So there is **no Pareto improvement over stage 6** anywhere on the grid.
+Stage-6 (`gate`, no iso) has strictly higher recall (49.3% vs 44.1%); the
+isolation configs have strictly higher precision (100% vs 93.0%). It is an
+honest **recall-for-precision trade**, not a domination — and the compound
+path that could have made it a domination is closed by the same board-vs-
+clutter selection problem stages 5–7 already diagnosed.
+
+### Timing — cheap, unlike stage 7 (clean single-process run, 535 frames)
+
+| config | total median | total p95 | total max | scoring median |
+|---|---|---|---|---|
+| `gate` off (stage-6 baseline) | 62.8 ms | 88.0 ms | 99.6 ms | 1.33 ms |
+| `gate` + iso 0.3 | 62.5 ms | 87.8 ms | 102.9 ms | 4.74 ms |
+| `none` + iso 0.3 | 63.9 ms | 90.2 ms | 103.3 ms | 5.37 ms |
+
+Isolation adds **~3.4 ms** to the per-frame scoring stage (1.33 → 4.74 ms) —
+~5% of the ~63 ms total, **well inside the 100 ms budget**, total median
+essentially unchanged. Despite projecting and residual-testing the *entire*
+pre-strip cloud per surviving candidate, the cost is negligible because the
+work is vectorized numpy and runs only on the handful of candidates that clear
+score + stance (not all ~9 raw candidates). This is the **opposite** of stage
+7's square-icp, which doubled compute past the budget. The flagged pitfall did
+not bite. (p95/max occasionally graze 100 ms, same as the baseline — a
+pre-existing tail, not introduced by isolation.)
+
+### Pose jitter and the retained-board tail
+
+True-board center jitter is unchanged by isolation (158.7 mm at `gate`+iso 0.3,
+n=236, vs 163.4 mm baseline n=264 — the figure is dominated by legitimate
+pose-to-pose board motion across the static-capture windows, as every prior
+stage noted, not detector noise; it moves only because the rejected 28-frame
+tail drops out). The 28 rejected board frames are the near-wall/near-backdrop
+takes the diagnostic identified (clustered at repeated centers in ds1/ds4/ds5)
+— genuinely less-isolated board captures, not a measurement artifact.
+
+### DECISION (Stage 8)
+
+1. **Isolation works and is validated on real data — adopt it as the
+   precision-priority single-frame operating point.** `gate` +
+   `--isolation --isolation-max-density 0.3` drives the residual clutter that
+   beat every prior stage **fully to zero (20 → 0), reaching 100.0% precision**
+   at 44.1% recall (236/535), for ~3.4 ms/frame. This is the first single-
+   frame configuration in the phase to reach 100% precision **without** the
+   ~64% recall collapse of `--strict-diamond` (which cost 59/535). It is a
+   real, cheap, honestly-priced option — a −5.2 pt recall trade for zero
+   clutter — not a free win.
+2. **The compound recall recovery is refuted.** Dropping or relaxing the
+   stance gate recovers **no** net board recall (264 → 262 → 252 as stance
+   loosens) — the stance-rejected frames select clutter, not the board — and
+   floods clutter that isolation cannot clean, because the freed clutter is
+   **free-standing** (the (4.7, 2.6) panel A) and isolation is blind to it.
+   Stance and isolation are **complementary discriminators for two different
+   clutter classes** (free-standing vs wall-embedded); neither substitutes for
+   the other. There is no Pareto improvement over stage 6 on the grid.
+3. **Which operating point to ship depends on the consumer, and for this
+   application isolation is recommended.** A calibration board detector feeds a
+   multi-pose session solver where a *false* board pose corrupts the extrinsic
+   but a *missed* frame is cheaply replaced (the board is held static for
+   seconds → dozens of frames per pose). Under that asymmetry, driving
+   residual clutter to zero is worth 5 pts of per-frame recall, so **`gate` +
+   isolation 0.3 is the recommended single-frame operating point going
+   forward**, with stage-6 (`gate`, no iso, 49.3%/93.0%) retained as the
+   higher-recall alternative when the downstream stage does its own outlier
+   rejection. Both are kept; isolation is default-off in `BoardConfig` so
+   stage-6 behavior is byte-identical when the flag is absent.
+4. **This does not move the phase's fundamental ceiling.** Recall is still
+   ~44–49% single-frame (half the frames lose the board to fragmentation or
+   hard scorer gates), and isolation is a *precision* tool — it cannot recover
+   the recall path, which stages 5–7 established needs the session-level
+   multi-pose cue (the board moves between poses; clutter does not). Stage 8's
+   contribution is closing the *precision* gap to 100% cheaply and honestly,
+   and proving — by the failed compound test — that no single-frame gate
+   combination recovers the recall the stance floor spends.
+
 ## Decision
 
-**Updated after Stage 7 (final stage of this phase).** The subsections below
+**Updated after Stage 8 (final stage of this phase).** The subsections below
 record each stage's verdict as it was made; this paragraph is the overall
-phase-7 call in light of all seven. Stage 7 built and benchmarked a fixed-size
+phase-7 call in light of all eight. Stage 7 built and benchmarked a fixed-size
 square fitter aimed at the recall ceiling and **refuted it on real data** — it
-loses recall and precision and doubles compute at every threshold — so the
-recommended operating point is unchanged from stage 6.
+loses recall and precision and doubles compute at every threshold. Stage 8
+then added an **isolation discriminator** (free-standing board vs
+wall-embedded clutter) and **validated it on real data**: `--isolation
+--isolation-max-density 0.3` drives the residual clutter fully to zero
+(20 → 0), reaching **100.0% precision at 44.1% recall (236/535)** for ~3.4
+ms/frame — the first single-frame path to 100% precision without
+`--strict-diamond`'s recall collapse. But the **compound hypothesis it was
+meant to unlock — drop the stance gate, let isolation hold precision, recover
+the 86 stance-rejected frames — was refuted**: relaxing stance recovers no net
+recall (the rejected frames select clutter, not board) and floods free-standing
+clutter that isolation is blind to by construction. Stance and isolation are
+**complementary gates for two clutter classes** (free-standing vs embedded),
+not substitutes, so there is no Pareto improvement over stage 6 — only an
+honest recall-for-precision trade. **The recommended single-frame operating
+point is now `--stance-gate --flatness-rms-max 0.045 --isolation
+--isolation-max-density 0.3` (44.1% / 100%)** when the consumer values
+precision (a false board pose corrupts calibration; a missed frame is cheaply
+replaced across a static pose's many frames), with stage 6
+(`--stance-gate --flatness-rms-max 0.045`, 49.3% / 93.0%) retained as the
+higher-recall alternative. Both are kept; isolation is default-off so stage-6
+behavior is byte-identical without the flag.
 
 The core idea — plane-fit into orthographic plane coordinates, then a shared
 2D quad scorer — is validated, and this phase reaches a genuinely usable,
@@ -1633,11 +1820,13 @@ positives the looser gate admits. The other recall lever the failure
 diagnosis flagged (relaxing `stance_floor`) was refuted — it buys no recall
 for the precision it spends — and is not adopted. This is a large improvement
 over stage 1's ≤2% and a real answer to stage 4's discrimination gap. It is
-**not** a 100%-recall or 100%-precision result, and this phase does not claim
-one: reaching 100% precision single-frame costs ~64% of recall
-(`--strict-diamond`, 59/535), the recall ceiling is still ~50% (half the
-frames lose the board to fragmentation or hard scorer gates), and the residual
-clutter is diagnosed, not hand-waved, as out of single-frame geometry's reach
+**not** a 100%-recall result, and this phase does not claim one: stage 8's
+isolation gate does reach **100% precision** cheaply (at 44.1% recall, a
+−5-pt trade, far better than `--strict-diamond`'s 59/535 = 89%-recall-cost
+route to the same precision), but the recall ceiling is still ~44–50% (half
+the frames lose the board to fragmentation or hard scorer gates), and the
+recall path — unlike the precision gap — is diagnosed as out of single-frame
+geometry's reach
 — closing it needs a session-level multi-pose cue (the board moves between
 calibration poses; static clutter does not), which is a capture-protocol
 change for a future phase, not implementable on today's single-static-capture
@@ -1903,7 +2092,7 @@ clutter):
   the phase's final single-frame result. See the updated top-level Decision
   above this section for the phase-wide call.
 
-### Stage-7 verdict (updates the above, final for this phase)
+### Stage-7 verdict (updates the above)
 
 Stage 7 built a fixed-size square fitter (`--square-icp`) to attack the
 largest remaining miss population — the 86 frames the 2D stance gate rejects —
@@ -1927,10 +2116,43 @@ Decision; the verdict:
   the competing-candidate field or the absolute residual gate the production
   detector actually uses — the same isolation blind-spot the honesty mandate
   caught twice before in this phase.
-- **This is the phase's final stage.** The seven-stage arc closes where stage 6
-  left it: `--stance-gate --flatness-rms-max 0.045`, **49.3% recall / 93.0%
-  precision, ~60 ms**. The square fitter stays in-tree behind its default-off
-  flag (mechanism proven synthetically, 87/87 tests green) but is in no
-  recommended configuration. The recall ceiling and residual clutter remain
-  where stages 5–6 diagnosed them: closable only by a session-level multi-pose
-  cue, not a heavier single-frame fitter.
+- **Stage 7 leaves the operating point unchanged from stage 6**
+  (`--stance-gate --flatness-rms-max 0.045`, 49.3% recall / 93.0% precision,
+  ~60 ms). The square fitter stays in-tree behind its default-off flag
+  (mechanism proven synthetically, tests green) but is in no recommended
+  configuration. The recall ceiling and residual clutter remain where stages
+  5–6 diagnosed them: closable only by a session-level multi-pose cue, not a
+  heavier single-frame fitter.
+
+### Stage-8 verdict (updates the above, final for this phase)
+
+Stage 8 added an **isolation discriminator** — free-standing board (no
+coplanar continuation past its fitted edges) vs wall-embedded clutter (backing
+plane continues) — measured against the pre-strip cloud, after a read-only
+gating diagnostic (`.superpowers/sdd/stage8-isolation-diagnosis.md`) that
+projected precision 93.0%→100% at ~44% recall. Full numbers and the isolation ×
+stance grid are in the *Stage 8 Results* section above; the verdict:
+
+- **Isolation is validated on real data and adopted (precision-priority).**
+  `--stance-gate --flatness-rms-max 0.045 --isolation --isolation-max-density
+  0.3` drives the residual clutter **fully to zero (20 → 0), 100.0% precision**
+  at 44.1% recall (236/535), for **~3.4 ms/frame** — the first single-frame
+  route to 100% precision without `--strict-diamond`'s recall collapse, and
+  well inside the 100 ms budget (unlike stage 7's fitter). Unlike stage 7, the
+  diagnostic transferred faithfully to the live detector.
+- **The compound recall-recovery hypothesis is refuted.** Relaxing/dropping the
+  stance gate recovers **no net board recall** (264 → 262 → 252 as stance
+  loosens — the stance-rejected frames select clutter, not the board, exactly
+  as stage 7 found) and floods free-standing clutter (the (4.7, 2.6) panel A)
+  that isolation **cannot** catch by construction. Stance and isolation are
+  **complementary gates for two clutter classes**, not substitutes; there is no
+  Pareto improvement over stage 6 anywhere on the grid — only a recall-for-
+  precision trade (49.3%/93.0% vs 44.1%/100%).
+- **This is the phase's final stage.** The eight-stage arc closes with a
+  validated single-frame detector offering two honestly-priced operating
+  points: stage 8's isolation (44.1% / 100%, zero residual clutter) as the
+  recommended precision-priority default, and stage 6 (49.3% / 93.0%) as the
+  higher-recall alternative. Isolation is default-off, so stage-6 behavior is
+  byte-identical without the flag. The recall ceiling (~44–50%) is unchanged
+  and remains closable only by the session-level multi-pose cue, not any
+  single-frame gate or fitter — a conclusion stages 5–8 now all converge on.
