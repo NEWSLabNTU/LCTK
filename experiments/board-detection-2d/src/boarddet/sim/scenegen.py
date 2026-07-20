@@ -15,7 +15,7 @@ from the origin).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -75,8 +75,14 @@ class SceneGenConfig:
     wall_half_width_m: float = 8.0
     wall_half_height_m: float = 3.0
     wall_center_z_m: float = 0.5
-    # boards
-    n_boards_range: tuple[int, int] = (1, 3)
+    # boards -- weighted scene-count distribution. 1 board is the primary
+    # deployment case (dominant); 0-board scenes anchor precision (learn
+    # clutter != board); 3 is a capped edge case. See docs.
+    board_count_weights: dict[int, float] = field(
+        default_factory=lambda: {0: 0.15, 1: 0.45, 2: 0.25, 3: 0.15})
+    # minimum angular separation between boards so they don't merge into one
+    # blob in the range image (ambiguous labels).
+    board_min_azimuth_sep_deg: float = 20.0
     board_range_m: tuple[float, float] = (2.0, 8.0)
     board_azimuth_range_deg: tuple[float, float] = (-75.0, 75.0)
     board_height_range_m: tuple[float, float] = (-0.4, 0.6)
@@ -279,11 +285,25 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None) ->
         primitives.append(wall)
 
     # --- diamond boards ---------------------------------------------------
-    n_boards = int(rng.integers(cfg.n_boards_range[0], cfg.n_boards_range[1] + 1))
+    _counts = sorted(cfg.board_count_weights)
+    _w = np.array([cfg.board_count_weights[c] for c in _counts], dtype=float)
+    n_boards = int(rng.choice(_counts, p=_w / _w.sum()))
     boards: list[BoardMeta] = []
+    placed_az_deg: list[float] = []
     for _ in range(n_boards):
         board_range = rng.uniform(*cfg.board_range_m)
-        az = np.radians(rng.uniform(*cfg.board_azimuth_range_deg))
+        # rejection-sample azimuth so boards stay angularly separated (never
+        # merge into one range-image blob). Give up on this board if crowded.
+        az = None
+        for _try in range(25):
+            cand_deg = rng.uniform(*cfg.board_azimuth_range_deg)
+            if all(abs(cand_deg - p) >= cfg.board_min_azimuth_sep_deg
+                   for p in placed_az_deg):
+                az = np.radians(cand_deg)
+                placed_az_deg.append(cand_deg)
+                break
+        if az is None:
+            break
         height = rng.uniform(*cfg.board_height_range_m)
         center_nom = _polar(board_range, az, height)
         facing_sensor_nom = -_unit(center_nom)

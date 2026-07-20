@@ -83,9 +83,9 @@ def test_diamond_board_plain_by_default_has_no_holes():
 
 def test_random_scene_produces_requested_board_count_range():
     rng = np.random.default_rng(0)
-    cfg = SceneGenConfig(n_boards_range=(1, 3))
+    cfg = SceneGenConfig()
     counts = {len(random_scene(rng, cfg).boards) for _ in range(60)}
-    assert counts.issubset({1, 2, 3})
+    assert counts.issubset({0, 1, 2, 3})
     assert len(counts) > 1  # domain randomization actually varies the count
 
 
@@ -186,12 +186,54 @@ def test_free_standing_clutter_is_not_on_any_wall_plane():
 def test_random_scene_renders_and_boards_get_hit_pixels():
     rng = np.random.default_rng(11)
     sensor = Vlp32cSensor()
-    scene = random_scene(rng, SceneGenConfig())
+    scene = random_scene(rng, SceneGenConfig(board_count_weights={3: 1.0}))
+    assert scene.boards, "forced-3-board config produced no boards"
     frame = render(scene.primitives, sensor, azimuth_steps=720,
                   rng=np.random.default_rng(12))
     for board in scene.boards:
         mask = frame.hit_prim_id == board.prim_index
         assert mask.sum() > 0, "a generated board produced zero hit pixels"
+
+
+def test_board_count_distribution_tracks_weights():
+    """Scene-count distribution roughly follows board_count_weights, and
+    0-board (empty) scenes really occur for the precision anchor."""
+    cfg = SceneGenConfig()  # {0:.15, 1:.45, 2:.25, 3:.15}
+    counts = [len(random_scene(np.random.default_rng(s), cfg).boards)
+              for s in range(800)]
+    frac = {k: counts.count(k) / len(counts) for k in (0, 1, 2, 3)}
+    assert frac[0] > 0.05, "no empty scenes -- precision anchor missing"
+    assert frac[1] == max(frac.values()), "1-board should be the dominant case"
+    # loose bounds around the configured weights (sampling + min-sep dropouts)
+    assert 0.08 < frac[0] < 0.24
+    assert 0.35 < frac[1] < 0.55
+    assert counts.count(4) == 0, "board count must be capped at 3"
+
+
+def test_boards_stay_angularly_separated():
+    """No two boards in a scene sit closer than the min azimuth separation
+    (so they never merge into one ambiguous range-image blob)."""
+    # sensor tilt off so nominal placement azimuths == realized azimuths
+    cfg = SceneGenConfig(board_count_weights={3: 1.0}, sensor_tilt_jitter_deg=0.0,
+                         sensor_height_jitter_m=0.0)  # force crowding
+    for seed in range(200):
+        scene = random_scene(np.random.default_rng(seed), cfg)
+        azs = [np.degrees(np.arctan2(b.center[1], b.center[0]))
+               for b in scene.boards]
+        for i in range(len(azs)):
+            for j in range(i + 1, len(azs)):
+                assert abs(azs[i] - azs[j]) >= cfg.board_min_azimuth_sep_deg - 1e-6
+
+
+def test_empty_scene_renders_without_boards():
+    """A 0-board scene still renders a valid range image (clutter only)."""
+    from boarddet.sim.dataset import render_labeled_scene, DatasetConfig
+    sensor = Vlp32cSensor()
+    cfg = DatasetConfig(scenegen=SceneGenConfig(board_count_weights={0: 1.0}),
+                        azimuth_steps=720)
+    sample = render_labeled_scene(np.random.default_rng(3), sensor, cfg)
+    assert sample.boards == []
+    assert np.isfinite(sample.image[..., 0]).any(), "empty scene has no returns"
 
 
 # ---------------------------------------------------------------------------

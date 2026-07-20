@@ -15,7 +15,7 @@ from boarddet.sim.sensor import Vlp32cSensor
 
 
 def _small_cfg(**overrides) -> DatasetConfig:
-    scenegen = SceneGenConfig(n_boards_range=(2, 2), n_clutter_range=(2, 2),
+    scenegen = SceneGenConfig(board_count_weights={2: 1.0}, n_clutter_range=(2, 2),
                               n_boxes_range=(0, 1), n_cylinders_range=(0, 1))
     return DatasetConfig(scenegen=scenegen, azimuth_steps=720, **overrides)
 
