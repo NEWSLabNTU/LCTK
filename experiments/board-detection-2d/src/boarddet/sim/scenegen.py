@@ -84,7 +84,7 @@ class SceneGenConfig:
     board_side_jitter_frac: float = 0.1
     board_normal_jitter_deg: float = 20.0
     board_inplane_rot_jitter_deg: float = 15.0
-    board_hollow_prob: float = 0.3
+    board_hollow_prob: float = 0.0  # plain square diamonds by default (no holes); set >0 to mix in hollow boards
     board_hole_radius_m: float = 0.15
     board_hole_shift_m: float = 0.20
     # clutter panels: MIX of embedded (coplanar-with-wall) + free-standing
