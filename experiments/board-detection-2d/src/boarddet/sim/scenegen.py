@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .primitives import Box, Cylinder, Rect
+from .sensor import Vlp32cSensor
 
 # ---------------------------------------------------------------------------
 # metadata
@@ -85,6 +86,12 @@ class SceneGenConfig:
     # is (half-width_i + half-width_j + this gap), i.e. extent-aware -- a fixed
     # center gap is insufficient because a near board subtends more azimuth.
     board_min_azimuth_sep_deg: float = 10.0
+    # VLP-32C packs lasers near the horizon and thins toward the FOV edges, so
+    # a board placed too high/low gets patchy vertical sampling. Reject any
+    # placement whose realized vertical extent isn't at least this fraction
+    # spanned by laser channels, with at least this many rings crossing it.
+    board_min_vertical_coverage: float = 0.7
+    board_min_laser_rings: int = 6
     board_range_m: tuple[float, float] = (2.0, 8.0)
     board_azimuth_range_deg: tuple[float, float] = (-75.0, 75.0)
     board_height_range_m: tuple[float, float] = (-0.4, 0.6)
@@ -246,8 +253,10 @@ def _polar(rng_range: float, az_rad: float, z: float) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None) -> Scene:
+def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None,
+                 sensor: Vlp32cSensor | None = None) -> Scene:
     cfg = cfg if cfg is not None else SceneGenConfig()
+    sensor = sensor if sensor is not None else Vlp32cSensor()
 
     roll = np.radians(rng.uniform(-cfg.sensor_tilt_jitter_deg, cfg.sensor_tilt_jitter_deg))
     pitch = np.radians(rng.uniform(-cfg.sensor_tilt_jitter_deg, cfg.sensor_tilt_jitter_deg))
@@ -295,55 +304,70 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None) ->
     # side s spans s*sqrt(2) across, so half-width = s/sqrt(2) at its range.
     placed: list[tuple[float, float]] = []
     max_side = cfg.board_side_m * (1.0 + cfg.board_side_jitter_frac)
+    el_deg = np.degrees(sensor.elevations)  # real laser channel elevations
+    # Clamp tilt to the hard safety cap so the board always faces the sensor
+    # (never edge-on / thin bar), regardless of jitter config.
+    board_tilt_deg = min(cfg.board_normal_jitter_deg, cfg.board_max_incidence_deg)
     for _ in range(n_boards):
-        board_range = rng.uniform(*cfg.board_range_m)
-        # 1.15x conservative inflation absorbs the sensor roll/pitch that
-        # shifts each board's realized azimuth after this nominal-frame check.
-        cand_hw = 1.15 * np.degrees(np.arctan2(max_side / np.sqrt(2.0), board_range))
-        # rejection-sample azimuth so this board's extent + gap clears every
-        # placed board's extent (never overlap in the range image). Give up on
-        # this board if the FOV is too crowded to fit it.
-        az = None
-        for _try in range(30):
+        # Rejection-sample the whole placement until it (a) doesn't overlap a
+        # placed board in azimuth and (b) gets enough vertical laser coverage
+        # (VLP-32C thins toward the FOV edges). Give up on this board if no
+        # placement fits.
+        accepted = None
+        for _try in range(60):
+            board_range = rng.uniform(*cfg.board_range_m)
             cand_deg = rng.uniform(*cfg.board_azimuth_range_deg)
-            if all(abs(cand_deg - p_az) >= cand_hw + p_hw + cfg.board_min_azimuth_sep_deg
+            # extent-aware azimuth separation (1.15x inflation absorbs the
+            # sensor roll/pitch that shifts realized azimuth after this check)
+            cand_hw = 1.15 * np.degrees(np.arctan2(max_side / np.sqrt(2.0), board_range))
+            if any(abs(cand_deg - p_az) < cand_hw + p_hw + cfg.board_min_azimuth_sep_deg
                    for p_az, p_hw in placed):
-                az = np.radians(cand_deg)
-                placed.append((cand_deg, cand_hw))
-                break
-        if az is None:
+                continue
+            az = np.radians(cand_deg)
+            height = rng.uniform(*cfg.board_height_range_m)
+            center_nom = _polar(board_range, az, height)
+            normal_nom = _jitter_direction(rng, -_unit(center_nom), board_tilt_deg)
+            side = cfg.board_side_m * (1.0 + rng.uniform(-cfg.board_side_jitter_frac,
+                                                           cfg.board_side_jitter_frac))
+            inplane_jitter = np.radians(rng.uniform(-cfg.board_inplane_rot_jitter_deg,
+                                                     cfg.board_inplane_rot_jitter_deg))
+            hollow = bool(rng.random() < cfg.board_hollow_prob)
+            rect_nom, corners_nom = make_diamond_board(
+                center_nom, normal_nom, up_hint=[0.0, 0.0, 1.0], side=side,
+                inplane_rot_rad=inplane_jitter, hollow=hollow,
+                hole_radius=cfg.board_hole_radius_m, hole_shift=cfg.board_hole_shift_m,
+            )
+            corners = np.stack([xf.point(c) for c in corners_nom])
+            # vertical laser coverage on the REALIZED (post-xf) board: fraction
+            # of the board's elevation extent spanned by channels, plus a
+            # minimum ring count. Exact against the real laser elevations.
+            el_c = np.degrees(np.arctan2(corners[:, 2],
+                                         np.hypot(corners[:, 0], corners[:, 1])))
+            top, bot = float(el_c.max()), float(el_c.min())
+            in_fov = el_deg[(el_deg >= bot) & (el_deg <= top)]
+            if len(in_fov) < cfg.board_min_laser_rings:
+                continue
+            coverage = (in_fov.max() - in_fov.min()) / (top - bot) if top > bot else 0.0
+            if coverage < cfg.board_min_vertical_coverage:
+                continue
+            rect = Rect(
+                center=xf.point(rect_nom.center),
+                normal=xf.direction(rect_nom.normal),
+                u_axis=xf.direction(rect_nom.u_axis),
+                half_u=rect_nom.half_u, half_v=rect_nom.half_v,
+                holes=rect_nom.holes,
+            )
+            placed.append((cand_deg, cand_hw))
+            accepted = BoardMeta(
+                prim_index=len(primitives), center=rect.center, normal=rect.normal,
+                u_axis=rect.u_axis, v_axis=rect.v_axis, side=side,
+                corners=corners, hollow=hollow,
+            )
+            primitives.append(rect)
+            boards.append(accepted)
             break
-        height = rng.uniform(*cfg.board_height_range_m)
-        center_nom = _polar(board_range, az, height)
-        facing_sensor_nom = -_unit(center_nom)
-        # Clamp tilt to the hard safety cap so the board is guaranteed to face
-        # the sensor (never edge-on / thin bar), regardless of jitter config.
-        board_tilt_deg = min(cfg.board_normal_jitter_deg, cfg.board_max_incidence_deg)
-        normal_nom = _jitter_direction(rng, facing_sensor_nom, board_tilt_deg)
-        side = cfg.board_side_m * (1.0 + rng.uniform(-cfg.board_side_jitter_frac,
-                                                       cfg.board_side_jitter_frac))
-        inplane_jitter = np.radians(rng.uniform(-cfg.board_inplane_rot_jitter_deg,
-                                                 cfg.board_inplane_rot_jitter_deg))
-        hollow = bool(rng.random() < cfg.board_hollow_prob)
-        rect_nom, corners_nom = make_diamond_board(
-            center_nom, normal_nom, up_hint=[0.0, 0.0, 1.0], side=side,
-            inplane_rot_rad=inplane_jitter, hollow=hollow,
-            hole_radius=cfg.board_hole_radius_m, hole_shift=cfg.board_hole_shift_m,
-        )
-        rect = Rect(
-            center=xf.point(rect_nom.center),
-            normal=xf.direction(rect_nom.normal),
-            u_axis=xf.direction(rect_nom.u_axis),
-            half_u=rect_nom.half_u, half_v=rect_nom.half_v,
-            holes=rect_nom.holes,
-        )
-        corners = np.stack([xf.point(c) for c in corners_nom])
-        boards.append(BoardMeta(
-            prim_index=len(primitives), center=rect.center, normal=rect.normal,
-            u_axis=rect.u_axis, v_axis=rect.v_axis, side=side,
-            corners=corners, hollow=hollow,
-        ))
-        primitives.append(rect)
+        if accepted is None:
+            break
 
     # --- clutter panels: MIX of embedded (coplanar-with-wall) + free-standing
     n_clutter = int(rng.integers(cfg.n_clutter_range[0], cfg.n_clutter_range[1] + 1))

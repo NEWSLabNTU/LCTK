@@ -56,7 +56,7 @@ def render_labeled_scene(rng: np.random.Generator, sensor: Vlp32cSensor,
     a real `Frame.xyz` would go through -- not `SimFrame.range_image`
     directly -- so the dataset a CNN trains on matches what it will see at
     real-data eval time pixel-binning-convention-for-convention."""
-    scene = random_scene(rng, cfg.scenegen)
+    scene = random_scene(rng, cfg.scenegen, sensor)
     sim_frame = render(
         scene.primitives, sensor,
         azimuth_steps=cfg.azimuth_steps,

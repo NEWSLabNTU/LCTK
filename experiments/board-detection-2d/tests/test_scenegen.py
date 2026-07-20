@@ -280,3 +280,33 @@ def test_boards_always_face_sensor_never_edge_on():
 def test_board_max_incidence_is_safely_below_edge_on():
     """The safety cap itself must stay well short of 90 deg (edge-on)."""
     assert SceneGenConfig().board_max_incidence_deg < 75.0
+
+
+# ---------------------------------------------------------------------------
+# vertical laser coverage: VLP-32C thins toward FOV edges, so every board must
+# be placed where laser channels reach >= board_min_vertical_coverage of it
+# ---------------------------------------------------------------------------
+
+
+def test_boards_get_enough_vertical_laser_coverage():
+    """Every generated board is placed so that laser channels span at least
+    board_min_vertical_coverage of its vertical extent, with >= the minimum
+    ring count -- guards against boards in the sparse top/bottom of the FOV."""
+    sensor = Vlp32cSensor()
+    el = np.degrees(sensor.elevations)
+    cfg = SceneGenConfig()
+    n_checked = 0
+    for seed in range(300):
+        scene = random_scene(np.random.default_rng(seed), cfg, sensor)
+        for b in scene.boards:
+            n_checked += 1
+            e = np.degrees(np.arctan2(b.corners[:, 2],
+                                      np.hypot(b.corners[:, 0], b.corners[:, 1])))
+            top, bot = float(e.max()), float(e.min())
+            in_band = el[(el >= bot) & (el <= top)]
+            assert len(in_band) >= cfg.board_min_laser_rings
+            coverage = (in_band.max() - in_band.min()) / (top - bot)
+            assert coverage >= cfg.board_min_vertical_coverage - 1e-9, (
+                f"board vertical coverage {coverage:.2f} < "
+                f"{cfg.board_min_vertical_coverage}")
+    assert n_checked > 200
