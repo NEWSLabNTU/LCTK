@@ -1776,11 +1776,174 @@ takes the diagnostic identified (clustered at repeated centers in ds1/ds4/ds5)
    and proving — by the failed compound test — that no single-frame gate
    combination recovers the recall the stance floor spends.
 
+## Stage 9 CNN Results
+
+Stages 1–8 exhausted single-frame *geometry*: plane-fit + 2D quad scoring, with every
+discriminator stages 4–8 could invent (stance, isolation, square-fit refinement),
+topped out at a **~44–49% recall ceiling** (stage 6: 49.3%/93.0%; stage 8: 44.1%/100%)
+that stages 5–7 diagnosed as structural — half the frames lose the board to
+fragmentation or hard scorer gates that no single-frame geometric gate recovers. Stage 9
+asks a different question: can a **learned segmenter**, trained entirely on synthetic
+data, do better? This is the decisive synth→real transfer test for the whole phase.
+
+### Simulator + training summary (Tasks 29–32)
+
+A ray-based simulator (`boarddet.sim`) casts the VLP-32C's **real per-laser beam
+directions** (parsed from the vendored VeloView calibration yaml) against domain-randomized
+scenes (ground + walls + 1–3 diamond calibration boards, a mix of plain and hollow, plus
+embedded/free-standing clutter panels, boxes, cylinders) — eliminating the object-space
+sampling-grid aliasing a naive renderer would introduce, and sharing ONE row/column
+binning convention (`sim.range_image.to_range_image`) between synthetic and real data so
+a synth-trained model cannot fail on real data for a dumb structural reason (see that
+module's docstring). `BoardUNet` (Task 32) is a ~0.21M-parameter U-Net with
+azimuth-circular padding, gentle vertical pooling (32 rows survive to the bottleneck),
+and a dilated bottleneck for the wide azimuthal context an isolation-style judgment
+needs. Trained on a 50/50 plain/hollow mix (the real eval board is hollow; the
+deployment target is plain) with Dice+BCE loss: **best checkpoint reaches val IoU 0.9898,
+pixel precision 0.9964, pixel recall 0.9934** on a fixed held-out synth set — the model
+learns the synth board mask essentially perfectly, with no overfitting (train/val loss
+track together throughout). Full detail: `.superpowers/sdd/task-31-report.md`,
+`task-32-report.md`.
+
+### Real-data eval (Task 33): the transfer test
+
+Method: `cnn.eval` runs every real frame (all 535, ds1–5) through
+`real_frame_to_input` (the identical synth/real normalization) → the trained checkpoint
+→ sigmoid → threshold → seam-wrapping connected components (the azimuth axis wraps at
+0/2π; components straddling the seam are merged, not split) → back-projection (each
+component's masked pixels looked up against a once-per-frame rebin of the frame's own
+3D points) → `square_fit.fit_fixed_square` (known board side) for a refined pose, falling
+back to the raw centroid when too few points back a component → classification against
+the real board's bbox (`bbox.json5`, same in/out rule stages 4–8 used, so results are
+directly comparable).
+
+**Recall / precision, all 535 frames, threshold sweep:**
+
+| threshold | recall | precision |
+|---|---|---|
+| 0.3 | 99.3% (531/535) | 14.5% (1277/8809) |
+| **0.5** | **99.3% (531/535)** | **14.8% (1299/8800)** |
+| 0.7 | 99.3% (531/535) | 15.0% (1296/8660) |
+
+**vs. geometry: stage-6 49.3%/93.0%, stage-8 44.1%/100%.**
+
+Recall is essentially threshold-invariant (531/535 at all three thresholds; total
+detections drop only 8809→8660, −1.7%, from 0.3→0.7) — the model is not marginally
+wrong on its false positives, it is *confidently* wrong (sigmoid saturated), exactly as
+confidently as it is right on the true board. Per-dataset recall is uniform (99–100%
+across all 5 datasets); precision varies 2× by dataset (11.2%–20.6%), tracking how much
+of each dataset's specific static clutter the model misfires on.
+
+**Timing** (535 frames, single-process, RTX 5090): forward pass **1.52 ms median / 1.62
+ms p95** — trivially fast, nowhere near budget. Post-processing (components + per-component
+plane/square fit) is the entire cost: **88.71 ms median / 113.76 ms p95**, scaling with
+the ~16.4 detections/frame the low precision implies (each gets a full coarse-to-fine θ
+sweep). **Total: 90.25 ms median (clears the 100 ms budget), 115.33 ms p95 (does not)** —
+directly downstream of the same precision problem, not a separate concern.
+
+**Pose quality on true (in-bbox) detections**: center jitter 431.8 mm (n=1299), notably
+worse than geometry's stage-6 163.4 mm / stage-8 158.7 mm — partly structural (this
+pipeline can and does emit multiple simultaneous in-bbox components per frame, ~2.4 per
+hit-frame — very likely the diamond's two "petal" lobes registering as separate
+components, both landing in-bbox and both fitted independently, rather than geometry's
+single best-detection-per-frame convention). Mean in-bbox center (2.31, −0.37, −0.04) vs.
+bbox translation (2.60, 0, 0.35) — a real, systematic offset, still within the box's
+generous half-extents but off-center rather than tightly clustered on the true pose.
+83.3% of all detections got a genuine `fit_fixed_square` pose; the rest fell back to a
+raw centroid (too few backing points).
+
+### Visual evidence — did it transfer?
+
+`results/stage9-cnn/real_pred.png` (gitignored): 6 real frames spanning all 5 datasets
+(plus a second ds3 frame), each showing the input range image, predicted probability, and
+thresholded mask, with the bbox's own projected (row, col) marked on every panel.
+
+**Verdict: PARTIAL transfer — recall transferred outstandingly; precision did not.**
+
+- **Recall: transferred, decisively.** Every one of the 6 visualized frames shows the
+  board's characteristic diamond "twin-spike" silhouette lighting up **exactly** at the
+  bbox reference marker — the same shape Task 32's synth val predictions showed,
+  reproduced on real sensor data the model never trained on. 99.3% recall is **more than
+  double** stage 6's 49.3% — the segmentation approach breaks the recall ceiling stages
+  5–8 diagnosed as out of single-frame geometry's reach. This is the clean, headline
+  result: a CNN trained ONLY on synthetic range images generalizes essentially perfectly
+  to recognizing the real board's presence.
+- **Precision: did not transfer.** 14.8% is a severe regression from geometry's
+  93.0–100%. The visual shows why directly: several **persistent real static fixtures**
+  (a thin vertical stripe near column ~200 present in literally every visualized frame, a
+  blob near ~500–560, a patch near ~1150–1200 in ds1/ds4, a dense cluster near
+  ~1600–1750) get confidently classified as board-shaped in essentially every frame —
+  the same kind of "known static room fixture" clutter stages 6–8 fought, but here with
+  **no discriminator downstream of the mask at all**: this task's pipeline is
+  threshold→components→fit→classify, none of geometry's hand-built stance/isolation
+  gates.
+
+**Diagnosis** (honesty mandate — reported straight, per stages 2/3/7's own standard for
+nulls): the mask is not empty on real data — it fires confidently and correctly on the
+true board (recall transferred) — but it also fires confidently on a small, consistent
+set of real static fixtures across every dataset, meaning the model genuinely did not
+learn to discriminate them from a board, not that it's making a marginal/uncertain call.
+This is a synthetic-clutter-coverage gap (Task 30's embedded/free-standing panels, boxes,
+and cylinders evidently don't cover whatever these specific real fixtures look like in
+range+discontinuity space) — not a back-projection or pose-fitting bug, since detections
+are computed directly from wherever the mask fires. Pose quality on genuine true
+positives is also somewhat worse than geometry's purpose-built fit, compounding the
+precision problem when multiple components register per frame.
+
+### DECISION (Stage 9)
+
+1. **The core hypothesis is validated: segmentation breaks the recall ceiling.** 99.3%
+   recall (531/535) more than doubles stage 6's 49.3% best geometry result — proof a
+   CNN trained purely on synthetic range images generalizes to the real board at a level
+   single-frame geometry structurally cannot reach (stages 5–7's diagnosis). This is the
+   project's headline positive result for the recall side of the problem.
+2. **Precision did not transfer and this is not adopted as a drop-in replacement for
+   geometry.** 14.8% precision at the best threshold is far below stage 6/8's 93–100% —
+   a small, consistent set of real static fixtures are confidently misclassified as
+   board, and nothing downstream of the raw mask currently corrects for it (unlike
+   geometry's purpose-built stance/isolation gates). Shipping this pipeline as-is would
+   trade a 5–10× worse false-positive rate for the recall gain, which is not a good trade
+   for a calibration pipeline that already tolerates missed frames cheaply (the board is
+   held static for seconds, giving dozens of frames per pose) but cannot easily tolerate
+   a false pose corrupting the extrinsic.
+3. **The fix is diagnosed, not out of reach, but is new work beyond this task.** Since
+   `fit_fixed_square` already returns each component's corners/pose, the SAME
+   stance/isolation-style discriminators that took geometry from 93%→100% precision
+   (stage 8) could run on the CNN's candidate components too — combining the CNN's
+   recall breakthrough with geometry's precision machinery. Building and validating that
+   composite pipeline is the natural next step this stage surfaces, not something
+   attempted or claimed here.
+4. **Timing is dominated by post-processing, not the network.** The GPU forward pass
+   (1.52 ms median) is a non-issue; the ~90 ms median (115 ms p95) cost is entirely
+   CPU-side component fitting, scaling with detection count — the same lever that would
+   fix precision would also fix the p95 timing overrun.
+
 ## Decision
 
-**Updated after Stage 8 (final stage of this phase).** The subsections below
-record each stage's verdict as it was made; this paragraph is the overall
-phase-7 call in light of all eight. Stage 7 built and benchmarked a fixed-size
+**Updated after Stage 9 (final stage of this phase).** Stage 9 built a synth-trained
+CNN segmenter (Tasks 29–32: ray-based simulator sharing one row/column convention with
+real data, a ~0.21M-param U-Net, val IoU 0.9898) and ran the decisive synth→real
+transfer test on all 535 real frames (Task 33). **Verdict: partial transfer.** Recall
+transferred outstandingly — **99.3% (531/535), more than double** stage 6's 49.3% best
+geometry result, proving a CNN trained purely on synthetic data breaks the recall
+ceiling stages 5–8 diagnosed as structurally out of single-frame geometry's reach.
+Precision did **not** transfer — **14.8%** at the best threshold, far below geometry's
+93–100%, because a small, consistent set of real static fixtures (visible in essentially
+every frame across every dataset) are confidently misclassified as board, with no
+discriminator downstream of the raw mask to catch them (unlike geometry's purpose-built
+stance/isolation gates). **The CNN pipeline is therefore not adopted as a replacement for
+the geometry operating points** (stage-6 49.3%/93.0% or stage-8 44.1%/100%, both still
+recommended below) — but the recall breakthrough is real, and the fix is diagnosed as
+tractable, not attempted: the same stance/isolation-style discriminators that took
+geometry from 93%→100% precision could run on the CNN's candidate components (which
+already carry a `fit_fixed_square` pose), combining the CNN's recall with geometry's
+precision machinery. That composite pipeline is future work this phase surfaces but does
+not build. Full detail: "Stage 9 CNN Results" above, `.superpowers/sdd/task-33-report.md`.
+
+**Updated after Stage 8** (superseded by the Stage 9 paragraph above, kept for
+the record). The subsections below record each stage's verdict as it was made;
+this paragraph was the overall phase-7 call in light of stages 1–8, before Stage
+9's CNN result. Stage 7 built and benchmarked a fixed-size
 square fitter aimed at the recall ceiling and **refuted it on real data** — it
 loses recall and precision and doubles compute at every threshold. Stage 8
 then added an **isolation discriminator** (free-standing board vs
@@ -2124,7 +2287,7 @@ Decision; the verdict:
   5–6 diagnosed them: closable only by a session-level multi-pose cue, not a
   heavier single-frame fitter.
 
-### Stage-8 verdict (updates the above, final for this phase)
+### Stage-8 verdict (updates the above, final geometry stage)
 
 Stage 8 added an **isolation discriminator** — free-standing board (no
 coplanar continuation past its fitted edges) vs wall-embedded clutter (backing
@@ -2148,7 +2311,8 @@ stance grid are in the *Stage 8 Results* section above; the verdict:
   **complementary gates for two clutter classes**, not substitutes; there is no
   Pareto improvement over stage 6 anywhere on the grid — only a recall-for-
   precision trade (49.3%/93.0% vs 44.1%/100%).
-- **This is the phase's final stage.** The eight-stage arc closes with a
+- **This is the final geometry stage** (superseded as "final for this phase" by
+  Stage 9's CNN result below). The eight-stage geometry arc closes with a
   validated single-frame detector offering two honestly-priced operating
   points: stage 8's isolation (44.1% / 100%, zero residual clutter) as the
   recommended precision-priority default, and stage 6 (49.3% / 93.0%) as the
@@ -2156,3 +2320,41 @@ stance grid are in the *Stage 8 Results* section above; the verdict:
   byte-identical without the flag. The recall ceiling (~44–50%) is unchanged
   and remains closable only by the session-level multi-pose cue, not any
   single-frame gate or fitter — a conclusion stages 5–8 now all converge on.
+
+### Stage-9 verdict (updates the above, final for this phase)
+
+Stage 9 asked whether a *learned* segmenter, trained purely on synthetic range
+images, could do what no single-frame geometric gate could: break the ~44–50%
+recall ceiling. Full numbers, the visual evidence, and the diagnosis are in the
+*Stage 9 CNN Results* section above; the verdict:
+
+- **Recall transferred, decisively — the ceiling is broken.** The synth-trained
+  `BoardUNet` (val IoU 0.9898) reaches **99.3% recall (531/535) on real data**,
+  more than double stage 6's 49.3% best geometry result, and does so
+  consistently across all 5 datasets (99–100% each). `real_pred.png` confirms
+  visually: the board's diamond silhouette lights up exactly at the bbox
+  reference location in every sample frame. This validates the phase's Stage-9
+  hypothesis and is the project's headline positive result.
+- **Precision did not transfer — 14.8%, far below geometry's 93–100%.** A
+  small, consistent set of real static fixtures (visible in nearly every
+  frame, every dataset) are confidently misclassified as board-shaped, with no
+  discriminator downstream of the raw mask to catch them — this task's
+  pipeline (threshold → components → fit → classify) carries none of
+  geometry's hand-built stance/isolation gates. Diagnosed as a synthetic-
+  clutter-coverage gap (Task 30's clutter distribution doesn't cover whatever
+  these specific real fixtures look like in range+discontinuity space), not a
+  back-projection or pose-fitting bug.
+- **Not adopted as a geometry replacement; both geometry operating points
+  stand.** Stage 6 (49.3% / 93.0%) and stage 8 (44.1% / 100%) remain the
+  recommended single-frame operating points. The CNN pipeline is not a
+  drop-in substitute at its current precision, but the recall breakthrough is
+  real and the fix is diagnosed as tractable: running geometry's
+  stance/isolation-style discriminators on the CNN's candidate components
+  (which already carry a `fit_fixed_square` pose) is the natural next step —
+  surfaced here as future work, not built or claimed in this stage.
+- **This is the phase's final stage.** The nine-stage arc closes with two
+  validated, honestly-priced *geometry* operating points (stage 6/stage 8, as
+  above) and one *validated-but-partial* CNN result: a real recall
+  breakthrough (99.3% vs. 49.3%) gated behind a real, diagnosed precision gap
+  (14.8% vs. 93–100%) that a follow-on composite pipeline could plausibly
+  close but that this phase does not build.
