@@ -80,9 +80,11 @@ class SceneGenConfig:
     # clutter != board); 3 is a capped edge case. See docs.
     board_count_weights: dict[int, float] = field(
         default_factory=lambda: {0: 0.15, 1: 0.45, 2: 0.25, 3: 0.15})
-    # minimum angular separation between boards so they don't merge into one
-    # blob in the range image (ambiguous labels).
-    board_min_azimuth_sep_deg: float = 20.0
+    # minimum angular GAP between two boards' azimuthal edges (extents) so they
+    # never merge into one blob in the range image. Required center separation
+    # is (half-width_i + half-width_j + this gap), i.e. extent-aware -- a fixed
+    # center gap is insufficient because a near board subtends more azimuth.
+    board_min_azimuth_sep_deg: float = 10.0
     board_range_m: tuple[float, float] = (2.0, 8.0)
     board_azimuth_range_deg: tuple[float, float] = (-75.0, 75.0)
     board_height_range_m: tuple[float, float] = (-0.4, 0.6)
@@ -289,18 +291,25 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None) ->
     _w = np.array([cfg.board_count_weights[c] for c in _counts], dtype=float)
     n_boards = int(rng.choice(_counts, p=_w / _w.sum()))
     boards: list[BoardMeta] = []
-    placed_az_deg: list[float] = []
+    # each placed board's (azimuth_deg, angular half-width_deg). A diamond of
+    # side s spans s*sqrt(2) across, so half-width = s/sqrt(2) at its range.
+    placed: list[tuple[float, float]] = []
+    max_side = cfg.board_side_m * (1.0 + cfg.board_side_jitter_frac)
     for _ in range(n_boards):
         board_range = rng.uniform(*cfg.board_range_m)
-        # rejection-sample azimuth so boards stay angularly separated (never
-        # merge into one range-image blob). Give up on this board if crowded.
+        # 1.15x conservative inflation absorbs the sensor roll/pitch that
+        # shifts each board's realized azimuth after this nominal-frame check.
+        cand_hw = 1.15 * np.degrees(np.arctan2(max_side / np.sqrt(2.0), board_range))
+        # rejection-sample azimuth so this board's extent + gap clears every
+        # placed board's extent (never overlap in the range image). Give up on
+        # this board if the FOV is too crowded to fit it.
         az = None
-        for _try in range(25):
+        for _try in range(30):
             cand_deg = rng.uniform(*cfg.board_azimuth_range_deg)
-            if all(abs(cand_deg - p) >= cfg.board_min_azimuth_sep_deg
-                   for p in placed_az_deg):
+            if all(abs(cand_deg - p_az) >= cand_hw + p_hw + cfg.board_min_azimuth_sep_deg
+                   for p_az, p_hw in placed):
                 az = np.radians(cand_deg)
-                placed_az_deg.append(cand_deg)
+                placed.append((cand_deg, cand_hw))
                 break
         if az is None:
             break

@@ -210,19 +210,32 @@ def test_board_count_distribution_tracks_weights():
     assert counts.count(4) == 0, "board count must be capped at 3"
 
 
-def test_boards_stay_angularly_separated():
-    """No two boards in a scene sit closer than the min azimuth separation
-    (so they never merge into one ambiguous range-image blob)."""
-    # sensor tilt off so nominal placement azimuths == realized azimuths
-    cfg = SceneGenConfig(board_count_weights={3: 1.0}, sensor_tilt_jitter_deg=0.0,
-                         sensor_height_jitter_m=0.0)  # force crowding
-    for seed in range(200):
+def test_boards_never_overlap_in_range_image():
+    """No two boards' azimuth-column extents overlap in the rendered range
+    image (extent-aware separation), so they never merge into one ambiguous
+    blob. This is the guarantee that matters -- checked on the actual render,
+    not just center angles, since a near board subtends more azimuth."""
+    sensor = Vlp32cSensor()
+    cfg = SceneGenConfig(board_count_weights={3: 1.0})  # force crowding
+    checked = 0
+    for seed in range(250):
         scene = random_scene(np.random.default_rng(seed), cfg)
-        azs = [np.degrees(np.arctan2(b.center[1], b.center[0]))
-               for b in scene.boards]
-        for i in range(len(azs)):
-            for j in range(i + 1, len(azs)):
-                assert abs(azs[i] - azs[j]) >= cfg.board_min_azimuth_sep_deg - 1e-6
+        if len(scene.boards) < 2:
+            continue
+        checked += 1
+        sf = render(scene.primitives, sensor, azimuth_steps=1800,
+                   rng=np.random.default_rng(seed + 1))
+        spans = []
+        for b in scene.boards:
+            m = sf.hit_prim_id == b.prim_index
+            if m.any():
+                spans.append((int(sf.cols[m].min()), int(sf.cols[m].max())))
+        for i in range(len(spans)):
+            for j in range(i + 1, len(spans)):
+                lo = max(spans[i][0], spans[j][0])
+                hi = min(spans[i][1], spans[j][1])
+                assert lo > hi, f"boards overlap in range image: {spans[i]} vs {spans[j]}"
+    assert checked > 50  # actually exercised multi-board scenes
 
 
 def test_empty_scene_renders_without_boards():
