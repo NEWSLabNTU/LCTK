@@ -192,3 +192,36 @@ def test_random_scene_renders_and_boards_get_hit_pixels():
     for board in scene.boards:
         mask = frame.hit_prim_id == board.prim_index
         assert mask.sum() > 0, "a generated board produced zero hit pixels"
+
+
+# ---------------------------------------------------------------------------
+# physical placement: boards always FACE the sensor, never edge-on (thin bar)
+# ---------------------------------------------------------------------------
+
+
+def test_boards_always_face_sensor_never_edge_on():
+    """Every generated board's incidence-from-face-on must stay under the
+    hard safety cap, so the LiDAR never sees the board edge-on as a thin bar.
+    Guards the facing-with-tilt invariant against future config drift."""
+    cfg = SceneGenConfig()
+    worst = 0.0
+    for seed in range(300):
+        scene = random_scene(np.random.default_rng(seed), cfg)
+        for b in scene.boards:
+            ray = b.center / np.linalg.norm(b.center)   # sensor -> board
+            n = b.normal / np.linalg.norm(b.normal)
+            incidence = np.degrees(np.arccos(np.clip(abs(float(ray @ n)), 0.0, 1.0)))
+            worst = max(worst, incidence)
+            assert incidence <= cfg.board_max_incidence_deg + 1e-6, (
+                f"board edge-on risk: incidence {incidence:.1f} deg "
+                f"exceeds cap {cfg.board_max_incidence_deg}")
+    # sanity: realized tilt tracks the configured jitter (a few deg of slack
+    # for the sensor height/tilt offset shifting the actual viewing ray), and
+    # is clearly non-flat.
+    assert worst <= cfg.board_normal_jitter_deg + 5.0
+    assert worst > 10.0, "boards are barely tilted; expected visible facing-tilt"
+
+
+def test_board_max_incidence_is_safely_below_edge_on():
+    """The safety cap itself must stay well short of 90 deg (edge-on)."""
+    assert SceneGenConfig().board_max_incidence_deg < 75.0

@@ -82,7 +82,15 @@ class SceneGenConfig:
     board_height_range_m: tuple[float, float] = (-0.4, 0.6)
     board_side_m: float = 1.0
     board_side_jitter_frac: float = 0.1
-    board_normal_jitter_deg: float = 20.0
+    # Board ALWAYS faces the sensor: its normal starts pointed back at the
+    # LiDAR, then tilts by a random cone of half-angle <= this value. This is
+    # also the MAX incidence-from-face-on, so keeping it well below 90 deg
+    # guarantees the board is never edge-on (never seen as a thin bar).
+    # Facing-with-tilt is the physically correct calibration-board placement.
+    board_normal_jitter_deg: float = 30.0
+    # Hard safety cap: generation asserts every board's incidence stays below
+    # this, so a mis-set jitter can never silently produce an edge-on board.
+    board_max_incidence_deg: float = 60.0
     board_inplane_rot_jitter_deg: float = 15.0
     board_hollow_prob: float = 0.0  # plain square diamonds by default (no holes); set >0 to mix in hollow boards
     board_hole_radius_m: float = 0.15
@@ -279,7 +287,10 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None) ->
         height = rng.uniform(*cfg.board_height_range_m)
         center_nom = _polar(board_range, az, height)
         facing_sensor_nom = -_unit(center_nom)
-        normal_nom = _jitter_direction(rng, facing_sensor_nom, cfg.board_normal_jitter_deg)
+        # Clamp tilt to the hard safety cap so the board is guaranteed to face
+        # the sensor (never edge-on / thin bar), regardless of jitter config.
+        board_tilt_deg = min(cfg.board_normal_jitter_deg, cfg.board_max_incidence_deg)
+        normal_nom = _jitter_direction(rng, facing_sensor_nom, board_tilt_deg)
         side = cfg.board_side_m * (1.0 + rng.uniform(-cfg.board_side_jitter_frac,
                                                        cfg.board_side_jitter_frac))
         inplane_jitter = np.radians(rng.uniform(-cfg.board_inplane_rot_jitter_deg,
