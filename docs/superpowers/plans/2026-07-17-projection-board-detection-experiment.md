@@ -2481,3 +2481,58 @@ range-image renderer (same row axis). Compare to the geometry pipeline's
 
 ### Tasks 31+: lightweight CNN train-on-synth / eval-on-real
 (Detailed after a labeled dataset exists.)
+
+---
+
+# Stage 9 CNN Training (Tasks 31-33): lightweight U-Net, train on synth, eval on real
+
+Simulator complete + vetted (plain diamonds, facing-with-tilt never edge-on,
+varied pose, non-overlapping, >=70% vertical laser coverage, realistic
+physics/noise, weighted 0/1/2/3 board counts). Now the model. GPU: RTX 5090
+(Blackwell/sm_120) — needs a recent CUDA torch build.
+
+Approved design: range image -> lightweight U-Net -> per-pixel board mask ->
+connected components -> per-instance points -> reuse `square_fit.py` for pose.
+CNN does SELECTION (the wall geometry couldn't cross), geometry does POSE.
+
+### Task 31: PyTorch dep + data pipeline (GATED on batch sanity)
+- Add `torch` (GPU, sm_120/RTX-5090 compatible: try stable cu12x wheel; if it
+  won't run on sm_120, use the nightly cu12x build; verify `cuda.is_available()`
+  and a GPU matmul actually runs, else document CPU fallback). `uv add torch`.
+- `src/boarddet/cnn/data.py`:
+  - `SynthBoardDataset(torch.utils.data.Dataset)` — on-the-fly: each item
+    generates a random scene (`random_scene` + `render` + `to_range_image`,
+    passing the sensor) -> input `(3,32,W)` + target mask `(1,32,W)`.
+    Channels: [0] normalized range (r/R_max clipped, 0 at no-return),
+    [1] validity (1=return), [2] discontinuity. Target = union of board masks.
+    Augmentation: circular azimuth-roll + horizontal flip (both roll input AND
+    mask). Include empty scenes (all-zero mask) per the count weights.
+  - `real_frame_to_input(frame, sensor, ...)` -> the IDENTICAL input tensor from
+    a real `Frame.xyz` via the SAME `to_range_image` + normalization (the
+    train/eval consistency linchpin — must match synth exactly).
+- GATE: save a PNG of one batch (3 input channels + target-mask overlay) and a
+  real-frame input side-by-side with a synth input; confirm channel layout +
+  normalization identical and the mask covers board pixels. Tests: shapes,
+  mask alignment, synth/real channel-stat parity.
+
+### Task 32: Model + training loop
+- `src/boarddet/cnn/model.py`: the lightweight U-Net (enc 16/32/64, dilated
+  bottleneck for isolation context, circular width padding, gentle vertical
+  pooling, 1-ch sigmoid). Report param count (<~1M target).
+- `src/boarddet/cnn/train.py`: Dice+BCE loss, Adam, train on-the-fly synth,
+  validate on a fixed held-out synth seed set (IoU / mask precision-recall),
+  checkpoint best, log curves. GPU.
+- Deliverable: trained checkpoint + synth val metrics. SANITY: if it can't
+  learn the synth board mask (val IoU stays low), STOP and debug — don't
+  proceed to real eval on a model that didn't learn.
+
+### Task 33: Eval on real + phase doc + decision (THE result)
+- `src/boarddet/cnn/eval.py`: checkpoint -> per real frame: input ->
+  model -> mask -> threshold -> connected components -> per-instance board
+  pixels -> back-project to 3D (row/col->ray via sensor) -> `square_fit.py`
+  pose -> accept. Classify at the real board bbox; recall/precision over the
+  535 frames vs the geometry baseline (44-49% recall / 93-100% precision).
+- Report the synth->real transfer honestly. Fill "## Stage 9 CNN Results" +
+  top-level Decision. If it doesn't transfer, report the null straight (as
+  stages 2/3/7 did) and diagnose (domain gap? normalization? mask ok but pose
+  fails?).
