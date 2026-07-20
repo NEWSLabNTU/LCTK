@@ -66,3 +66,19 @@ class BoardConfig:
     # a >0.10 margin below a same-extent non-board clutter blob (measured
     # ~0.55) while accepting that genuine partial-coverage recovery.
     square_icp_residual_max: float = 0.45
+    # --- Task 26: isolation (exterior coplanar-continuation) discriminator -
+    # A real board is FREE-STANDING: nothing coplanar continues past its
+    # fitted edges. Clutter that beats the other gates (e.g. the ds5 wall
+    # panel) is EMBEDDED: it's a patch of a larger surface, so points just
+    # beyond its fitted quad, still on its plane, are common. See
+    # `isolation.isolation_density` and
+    # `.superpowers/sdd/stage8-isolation-diagnosis.md` for the measurement
+    # that validated this (89% of true boards measure exactly 0 density;
+    # 0/20 residual clutter samples ever did, min 0.485). Off by default so
+    # stage-6 behavior stays byte-identical; independent of `stance_floor`/
+    # `square_icp` -- both may be toggled with this without coupling.
+    isolation: bool = False
+    # Reject candidates whose isolation_density exceeds this (points per
+    # metre of quad perimeter). ~0.3 sits in the Stage 8 diagnostic's clean
+    # gap (0, 0.485); Task 27 tunes it against the full benchmark.
+    isolation_max_density: float = 0.3

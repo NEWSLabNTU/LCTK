@@ -3,7 +3,7 @@ import pytest
 from boarddet.board_config import BoardConfig
 from boarddet.candidates import Candidate
 from boarddet.detector import GENERATORS, _stance, _up_2d, detect
-from boarddet.geometry import PlaneModel, fit_plane, project_to_plane
+from boarddet.geometry import PlaneModel, fit_plane, project_to_plane, unproject
 from boarddet.synth import SceneTruth, _plane_basis, make_scene
 
 
@@ -345,3 +345,90 @@ def test_up_2d_present_for_vertical_plane():
     assert up is not None
     np.testing.assert_allclose(np.linalg.norm(up), 1.0)
     np.testing.assert_allclose(up, [0.0, 1.0], atol=1e-12)
+
+
+# --- Task 26: isolation (exterior coplanar-continuation) discriminator ---
+
+@pytest.mark.parametrize("gen", list(GENERATORS))
+def test_isolation_off_byte_identical_to_stage6(gen):
+    """Regression pin: adding the isolation knob must not perturb the
+    default (off) path at all -- explicit BoardConfig(isolation=False) must
+    reproduce the exact same scored outcome as a plain BoardConfig() call
+    (which predates this task) on the standard scene."""
+    pts, _ = make_scene(rng=np.random.default_rng(13))
+    out_default = detect(pts, BoardConfig(side_m=1.0), generator=gen)
+    out_explicit_off = detect(pts, BoardConfig(side_m=1.0, isolation=False),
+                              generator=gen)
+    assert (out_default.detection is None) == (
+        out_explicit_off.detection is None)
+    if out_default.detection is not None:
+        np.testing.assert_array_equal(out_default.detection.center,
+                                      out_explicit_off.detection.center)
+        np.testing.assert_array_equal(out_default.detection.rotation,
+                                      out_explicit_off.detection.rotation)
+        np.testing.assert_array_equal(out_default.detection.corners_3d,
+                                      out_explicit_off.detection.corners_3d)
+        assert out_default.detection.score == out_explicit_off.detection.score
+
+
+@pytest.mark.parametrize("gen", list(GENERATORS))
+def test_isolation_on_still_detects_free_standing_board(gen):
+    """`make_scene`'s board is free-standing (ground/wall/blob clutter all
+    sit spatially and spectrally away from the board's own fitted plane),
+    so turning isolation on must not cost this detection: the exterior band
+    around its quad has no coplanar clutter to trip the gate."""
+    pts, truth = make_scene(rng=np.random.default_rng(13))
+    out = detect(pts, BoardConfig(side_m=1.0, isolation=True), generator=gen)
+    assert out.detection is not None, f"generator {gen} found nothing"
+    assert np.linalg.norm(out.detection.center - truth.center) < 0.05
+    assert abs(out.detection.rotation[:, 2] @ truth.normal) > 0.99
+
+
+def test_isolation_rejects_board_sized_patch_of_a_big_wall():
+    """THE test that proves isolation's value: a "board" that is really
+    just a board-sized patch cut out of a much larger coplanar wall (an
+    embedded panel, like the ds5 residual clutter in
+    stage8-isolation-diagnosis.md) must score/stance/etc. fine on its own
+    patch of points (that's the whole problem -- nothing else catches it)
+    but isolation must reject it once the full pre-strip cloud (which still
+    contains the wall's continuation beyond the patch) is consulted.
+
+    Uses a stubbed generator returning exactly one Candidate (the small
+    patch) so the outcome is attributable purely to the isolation gate, not
+    generator/candidate selection.
+    """
+    rng = np.random.default_rng(7)
+    plane = PlaneModel(center=np.array([4.0, 0.0, 0.3]),
+                       normal=np.array([1.0, 0.0, 0.0]),
+                       u=np.array([0.0, 1.0, 0.0]),
+                       v=np.array([0.0, 0.0, 1.0]))
+    half = 0.5
+    xs = np.arange(-1.2, 1.2, 0.02)
+    xx, yy = np.meshgrid(xs, xs)
+    wall_2d = np.stack([xx.ravel(), yy.ravel()], axis=1)
+    wall_pts = unproject(wall_2d, plane)
+    wall_pts = (wall_pts + rng.normal(0.0, 0.003, size=(len(wall_pts), 1))
+               * plane.normal).astype(np.float32)
+    patch_mask = (np.abs(wall_2d[:, 0]) < half) & (np.abs(wall_2d[:, 1]) < half)
+    patch_pts = wall_pts[patch_mask]
+
+    def fake_gen(dn, board, **kwargs):
+        return [Candidate(points=patch_pts, plane=fit_plane(patch_pts))]
+
+    GENERATORS["_wall_patch"] = fake_gen
+    try:
+        board = BoardConfig(side_m=1.0, vertical_gap_deg=0.0)
+        out_off = detect(wall_pts, board, generator="_wall_patch")
+        out_on = detect(
+            wall_pts,
+            BoardConfig(side_m=1.0, vertical_gap_deg=0.0, isolation=True),
+            generator="_wall_patch")
+    finally:
+        del GENERATORS["_wall_patch"]
+
+    assert out_off.detection is not None, (
+        "fixture's patch should score/stance fine on its own -- the whole "
+        "point is that nothing but isolation catches this")
+    assert out_on.detection is None, (
+        "isolation should reject a board-sized patch of a much larger "
+        "coplanar wall")
