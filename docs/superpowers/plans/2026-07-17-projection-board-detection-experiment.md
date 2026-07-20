@@ -2335,3 +2335,58 @@ Benchmark isolation ON vs the stage-6 operating point, all 5 datasets. Does
 it kill the residual clutter (the ds5 panel etc.) while retaining board
 recall? Precision/recall/timing. Fill "## Stage 8 Results" + Decision.
 Honest: if it doesn't separate on real data, report the null.
+
+---
+
+# Stage 9 Addendum (2026-07-20): Lightweight CNN Board Detector — Feasibility Spike
+
+Idea (user): train a lightweight CNN to locate the board. Assessment: the only
+non-overfitting version is a full-scene RANGE-IMAGE detector trained on DIVERSE
+SYNTHETIC data (our 5 static scenes would make a real-data-trained CNN memorize
+rooms), validated on the real 535 frames as held-out. Patch-classifier on the
+plane-projected board is dead (plain board ≡ plain clutter as a uniform square).
+Before the full build (PyTorch + synth pipeline + training), a feasibility
+spike de-risks two gates.
+
+### Task 28: CNN feasibility spike (GATING, read-only/scratch)
+
+Build a range-image renderer (scratch, not committed production code) and
+answer two GO/NO-GO questions with visual evidence.
+
+Range-image definition: rows = pseudo-ring from elevation `atan2(z, hypot(x,y))`
+binned to ~32 rows (VLP-32C channels) — geometry-derived, no ring field;
+cols = azimuth `atan2(y,x)` binned (e.g. 0.2-0.4° → ~900-1800 cols); pixel
+value = range (and optionally a 2nd channel = a depth-discontinuity/edge map).
+
+**Gate 1 — is the board learnable-in-principle in a REAL range image?**
+For several real frames where the board is detected (in-bbox, ds1-4), render
+the range image, locate the board's pixels (project the known bbox / detected
+corners into range-image coords), and assess: does the board appear as a
+COHERENT region a CNN could learn — a recognizable patch bounded by depth
+discontinuities (the isolation signal, now in image form)? Or is it an
+incoherent smear of a handful of pixels? Report the board's typical
+pixel-footprint (rows × cols occupied), and whether its border shows the
+depth-discontinuity signature in the range image. If the board is too
+sparse/incoherent to be a learnable image region → NO-GO (no CNN can find
+what isn't visible).
+
+**Gate 2 — is the synth-to-real gap bridgeable?**
+Render the same range-image representation for a `synth.py` scene. Compare
+real vs synth side by side: board appearance, ring/row structure, sparsity,
+clutter, noise. List concretely what synth CAPTURES vs MISSES (real elevation
+nonuniformity, real noise, real clutter variety, occlusion, board mounting/
+support). Estimate whether domain randomization + realistic ring modeling can
+close the gap, or whether synth is so far from real that a synth-trained CNN
+would learn artifacts.
+
+**Deliverable**: save side-by-side real-vs-synth range-image PNGs (several
+real board frames + synth) to a scratch/results dir; write
+`.superpowers/sdd/stage9-cnn-spike.md` with the board pixel-footprint stats,
+the two gate assessments, and a combined GO/NO-GO: GO only if (1) the board is
+a coherent learnable region in real range images AND (2) the synth gap looks
+bridgeable. Honesty mandate — if either gate fails, NO-GO and say why; a CNN
+that can't see the board or can't transfer from synth is not worth building.
+
+### Task 29 (if GO): synthetic range-image data pipeline + lightweight CNN
+### Task 30 (if GO): train on synth, evaluate recall/precision on real 535 frames
+(Detailed only if Task 28 says GO.)
