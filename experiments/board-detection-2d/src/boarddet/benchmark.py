@@ -131,6 +131,8 @@ def run(datasets: list[int], generators: list[str], board: BoardConfig,
         "flatness_rms_max": board.flatness_rms_max,
         "square_icp": board.square_icp,
         "square_icp_residual_max": board.square_icp_residual_max,
+        "isolation": board.isolation,
+        "isolation_max_density": board.isolation_max_density,
         "datasets": all_results,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -186,6 +188,17 @@ def main() -> None:
                     help="acceptance threshold on the square fit's "
                          "coverage residual, lower is better (Task 24 "
                          "tunes this; 0.35 is a sane starting point)")
+    ap.add_argument("--isolation", action="store_true",
+                    help="Task 26: reject candidates whose exterior-band "
+                         "coplanar density (isolation.isolation_density) "
+                         "exceeds --isolation-max-density -- an embedded "
+                         "patch of a larger surface, not a free-standing "
+                         "board (off by default)")
+    ap.add_argument("--isolation-max-density", type=float, default=0.3,
+                    help="isolation acceptance gate, points per metre of "
+                         "quad perimeter (Task 27 tunes this; 0.3 sits in "
+                         "the Stage 8 diagnostic's clean gap between "
+                         "free-standing boards and embedded clutter)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     board_kwargs: dict = dict(
@@ -194,6 +207,8 @@ def main() -> None:
         flatness_rms_max=args.flatness_rms_max,
         square_icp=args.square_icp,
         square_icp_residual_max=args.square_icp_residual_max,
+        isolation=args.isolation,
+        isolation_max_density=args.isolation_max_density,
     )
     if args.strict_diamond:
         board_kwargs.update(strict_squareness=True, stance_floor=0.9,

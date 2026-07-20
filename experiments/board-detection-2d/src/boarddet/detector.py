@@ -12,6 +12,7 @@ from .candidates.cluster_after_ground import generate_cluster_after_ground
 from .candidates.ransac_iterative import generate_ransac_iterative
 from .candidates.region_growing import generate_region_growing
 from .geometry import PlaneModel, downsample, project_to_plane
+from .isolation import isolation_density
 from .pose import BoardDetection, board_pose
 from .scorer import ScoreResult, score_candidate
 from .square_fit import fit_fixed_square
@@ -159,6 +160,11 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             if board.stance_floor > 0:
                 if _stance(det.corners_3d) <= board.stance_floor:
                     continue
+            if board.isolation:
+                density = isolation_density(dn, cand.plane,
+                                           det.result.corners_2d)
+                if density > board.isolation_max_density:
+                    continue
             if fit.residual < best_residual:
                 best_residual = fit.residual
                 best = det
@@ -176,6 +182,10 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             if best_rejected is None or det.score > best_rejected.score:
                 best_rejected = det
             continue
+        if board.isolation:
+            density = isolation_density(dn, cand.plane, det.result.corners_2d)
+            if density > board.isolation_max_density:
+                continue
         if best is None or det.score > best.score:
             best = det
     if best is not None:
