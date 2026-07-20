@@ -2536,3 +2536,50 @@ CNN does SELECTION (the wall geometry couldn't cross), geometry does POSE.
   top-level Decision. If it doesn't transfer, report the null straight (as
   stages 2/3/7 did) and diagnose (domain gap? normalization? mask ok but pose
   fails?).
+
+---
+
+# Stage 10 (Tasks 34-36): Hybrid CNN-propose -> geometry-verify
+
+CNN broke the recall ceiling (99.3% on real) but 15% precision (fires on ~4
+wall-embedded real clutter fixtures). Research (hybrid-detector literature)
+strongly favors: CNN PROPOSES (recall) -> geometric ISOLATION gate VERIFIES
+(precision), single pass, verify only proposals (negligible compute; the CNN
+REPLACES geometry's expensive scene-wide candidate generation). Robust to
+UNSEEN clutter (isolation rejects anything wall-embedded regardless of
+training) -- unlike closed-set fixes. Published precedent: VoxelNet-segment +
+RANSAC/PCA-verify LiDAR calibration board (MDPI Sensors 2025). Complement with
+richer synthetic clutter (raise CNN intrinsic precision, shrink verifier load).
+
+### Task 34: Validate the load-bearing assumption (GATING, read-only)
+The isolation verifier's 44% STANDALONE recall is likely a search/localization
+artifact, NOT a confirmation-accuracy one. As a GATE on the CNN's already-
+localized true-board proposals it only needs a low false-NEGATIVE rate on
+genuine boards. Check cheaply BEFORE building:
+- Run the CNN on the 535 real frames -> detections (components + back-projected
+  3D points). For the IN-BBOX (true-board) detections, compute the stage-8
+  isolation density (exterior coplanar continuation, against the pre-strip
+  cloud) on their points. What fraction does an isolation threshold ACCEPT
+  (keep)? -> the combined-pipeline recall proxy (want ~high).
+- For the OUT-OF-BBOX (clutter FP) detections, what fraction does isolation
+  REJECT? -> the combined-pipeline precision proxy (want ~high; the ~4 fixtures
+  are wall-embedded so should be rejected).
+- Report projected combined recall/precision = (CNN recall x isolation-accepts-
+  true) / (isolation-rejects-clutter). GO if the projection beats the geometry
+  baselines (49.3%/93%, 44.1%/100%) meaningfully; if isolation rejects too many
+  true boards (localization-recall confound bites) or fails to reject the CNN's
+  specific clutter, diagnose + re-plan. Write .superpowers/sdd/stage10-hybrid-gate.md.
+
+### Task 35 (if GO): Build the single hybrid pipeline
+`cnn/hybrid.py`: real frame -> CNN forward -> mask -> components -> per
+candidate: back-project -> isolation gate (reject embedded) -> survivors ->
+plane + square_fit pose -> accept. Isolation prunes BEFORE the costly square_fit
+(fixes Task-33's 89ms). Config knobs (isolation threshold). Tests: on synth +
+a held-out check. Optionally regenerate synth with the ~4 real fixture shapes
+added to clutter (option c complement) + note.
+
+### Task 36 (if GO): Eval hybrid on real + phase doc + decision
+Combined pipeline on 535 real frames: recall/precision/timing vs CNN-alone
+(99.3%/15%) and geometry (49.3%/93%, 44.1%/100%). THE result: does CNN-recall x
+geometry-precision give high-BOTH in one cheap pass? Fill phase doc + top-level
+Decision. Honest if it doesn't.
