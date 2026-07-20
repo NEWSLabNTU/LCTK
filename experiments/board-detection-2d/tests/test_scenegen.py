@@ -1,0 +1,194 @@
+"""Tests for domain-randomized scene generation (Task 30): diamond board
+orientation (review must-fix #2), board count, and the embedded/
+free-standing clutter mix that teaches a CNN the isolation discriminator."""
+from __future__ import annotations
+
+import numpy as np
+
+from boarddet.sim.raycast import render
+from boarddet.sim.scenegen import (
+    Scene,
+    SceneGenConfig,
+    make_diamond_board,
+    random_scene,
+)
+from boarddet.sim.sensor import Vlp32cSensor
+
+# ---------------------------------------------------------------------------
+# diamond orientation (review must-fix #2)
+# ---------------------------------------------------------------------------
+
+
+def test_diamond_board_corners_point_up_down_left_right():
+    """At zero extra in-plane jitter, a diamond board's 4 corners must sit
+    along the plane's own up/down/left/right axes (v, -v, u, -u) at the
+    diagonal distance side/sqrt(2) -- a diamond, not an axis-aligned
+    square whose corners would sit at 45 deg off those axes instead."""
+    center = np.array([3.0, 0.0, 0.2])
+    normal = np.array([-1.0, 0.0, 0.0])
+    up_hint = np.array([0.0, 0.0, 1.0])
+    side = 1.0
+    rect, corners = make_diamond_board(center, normal, up_hint, side,
+                                       inplane_rot_rad=0.0)
+    half_diag = side / np.sqrt(2.0)
+    u, v, n = rect.u_axis, rect.v_axis, rect.normal
+    # recover the UN-rotated (u, v) used to build the 45-deg diamond stance
+    # by rotating back -45 deg
+    u0 = np.cos(-np.pi / 4) * u + np.sin(-np.pi / 4) * v
+    v0 = np.cos(-np.pi / 4) * v - np.sin(-np.pi / 4) * u
+    expected = np.stack([
+        center + half_diag * v0,   # top
+        center + half_diag * u0,   # right
+        center - half_diag * v0,   # bottom
+        center - half_diag * u0,   # left
+    ])
+    # corners are returned in (+u+v, +u-v, -u-v, -u+v) order == (top, right,
+    # bottom, left) at inplane_rot_rad=0 (see make_diamond_board docstring)
+    assert np.allclose(corners, expected, atol=1e-9)
+    # diagonal (vertical) extent = side*sqrt(2), not the side length itself
+    vertical_extent = float((corners[0] - corners[2]) @ v0)
+    assert np.isclose(vertical_extent, side * np.sqrt(2.0), atol=1e-9)
+    assert np.isclose(np.linalg.norm(n), 1.0)
+
+
+def test_diamond_board_rect_is_axis_aligned_square_in_its_own_rotated_frame():
+    """The Rect primitive itself stays a plain axis-aligned square in ITS
+    OWN (u, v) frame (half_u == half_v == side/2); "diamond" is purely the
+    45-deg rotation of that frame relative to world up/right."""
+    rect, _ = make_diamond_board(center=(2.0, 0.0, 0.0), normal=(-1.0, 0.0, 0.0),
+                                 up_hint=(0.0, 0.0, 1.0), side=1.2)
+    assert np.isclose(rect.half_u, 0.6)
+    assert np.isclose(rect.half_v, 0.6)
+
+
+def test_diamond_board_hollow_has_four_holes_matching_real_board_geometry():
+    rect, _ = make_diamond_board(center=(2.0, 0.0, 0.0), normal=(-1.0, 0.0, 0.0),
+                                 up_hint=(0.0, 0.0, 1.0), side=1.0, hollow=True,
+                                 hole_radius=0.15, hole_shift=0.2)
+    assert len(rect.holes) == 4
+    for (_, radius) in rect.holes:
+        assert np.isclose(radius, 0.15)
+
+
+def test_diamond_board_plain_by_default_has_no_holes():
+    rect, _ = make_diamond_board(center=(2.0, 0.0, 0.0), normal=(-1.0, 0.0, 0.0),
+                                 up_hint=(0.0, 0.0, 1.0), side=1.0)
+    assert rect.holes == []
+
+
+# ---------------------------------------------------------------------------
+# random_scene: board count + geometry sanity
+# ---------------------------------------------------------------------------
+
+
+def test_random_scene_produces_requested_board_count_range():
+    rng = np.random.default_rng(0)
+    cfg = SceneGenConfig(n_boards_range=(1, 3))
+    counts = {len(random_scene(rng, cfg).boards) for _ in range(60)}
+    assert counts.issubset({1, 2, 3})
+    assert len(counts) > 1  # domain randomization actually varies the count
+
+
+def test_random_scene_board_prim_index_matches_placed_rect():
+    rng = np.random.default_rng(3)
+    scene = random_scene(rng, SceneGenConfig())
+    for board in scene.boards:
+        prim = scene.primitives[board.prim_index]
+        assert np.allclose(prim.center, board.center)
+        assert np.allclose(prim.normal, board.normal)
+
+
+def test_random_scene_boards_have_diamond_diagonal_extent():
+    rng = np.random.default_rng(4)
+    cfg = SceneGenConfig(board_side_m=1.0, board_side_jitter_frac=0.0,
+                        board_inplane_rot_jitter_deg=0.0)
+    scene = random_scene(rng, cfg)
+    for board in scene.boards:
+        diag = np.linalg.norm(board.corners[0] - board.corners[2])
+        assert np.isclose(diag, np.sqrt(2.0), atol=1e-6)
+
+
+def test_random_scene_returns_a_scene_instance():
+    rng = np.random.default_rng(5)
+    scene = random_scene(rng, SceneGenConfig())
+    assert isinstance(scene, Scene)
+    assert len(scene.primitives) > 0
+
+
+# ---------------------------------------------------------------------------
+# clutter mix: embedded (coplanar-with-wall) vs free-standing
+# ---------------------------------------------------------------------------
+
+
+def test_random_scene_clutter_has_both_embedded_and_free_standing():
+    rng = np.random.default_rng(6)
+    cfg = SceneGenConfig(n_clutter_range=(2, 6))
+    saw_embedded = False
+    saw_free = False
+    for _ in range(30):
+        scene = random_scene(rng, cfg)
+        for c in scene.clutter:
+            if c.embedded:
+                saw_embedded = True
+            else:
+                saw_free = True
+    assert saw_embedded, "no embedded (coplanar-with-wall) clutter ever generated"
+    assert saw_free, "no free-standing clutter ever generated"
+
+
+def test_random_scene_single_scene_has_the_mix_when_clutter_count_allows():
+    """The mix must be per-scene, not just across many scenes -- guaranteed
+    at least one of each when n_clutter >= 2 (see random_scene)."""
+    rng = np.random.default_rng(7)
+    cfg = SceneGenConfig(n_clutter_range=(4, 4))
+    for _ in range(10):
+        scene = random_scene(rng, cfg)
+        embedded = [c for c in scene.clutter if c.embedded]
+        free = [c for c in scene.clutter if not c.embedded]
+        assert len(embedded) >= 1
+        assert len(free) >= 1
+
+
+def test_embedded_clutter_is_actually_coplanar_with_its_wall():
+    rng = np.random.default_rng(8)
+    cfg = SceneGenConfig(n_clutter_range=(4, 4), clutter_embedded_frac=1.0)
+    scene = random_scene(rng, cfg)
+    for c in scene.clutter:
+        if not c.embedded:
+            continue
+        wall = scene.primitives[c.wall_index]
+        panel = scene.primitives[c.prim_index]
+        assert np.allclose(panel.normal, wall.normal, atol=1e-9)
+        # panel center must lie exactly on the wall's plane
+        offset = (panel.center - wall.center) @ wall.normal
+        assert abs(offset) < 1e-9
+
+
+def test_free_standing_clutter_is_not_on_any_wall_plane():
+    rng = np.random.default_rng(9)
+    cfg = SceneGenConfig(n_clutter_range=(4, 4), clutter_embedded_frac=0.0)
+    scene = random_scene(rng, cfg)
+    walls = [p for p in scene.primitives if getattr(p, "half_u", None)
+            == cfg.wall_half_width_m]
+    for c in scene.clutter:
+        assert not c.embedded
+        panel = scene.primitives[c.prim_index]
+        for wall in walls:
+            offset = (panel.center - wall.center) @ wall.normal
+            assert abs(offset) > 1e-3
+
+
+# ---------------------------------------------------------------------------
+# rendering sanity: boards actually produce a coherent hit region
+# ---------------------------------------------------------------------------
+
+
+def test_random_scene_renders_and_boards_get_hit_pixels():
+    rng = np.random.default_rng(11)
+    sensor = Vlp32cSensor()
+    scene = random_scene(rng, SceneGenConfig())
+    frame = render(scene.primitives, sensor, azimuth_steps=720,
+                  rng=np.random.default_rng(12))
+    for board in scene.boards:
+        mask = frame.hit_prim_id == board.prim_index
+        assert mask.sum() > 0, "a generated board produced zero hit pixels"
