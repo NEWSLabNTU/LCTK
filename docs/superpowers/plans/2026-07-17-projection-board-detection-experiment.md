@@ -2436,10 +2436,48 @@ positioned square + respects holes + bounds); ray-box, ray-cylinder;
 nearest-hit selection over multiple primitives; dropout/noise statistics;
 the Gate-2 fidelity assertion.
 
-### Task 30: Scene generation + labeled dataset
-Domain-randomized `scenegen.py` (multi-board + embedded/free-standing panel
-clutter + boxes/poles), per-board labels (mask/bbox/pose), dataset dump.
-(Detailed after Task 29's Gate-2 passes.)
+### Task 30: Shared range-image renderer + scene generation + labeled dataset
+
+Task-29 review flagged two must-fix-before-training items, baked in here:
+- **Row-semantics linchpin**: the sim's range-image rows are real per-channel
+  elevations; the spike's real-frame renderer used uniform bins. Train-on-sim /
+  eval-on-real would then have DIFFERENT row axes -> CNN fails for a dumb
+  reason. Fix: ONE shared renderer used by BOTH sim output and real frames,
+  binning every point to its NEAREST REAL CHANNEL (the 32 real elevations from
+  the sensor model). Identical row axis for train and eval.
+- **Diamond boards**: scenes must orient boards as the real 45deg-rotated
+  diamond (1.41 m diagonal extent), not an axis-aligned square.
+
+**Files:** `src/boarddet/sim/range_image.py` (shared renderer),
+`src/boarddet/sim/scenegen.py`, `src/boarddet/sim/dataset.py`; tests.
+
+1. `range_image.py`: `to_range_image(points, sensor, azimuth_steps,
+   channels=2) -> (H,W,C)` — assign each point to nearest real channel
+   (row) + azimuth bin (col); value = range (+ optional discontinuity
+   channel). Used by BOTH `raycast.render` output AND real `Frame.xyz`
+   (CNN eval). Validate: real-frame range image via this renderer matches
+   the sim's row convention exactly; re-do the Gate-2 comparison with a
+   DIAMOND board and this shared renderer (honest fidelity, per review #1).
+2. `scenegen.py`: `random_scene(rng, cfg) -> (scene, board_poses)` —
+   domain-randomized: ground (random z), 2-4 walls, N_board in {1,2,3}
+   diamond boards (random pose 2-8 m, orientation facing-ish sensor,
+   in-plane rot, side ~1 m +/- jitter, plain or hollow), M panel clutter
+   (MIX of embedded-coplanar-with-wall and free-standing -- so the CNN
+   learns isolation), K boxes, L cylinders. Randomize sensor tilt/height.
+3. `dataset.py`: generate a labeled dataset -> per scene: range image +
+   per-board label (pixel mask / bbox in image coords / 3D pose). Dump
+   to disk (npz/npy, gitignored). Config for count.
+
+Tests: nearest-channel binning correctness (a point at a known elevation
+lands in the right row); real+sim share row axis; scenegen produces valid
+scenes with the requested board count + clutter mix; labels align with the
+rendered board pixels (a labeled board mask actually covers board hits).
+
+### Tasks 31+: lightweight CNN train-on-synth / eval-on-real
+Add PyTorch (uv), small heatmap/U-Net detector, train on the synth dataset,
+evaluate recall/precision on the real 535 frames (held-out) via the SHARED
+range-image renderer (same row axis). Compare to the geometry pipeline's
+44-49%/93-100%.
 
 ### Tasks 31+: lightweight CNN train-on-synth / eval-on-real
 (Detailed after a labeled dataset exists.)
