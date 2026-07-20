@@ -2583,3 +2583,43 @@ Combined pipeline on 535 real frames: recall/precision/timing vs CNN-alone
 (99.3%/15%) and geometry (49.3%/93%, 44.1%/100%). THE result: does CNN-recall x
 geometry-precision give high-BOTH in one cheap pass? Fill phase doc + top-level
 Decision. Honest if it doesn't.
+
+---
+
+# Stage 10 revised (Tasks 35-36): fix the CNN via richer synthetic clutter
+
+Task 34/34b diagnostics: the isolation hybrid + any cheap geometric verifier
+FAIL — the CNN's false positives are a BROAD free-standing-object population
+(28% small scatter ~0.2-0.5m = poles/brackets; 72% large, median diagonal
+1.71m > the board), none separable from the diamond board by
+size/stance/square-residual/isolation. Root cause: synthetic clutter had only
+wall-embedded panels + modest boxes/cylinders — NO diverse free-standing
+distractors — so the CNN never learned "diamond board vs arbitrary
+free-standing object." Fix = option (c), single CNN pass, no inference geometry.
+
+### Task 35: Enrich synthetic clutter with diverse free-standing distractors
+`scenegen.py`: broaden the clutter distribution so the CNN sees non-board
+free-standing objects across the real size/shape range:
+- SMALL scatter distractors: thin vertical poles/brackets, small panels
+  (0.1-0.5 m), clusters of a few small objects (mimic the pole/bracket FPs).
+- LARGE free-standing structures: big panels/boxes (1.5-2.5 m — the 1.71m
+  "other_clutter"), currently uncovered.
+- Varied aspect-ratio rectangular (non-square) panels, varied orientation
+  (NOT constrained to face the sensor like the board is — clutter can be any
+  orientation, incl. edge-on).
+- Keep the board the plain diamond (facing-with-tilt, coverage-gated); make
+  ONLY the board a diamond. Config knobs for the new distractor types/counts.
+Tests: enriched scenes contain the new distractor size range; board still
+distinct; existing scene invariants hold. Visual: a gallery showing diverse
+clutter. Optionally a light connected-component merge-split fix in the eval
+(the mask-merge artifact) — or note it for Task 36.
+
+### Task 36: Retrain on enriched synth + eval on real + decision (THE result)
+Retrain BoardUNet on the enriched synth (plain+hollow board mix, diverse
+free-standing clutter). Re-run the Task-33 real eval on 535 frames:
+recall/precision/timing vs CNN-before (99.3%/15%), geometry (49.3%/93%,
+44.1%/100%). Did richer clutter lift precision while keeping ~99% recall?
+Fill phase doc "## Stage 10 Results" + top-level Decision. Honest: if precision
+doesn't lift enough, report the residual clutter it still fires on and whether
+it's now covered/coverable, or whether multi-pose is the remaining fundamental
+lever. Save real-pred overlays.
