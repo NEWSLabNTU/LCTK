@@ -5,6 +5,7 @@ from collections import deque
 
 import numpy as np
 import open3d as o3d
+from scipy.spatial import cKDTree
 
 from . import Candidate, plausible_board_patch
 from ..board_config import BoardConfig
@@ -18,15 +19,23 @@ def generate_region_growing(points: np.ndarray, board: BoardConfig,
     pc.estimate_normals(
         o3d.geometry.KDTreeSearchParamKNN(knn=knn))
     normals = np.asarray(pc.normals)
-    tree = o3d.geometry.KDTreeFlann(pc)
     n_pts = len(points)
     cos_thresh = np.cos(np.radians(angle_deg))
 
-    # precompute neighbor lists once
-    neighbors = []
-    for i in range(n_pts):
-        _, idx, _ = tree.search_knn_vector_3d(pc.points[i], knn)
-        neighbors.append(np.asarray(idx[1:]))
+    # Precompute neighbour lists once, in a single vectorized batch query.
+    #
+    # scipy's cKDTree rather than open3d's KDTreeFlann: the latter's
+    # search_knn_vector_3d segfaults outright when open3d is running against
+    # numpy 2.x (open3d 0.18 declares `numpy>=1.18.0` but is compiled against
+    # the numpy 1.x C ABI, which numpy 2 changed). Every other open3d call
+    # this package makes -- voxel_down_sample, segment_plane, cluster_dbscan,
+    # estimate_normals -- is unaffected; only the KD-tree search is. Both
+    # trees do exact KNN, so neighbour sets are equivalent.
+    #
+    # Column 0 of a self-query is the point itself, hence [:, 1:].
+    tree = cKDTree(points.astype(np.float64))
+    _, idx = tree.query(points.astype(np.float64), k=knn)
+    neighbors = [row for row in np.atleast_2d(idx)[:, 1:]]
 
     visited = np.zeros(n_pts, dtype=bool)
     out: list[Candidate] = []

@@ -184,6 +184,16 @@ def test_isotropic_path_byte_identical_to_pre_task16():
     golden values captured from the isotropic code path (unchanged by this
     task; verified by diffing against `git show HEAD:.../scorer.py` prior
     to this task's edits) before Task 16 introduced the rotated-frame path.
+
+    Corner tolerance is 1e-6, not 1e-12 like the scalars below. The goldens
+    were captured on x86_64; cv2's minAreaRect works internally in float32,
+    and its rounding differs between x86_64 and aarch64 by ~1e-8 absolute
+    (measured on the project's Jetson, where this experiment ran for the
+    first time). That is platform floating-point noise two orders of
+    magnitude below float32 eps' worth of signal, whereas any real
+    behavioural regression in this path moves corners by cell_m (0.02) or
+    more -- so 1e-6 still pins the behaviour this test exists to pin. Same
+    reasoning as the Open3D RANSAC non-determinism allowance in `75eb48c`.
     """
     board = BoardConfig(side_m=1.0)
     res = score_candidate(_board_2d(), board, up_2d=None, close_height_m=None)
@@ -197,7 +207,7 @@ def test_isotropic_path_byte_identical_to_pre_task16():
          [0.6631198394527915, -0.1903388436985557],
          [0.19084213898897115, 0.6637913606888861],
          [-0.6605612139952075, 0.18894285706611078]],
-        rtol=1e-12)
+        rtol=1e-6)
     np.testing.assert_allclose(
         res.side_lengths,
         [0.9776392072408057, 0.9760044223272387,
@@ -206,8 +216,10 @@ def test_isotropic_path_byte_identical_to_pre_task16():
     np.testing.assert_allclose(res.fill_ratio, 0.9975786924939467, rtol=1e-12)
     np.testing.assert_allclose(res.angle_err_deg, 0.2985387632596037,
                                rtol=1e-12)
+    # origin is derived from the same minAreaRect corners, so it inherits
+    # their cross-platform float32 rounding -- see the docstring above.
     np.testing.assert_allclose(
-        res.origin, [-0.7053198348638247, -0.70531901544243], rtol=1e-12)
+        res.origin, [-0.7053198348638247, -0.70531901544243], rtol=1e-6)
     assert res.cell_m == 0.02
     # Whole-raster checksum in lieu of embedding the full (71, 71) array.
     assert res.raster.shape == (71, 71)
