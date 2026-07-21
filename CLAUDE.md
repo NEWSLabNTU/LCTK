@@ -39,7 +39,8 @@ just
   - `pointcloud_image_overlay/` - Projects the cloud onto the image for visual verification
   - `filter_box_tuner/` - Interactive crop-box tuning for the board detector
   - `lctk_autoware_export/` - Exports a solved extrinsic into Autoware `sensor_kit_calibration.yaml`
-  - `lctk_sample_data/` - Sample data playback (pcap + avi; there are **no rosbags** in this repo)
+  - `lctk_sample_data/` - Sample data playback (pcap + avi), plus gitignored recorded
+    `bags/TWO_LIDAR_*` (two-LiDAR: VLP-32C + solid-state Falcon; see `bags/README.md`)
   - `conflux/` - Git submodule (jerry73204/conflux): message synchronizer used by all solvers
     (`conflux_cpp` builds `libconflux_ffi.so`, `conflux_py` wraps it via ctypes)
 - **`setup/`**: Development environment setup scripts
@@ -344,9 +345,10 @@ The calibration pipeline supports two processing modes controlled by the `mode` 
 | `offline` (default) | RELIABLE | infinite | 100 | reject_new | Recorded data (rosbags or the pcap/avi sample playback). No time-based dropping, preserves all data. |
 | `realtime` | BEST_EFFORT | 50ms | 2 | drop_oldest | Live sensor data. Low latency, always processes latest. |
 
-Note: the repo ships no rosbags — the only recorded data is `lctk_sample_data`'s pcap + avi
-(datasets 1–5; dataset 3 is the lidar-camera default, dataset 4 the second lidar). To get a real
-bag, record one during playback: `ros2 bag record -a` alongside `just sample-data`.
+Note: `lctk_sample_data` ships pcap + avi in git (datasets 1–5; dataset 3 is the lidar-camera
+default, dataset 4 the second lidar). Recorded two-LiDAR bags live in
+`ros/lctk_sample_data/bags/TWO_LIDAR_*` but are **gitignored** — see that directory's README to
+obtain them. To record more: `ros2 bag record -a` alongside `just sample-data`.
 
 **Settings derived from mode:**
 - **QoS Reliability**: RELIABLE (offline) vs BEST_EFFORT (realtime)
