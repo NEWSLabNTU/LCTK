@@ -69,19 +69,28 @@ def make_board(side, center, normal, up_hint, spacing, noise, rng,
 
 
 def make_scene(board_side=1.0, board_center=(4.0, 0.5, 0.3), spacing=0.03,
-               noise=0.01, pattern="grid", rng=None):
+               noise=0.01, pattern="grid", rng=None, include_board=True):
+    """include_board=False returns the same static geometry (ground, wall,
+    clutter blob) with no board and truth=None -- the "background" half of a
+    background/reveal pair for Method E's tests. Ground/wall/blob placement
+    is fixed regardless of seed (only sampling and noise use rng), so two
+    calls with different seeds differ only by noise, like two consecutive
+    rotations over a static scene."""
     rng = rng if rng is not None else np.random.default_rng()
-    board_pts, truth = make_board(
-        side=board_side,
-        center=np.asarray(board_center, float),
-        normal=np.array([-1.0, 0.15, 0.05]),
-        up_hint=np.array([0.0, 0.0, 1.0]),
-        spacing=spacing,
-        noise=noise,
-        rng=rng,
-        pattern=pattern,
-    )
-    parts = [board_pts]
+    parts = []
+    truth = None
+    if include_board:
+        board_pts, truth = make_board(
+            side=board_side,
+            center=np.asarray(board_center, float),
+            normal=np.array([-1.0, 0.15, 0.05]),
+            up_hint=np.array([0.0, 0.0, 1.0]),
+            spacing=spacing,
+            noise=noise,
+            rng=rng,
+            pattern=pattern,
+        )
+        parts.append(board_pts)
     # ground plane z = -1, 12x12 m
     g = _sample_plane_patch(6.0, 6.0, spacing * 3, pattern, rng)
     ground = np.stack([g[:, 0] + 4.0, g[:, 1], np.full(len(g), -1.0)], axis=1)
