@@ -68,3 +68,9 @@ env/
 
 # Setup markers
 setup/.markers/
+
+# Recorded ROS 2 bags used as boarddet benchmark data (TWO_LIDAR_*).
+# ~2.4 GB of .db3 plus ~1.9 GB of redundant .zip archives -- far too large to
+# put in git history, and re-derivable only by re-recording. See
+# ros/lctk_sample_data/bags/README.md for the expected layout.
+/ros/lctk_sample_data/bags/
