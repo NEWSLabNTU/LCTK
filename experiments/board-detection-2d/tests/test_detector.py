@@ -6,8 +6,15 @@ from boarddet.detector import GENERATORS, _stance, _up_2d, detect
 from boarddet.geometry import PlaneModel, fit_plane, project_to_plane, unproject
 from boarddet.synth import SceneTruth, _plane_basis, make_scene
 
+# Generator "e" (background_diff) is excluded from every sweep in this file.
+# Unlike a/b/c it needs a caller-supplied, pre-populated BackgroundModel, so
+# a bare `detect(pts, board, generator=...)` is not a valid call for it --
+# it raises by design. Its equivalents live in test_detector_e.py, which
+# supplies a background.
+_BARE_CALL_GENERATORS = [g for g in GENERATORS if g != "e"]
 
-@pytest.mark.parametrize("gen", list(GENERATORS))
+
+@pytest.mark.parametrize("gen", _BARE_CALL_GENERATORS)
 def test_detects_board_in_synthetic_scene(gen):
     pts, truth = make_scene(rng=np.random.default_rng(13))
     out = detect(pts, BoardConfig(side_m=1.0), generator=gen)
@@ -17,7 +24,7 @@ def test_detects_board_in_synthetic_scene(gen):
     assert out.timings_ms["total"] > 0
 
 
-@pytest.mark.parametrize("gen", list(GENERATORS))
+@pytest.mark.parametrize("gen", _BARE_CALL_GENERATORS)
 def test_no_detection_in_boardless_scene(gen):
     rng = np.random.default_rng(14)
     pts, _ = make_scene(rng=rng)
@@ -251,7 +258,7 @@ def _assert_detection_matches(det_a, det_b, gen):
         assert det_a.score == det_b.score
 
 
-@pytest.mark.parametrize("gen", list(GENERATORS))
+@pytest.mark.parametrize("gen", _BARE_CALL_GENERATORS)
 def test_square_icp_off_byte_identical_to_stage6(gen):
     """Regression pin: adding the square_icp knob must not perturb the
     default (off) path at all -- explicit BoardConfig(square_icp=False)
@@ -278,7 +285,7 @@ def test_square_icp_off_byte_identical_to_stage6(gen):
                                   out_explicit_off.detection, gen)
 
 
-@pytest.mark.parametrize("gen", list(GENERATORS))
+@pytest.mark.parametrize("gen", _BARE_CALL_GENERATORS)
 def test_square_icp_detects_board_in_synthetic_scene(gen):
     pts, truth = make_scene(rng=np.random.default_rng(13))
     out = detect(pts, BoardConfig(side_m=1.0, square_icp=True), generator=gen)
@@ -389,7 +396,7 @@ def test_up_2d_present_for_vertical_plane():
 
 # --- Task 26: isolation (exterior coplanar-continuation) discriminator ---
 
-@pytest.mark.parametrize("gen", list(GENERATORS))
+@pytest.mark.parametrize("gen", _BARE_CALL_GENERATORS)
 def test_isolation_off_byte_identical_to_stage6(gen):
     """Regression pin: adding the isolation knob must not perturb the
     default (off) path at all -- explicit BoardConfig(isolation=False) must
@@ -411,7 +418,7 @@ def test_isolation_off_byte_identical_to_stage6(gen):
                                   out_explicit_off.detection, gen)
 
 
-@pytest.mark.parametrize("gen", list(GENERATORS))
+@pytest.mark.parametrize("gen", _BARE_CALL_GENERATORS)
 def test_isolation_on_still_detects_free_standing_board(gen):
     """`make_scene`'s board is free-standing (ground/wall/blob clutter all
     sit spatially and spectrally away from the board's own fitted plane),
