@@ -1,10 +1,16 @@
 """Tests for domain-randomized scene generation (Task 30): diamond board
 orientation (review must-fix #2), board count, and the embedded/
-free-standing clutter mix that teaches a CNN the isolation discriminator."""
+free-standing clutter mix that teaches a CNN the isolation discriminator.
+
+Task 35 adds tests for the broadened free-standing distractor population
+(small scatter clusters, large free-standing structures, non-square/
+arbitrary-orientation panels) -- see `SceneGenConfig`'s "Task 35" knobs and
+`random_scene`'s scatter-cluster / large-clutter blocks in scenegen.py."""
 from __future__ import annotations
 
 import numpy as np
 
+from boarddet.sim.primitives import Box, Cylinder, Rect
 from boarddet.sim.raycast import render
 from boarddet.sim.scenegen import (
     Scene,
@@ -310,3 +316,203 @@ def test_boards_get_enough_vertical_laser_coverage():
                 f"board vertical coverage {coverage:.2f} < "
                 f"{cfg.board_min_vertical_coverage}")
     assert n_checked > 200
+
+
+# ---------------------------------------------------------------------------
+# Task 35: diverse free-standing distractors -- small scatter, large
+# structures, non-square/arbitrary orientation
+# ---------------------------------------------------------------------------
+
+
+def _rect_diag(rect: Rect) -> float:
+    return 2.0 * float(np.hypot(rect.half_u, rect.half_v))
+
+
+def _box_diag(box: Box) -> float:
+    return 2.0 * float(np.linalg.norm(box.half_sizes))
+
+
+def _cylinder_extent(cyl: Cylinder) -> float:
+    return float(np.hypot(cyl.height, 2.0 * cyl.radius))
+
+
+def _incidence_deg(prim) -> float:
+    """Angle between the primitive's own normal/axis and the sensor-facing
+    ray to its center -- 0 deg = face-on (like the board), 90 deg = edge-on.
+    Only meaningful for planar Rects (what "facing" means for a Box/Cylinder
+    is ambiguous, so callers only use this on Rect clutter)."""
+    center = prim.center
+    ray = center / np.linalg.norm(center)
+    return float(np.degrees(np.arccos(np.clip(abs(float(ray @ prim.normal)), 0.0, 1.0))))
+
+
+def test_scatter_clusters_produce_small_free_standing_poles_and_panels():
+    """Forcing exactly one scatter cluster of exactly 5 members must yield
+    a mix of thin `Cylinder` poles and small `Rect` panels, all within the
+    configured small (0.03-1.5 m) size range -- the pole/bracket real FP
+    population (Stage-10: 28% of the CNN's clutter, ~0.2-0.5 m)."""
+    rng = np.random.default_rng(20)
+    cfg = SceneGenConfig(
+        board_count_weights={0: 1.0}, n_clutter_range=(0, 0),
+        n_boxes_range=(0, 0), n_cylinders_range=(0, 0),
+        n_large_clutter_range=(0, 0),
+        n_scatter_clusters_range=(1, 1), scatter_cluster_size_range=(5, 5),
+    )
+    saw_pole = False
+    saw_panel = False
+    for _ in range(30):
+        scene = random_scene(rng, cfg)
+        for prim in scene.primitives:
+            if isinstance(prim, Cylinder):
+                saw_pole = True
+                assert cfg.scatter_pole_radius_range_m[0] - 1e-9 <= prim.radius \
+                    <= cfg.scatter_pole_radius_range_m[1] + 1e-9
+                assert cfg.scatter_pole_height_range_m[0] - 1e-9 <= prim.height \
+                    <= cfg.scatter_pole_height_range_m[1] + 1e-9
+            elif isinstance(prim, Rect) and getattr(prim, "half_u", None) not in \
+                    (cfg.ground_half_extent_m, cfg.wall_half_width_m):
+                saw_panel = True
+                diag = _rect_diag(prim)
+                assert diag < 1.0, f"scatter panel diag {diag} unexpectedly large"
+    assert saw_pole, "no scatter poles (Cylinder) generated"
+    assert saw_panel, "no scatter panels (Rect) generated"
+
+
+def test_large_clutter_produces_big_free_standing_panels_and_boxes():
+    """Forcing large-clutter panels must yield diagonals well into the
+    1.5-3 m range (the 1.71 m-median "other_clutter" real FP population,
+    Stage-10: 72% of the CNN's clutter) -- previously uncovered by the
+    narrower panel/box ranges."""
+    rng = np.random.default_rng(21)
+    cfg = SceneGenConfig(
+        board_count_weights={0: 1.0}, n_clutter_range=(0, 0),
+        n_boxes_range=(0, 0), n_cylinders_range=(0, 0),
+        n_scatter_clusters_range=(0, 0),
+        n_large_clutter_range=(1, 1), large_clutter_panel_frac=1.0,
+    )
+    diags = []
+    for _ in range(30):
+        scene = random_scene(rng, cfg)
+        for c in scene.clutter:
+            if c.kind == "large_panel":
+                diags.append(_rect_diag(scene.primitives[c.prim_index]))
+    assert len(diags) > 20
+    assert max(diags) > 1.5, f"large panels never exceeded 1.5 m diag: max={max(diags)}"
+    assert min(diags) >= 2.0 * cfg.large_panel_half_extent_range_m[0] / \
+        cfg.clutter_max_aspect_ratio - 1e-6
+
+
+def test_large_clutter_boxes_are_big():
+    rng = np.random.default_rng(22)
+    cfg = SceneGenConfig(
+        board_count_weights={0: 1.0}, n_clutter_range=(0, 0),
+        n_boxes_range=(0, 0), n_cylinders_range=(0, 0),
+        n_scatter_clusters_range=(0, 0),
+        n_large_clutter_range=(1, 1), large_clutter_panel_frac=0.0,
+    )
+    saw_large_box = False
+    for _ in range(20):
+        scene = random_scene(rng, cfg)
+        for prim in scene.primitives:
+            if isinstance(prim, Box) and _box_diag(prim) > 1.0:
+                saw_large_box = True
+                assert np.all(prim.half_sizes >= cfg.large_box_half_size_range_m[0] - 1e-9)
+    assert saw_large_box, "no large free-standing boxes generated"
+
+
+def test_new_distractor_panels_have_varied_non_square_aspect_ratio():
+    """Scatter/large panels must include genuinely non-square rectangles
+    (half_u != half_v, ratio up to ~clutter_max_aspect_ratio), unlike the
+    board which is always a plain square diamond."""
+    rng = np.random.default_rng(23)
+    cfg = SceneGenConfig(
+        board_count_weights={0: 1.0}, n_clutter_range=(0, 0),
+        n_boxes_range=(0, 0), n_cylinders_range=(0, 0),
+        n_scatter_clusters_range=(2, 2), scatter_cluster_size_range=(4, 4),
+        scatter_pole_frac=0.0,  # force panels, not poles, for this check
+        n_large_clutter_range=(1, 1), large_clutter_panel_frac=1.0,
+    )
+    ratios = []
+    for _ in range(15):
+        scene = random_scene(rng, cfg)
+        for c in scene.clutter:
+            if c.kind in ("scatter_panel", "large_panel"):
+                r = scene.primitives[c.prim_index]
+                lo, hi = sorted((r.half_u, r.half_v))
+                ratios.append(hi / lo)
+    assert len(ratios) > 20
+    assert max(ratios) > 1.5, "no meaningfully non-square panels generated"
+    assert min(ratios) < 1.3, "no near-square panels generated -- aspect should vary"
+
+
+def test_new_distractor_panels_are_not_all_sensor_facing():
+    """Unlike the board (capped at board_max_incidence_deg from face-on),
+    the new scatter/large panels must include high-incidence (edge-on/
+    tilted-away) orientations -- confirms they are NOT sensor-facing
+    constrained."""
+    rng = np.random.default_rng(24)
+    cfg = SceneGenConfig(
+        board_count_weights={0: 1.0}, n_clutter_range=(0, 0),
+        n_boxes_range=(0, 0), n_cylinders_range=(0, 0),
+        scatter_pole_frac=0.0,
+        n_scatter_clusters_range=(2, 2), scatter_cluster_size_range=(4, 4),
+        n_large_clutter_range=(1, 1), large_clutter_panel_frac=1.0,
+    )
+    incidences = []
+    for _ in range(15):
+        scene = random_scene(rng, cfg)
+        for c in scene.clutter:
+            if c.kind in ("scatter_panel", "large_panel"):
+                incidences.append(_incidence_deg(scene.primitives[c.prim_index]))
+    assert len(incidences) > 20
+    assert max(incidences) > 70.0, (
+        "no near-edge-on panels generated -- orientation looks constrained")
+
+
+def test_clutter_meta_kind_tags_cover_new_distractor_types():
+    """`ClutterMeta.kind` distinguishes the pre-existing wall/free panels
+    from the Task-35 scatter/large panels, for downstream bucketing."""
+    rng = np.random.default_rng(25)
+    cfg = SceneGenConfig(
+        board_count_weights={0: 1.0},
+        n_clutter_range=(4, 4), clutter_embedded_frac=0.5,
+        n_scatter_clusters_range=(1, 2), scatter_cluster_size_range=(3, 5),
+        scatter_pole_frac=0.0,
+        n_large_clutter_range=(1, 2), large_clutter_panel_frac=1.0,
+    )
+    kinds = set()
+    for _ in range(20):
+        scene = random_scene(rng, cfg)
+        for c in scene.clutter:
+            kinds.add(c.kind)
+    assert kinds == {"wall_panel", "free_panel", "scatter_panel", "large_panel"}
+
+
+def test_enriched_clutter_size_spans_small_to_large():
+    """With default config, a batch of scenes' Rect/Box/Cylinder clutter
+    sizes must span from small (<0.5 m) to large (>1.5 m) -- the real FP
+    range Stage-10 diagnosed (0.2-1.71 m+), vs the old narrow panel/box/
+    cylinder-only range."""
+    cfg = SceneGenConfig()
+    sizes = []
+    for seed in range(60):
+        scene = random_scene(np.random.default_rng(seed), cfg)
+        board_prim_idx = {b.prim_index for b in scene.boards}
+        for i, prim in enumerate(scene.primitives):
+            if i in board_prim_idx:
+                continue
+            if isinstance(prim, Rect) and getattr(prim, "half_u", None) == \
+                    cfg.ground_half_extent_m:
+                continue  # skip the ground plane
+            if isinstance(prim, Rect) and getattr(prim, "half_u", None) == \
+                    cfg.wall_half_width_m:
+                continue  # skip walls
+            if isinstance(prim, Rect):
+                sizes.append(_rect_diag(prim))
+            elif isinstance(prim, Box):
+                sizes.append(_box_diag(prim))
+            elif isinstance(prim, Cylinder):
+                sizes.append(_cylinder_extent(prim))
+    assert len(sizes) > 50
+    assert min(sizes) < 0.5, f"no small (<0.5m) clutter: min={min(sizes):.2f}"
+    assert max(sizes) > 1.5, f"no large (>1.5m) clutter: max={max(sizes):.2f}"

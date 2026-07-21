@@ -8,6 +8,22 @@ is a 45-deg-rotated diamond, `side*sqrt(2)` diagonal, NOT an axis-aligned
 square), a mix of embedded (coplanar-with-a-wall) and free-standing panel
 clutter (so a CNN trained on this data learns the isolation discriminator
 Stage 8 identified, not just "flat surface = board"), boxes, and cylinders.
+
+Task 35: the free-standing clutter distribution is further broadened with
+diverse, UNCONSTRAINED-orientation distractors, because Stage-10 diagnostics
+(`.superpowers/sdd/stage10-hybrid-gate.md`, `stage10-fixture-char.md`) found
+the trained CNN's real false positives are a broad free-standing-object
+population -- 28% small scatter (poles/brackets, ~0.2-0.5 m) and 72% LARGE
+free-standing structures (median diagonal 1.71 m, bigger than the board) --
+that the old clutter distribution (wall panels + modest free panels/boxes/
+cylinders) never covered, so the CNN never learned "diamond board vs
+arbitrary free-standing object": small scatter clusters (thin poles +
+small panels), large free-standing panels/boxes, and non-square,
+arbitrarily-oriented (not sensor-facing) panels. Only the board stays a
+plain facing-with-tilt diamond -- everything else is deliberately NOT
+diamond-shaped and NOT facing-constrained, so the discriminating feature the
+CNN can learn is "diamond, facing the sensor" = board.
+
 Sensor tilt/height are randomized per scene by transforming every primitive
 from a convenient "nominal, level" frame into the actual (tilted, raised)
 sensor frame before it's handed to `raycast.render` (which always casts
@@ -48,11 +64,20 @@ class ClutterMeta:
     """A generated clutter panel's provenance: embedded (coplanar with an
     existing wall -- indistinguishable from that wall by depth alone, so
     a CNN must learn isolation, not just "flat surface") vs free-standing
-    (isolated in space, like a real board)."""
+    (isolated in space, like a real board).
+
+    Only rectangular (`Rect`) clutter is tracked here -- `Box`/`Cylinder`
+    clutter (including the Task-35 scatter poles and large boxes) is added
+    straight to `Scene.primitives` untracked, same as the pre-existing
+    boxes/cylinders, since nothing downstream keys off their metadata."""
 
     prim_index: int
     embedded: bool
     wall_index: int | None  # index into scene.primitives of the wall it's on, else None
+    # provenance tag for tests/inspection: "wall_panel", "free_panel",
+    # "scatter_panel" (Task 35 small scatter), "large_panel" (Task 35 large
+    # free-standing structure)
+    kind: str = "panel"
 
 
 @dataclass
@@ -126,6 +151,41 @@ class SceneGenConfig:
     clutter_range_m: tuple[float, float] = (2.0, 10.0)
     clutter_azimuth_range_deg: tuple[float, float] = (-160.0, 160.0)
     clutter_height_range_m: tuple[float, float] = (-0.8, 1.0)
+
+    # --- Task 35: diverse free-standing distractors -----------------------
+    # Real CNN false positives (Stage-10 diagnostics) split ~28% small
+    # scatter (poles/brackets, 0.2-0.5 m) / ~72% large free-standing
+    # structures (median diagonal 1.71 m), NEITHER covered by the panel/box/
+    # cylinder ranges above. All distractors below are free-standing,
+    # UNCONSTRAINED orientation (arbitrary normal -- not sensor-facing like
+    # the board, so edge-on/tilted is expected), and unconstrained overlap
+    # (only boards get non-overlap + coverage gating).
+    #
+    # max aspect ratio (long side : short side) for the new non-square
+    # panels below.
+    clutter_max_aspect_ratio: float = 3.0
+    # small scatter clusters: a few thin poles/brackets + small panels,
+    # clumped near a random center in the sensor's forward field.
+    n_scatter_clusters_range: tuple[int, int] = (0, 2)
+    scatter_cluster_size_range: tuple[int, int] = (2, 5)
+    scatter_cluster_spread_m: float = 0.6  # +/- jitter of each member around the cluster center
+    scatter_pole_frac: float = 0.6  # fraction of cluster members that are poles vs small panels
+    scatter_pole_radius_range_m: tuple[float, float] = (0.03, 0.1)
+    scatter_pole_height_range_m: tuple[float, float] = (0.3, 1.5)
+    scatter_panel_half_extent_range_m: tuple[float, float] = (0.1, 0.3)
+    scatter_range_m: tuple[float, float] = (2.0, 8.0)
+    scatter_azimuth_range_deg: tuple[float, float] = (-90.0, 90.0)
+    scatter_height_range_m: tuple[float, float] = (-0.8, 1.0)
+    # large free-standing structures: big panels/boxes, 1.5-3 m across -- the
+    # 1.71 m-median "other_clutter" population, previously uncovered.
+    n_large_clutter_range: tuple[int, int] = (0, 2)
+    large_clutter_panel_frac: float = 0.5  # fraction panel vs box
+    large_panel_half_extent_range_m: tuple[float, float] = (0.75, 1.5)
+    large_box_half_size_range_m: tuple[float, float] = (0.5, 1.2)
+    large_clutter_range_m: tuple[float, float] = (2.0, 12.0)
+    large_clutter_azimuth_range_deg: tuple[float, float] = (-160.0, 160.0)
+    large_clutter_height_range_m: tuple[float, float] = (-0.8, 1.5)
+
     # sensor pose randomization
     sensor_tilt_jitter_deg: float = 3.0
     sensor_height_jitter_m: float = 0.1
@@ -169,6 +229,44 @@ def _plane_basis(normal: np.ndarray, up_hint: np.ndarray):
     v = _unit(v)
     u = np.cross(v, n)
     return u, v, n
+
+
+def _random_orientation_normal(rng: np.random.Generator) -> np.ndarray:
+    """Uniform-random unit normal on the sphere -- UNCONSTRAINED orientation
+    (unlike the board's always-facing-the-sensor normal), so a distractor
+    can be edge-on, tilted, even facing straight away. Task 35: teaches the
+    CNN that "diamond, facing the sensor" singles out the board."""
+    v = rng.normal(size=3)
+    norm = float(np.linalg.norm(v))
+    if norm < 1e-9:
+        return np.array([1.0, 0.0, 0.0])
+    return v / norm
+
+
+def _random_rect_u_axis(rng: np.random.Generator, normal: np.ndarray) -> np.ndarray:
+    """A `u_axis` orthogonal to `normal` at a uniformly random in-plane spin,
+    so a distractor panel's own rectangle orientation (not just its normal)
+    is unconstrained too."""
+    hint = np.array([0.0, 0.0, 1.0])
+    if abs(float(_unit(normal) @ hint)) > 0.95:
+        hint = np.array([1.0, 0.0, 0.0])
+    u0, v0, _ = _plane_basis(normal, hint)
+    theta = rng.uniform(0.0, 2.0 * np.pi)
+    return _unit(np.cos(theta) * u0 + np.sin(theta) * v0)
+
+
+def _random_aspect_half_extents(rng: np.random.Generator,
+                                half_extent_range: tuple[float, float],
+                                max_aspect_ratio: float) -> tuple[float, float]:
+    """Sample `(half_u, half_v)` for a rectangular, possibly NON-square,
+    panel: one side drawn from `half_extent_range`, the other shrunk by a
+    random ratio up to `max_aspect_ratio` -- and which axis ends up longer
+    is randomized too, so aspect ratio varies freely up to
+    `max_aspect_ratio`:1 in either direction."""
+    a = rng.uniform(*half_extent_range)
+    ratio = rng.uniform(1.0, max(max_aspect_ratio, 1.0))
+    b = a / ratio
+    return (a, b) if rng.random() < 0.5 else (b, a)
 
 
 def make_diamond_board(center, normal, up_hint, side: float,
@@ -376,7 +474,15 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None,
     # essential (brief), not left to chance for small n_clutter, but a
     # frac of exactly 0.0/1.0 is an explicit "all one kind" request and
     # must be honored (e.g. by tests isolating one branch).
-    if not wall_indices or cfg.clutter_embedded_frac <= 0.0:
+    if n_clutter == 0:
+        # pre-existing edge case (surfaced by Task 35's n_clutter_range=(0, 0)
+        # configs, which disable this old-style panel loop entirely in favor
+        # of the new scatter/large distractors below): the `else` branch's
+        # coin flip must not run here, or `[True]*1 + [False]*(0-1)` (a
+        # negative repeat, i.e. []) silently produces a stray embedded panel
+        # even though n_clutter is 0.
+        n_embedded = 0
+    elif not wall_indices or cfg.clutter_embedded_frac <= 0.0:
         n_embedded = 0
     elif cfg.clutter_embedded_frac >= 1.0:
         n_embedded = n_clutter
@@ -405,7 +511,8 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None,
             panel = Rect(center=panel_center, normal=wall.normal,
                         u_axis=wall.u_axis, half_u=half_u, half_v=half_v)
             clutter.append(ClutterMeta(prim_index=len(primitives),
-                                       embedded=True, wall_index=wall_idx))
+                                       embedded=True, wall_index=wall_idx,
+                                       kind="wall_panel"))
             primitives.append(panel)
         else:
             c_range = rng.uniform(*cfg.clutter_free_range_m)
@@ -419,7 +526,8 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None,
             panel = Rect(center=xf.point(center_nom), normal=xf.direction(n_nom),
                         u_axis=xf.direction(u_nom), half_u=half_u, half_v=half_v)
             clutter.append(ClutterMeta(prim_index=len(primitives),
-                                       embedded=False, wall_index=None))
+                                       embedded=False, wall_index=None,
+                                       kind="free_panel"))
             primitives.append(panel)
 
     # --- boxes ------------------------------------------------------------
@@ -448,6 +556,83 @@ def random_scene(rng: np.random.Generator, cfg: SceneGenConfig | None = None,
         cyl = Cylinder(base=xf.point(center_nom), axis=xf.direction([0.0, 0.0, 1.0]),
                        radius=radius, height=height)
         primitives.append(cyl)
+
+    # --- Task 35: small scatter distractor clusters ------------------------
+    # A few (2-5) thin poles/brackets + small panels clumped near a random
+    # center in the sensor's forward field -- mimics the pole/bracket real
+    # false positives (Stage-10: 28% of the CNN's clutter, 0.2-0.5 m).
+    # Free-standing, unconstrained orientation; not tracked as ClutterMeta
+    # when they're Cylinder poles (same convention as the pre-existing
+    # boxes/cylinders above -- nothing downstream keys off pole metadata).
+    n_scatter_clusters = int(rng.integers(cfg.n_scatter_clusters_range[0],
+                                          cfg.n_scatter_clusters_range[1] + 1))
+    for _ in range(n_scatter_clusters):
+        c_range = rng.uniform(*cfg.scatter_range_m)
+        c_az = np.radians(rng.uniform(*cfg.scatter_azimuth_range_deg))
+        c_height = rng.uniform(*cfg.scatter_height_range_m)
+        cluster_center_nom = _polar(c_range, c_az, c_height)
+        n_members = int(rng.integers(cfg.scatter_cluster_size_range[0],
+                                     cfg.scatter_cluster_size_range[1] + 1))
+        for _ in range(n_members):
+            offset = rng.uniform(-cfg.scatter_cluster_spread_m,
+                                 cfg.scatter_cluster_spread_m, size=3)
+            member_center_nom = cluster_center_nom + offset
+            if rng.random() < cfg.scatter_pole_frac:
+                radius = rng.uniform(*cfg.scatter_pole_radius_range_m)
+                height = rng.uniform(*cfg.scatter_pole_height_range_m)
+                pole = Cylinder(base=xf.point(member_center_nom),
+                               axis=xf.direction([0.0, 0.0, 1.0]),
+                               radius=radius, height=height)
+                primitives.append(pole)
+            else:
+                normal_nom = _random_orientation_normal(rng)
+                u_nom = _random_rect_u_axis(rng, normal_nom)
+                half_u, half_v = _random_aspect_half_extents(
+                    rng, cfg.scatter_panel_half_extent_range_m,
+                    cfg.clutter_max_aspect_ratio)
+                panel = Rect(center=xf.point(member_center_nom),
+                            normal=xf.direction(normal_nom),
+                            u_axis=xf.direction(u_nom),
+                            half_u=half_u, half_v=half_v)
+                clutter.append(ClutterMeta(prim_index=len(primitives),
+                                           embedded=False, wall_index=None,
+                                           kind="scatter_panel"))
+                primitives.append(panel)
+
+    # --- Task 35: large free-standing structures ----------------------------
+    # Big panels/boxes, 1.5-3 m across -- the 1.71 m-median "other_clutter"
+    # population that dominates the CNN's real false positives (Stage-10:
+    # 72% of clutter) and was previously uncovered by the narrower panel/box
+    # ranges above. Arbitrary orientation; panels are non-square too.
+    n_large = int(rng.integers(cfg.n_large_clutter_range[0],
+                               cfg.n_large_clutter_range[1] + 1))
+    for _ in range(n_large):
+        l_range = rng.uniform(*cfg.large_clutter_range_m)
+        l_az = np.radians(rng.uniform(*cfg.large_clutter_azimuth_range_deg))
+        l_height = rng.uniform(*cfg.large_clutter_height_range_m)
+        center_nom = _polar(l_range, l_az, l_height)
+        if rng.random() < cfg.large_clutter_panel_frac:
+            normal_nom = _random_orientation_normal(rng)
+            u_nom = _random_rect_u_axis(rng, normal_nom)
+            half_u, half_v = _random_aspect_half_extents(
+                rng, cfg.large_panel_half_extent_range_m,
+                cfg.clutter_max_aspect_ratio)
+            panel = Rect(center=xf.point(center_nom),
+                        normal=xf.direction(normal_nom),
+                        u_axis=xf.direction(u_nom),
+                        half_u=half_u, half_v=half_v)
+            clutter.append(ClutterMeta(prim_index=len(primitives),
+                                       embedded=False, wall_index=None,
+                                       kind="large_panel"))
+            primitives.append(panel)
+        else:
+            yaw = rng.uniform(0.0, 2.0 * np.pi)
+            cz, sz = np.cos(yaw), np.sin(yaw)
+            r_nom = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+            half_sizes = rng.uniform(*cfg.large_box_half_size_range_m, size=3)
+            box = Box(center=xf.point(center_nom), R=xf.R @ r_nom,
+                     half_sizes=half_sizes)
+            primitives.append(box)
 
     return Scene(primitives=primitives, boards=boards, clutter=clutter,
                 sensor_roll_rad=roll, sensor_pitch_rad=pitch,
