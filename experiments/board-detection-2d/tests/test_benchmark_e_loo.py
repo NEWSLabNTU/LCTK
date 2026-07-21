@@ -60,6 +60,16 @@ def test_build_background_excludes_the_held_out_dataset():
     assert len(model.foreground_points(held)) == len(held)
 
 
+def test_unreachable_min_sources_is_rejected_loudly(tmp_path):
+    """With N datasets each fold has only N-1 contributors, so
+    min_sources > N-1 finalizes an EMPTY background: everything reads as
+    foreground and the fold reports a meaninglessly high recall from a
+    detector no longer doing background subtraction. Must raise, not run."""
+    from boarddet.board_config import BoardConfig
+    with pytest.raises(ValueError, match="unreachable"):
+        loo.run_loo([1, 3], BoardConfig(side_m=1.0), tmp_path, min_sources=2)
+
+
 def test_consensus_drops_a_single_contributors_unique_geometry():
     """With min_sources=2, geometry only one contributor saw (its own
     board) must not become background."""

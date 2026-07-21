@@ -70,6 +70,20 @@ def build_background(all_frames: dict[int, list[Frame]], held_out: int,
 def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
             max_frames: int | None = None, background_voxel: float = 0.06,
             dilation_radius: int = 1, min_sources: int = 2) -> dict:
+    # Each fold contributes every dataset except the held-out one, so a
+    # consensus threshold above that count can never be met: the background
+    # would finalize EMPTY, every point would read as foreground, and the
+    # fold would report a meaninglessly high recall from a detector that is
+    # no longer doing background subtraction at all. Fail loudly instead --
+    # this is the same class of silent-acceptance bug as C-04.
+    n_contributors = len(datasets) - 1
+    if n_contributors < min_sources:
+        raise ValueError(
+            f"min_sources={min_sources} is unreachable with {len(datasets)} "
+            f"datasets: each fold has only {n_contributors} contributing "
+            f"source(s), so the background would be empty and every point "
+            f"would count as foreground. Use at least {min_sources + 1} "
+            f"datasets, or lower --min-sources.")
     out_dir.mkdir(parents=True, exist_ok=True)
     all_frames = {ds: load_frames(ds, max_frames=max_frames)
                   for ds in datasets}
@@ -91,6 +105,7 @@ def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
             "n_known_clutter_survived": sum(
                 1 for d in dets if near_known_clutter(d.center)),
             "background_voxels": model.n_voxels,
+            "n_contributing_sources": model.n_sources,
             "median_total_ms": float(np.median(
                 [o.timings_ms["total"] for o in outcomes]
             )) if outcomes else 0.0,
