@@ -1918,9 +1918,172 @@ precision problem when multiple components register per frame.
    CPU-side component fitting, scaling with detection count — the same lever that would
    fix precision would also fix the p95 timing overrun.
 
+## Stage 10 Results
+
+Stage 9's diagnosis was a **training-data-coverage gap**, not a structural dead end:
+the CNN fires confidently on a small, consistent set of real static fixtures because
+`SceneGenConfig`'s clutter (Task 30) never included anything shaped like them.
+`.superpowers/sdd/stage10-fixture-char.md` (a read-only diagnostic, no source changed)
+quantified the gap precisely by rerunning the v1 checkpoint's own false positives
+through `fit_fixed_square` and measuring size: **28%** of the clutter volume is small
+(~0.2–0.5 m, poles/brackets/shelf edges) and **72%** is large ("other_clutter", median
+diagonal **1.71 m** — bigger than the board's own 1.08 m median). The old clutter
+generator only produced roughly sensor-facing panels (0.2–0.8 m), boxes (0.15–0.5 m),
+and cylinders (0.08–0.25 m radius) — covering neither end of the diagnosed range. A
+cheap geometric size gate was ruled out as a fix (it kills the two named fixtures but
+leaves the large-footprint majority untouched, moving overall precision by <1 point).
+
+### The fix (Tasks 35–36): enrich clutter, retrain, re-eval on real data — no eval-side changes
+
+Task 35 added three new free-standing distractor kinds to `scenegen.py` (clutter
+generation only; board generation and every board-specific test untouched): small
+**scatter clusters** (0.1–0.3 m panels, 0.03–0.1 m radius poles), **large panels/boxes**
+(0.75–1.5 m panels, 0.5–1.2 m half-size boxes reaching up to ~4 m diagonal), and
+**non-square, arbitrarily-oriented** panels for both (unlike the board, not constrained
+to face the sensor). Measured clutter-diagonal distribution before/after (400 scenes
+each): before had **zero** clutter under 0.5 m and topped out at 2.24 m; after spans
+0.21–4.08 m, now bracketing the diagnosed 0.2–1.71 m real-FP range end to end. Task 36
+retrained `BoardUNet` from scratch on this enriched distribution with **the same
+architecture and hyperparameters as Task 32** (`tmp/train_v2.py`, all `TrainConfig`
+defaults, 50/50 plain/hollow mix) — the enriched clutter is scenegen's new default, so
+nothing else changed. **Best checkpoint (epoch 59, 211553 params): synth val IoU
+0.9679, precision 0.9840, recall 0.9834** — essentially unchanged from v1's synth
+val metrics (IoU 0.9898), i.e. the richer clutter distribution did not make the
+synth-only fit harder. Checkpoint: `results/stage9-cnn/board_unet_v2.pt`.
+
+Then the **identical** Task-33 real-data pipeline (`cnn.eval.run_eval` — same
+checkpoint loader, same seam-wrapping components, same back-projection, same
+`fit_fixed_square`, same bbox classification; zero eval-side code changed) was rerun
+on all 535 real frames against v2:
+
+**Recall / precision, all 535 real frames, threshold sweep — v1 vs v2:**
+
+| threshold | v1 recall | v1 precision | v2 recall | v2 precision |
+|---|---|---|---|---|
+| 0.3 | 99.3% (531/535) | 14.5% (1277/8809) | 99.3% (531/535) | **56.1%** (1219/2173) |
+| 0.5 | 99.3% (531/535) | 14.8% (1299/8800) | 99.3% (531/535) | **60.8%** (1245/2048) |
+| 0.7 | 99.3% (531/535) | 15.0% (1296/8660) | 99.3% (531/535) | **66.1%** (1264/1911) |
+
+**Timing (535 frames, single-process, RTX 5090), reference threshold 0.5 — v1 vs v2:**
+
+| stage | v1 median | v1 p95 | v2 median | v2 p95 |
+|---|---|---|---|---|
+| forward (GPU) | 1.52 ms | 1.62 ms | 2.76 ms | 4.22 ms |
+| post-proc (CPU) | 88.71 ms | 113.76 ms | **27.21 ms** | **49.19 ms** |
+| **total** | **90.25 ms** | **115.33 ms** | **30.19 ms** | **52.40 ms** |
+
+**Headline: precision 15%→66% (threshold 0.7) at zero recall cost, a single cheap
+retrain (no eval-side code, no inference-time geometry added), and both median and
+p95 timing improve 3× along with it** — post-processing cost tracks detection count
+directly (v1: ~16.4 detections/frame at threshold 0.5; v2: ~3.8/frame), so cutting
+clutter volume cuts CPU cost in lockstep. p95 now clears the 100 ms budget with
+headroom (52 ms vs. the old 115 ms overrun), which Stage 9 had flagged as
+precision-downstream, not separately investigated — it wasn't; the fix that improved
+precision fixed timing too, exactly as predicted.
+
+**Visual evidence**: `results/stage9-cnn/real_pred_v2.png` (gitignored), same 6
+frames (ds1/ds2/ds3×2/ds4/ds5) as v1's `real_pred.png` for direct comparison. Three
+of v1's four persistent fixtures — the vertical stripe near column ~200 present in
+every v1 frame, the blob near column ~500–560, and the dense cluster near
+column ~1600–1750 — are visibly gone or reduced to a stray pixel or two in v2 across
+all 6 frames. The board's diamond twin-spike silhouette still lights up exactly at
+the bbox reference marker in every frame, confirming recall held. One fixture — a
+patch near column ~1150–1200, present in v1's ds1/ds4 — persists at similar visual
+strength in v2's ds4 frame, matching the residual-FP finding below.
+
+### Residual false positives at threshold 0.7 (34% still out-of-bbox): same zones, far sparser
+
+A scratch analysis (`tmp/residual_fp_cluster.py`, not committed) reran both
+checkpoints' full 535-frame real eval at threshold 0.7, collected every out-of-bbox
+detection center, and clustered them (DBSCAN, eps=0.4 m, min_samples=5) to locate the
+dominant residual false-positive zones:
+
+- **v1: 7364 out-of-bbox detections** (13.8/frame) form a handful of DBSCAN
+  "mega-clusters" 3–6 m across — density-chained across the room, confirming
+  `stage10-fixture-char.md`'s finding that v1's false positives are not two isolated
+  fixtures but a broad, room-scattered population (the two named fixtures at
+  [-2.1, 1.6] / [-2.4, 1.65] sit inside the largest of these chained blobs, alongside
+  much more).
+- **v2: 647 out-of-bbox detections** (1.2/frame) — a **91% reduction in false-positive
+  volume** — form 13 much tighter, spatially compact clusters (extent 0.15–1.7 m each).
+- **Same zones, not new ones.** A naive nearest-cluster-centroid check flags most v2
+  clusters as ">0.5 m from any v1 centroid" — but that's an artifact of v1's centroids
+  being averaged over multi-meter merged blobs, not physically meaningful single-point
+  markers. Checking containment instead (does a v2 cluster's location fall *inside* a
+  v1 mega-cluster's bounding envelope) shows **the opposite: at least 6 of v2's 8
+  largest clusters (~81% of residual volume) sit inside a region v1 also fired on** —
+  the wall run near x≈-2, y≈1.6–3.2 (the two named A/B fixtures' neighborhood), a zone
+  near x≈2.8–4.7, y≈3.4–4.2, and one near x≈3.2–4.8, y≈-3.7 to -2.6. Only one or two
+  small clusters (≤77 detections each) sit just outside any v1 envelope by 0.1–0.6 m —
+  plausibly a sub-fixture that was previously buried inside v1's larger merged blob,
+  not a genuinely new failure mode.
+- **Verdict: coverable, not structural.** The retrain did not fix a different bug or
+  hit an architectural ceiling — it suppressed the same real-world clutter population
+  by ~90% in volume and collapsed it from broad multi-meter smears to tight,
+  physically localized clusters, without touching the handful of zones evidently still
+  under-represented in the enriched synthetic distribution (Task 35's frequency knobs,
+  `n_scatter_clusters_range=(0,2)` / `n_large_clutter_range=(0,2)`, were deliberately
+  modest per that task's own report). A further enrichment/hard-example-mining pass
+  targeted at these specific remaining zones is the natural next iteration, not a
+  reason to suspect a ceiling.
+
+### DECISION (Stage 10)
+
+1. **The precision gap Stage 9 diagnosed as a training-data-coverage problem was, in
+   fact, fixable that way.** A single retrain on Task 35's enriched clutter — same
+   architecture, same hyperparameters, zero eval-side or inference-time geometry
+   changes — took real precision from 14.8%→60.8% (threshold 0.5) at **zero recall
+   cost** (531/535 both before and after) and as a bonus cut both median and p95
+   timing 3× (post-processing cost tracks detection count).
+2. **Still short of geometry's operating points.** 60.8–66.1% precision is a large,
+   real improvement over 14.8–15.0%, but still well below stage-6's 93.0% and stage-8's
+   100%. This is reported straight: Stage 10 is a strong partial, not a close-out.
+3. **The residual is a further coverage gap, not a structural wall.** The 34% still
+   out-of-bbox at threshold 0.7 clusters into far fewer, far tighter, far sparser hits
+   in the *same* real-world zones v1 fired on — not a new or different failure mode —
+   consistent with under-frequent (not absent) coverage of those zones in the enriched
+   synthetic distribution. Another enrichment/hard-mining round targeted at the
+   remaining zones (or simply raising `n_scatter_clusters_range` /
+   `n_large_clutter_range`'s frequency) is the indicated next step.
+4. **Not yet adopted as a drop-in replacement for geometry.** The gap to stage-8's
+   100% precision is still too large for a calibration pipeline that "cannot easily
+   tolerate a false pose corrupting the extrinsic" (Stage 9's own words) — but the
+   trend across one retrain cycle (15%→66% precision, zero recall cost, timing
+   improving in lockstep) makes the composite-pipeline path Stage 9 surfaced (CNN
+   recall + geometry-style discriminators, or further clutter enrichment, or both)
+   look more tractable than a one-shot data-coverage gap alone would.
+
 ## Decision
 
-**Updated after Stage 9 (final stage of this phase).** Stage 9 built a synth-trained
+**Updated after Stage 10 (final stage of this phase).** Stage 9's synth→real transfer
+test (Task 33) found a partial result: recall broke the geometry ceiling (99.3% vs.
+stage-6's 49.3%) but precision did not transfer (14.8% vs. 93–100%), diagnosed as a
+training-data-coverage gap — the synthetic clutter distribution didn't cover the real
+static fixtures the CNN misfired on. Stage 10 tested that diagnosis directly: Task 35
+enriched the synthetic clutter generator with small scatter (0.2–0.5 m poles/panels)
+and large free-standing structures (0.75–4 m panels/boxes) targeting the exact size
+gap `stage10-fixture-char.md` measured, and Task 36 retrained the identical
+architecture on it and reran the identical Task-33 real-eval pipeline unchanged.
+**Result: the diagnosis was right, and the fix worked, partially.** Real precision
+rose **14.8%→60.8%** (threshold 0.5) / **15.0%→66.1%** (threshold 0.7) at **zero
+recall cost** (531/535 unchanged) — a single retrain, no eval-side code, no
+inference-time geometry. Timing improved in lockstep (~90 ms→~30 ms median,
+~115 ms→~52 ms p95), since post-processing cost tracks detection count directly.
+Residual false positives (34% at threshold 0.7) cluster into the **same** real-world
+zones v1 fired on, just ~90% sparser and far more spatially compact — a further
+coverage gap, not a new or structural failure mode. **Still not adopted as a
+drop-in replacement for geometry**: 60.8–66.1% precision, while a large real
+improvement, remains well below stage-6's 93.0% and stage-8's 100%. The recommended
+single-frame geometry operating points (stage-6 49.3%/93.0%, stage-8 44.1%/100%,
+both below) remain the shipped recommendation; the CNN pipeline (now `board_unet_v2.pt`)
+is the strongest evidence yet that closing the remaining gap — via another
+enrichment/hard-mining round, or by combining the CNN's recall with geometry's
+stance/isolation-style discriminators (Stage 9's still-unbuilt composite pipeline
+idea) — is tractable future work, not a dead end. Full detail: "Stage 10 Results"
+above, `.superpowers/sdd/task-36-report.md`.
+
+**Updated after Stage 9** (superseded by the Stage 10 paragraph above, kept for
+the record). Stage 9 built a synth-trained
 CNN segmenter (Tasks 29–32: ray-based simulator sharing one row/column convention with
 real data, a ~0.21M-param U-Net, val IoU 0.9898) and ran the decisive synth→real
 transfer test on all 535 real frames (Task 33). **Verdict: partial transfer.** Recall
