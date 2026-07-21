@@ -141,6 +141,41 @@ def load_frames(dataset: int, max_frames: int | None = None) -> list[Frame]:
     return frames
 
 
+# Sensors exported from the recorded TWO_LIDAR bags by
+# tools/export_bag_npz.py. "falcon" is solid-state (no ring structure) --
+# see BoardConfig.vertical_gap_deg before benchmarking it.
+BAG_SENSORS = ("vlp32", "falcon")
+
+
+def _bag_cache_path(bag: str, sensor: str) -> Path:
+    return CACHE_DIR / f"bag_{bag}_{sensor}.npz"
+
+
+def load_bag_frames(bag: str, sensor: str,
+                    max_frames: int | None = None) -> list[Frame]:
+    """Load frames exported from a recorded ROS 2 bag.
+
+    Unlike `load_frames`, this never decodes anything itself: bags are read
+    by `tools/export_bag_npz.py`, which needs ROS and therefore a different
+    Python than this package runs on. The export is a prerequisite, and a
+    missing one is a workflow step not yet taken.
+    """
+    if sensor not in BAG_SENSORS:
+        raise ValueError(
+            f"unknown sensor {sensor!r}; expected one of {BAG_SENSORS}")
+    cached = _bag_cache_path(bag, sensor)
+    if not cached.exists():
+        raise FileNotFoundError(
+            f"no exported cache at {cached}. Create it with:\n"
+            f"  source /opt/ros/humble/setup.bash\n"
+            f"  python3 tools/export_bag_npz.py --bags {bag} "
+            f"--sensors {sensor}")
+    frames = _load_cache(cached)
+    if max_frames is not None:
+        frames = frames[:max_frames]
+    return frames
+
+
 if __name__ == "__main__":
     import sys
 
