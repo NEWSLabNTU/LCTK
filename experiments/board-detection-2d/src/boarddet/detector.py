@@ -7,7 +7,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .background import BackgroundModel
 from .board_config import BoardConfig
+from .candidates.background_diff import generate_background_diff
 from .candidates.cluster_after_ground import generate_cluster_after_ground
 from .candidates.ransac_iterative import generate_ransac_iterative
 from .candidates.region_growing import generate_region_growing
@@ -21,6 +23,7 @@ GENERATORS = {
     "a": generate_ransac_iterative,
     "b": generate_cluster_after_ground,
     "c": generate_region_growing,
+    "e": generate_background_diff,
 }
 
 
@@ -88,16 +91,28 @@ def _quad_center(res: ScoreResult) -> np.ndarray:
 
 
 def detect(points: np.ndarray, board: BoardConfig, generator: str,
-           voxel: float = 0.03) -> DetectOutcome:
+           voxel: float = 0.03,
+           background: BackgroundModel | None = None) -> DetectOutcome:
     gen = GENERATORS[generator]
     t0 = time.perf_counter()
     dn = downsample(points, voxel)
     t1 = time.perf_counter()
-    # Generator B alone takes anisotropic clustering tolerance; A and C keep
-    # their stage-1 signatures (gen(points, board)) unchanged this stage, so
-    # this is an explicit special-case rather than a shared kwarg.
+    # Generators B and E take extra arguments; A and C keep their stage-1
+    # signatures (gen(points, board)) unchanged, so this stays an explicit
+    # per-generator special case rather than a shared kwarg.
+    #
+    # detect() stays stateless: it never owns or mutates the background
+    # model, it only forwards the caller's. observe()/finalize() happen
+    # entirely outside, so "one call = one frame in, one outcome out" holds.
     if generator == "b":
         cands = gen(dn, board, vertical_gap_deg=board.vertical_gap_deg)
+    elif generator == "e":
+        if background is None:
+            raise ValueError(
+                "generator 'e' (background_diff) requires a background "
+                "reference; pass detect(..., background=<BackgroundModel>)")
+        cands = gen(dn, board, background=background,
+                    vertical_gap_deg=board.vertical_gap_deg)
     else:
         cands = gen(dn, board)
     t2 = time.perf_counter()
