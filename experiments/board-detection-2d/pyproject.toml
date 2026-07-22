@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "dpkt>=1.9.8",
+    "json5>=0.15.0",
     "matplotlib>=3.11.0",
     "numpy>=2.4.6",
     "open3d>=0.18.0",
