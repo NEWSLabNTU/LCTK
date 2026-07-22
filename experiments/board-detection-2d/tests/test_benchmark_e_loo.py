@@ -54,13 +54,13 @@ def _frames(x: float, n: int = 2) -> list[Frame]:
 
 
 def test_build_background_excludes_the_held_out_dataset():
-    """The core LOO invariant. Dataset 3's own geometry must never enter
+    """The core LOO invariant. Dataset C's own geometry must never enter
     its own background, or the fold is self-referential."""
-    all_frames = {1: _frames(1.0), 2: _frames(1.0), 3: _frames(9.0)}
-    model = loo.build_background(all_frames, held_out=3, voxel=0.06,
+    all_frames = {"A": _frames(1.0), "B": _frames(1.0), "C": _frames(9.0)}
+    model = loo.build_background(all_frames, held_out="C", voxel=0.06,
                                  dilation_radius=0, min_sources=1)
     assert model.n_sources == 2
-    held = all_frames[3][0].xyz
+    held = all_frames["C"][0].xyz
     assert len(model.foreground_points(held)) == len(held)
 
 
@@ -78,11 +78,35 @@ def test_unreachable_min_sources_is_rejected_loudly(tmp_path):
 def test_consensus_drops_a_single_contributors_unique_geometry():
     """With min_sources=2, geometry only one contributor saw (its own
     board) must not become background."""
-    all_frames = {1: _frames(1.0), 2: _frames(1.0), 3: _frames(5.0),
-                  4: _frames(9.0)}
-    model = loo.build_background(all_frames, held_out=4, voxel=0.06,
+    all_frames = {"A": _frames(1.0), "B": _frames(1.0), "C": _frames(5.0),
+                  "D": _frames(9.0)}
+    model = loo.build_background(all_frames, held_out="D", voxel=0.06,
                                  dilation_radius=0, min_sources=2)
-    unique = all_frames[3][0].xyz          # seen by contributor 3 alone
-    shared = all_frames[1][0].xyz          # seen by contributors 1 and 2
+    unique = all_frames["C"][0].xyz        # seen by contributor C alone
+    shared = all_frames["A"][0].xyz        # seen by contributors A and B
     assert len(model.foreground_points(unique)) == len(unique)
     assert len(model.foreground_points(shared)) == 0
+
+
+def test_run_loo_accepts_named_sources(tmp_path):
+    """Folds are keyed by label, so pcap datasets ('3') and bags
+    ('TWO_LIDAR_1') can both be held out by the same harness."""
+    from boarddet.board_config import BoardConfig
+    sources = {"A": _frames(1.0), "B": _frames(1.0),
+               "C": _frames(1.0), "D": _frames(9.0)}
+    out = loo.run_loo(sources, BoardConfig(side_m=1.0), tmp_path,
+                      box=_BOX, min_sources=2, dilation_radius=0)
+    assert set(out["folds"]) == {"A", "B", "C", "D"}
+
+
+def test_unreachable_min_sources_still_rejected(tmp_path):
+    from boarddet.board_config import BoardConfig
+    sources = {"A": _frames(1.0), "B": _frames(9.0)}
+    with pytest.raises(ValueError, match="unreachable"):
+        loo.run_loo(sources, BoardConfig(side_m=1.0), tmp_path,
+                    box=_BOX, min_sources=2)
+
+
+def test_load_sources_rejects_unknown_kind():
+    with pytest.raises(ValueError, match="kind"):
+        loo.load_sources("floppy-disk", ["1"], "vlp32", None)
