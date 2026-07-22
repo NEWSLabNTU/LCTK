@@ -104,8 +104,19 @@ def render_methode(frame_xyz: np.ndarray, board: BoardConfig,
     det = outcome.detection
     state = (f"score={det.score:.2f}" if det is not None else "NO DETECTION")
 
+    path = Path(path)
     fig, axes = plt.subplots(2, 3, figsize=(19, 11))
+    try:
+        _render_panels(fig, axes, dn, fg, box_corners, outcome, det, state,
+                       path.stem)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=100)
+    finally:
+        plt.close(fig)
 
+
+def _render_panels(fig, axes, dn, fg, box_corners, outcome, det, state,
+                   suptitle):
     # Panel 1: raw only, top-down (zoomed to the box like the rest)
     _scatter(axes[0, 0], dn, 0, 1, _C_RAW, 2.0, 0.5)
     _draw_box(axes[0, 0], box_corners, 0, 1)
@@ -152,9 +163,5 @@ def render_methode(frame_xyz: np.ndarray, board: BoardConfig,
         ax.axis("off")
         ax.set_title("plane raster (no detection)")
 
-    fig.suptitle(Path(path).stem, fontsize=12)
+    fig.suptitle(suptitle, fontsize=12)
     fig.tight_layout()
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=100)
-    plt.close(fig)
