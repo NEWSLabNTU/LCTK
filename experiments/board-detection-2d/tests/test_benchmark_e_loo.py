@@ -53,6 +53,36 @@ def _frames(x: float, n: int = 2) -> list[Frame]:
                   ring=np.zeros(len(xyz), dtype=np.uint8)) for i in range(n)]
 
 
+def test_save_overlays_writes_pngs_and_is_off_by_default(tmp_path):
+    """save_overlays=0 writes no overlay PNGs; >0 writes at most that many
+    per fold, and the returned summary is identical either way."""
+    from boarddet.board_config import BoardConfig
+    sources = {"A": _frames(1.0), "B": _frames(1.0),
+               "C": _frames(1.0), "D": _frames(9.0)}
+    board = BoardConfig(side_m=1.0)
+
+    off = tmp_path / "off"
+    s0 = loo.run_loo(sources, board, off, box=_BOX, min_sources=2,
+                     dilation_radius=0, save_overlays=0)
+    assert list(off.glob("overlay_*.png")) == []
+
+    on = tmp_path / "on"
+    s1 = loo.run_loo(sources, board, on, box=_BOX, min_sources=2,
+                     dilation_radius=0, save_overlays=2)
+    pngs = list(on.glob("overlay_*.png"))
+    assert len(pngs) > 0
+    # at most save_overlays per fold (4 folds x 2)
+    assert len(pngs) <= 8
+
+    # Numbers unaffected by rendering. median_total_ms is a per-run timing
+    # measurement that jitters between runs, so compare every field except
+    # that one -- the counts and recall/precision are what must be identical.
+    def _counts(summary):
+        return {k: {kk: vv for kk, vv in v.items() if kk != "median_total_ms"}
+                for k, v in summary["folds"].items()}
+    assert _counts(s0) == _counts(s1)
+
+
 def test_build_background_excludes_the_held_out_dataset():
     """The core LOO invariant. Dataset C's own geometry must never enter
     its own background, or the fold is self-referential."""
