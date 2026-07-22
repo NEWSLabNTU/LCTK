@@ -25,14 +25,16 @@ from pathlib import Path
 import numpy as np
 
 from .background import BackgroundModel
+from .bbox_ref import BoxRef, load_bbox
 from .board_config import BoardConfig
 from .detector import detect
 from .ingest import Frame, load_frames
 
-# ros/lctk_launch/config/board/bbox.json5: translation [2.6, 0, 0.35],
-# size [3.1, 3.94, 2.2]. The same true-board reference stages 4-8 used.
-_BBOX_CENTER = np.array([2.6, 0.0, 0.35])
-_BBOX_HALF = np.array([3.1, 3.94, 2.2]) / 2.0
+# The pcap rig's reference, used by stages 3-8 and Method E. Other rigs
+# (e.g. the recorded TWO_LIDAR bags) supply their own via --bbox.
+DEFAULT_BBOX_PATH = (Path(__file__).resolve().parents[4]
+                     / "ros" / "lctk_launch" / "config" / "board"
+                     / "bbox.json5")
 
 # Static clutter attractors documented across stages 1-8. A background built
 # from four other datasets MUST suppress these; if it does not, the shared
@@ -40,10 +42,6 @@ _BBOX_HALF = np.array([3.1, 3.94, 2.2]) / 2.0
 # other number in the fold is suspect.
 _KNOWN_CLUTTER_XY = np.array([[-1.83, -2.89], [4.7, 2.6], [-3.3, 3.4]])
 _KNOWN_CLUTTER_TOL = 0.5  # m, in the xy plane
-
-
-def in_bbox(center: np.ndarray) -> bool:
-    return bool(np.all(np.abs(np.asarray(center) - _BBOX_CENTER) <= _BBOX_HALF))
 
 
 def near_known_clutter(center: np.ndarray) -> bool:
@@ -68,8 +66,9 @@ def build_background(all_frames: dict[int, list[Frame]], held_out: int,
 
 
 def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
-            max_frames: int | None = None, background_voxel: float = 0.06,
-            dilation_radius: int = 1, min_sources: int = 2) -> dict:
+            box: BoxRef, max_frames: int | None = None,
+            background_voxel: float = 0.06, dilation_radius: int = 1,
+            min_sources: int = 2) -> dict:
     # Each fold contributes every dataset except the held-out one, so a
     # consensus threshold above that count can never be met: the background
     # would finalize EMPTY, every point would read as foreground, and the
@@ -94,7 +93,7 @@ def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
         outcomes = [detect(f.xyz, board, generator="e", background=model)
                     for f in all_frames[held_out]]
         dets = [o.detection for o in outcomes if o.detection is not None]
-        n_true = sum(1 for d in dets if in_bbox(d.center))
+        n_true = sum(1 for d in dets if box.contains(d.center))
         folds[held_out] = {
             "n_frames": len(outcomes),
             "n_detections": len(dets),
@@ -150,6 +149,9 @@ def main() -> None:
     ap.add_argument("--isolation", action="store_true",
                     help="stage-8 isolation gate")
     ap.add_argument("--isolation-max-density", type=float, default=0.3)
+    ap.add_argument("--bbox", type=Path, default=DEFAULT_BBOX_PATH,
+                    help="true-board reference box (bbox.json5 schema); "
+                         "each recording rig has its own")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     board = BoardConfig(
@@ -159,7 +161,8 @@ def main() -> None:
         isolation=args.isolation,
         isolation_max_density=args.isolation_max_density,
     )
-    run_loo(args.datasets, board, args.out, max_frames=args.max_frames,
+    run_loo(args.datasets, board, args.out, box=load_bbox(args.bbox),
+            max_frames=args.max_frames,
             background_voxel=args.background_voxel,
             dilation_radius=args.dilation_radius,
             min_sources=args.min_sources)
