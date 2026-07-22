@@ -105,9 +105,14 @@ def _pick_overlay_indices(outcomes: list, n: int) -> list[int]:
 
 def _save_fold_overlays(frames, outcomes, board, model, box, out_dir,
                         held_out, n) -> None:
+    # Overlays are a debug aid -- a render failure on one frame must never
+    # abort the benchmark before its summary is written. Isolate each call.
     for i in _pick_overlay_indices(outcomes, n):
-        render_methode(frames[i].xyz, board, model, outcomes[i], box,
-                       out_dir / f"overlay_{held_out}_frame{i:04d}.png")
+        try:
+            render_methode(frames[i].xyz, board, model, outcomes[i], box,
+                           out_dir / f"overlay_{held_out}_frame{i:04d}.png")
+        except Exception as e:  # noqa: BLE001 -- debug output, never fatal
+            print(f"  overlay {held_out} frame {i} failed to render: {e}")
 
 
 def run_loo(sources: dict[str, list[Frame]], board: BoardConfig,
