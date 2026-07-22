@@ -217,3 +217,101 @@ this generator must set `min_sources` from the geometry of the capture set
 and must check the background is still dense enough to suppress known static
 clutter — the harness's `n_known_clutter_survived` is there for exactly that,
 and it is what disqualifies the otherwise-tempting `min_sources=4`.
+
+---
+
+## Second rig: recorded TWO_LIDAR bags (VLP-32C)
+
+The first real-data test of Method E on a **different rig**: four recorded
+ROS 2 bags (`ros/lctk_sample_data/bags/TWO_LIDAR_*`, gitignored), each a
+~20 s static-board capture from a two-LiDAR rig (VLP-32C + a solid-state
+Falcon; the Falcon is a separate write-up). Exported to the npz frame cache
+by `tools/export_bag_npz.py`, evaluated through the same
+`benchmark_e_loo` harness, classified against the rig's own reference box
+(`ros/lctk_launch/config/board/bbox-vlp.json5`), which loads through the
+same rotation-aware `bbox_ref` path as the pcap box.
+
+### The capture set is two board positions, not four
+
+Measured, and decisive for how the LOO is run: the four bags hold only **two
+distinct board positions** — `{TWO_LIDAR_1, TWO_LIDAR_2}` at one location
+(call it **A**), `{TWO_LIDAR_3, TWO_LIDAR_4}` at another (**B**). A naive
+4-fold LOO is therefore **confounded**: holding out bag 1 leaves its
+same-position twin (bag 2) in the background, so the held-out board is
+partly self-suppressed. That confound is visible in the numbers — a naive
+4-bag sweep gave 0 % at `min_sources=1`, and a weak, asymmetric 5–16 % at
+`min_sources=2/3`.
+
+The correct experiment merges each pair into one source and runs a clean
+**2-fold LOO at `min_sources=1`**: hold out A, build the background from B
+(which has no board at A), and vice versa. No twin contamination, one clean
+contributor per fold. `tools/bag_motion_probe.py` is the gate check — it
+confirms foreground survives (the board is not in the same place across all
+four), so the premise holds.
+
+### The board is at ~9 m — 4× the pcap range — and that changes the tuning
+
+The bag board sits at ~9–10 m (bbox centre `[9.2, 1.1, −0.5]` in the
+velodyne frame) versus ~2 m for the pcap board. At the stage-6 operating
+point *with the pcap's default `vertical_gap_deg=3.0`*, recall was only
+**3.3 %** — even though the board is plainly present. The 6-panel overlay
+(`--save-overlays`, added for exactly this diagnosis) showed why: the board
+*is* a clean hollow diamond (all three holes visible in the plane raster),
+but its candidate cluster absorbed a tail of ground points 2.5 m below,
+inflating the fitted quad to 1.2 × 1.9 m and failing the size gate.
+
+The cause is range-dependent and specific: the anisotropic clustering
+z-compresses by `2·r·tan(gap_deg)`, which at r≈9 m and 3° is ~0.9 m — enough
+to merge the ground into the board. Retuning `--vertical-gap-deg 1.0`
+(~0.3 m tolerance at 9 m — still bridges the board's own ring gaps, no longer
+reaches the ground) is the fix:
+
+| `vertical_gap_deg` | recall (630/795 frames) |
+|---|---|
+| 3.0 (pcap default) | 3.3 % |
+| 0 (isotropic) | 0 % — ring gaps at 9 m fragment the board |
+| **1.0** | **79.2 %** |
+
+### Operating point and results
+
+`--stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 1.0
+--min-sources 1`, merged 2-fold LOO, all frames:
+
+| fold (position) | true board | frames | recall | clutter |
+|---|---|---|---|---|
+| A = bags 1+2 | 397 | 397 | **100 %** | 0 |
+| B = bags 3+4 | 233 | 398 | 58.5 % | 0 |
+| **total** | **630** | **795** | **79.2 %** | **0 → 100 % precision** |
+
+Verified visually: the accepted quad traces the hollow-diamond board (holes
+and all) at score ~0.88, clear of the ground.
+
+### What does not transfer from the pcap rig
+
+- **`n_known_clutter_survived` is meaningless here.** Its coordinates are the
+  *pcap* rig's static attractors; on this rig it is not a valid sanity
+  check, and is reported as 0 only because those specific points are empty
+  here. The genuine precision evidence is the bbox classification: 0 clutter
+  across 795 frames.
+- **Isolation *hurts* at this range.** Adding `--isolation
+  --isolation-max-density 0.3` collapses recall to 50.9 % (position B falls
+  233 → 8): at 9 m the board's backing structure trips the exterior-band
+  coplanar test that, on the pcap rig, cleanly separated a free-standing
+  board from a wall panel. It is correctly **off** for this rig.
+- **Timing is ~200 ms/frame, 2× the 100 ms budget** — the noisier
+  long-range foreground leaves more points to cluster than the pcap clouds.
+  Not disqualifying for offline calibration, but no longer inside budget.
+
+### Honest read
+
+- **Method E transfers to a second rig and a 4×-farther board — 79.2 % /
+  100 % — but only after a range-appropriate `vertical_gap_deg`.** The
+  anisotropic tolerance is not rig-independent; a board-distance-aware
+  `vertical_gap_deg` (or an explicit per-rig setting) is the clean
+  follow-on, and the fixed default carried over from the near-board pcap
+  case is the wrong value here.
+- **Position B (58.5 %) is a real partial failure, not noise** — B is the
+  harder of the two placements (farther / more grazing), and its fold is the
+  one that loses frames. A is a clean 100 %.
+- **Only two board positions** means this is a weaker cross-position test
+  than the pcap's five; it is one honest clean-LOO pair, not five.
