@@ -28,7 +28,7 @@ from .background import BackgroundModel
 from .bbox_ref import BoxRef, load_bbox
 from .board_config import BoardConfig
 from .detector import detect
-from .ingest import Frame, load_frames
+from .ingest import Frame, load_bag_frames, load_frames
 
 # The pcap rig's reference, used by stages 3-8 and Method E. Other rigs
 # (e.g. the recorded TWO_LIDAR bags) supply their own via --bbox.
@@ -49,7 +49,7 @@ def near_known_clutter(center: np.ndarray) -> bool:
     return bool((d <= _KNOWN_CLUTTER_TOL).any())
 
 
-def build_background(all_frames: dict[int, list[Frame]], held_out: int,
+def build_background(all_frames: dict[str, list[Frame]], held_out: str,
                      voxel: float, dilation_radius: int,
                      min_sources: int) -> BackgroundModel:
     """One source per contributing dataset -- that per-source split is what
@@ -65,33 +65,44 @@ def build_background(all_frames: dict[int, list[Frame]], held_out: int,
     return model
 
 
-def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
-            box: BoxRef, max_frames: int | None = None,
-            background_voxel: float = 0.06, dilation_radius: int = 1,
-            min_sources: int = 2) -> dict:
-    # Each fold contributes every dataset except the held-out one, so a
+def load_sources(kind: str, names: list[str], sensor: str,
+                 max_frames: int | None) -> dict[str, list[Frame]]:
+    """Load frames for each named capture. `kind` selects the reader:
+    "pcap" for the sample datasets 1-5, "bag" for exported TWO_LIDAR bags
+    (see tools/export_bag_npz.py). Labels are the names as given, so folds
+    are readable in the output either way."""
+    if kind == "pcap":
+        return {n: load_frames(int(n), max_frames=max_frames) for n in names}
+    if kind == "bag":
+        return {n: load_bag_frames(n, sensor, max_frames=max_frames)
+                for n in names}
+    raise ValueError(f"unknown source kind {kind!r}; expected 'pcap' or 'bag'")
+
+
+def run_loo(sources: dict[str, list[Frame]], board: BoardConfig,
+            out_dir: Path, *, box: BoxRef, background_voxel: float = 0.06,
+            dilation_radius: int = 1, min_sources: int = 2) -> dict:
+    # Each fold contributes every source except the held-out one, so a
     # consensus threshold above that count can never be met: the background
     # would finalize EMPTY, every point would read as foreground, and the
     # fold would report a meaninglessly high recall from a detector that is
     # no longer doing background subtraction at all. Fail loudly instead --
     # this is the same class of silent-acceptance bug as C-04.
-    n_contributors = len(datasets) - 1
+    n_contributors = len(sources) - 1
     if n_contributors < min_sources:
         raise ValueError(
-            f"min_sources={min_sources} is unreachable with {len(datasets)} "
-            f"datasets: each fold has only {n_contributors} contributing "
+            f"min_sources={min_sources} is unreachable with {len(sources)} "
+            f"captures: each fold has only {n_contributors} contributing "
             f"source(s), so the background would be empty and every point "
             f"would count as foreground. Use at least {min_sources + 1} "
-            f"datasets, or lower --min-sources.")
+            f"captures, or lower --min-sources.")
     out_dir.mkdir(parents=True, exist_ok=True)
-    all_frames = {ds: load_frames(ds, max_frames=max_frames)
-                  for ds in datasets}
-    folds: dict[int, dict] = {}
-    for held_out in datasets:
-        model = build_background(all_frames, held_out, background_voxel,
+    folds: dict[str, dict] = {}
+    for held_out in sources:
+        model = build_background(sources, held_out, background_voxel,
                                  dilation_radius, min_sources)
         outcomes = [detect(f.xyz, board, generator="e", background=model)
-                    for f in all_frames[held_out]]
+                    for f in sources[held_out]]
         dets = [o.detection for o in outcomes if o.detection is not None]
         n_true = sum(1 for d in dets if box.contains(d.center))
         folds[held_out] = {
@@ -123,6 +134,7 @@ def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
         "flatness_rms_max": board.flatness_rms_max,
         "isolation": board.isolation,
         "isolation_max_density": board.isolation_max_density,
+        "source_labels": list(sources),
         "folds": folds,
     }
     (out_dir / "loo_summary.json").write_text(json.dumps(summary, indent=2))
@@ -131,7 +143,19 @@ def run_loo(datasets: list[int], board: BoardConfig, out_dir: Path, *,
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--datasets", type=int, nargs="+", default=[1, 2, 3, 4, 5])
+    ap.add_argument("--source", choices=["pcap", "bag"], default="pcap",
+                    help="pcap = sample datasets 1-5; bag = exported "
+                         "TWO_LIDAR bags (run tools/export_bag_npz.py first)")
+    ap.add_argument("--names", nargs="+", default=None,
+                    help="capture names; defaults to 1..5 for pcap and "
+                         "TWO_LIDAR_1..4 for bag")
+    ap.add_argument("--sensor", choices=["vlp32", "falcon"], default="vlp32",
+                    help="bag sources only; falcon is solid-state, so "
+                         "consider --vertical-gap-deg 0")
+    ap.add_argument("--vertical-gap-deg", type=float, default=3.0,
+                    help="anisotropic clustering tolerance; 3.0 suits the "
+                         "VLP-32C's ring gaps, 0 disables it for a "
+                         "solid-state sensor with no ring structure")
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--side", type=float, default=1.0)
     ap.add_argument("--background-voxel", type=float, default=0.06,
@@ -154,15 +178,21 @@ def main() -> None:
                          "each recording rig has its own")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
+    names = args.names
+    if names is None:
+        names = (["1", "2", "3", "4", "5"] if args.source == "pcap"
+                 else ["TWO_LIDAR_1", "TWO_LIDAR_2", "TWO_LIDAR_3",
+                       "TWO_LIDAR_4"])
+    sources = load_sources(args.source, names, args.sensor, args.max_frames)
     board = BoardConfig(
         side_m=args.side,
         stance_floor=0.9 if args.stance_gate else 0.0,
         flatness_rms_max=args.flatness_rms_max,
         isolation=args.isolation,
         isolation_max_density=args.isolation_max_density,
+        vertical_gap_deg=args.vertical_gap_deg,
     )
-    run_loo(args.datasets, board, args.out, box=load_bbox(args.bbox),
-            max_frames=args.max_frames,
+    run_loo(sources, board, args.out, box=load_bbox(args.bbox),
             background_voxel=args.background_voxel,
             dilation_radius=args.dilation_radius,
             min_sources=args.min_sources)
