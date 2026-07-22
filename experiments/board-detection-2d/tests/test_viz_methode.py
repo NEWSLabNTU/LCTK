@@ -74,3 +74,4 @@ def test_renders_with_empty_foreground(tmp_path):
     assert len(model.foreground_points(downsample(scene, 0.03))) == 0
     render_methode(scene, board, model, out, box, p)
     assert p.exists()
+    assert _png_header(p) == _PNG_MAGIC
