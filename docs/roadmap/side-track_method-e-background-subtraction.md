@@ -315,3 +315,60 @@ and all) at score ~0.88, clear of the ground.
   one that loses frames. A is a clean 100 %.
 - **Only two board positions** means this is a weaker cross-position test
   than the pcap's five; it is one honest clean-LOO pair, not five.
+
+## Solid-state: the Falcon topic
+
+The same bags carry a second sensor — an Innovusion/Seyond Falcon
+(`/lidar/falcon/iv_points`, solid-state, ~92 k points/frame, no ring
+structure) — classified against its own reference box
+(`bbox-seyond.json5`, board at ~7.4 m in the seyond frame). This is the
+**first test of the projection pipeline on a real solid-state LiDAR**;
+phase 7 had only synthetic uniform-sampling evidence for that case, with its
+own caveat that "real spinning-LiDAR data is the hard case here, not the easy
+one." The same physical board, scene, and capture as the VLP-32C run above —
+only the sensor differs — so this is the cleanest sensor-to-sensor
+comparison in the phase.
+
+### Anisotropic clustering must be OFF for a ring-less sensor
+
+The mirror image of the VLP-32C finding. `vertical_gap_deg` exists to bridge
+a spinning LiDAR's ring gaps; the Falcon has none, and applying the
+z-compression to its dense uniform cloud **destroys** detection:
+
+| `vertical_gap_deg` | recall |
+|---|---|
+| **0 (isotropic)** | **92.9 %** |
+| 1.0 | 0 % — z-compression corrupts the dense cloud |
+
+### Results
+
+`--stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 0
+--min-sources 1`, merged 2-fold LOO, all frames:
+
+| fold (position) | true board | frames | recall | clutter |
+|---|---|---|---|---|
+| A = bags 1+2 | 391 | 397 | 98.5 % | 0 |
+| B = bags 3+4 | 347 | 397 | 87.4 % | 0 |
+| **total** | **738** | **794** | **92.9 %** | **0 → 100 % precision** |
+
+The plane raster of an accepted Falcon detection is a dense, crisp hollow
+diamond — all three holes cleanly resolved, far sharper than the sparse
+VLP-32C board at the same range.
+
+### Read
+
+- **The projection + 2D-scorer pipeline works on a real solid-state LiDAR —
+  92.9 % / 100 %.** Phase 7's synthetic solid-state claim holds on real
+  data, and its worry that spinning data was "the easy case" is inverted
+  here: the Falcon's dense uniform sampling has no ring-gap fragmentation,
+  so it is the *easier* sensor. On the identical board and scene it beats the
+  VLP-32C (92.9 % vs 79.2 %), and both positions clear 87 % where the VLP's
+  position B stalled at 58.5 %.
+- **The one knob that flips between sensors is `vertical_gap_deg`** — tuned
+  down for the VLP's far board, off entirely for the Falcon. Everything else
+  (stance, flatness, `min_sources`, isolation-off) is shared. A
+  sensor-aware default for that one parameter is the obvious follow-on.
+- **Timing is ~270 ms/frame** — the highest here, from the 67 k-point
+  downsampled Falcon cloud. Comfortably usable offline, well over the 100 ms
+  real-time budget.
+- Same two-position caveat as the VLP-32C run: a clean-LOO pair, not five.
