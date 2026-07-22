@@ -63,11 +63,25 @@ def _scatter(ax, pts: np.ndarray, ai: int, bi: int, color: str,
     ax.scatter(pts[::step, ai], pts[::step, bi], s=s, c=color, alpha=alpha)
 
 
+# How far beyond the reference box, in metres, the spatial panels show. The
+# board is a small object; without a zoom the panels autoscale to distant
+# scattered foreground (100 m+ away) and the board region collapses to a few
+# invisible pixels. Centre on the box and clip to this margin instead.
+_ZOOM_MARGIN_M = 4.0
+
+
+def _zoom_to_box(ax, box_corners: np.ndarray, ai: int, bi: int) -> None:
+    lo = box_corners[:, [ai, bi]].min(axis=0) - _ZOOM_MARGIN_M
+    hi = box_corners[:, [ai, bi]].max(axis=0) + _ZOOM_MARGIN_M
+    ax.set_xlim(lo[0], hi[0])
+    ax.set_ylim(lo[1], hi[1])
+
+
 def _proj_panel(ax, ai: int, bi: int, labels: tuple[str, str], title: str,
                 raw, fg, box_corners, outcome: DetectOutcome) -> None:
-    """One orthographic projection panel with all layers."""
-    _scatter(ax, raw, ai, bi, _C_RAW, 0.5, 0.35)
-    _scatter(ax, fg, ai, bi, _C_FG, 1.5, 0.8)
+    """One orthographic projection panel with all layers, zoomed to the box."""
+    _scatter(ax, raw, ai, bi, _C_RAW, 2.0, 0.35)
+    _scatter(ax, fg, ai, bi, _C_FG, 4.0, 0.8)
     _draw_box(ax, box_corners, ai, bi)
     if outcome.best_rejected is not None:
         _draw_quad(ax, outcome.best_rejected, ai, bi, _C_CAND)
@@ -77,6 +91,7 @@ def _proj_panel(ax, ai: int, bi: int, labels: tuple[str, str], title: str,
     ax.set_xlabel(labels[0])
     ax.set_ylabel(labels[1])
     ax.set_title(title)
+    _zoom_to_box(ax, box_corners, ai, bi)
 
 
 def render_methode(frame_xyz: np.ndarray, board: BoardConfig,
@@ -91,21 +106,24 @@ def render_methode(frame_xyz: np.ndarray, board: BoardConfig,
 
     fig, axes = plt.subplots(2, 3, figsize=(19, 11))
 
-    # Panel 1: raw only, top-down
-    _scatter(axes[0, 0], dn, 0, 1, _C_RAW, 0.5, 0.5)
+    # Panel 1: raw only, top-down (zoomed to the box like the rest)
+    _scatter(axes[0, 0], dn, 0, 1, _C_RAW, 2.0, 0.5)
     _draw_box(axes[0, 0], box_corners, 0, 1)
     axes[0, 0].set_aspect("equal")
     axes[0, 0].set_xlabel("x [m]")
     axes[0, 0].set_ylabel("y [m]")
     axes[0, 0].set_title("raw cloud (top-down)")
+    _zoom_to_box(axes[0, 0], box_corners, 0, 1)
 
-    # Panel 2: foreground only, top-down
-    _scatter(axes[0, 1], fg, 0, 1, _C_FG, 1.5, 0.9)
+    # Panel 2: foreground only, top-down. Title carries the TOTAL foreground
+    # count (whole scene), but the view is zoomed to the box.
+    _scatter(axes[0, 1], fg, 0, 1, _C_FG, 4.0, 0.9)
     _draw_box(axes[0, 1], box_corners, 0, 1)
     axes[0, 1].set_aspect("equal")
     axes[0, 1].set_xlabel("x [m]")
     axes[0, 1].set_ylabel("y [m]")
-    axes[0, 1].set_title(f"foreground diff ({len(fg)} pts)")
+    axes[0, 1].set_title(f"foreground diff ({len(fg)} pts total)")
+    _zoom_to_box(axes[0, 1], box_corners, 0, 1)
 
     # Panel 3: mix, top-down
     _proj_panel(axes[0, 2], 0, 1, ("x [m]", "y [m]"),
