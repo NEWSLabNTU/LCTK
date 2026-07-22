@@ -29,6 +29,7 @@ from .bbox_ref import BoxRef, load_bbox
 from .board_config import BoardConfig
 from .detector import detect
 from .ingest import Frame, load_bag_frames, load_frames
+from .viz_methode import render_methode
 
 # The pcap rig's reference, used by stages 3-8 and Method E. Other rigs
 # (e.g. the recorded TWO_LIDAR bags) supply their own via --bbox.
@@ -79,9 +80,40 @@ def load_sources(kind: str, names: list[str], sensor: str,
     raise ValueError(f"unknown source kind {kind!r}; expected 'pcap' or 'bag'")
 
 
+def _pick_overlay_indices(outcomes: list, n: int) -> list[int]:
+    """Up to n frame indices to render: the first detection, the highest-
+    scoring rejection, and an even spread -- deduped, capped at n."""
+    picks: list[int] = []
+    det_idx = [i for i, o in enumerate(outcomes) if o.detection is not None]
+    if det_idx:
+        picks.append(det_idx[0])
+    rej = [(o.best_rejected.score, i) for i, o in enumerate(outcomes)
+           if o.best_rejected is not None]
+    if rej:
+        picks.append(max(rej)[1])
+    if outcomes:
+        step = max(1, len(outcomes) // n)
+        picks.extend(range(0, len(outcomes), step))
+    seen: list[int] = []
+    for i in picks:
+        if i not in seen:
+            seen.append(i)
+        if len(seen) >= n:
+            break
+    return seen
+
+
+def _save_fold_overlays(frames, outcomes, board, model, box, out_dir,
+                        held_out, n) -> None:
+    for i in _pick_overlay_indices(outcomes, n):
+        render_methode(frames[i].xyz, board, model, outcomes[i], box,
+                       out_dir / f"overlay_{held_out}_frame{i:04d}.png")
+
+
 def run_loo(sources: dict[str, list[Frame]], board: BoardConfig,
             out_dir: Path, *, box: BoxRef, background_voxel: float = 0.06,
-            dilation_radius: int = 1, min_sources: int = 2) -> dict:
+            dilation_radius: int = 1, min_sources: int = 2,
+            save_overlays: int = 0) -> dict:
     # Each fold contributes every source except the held-out one, so a
     # consensus threshold above that count can never be met: the background
     # would finalize EMPTY, every point would read as foreground, and the
@@ -103,6 +135,9 @@ def run_loo(sources: dict[str, list[Frame]], board: BoardConfig,
                                  dilation_radius, min_sources)
         outcomes = [detect(f.xyz, board, generator="e", background=model)
                     for f in sources[held_out]]
+        if save_overlays > 0:
+            _save_fold_overlays(sources[held_out], outcomes, board, model,
+                                box, out_dir, held_out, save_overlays)
         dets = [o.detection for o in outcomes if o.detection is not None]
         n_true = sum(1 for d in dets if box.contains(d.center))
         folds[held_out] = {
@@ -173,6 +208,9 @@ def main() -> None:
     ap.add_argument("--isolation", action="store_true",
                     help="stage-8 isolation gate")
     ap.add_argument("--isolation-max-density", type=float, default=0.3)
+    ap.add_argument("--save-overlays", type=int, default=0,
+                    help="render this many Method E 6-panel overlays per "
+                         "fold into --out (0 = off)")
     ap.add_argument("--bbox", type=Path, default=DEFAULT_BBOX_PATH,
                     help="true-board reference box (bbox.json5 schema); "
                          "each recording rig has its own")
@@ -195,7 +233,8 @@ def main() -> None:
     run_loo(sources, board, args.out, box=load_bbox(args.bbox),
             background_voxel=args.background_voxel,
             dilation_radius=args.dilation_radius,
-            min_sources=args.min_sources)
+            min_sources=args.min_sources,
+            save_overlays=args.save_overlays)
 
 
 if __name__ == "__main__":
