@@ -7,7 +7,11 @@ import numpy as np
 import pytest
 
 from boarddet import benchmark_e_loo as loo
+from boarddet.bbox_ref import load_bbox
+from boarddet.benchmark_e_loo import DEFAULT_BBOX_PATH
 from boarddet.ingest import Frame
+
+_BOX = load_bbox(DEFAULT_BBOX_PATH)
 
 # Confirmed true-board centers, phase-7 doc "Pose sanity" table (:782-793).
 _CONFIRMED_BOARDS = [
@@ -20,12 +24,12 @@ _CONFIRMED_CLUTTER = [(-1.83, -2.89, -0.1), (4.7, 2.6, -0.1), (-3.3, 3.4, 0.5)]
 
 @pytest.mark.parametrize("center", _CONFIRMED_BOARDS)
 def test_confirmed_board_centers_are_in_bbox(center):
-    assert loo.in_bbox(np.array(center))
+    assert _BOX.contains(np.array(center))
 
 
 @pytest.mark.parametrize("center", _CONFIRMED_CLUTTER)
 def test_confirmed_clutter_is_outside_bbox(center):
-    assert not loo.in_bbox(np.array(center))
+    assert not _BOX.contains(np.array(center))
 
 
 @pytest.mark.parametrize("center", _CONFIRMED_CLUTTER)
@@ -67,7 +71,8 @@ def test_unreachable_min_sources_is_rejected_loudly(tmp_path):
     detector no longer doing background subtraction. Must raise, not run."""
     from boarddet.board_config import BoardConfig
     with pytest.raises(ValueError, match="unreachable"):
-        loo.run_loo([1, 3], BoardConfig(side_m=1.0), tmp_path, min_sources=2)
+        loo.run_loo([1, 3], BoardConfig(side_m=1.0), tmp_path, box=_BOX,
+                    min_sources=2)
 
 
 def test_consensus_drops_a_single_contributors_unique_geometry():
