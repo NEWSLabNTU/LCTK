@@ -62,6 +62,45 @@ Holds out each dataset in turn and builds its background from the other four.
 `--min-sources` is the consensus threshold and is load-bearing: 1 (a plain
 union) scores 0/535 on this data. See the results doc linked above.
 
+### Recorded bags (two-LiDAR: VLP-32C + solid-state Falcon)
+
+The `TWO_LIDAR_*` bags are gitignored — see
+[`ros/lctk_sample_data/bags/README.md`](../../ros/lctk_sample_data/bags/README.md).
+Export them once (needs ROS, runs outside this venv):
+
+```bash
+source /opt/ros/humble/setup.bash
+python3 tools/export_bag_npz.py
+```
+
+Then benchmark either sensor. The bag rig has its own reference box per
+sensor frame, so `--bbox` is required. The four bags are only two board
+positions (`TWO_LIDAR_1`/`2` share one, `3`/`4` the other), so the commands
+below pick one bag per position (`TWO_LIDAR_1` and `TWO_LIDAR_3`) for a
+clean 2-fold LOO at `--min-sources 1`; the headline results merge each pair
+to use all frames — see the results doc. Key flags differ by sensor:
+
+```bash
+# VLP-32C: spinning, board at ~9 m -> anisotropic clustering tuned down
+uv run python -m boarddet.benchmark_e_loo --source bag --sensor vlp32 \
+  --names TWO_LIDAR_1 TWO_LIDAR_3 --min-sources 1 \
+  --side 1.0 --stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 1.0 \
+  --bbox ../../ros/lctk_launch/config/board/bbox-vlp.json5 \
+  --out results/bagE-vlp32
+
+# Falcon: solid-state, no rings -> anisotropic clustering OFF
+uv run python -m boarddet.benchmark_e_loo --source bag --sensor falcon \
+  --names TWO_LIDAR_1 TWO_LIDAR_3 --min-sources 1 \
+  --side 1.0 --stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 0 \
+  --bbox ../../ros/lctk_launch/config/board/bbox-seyond.json5 \
+  --out results/bagE-falcon
+```
+
+`--vertical-gap-deg` bridges a spinning LiDAR's ring gaps; the Falcon has
+none, so it is off (0), and the pcap default (3.0) must be lowered for the
+VLP's far board. Add `--save-overlays N` to write N 6-panel Method E
+overlays per fold into `--out`.
+
 ## Tests
 
 ```bash
