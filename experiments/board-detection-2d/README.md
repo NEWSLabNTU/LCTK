@@ -53,7 +53,7 @@ spot-checking. `results/` is gitignored — re-run to reproduce.
 
 ```bash
 uv run python -m boarddet.benchmark_e_loo \
-  --datasets 1 2 3 4 5 --side 1.0 --stance-gate --flatness-rms-max 0.045 \
+  --side 1.0 --stance-gate --flatness-rms-max 0.045 \
   --min-sources 3 --isolation --isolation-max-density 0.3 \
   --out results/methodE-ms3-iso
 ```
