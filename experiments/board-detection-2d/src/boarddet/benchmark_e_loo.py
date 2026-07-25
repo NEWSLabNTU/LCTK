@@ -208,6 +208,21 @@ def main() -> None:
                          "contributing datasets saw it; 1 = plain union")
     ap.add_argument("--stance-gate", action="store_true",
                     help="stage-6 operating point: stance_floor=0.9")
+    ap.add_argument("--square-icp", action="store_true",
+                    help="refine each candidate with the fixed-side square "
+                         "fitter (pins side=side_m, spends DOF on pose). "
+                         "Fixes the minAreaRect oversize that sinks a dense "
+                         "board's score, and re-activates the stance gate -- "
+                         "pair with a correct --up-axis on a z-forward rig")
+    ap.add_argument("--up-axis", type=float, nargs=3, default=(0.0, 0.0, 1.0),
+                    metavar=("X", "Y", "Z"),
+                    help="world-up direction in the sensor frame for the "
+                         "stance gate; (0 0 1) for a z-up rig (pcap, VLP "
+                         "bag), (0 1 0) for the z-forward Falcon")
+    ap.add_argument("--cluster-min-points", type=int, default=30,
+                    help="DBSCAN core-point density for generator E's "
+                         "foreground clustering; lower it for a far, sparsely "
+                         "sampled board (the ~9 m VLP bag wants 20)")
     ap.add_argument("--flatness-rms-max", type=float, default=0.035,
                     help="stage 6 adopted 0.045")
     ap.add_argument("--isolation", action="store_true",
@@ -234,6 +249,9 @@ def main() -> None:
         isolation=args.isolation,
         isolation_max_density=args.isolation_max_density,
         vertical_gap_deg=args.vertical_gap_deg,
+        cluster_min_points=args.cluster_min_points,
+        square_icp=args.square_icp,
+        up_axis=tuple(args.up_axis),
     )
     run_loo(sources, board, args.out, box=load_bbox(args.bbox),
             background_voxel=args.background_voxel,

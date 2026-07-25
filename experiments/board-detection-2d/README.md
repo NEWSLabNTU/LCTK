@@ -81,25 +81,44 @@ clean 2-fold LOO at `--min-sources 1`; the headline results merge each pair
 to use all frames — see the results doc. Key flags differ by sensor:
 
 ```bash
-# VLP-32C: spinning, board at ~9 m -> anisotropic clustering tuned down
+# VLP-32C: spinning, board at ~9 m -> anisotropic clustering tuned down,
+# DBSCAN density lowered so the sparse far-board corners survive
 uv run python -m boarddet.benchmark_e_loo --source bag --sensor vlp32 \
   --names TWO_LIDAR_1 TWO_LIDAR_3 --min-sources 1 \
   --side 1.0 --stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 1.0 \
+  --cluster-min-points 20 \
   --bbox ../../ros/lctk_launch/config/board/bbox-vlp.json5 \
   --out results/bagE-vlp32
 
-# Falcon: solid-state, no rings -> anisotropic clustering OFF
+# Falcon: solid-state, no rings -> anisotropic clustering OFF; z-forward
+# frame -> gravity along +y; fixed-square fitter pins the side length
 uv run python -m boarddet.benchmark_e_loo --source bag --sensor falcon \
   --names TWO_LIDAR_1 TWO_LIDAR_3 --min-sources 1 \
   --side 1.0 --stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 0 \
+  --square-icp --up-axis 0 1 0 \
   --bbox ../../ros/lctk_launch/config/board/bbox-seyond.json5 \
   --out results/bagE-falcon
 ```
 
-`--vertical-gap-deg` bridges a spinning LiDAR's ring gaps; the Falcon has
-none, so it is off (0), and the pcap default (3.0) must be lowered for the
-VLP's far board. Add `--save-overlays N` to write N 6-panel Method E
-overlays per fold into `--out`.
+Key flags, why they differ by sensor:
+
+- `--vertical-gap-deg` bridges a spinning LiDAR's ring gaps; the Falcon has
+  none, so it is off (0), and the pcap default (3.0) must be lowered for the
+  VLP's far board.
+- `--cluster-min-points` is the foreground DBSCAN core-point density
+  (default 30). The VLP board at ~9 m is sampled so sparsely that its corner
+  points otherwise drop out as noise and truncate the fitted quad; 20 keeps
+  them (recall 79.9% -> 91.2%, precision unchanged).
+- `--up-axis` is world-up in the sensor frame for the stance gate. It is
+  `0 0 1` for the z-up rigs (default) but `0 1 0` for the z-forward Falcon
+  frame — with the wrong axis the stance gate rejects every upright board.
+- `--square-icp` pins the board side to `--side` and fits only pose, fixing
+  the `minAreaRect` oversize that sinks a dense Falcon board's score
+  (recall 92.7% -> 100%); it also re-activates the stance gate, which is why
+  the Falcon command must pair it with the correct `--up-axis`.
+
+Add `--save-overlays N` to write N 6-panel Method E overlays per fold into
+`--out`.
 
 ## Tests
 
