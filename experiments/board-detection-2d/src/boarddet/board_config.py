@@ -21,6 +21,21 @@ class BoardConfig:
     # clusters. VLP-32C worst adjacent-channel spacing is ~3 deg. 0 disables
     # the anisotropic scaling (plain isotropic DBSCAN).
     vertical_gap_deg: float = 3.0
+    # DBSCAN core-point density (min neighbours within eps) for generator E's
+    # foreground clustering. The generator's own default is 30, tuned for the
+    # near (~2 m) pcap board. A far board (the ~9 m VLP bag) is sampled so
+    # sparsely that its corner/edge points fall below 30 neighbours and get
+    # dropped as noise, truncating the cluster so the fitted quad no longer
+    # spans the board (measured: VLP bag recall 79.9% -> 91.2% at 20, with
+    # precision held at 100%). Set it from the board's sampled density.
+    cluster_min_points: int = 30
+    # World "up" direction in the SENSOR frame, for the diamond-stance gate
+    # (`_stance`/`_up_2d` in detector.py). Default (0,0,1) is a REP-103 z-up
+    # frame (pcap rig, VLP bag). A z-forward sensor (the Seyond Falcon, board
+    # at z~7.4 m) has gravity along a different axis; leaving this at +z makes
+    # the stance gate read every upright board as lying flat and reject it
+    # (measured: Falcon recall collapses to 0/397). Set it per rig.
+    up_axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
     # Plane-fit RMS gate in plausible_board_patch (candidates/__init__.py):
     # a 3D patch flatter than this (in meters) is accepted as board-shaped.
     # Default matches the module's own _FLATNESS_RMS_MAX -- current

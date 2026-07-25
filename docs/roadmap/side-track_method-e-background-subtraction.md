@@ -286,6 +286,26 @@ reaches the ground) is the fix:
 Verified visually: the accepted quad traces the hollow-diamond board (holes
 and all) at score ~0.88, clear of the ground.
 
+#### Follow-up (2026-07-25): `cluster_min_points` for the sparse far board
+
+Overlay review of the clean `TWO_LIDAR_1`/`TWO_LIDAR_3` pair showed the fitted
+quad *truncating* the board — spanning only its dense middle band, not the
+full diamond. Root cause: at 9 m the board's corner/edge points fall below
+generator E's hardcoded `cluster_min_points=30` DBSCAN density and are dropped
+as **noise** (measured: 40 % of the foreground labelled noise, cluster split
+in two), so the surviving cluster's `minAreaRect` is short. This is now a
+config/CLI knob (`--cluster-min-points`, `BoardConfig.cluster_min_points`).
+Lowering it to 20 keeps the sparse corners:
+
+| `cluster_min_points` | recall (`TWO_LIDAR_1`/`3`, 398 frames) | clutter |
+|---|---|---|
+| 30 (old default) | 79.9 % | 0 |
+| **20** | **91.2 %** (100 % / 82.4 %) | 0 → 100 % precision |
+| 15 | 88.9 % | 0 |
+
+`20` is the operating point; precision stays 100 %. Recommended VLP bag command
+gains `--cluster-min-points 20`.
+
 ### What does not transfer from the pcap rig
 
 - **`n_known_clutter_survived` is meaningless here.** Its coordinates are the
@@ -372,3 +392,94 @@ VLP-32C board at the same range.
   downsampled Falcon cloud. Comfortably usable offline, well over the 100 ms
   real-time budget.
 - Same two-position caveat as the VLP-32C run: a clean-LOO pair, not five.
+
+#### Follow-up (2026-07-25): fixed-square fitter + per-rig gravity axis
+
+Overlay review found frames where the orange near-miss quad traced the board
+perfectly yet the verdict was negative. Two coupled root causes, now fixed:
+
+1. **The score, not gravity, was rejecting it.** With `square_icp` off, the
+   side length comes from `cv2.minAreaRect` — the minimum *enclosing*
+   rectangle, which over-sizes on a dense, hole-punched, foreshortened Falcon
+   board (measured mean side 1.18 m vs 1.0 m). The score's size penalty
+   `exp(−2·|mean−1|)` then pushed it to **0.499**, just under `min_score=0.5`.
+   Enabling the fixed-side square fitter (`--square-icp`) pins the side to
+   `side_m` and spends its DOF on pose, taking the score to ~1.0.
+2. **The gravity axis was hardcoded to world +z.** `_stance`/`_up_2d` assumed
+   a REP-103 z-up frame, but the Falcon frame is **z-forward** (board at
+   z ≈ 7.4 m; gravity ≈ ∓y). Turning on `square_icp` re-activates the stance
+   gate, which — still reading up = +z — then rejected *every* upright board
+   (recall 0/397). The up axis is now a per-rig config/CLI value
+   (`--up-axis`, `BoardConfig.up_axis`); `0 1 0` is correct here.
+
+| Falcon config (`TWO_LIDAR_1`/`3`) | recall | precision |
+|---|---|---|
+| baseline (`square_icp` off, stance off) | 92.7 % | 100 % |
+| `--square-icp` (stance off) | 100 % | 100 % |
+| `--square-icp`, stance on, `--up-axis 0 0 1` (wrong) | **0 %** | — |
+| **`--square-icp`, stance on, `--up-axis 0 1 0`** | **100 %** | 100 % |
+
+This retires the "sensor-aware default" follow-on above for gravity: the one
+knob that flips between the z-up rigs and the z-forward Falcon is `up_axis`,
+now explicit. Recommended Falcon bag command gains `--square-icp --up-axis 0 1 0`.
+
+---
+
+## Appendix: `benchmark_e_loo` CLI reference
+
+Every result above was produced by `boarddet.benchmark_e_loo`, but the
+argument set is only shown by example. Full reference, grouped by role and
+wired to the code that consumes each flag (`src/boarddet/benchmark_e_loo.py`
+unless noted).
+
+### Data selection
+
+| flag | default | effect |
+|---|---|---|
+| `--source {pcap,bag}` | `pcap` | Selects the frame reader. `pcap` = sample datasets 1–5 (`ingest.load_frames`); `bag` = exported TWO_LIDAR bags (`ingest.load_bag_frames`, which requires `tools/export_bag_npz.py` to have been run first). |
+| `--names N …` | `1 2 3 4 5` (pcap) / `TWO_LIDAR_1 … 4` (bag) | The captures to use. Each name is simultaneously one held-out LOO fold *and* one background-contributing source in the other folds. |
+| `--sensor {vlp32,falcon}` | `vlp32` | **Bag sources only** (ignored for pcap). Chooses which sensor's exported cache to read. `falcon` is solid-state (no rings) — pair it with `--vertical-gap-deg 0`. |
+| `--max-frames N` | all | Truncates each capture to its first `N` frames. Smoke-test knob only. |
+| `--out DIR` | **required** | Destination for `loo_summary.json` and any overlays. |
+
+### Background model (`background.BackgroundModel`)
+
+| flag | default | effect |
+|---|---|---|
+| `--background-voxel M` | `0.06` | Occupancy cell size in metres. Smaller = stricter diff but more voxel-boundary aliasing; larger = coarser and risks absorbing the board. |
+| `--dilation-radius R` | `1` | Query-time neighbour stencil, `(2R+1)³` cells, that absorbs voxel-edge aliasing from range noise. `0` disables it (reproduces the aliasing bug). |
+| `--min-sources K` | `2` | **The load-bearing knob.** A voxel is background only once `≥ K` distinct sources have seen it; `1` is a plain union (scores 0/535 on the pcap set). Set it from the capture geometry — enough votes that no held-out board is covered by that many contributors. A fold with fewer than `K` contributors is a hard error (would finalize an empty background). |
+
+### Clustering / detector tuning
+
+| flag | default | effect |
+|---|---|---|
+| `--vertical-gap-deg D` | `3.0` | Anisotropic DBSCAN z-compression, `2·r·tan(D)`, that bridges spinning-LiDAR ring gaps. `3.0` suits the near VLP board; `1.0` for the far (9 m) VLP board (else it merges the ground); `0` for the Falcon (ringless — z-compression corrupts a dense cloud). Also gates whether `up_2d`/`close_height_m` are computed at all (`detector.py`). |
+| `--cluster-min-points N` | `30` | Generator E's foreground-DBSCAN core-point density (min neighbours within eps). `30` suits the near pcap board; the far (9 m) VLP board is sampled so sparsely that its corner points fall below it and drop out as noise, truncating the fitted quad — `20` keeps them (VLP bag recall 79.9% → 91.2%, precision unchanged). |
+| `--side M` | `1.0` | Physical board side length in metres; feeds every size/extent gate (and the pinned side of `--square-icp`). |
+
+### Acceptance gates
+
+| flag | default | effect |
+|---|---|---|
+| `--stance-gate` | off | Sets `stance_floor = 0.9` — reject a quad whose best diamond diagonal is more than ~25° off vertical. **Only actually fires when `--square-icp` is on or `vertical_gap_deg > 0`** (the scorer's stance gate needs an in-plane up direction); it is inert on a bare `--vertical-gap-deg 0` run. Reads world-up from `--up-axis`. |
+| `--square-icp` | off | Refine each candidate with the fixed-side square fitter (`square_fit.fit_fixed_square`): pins the side to `--side` and spends its DOF on pose. Fixes the `minAreaRect` oversize that sinks a dense board's score below `min_score` (Falcon bag recall 92.7% → 100%). It **re-activates the stance gate**, so on a non-z-up rig it must be paired with the correct `--up-axis`. |
+| `--up-axis X Y Z` | `0 0 1` | World-up direction in the sensor frame for the stance gate. `0 0 1` for a REP-103 z-up rig (pcap, VLP bag); `0 1 0` for the z-forward Falcon frame (board at z ≈ 7.4 m). With the wrong axis the stance gate reads every upright board as lying flat and rejects it (Falcon recall → 0/397). |
+| `--flatness-rms-max M` | `0.035` | Plane-fit RMS ceiling in `plausible_board_patch` (`candidates/__init__.py`). Above the VLP-32C noise floor. Stage 6 adopted `0.045`. |
+| `--isolation` | off | Free-standing gate: rejects a candidate whose plane has coplanar points continuing past the fitted quad (an embedded panel/wall rather than a free board). Helps the pcap rig; *hurts* the far bags (the board's own backing structure trips it), so it is off for both bag rigs. |
+| `--isolation-max-density X` | `0.3` | Threshold for the above (points per metre of quad perimeter). Only consulted when `--isolation` is set. |
+
+### Output
+
+| flag | default | effect |
+|---|---|---|
+| `--save-overlays N` | `0` | Render up to `N` six-panel Method-E overlays per fold. The frames chosen are the first detection, the **highest-scoring rejection**, and an even spread (`_pick_overlay_indices`) — which is why a clean-looking orange near-miss (a `best_rejected` quad) is *always* among them, by design. |
+| `--bbox PATH` | pcap `bbox.json5` | Reference box used for precision scoring (`box.contains(center)`). **Per-rig** — the VLP and Falcon runs each pass their own (`bbox-vlp.json5`, `bbox-seyond.json5`). |
+
+### Not exposed as flags
+
+These are fixed in `BoardConfig`: `min_score = 0.5` (soft acceptance
+threshold), `stance_weight = 0.0`, `strict_squareness = False`,
+`edge_support_min = 0.0`, `cell_m = 0.02`, `side_tol = 0.20`. Changing them
+currently means editing the `BoardConfig` construction in
+`benchmark_e_loo.main()`.

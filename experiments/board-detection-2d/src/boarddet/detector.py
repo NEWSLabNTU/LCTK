@@ -40,13 +40,14 @@ _MIN_UP_PROJ = 0.2  # below this, the plane is near-horizontal: no privileged
                     # "up" stripe direction, fall back to the isotropic kernel
 
 
-def _up_2d(plane: PlaneModel) -> np.ndarray | None:
+def _up_2d(plane: PlaneModel, up: np.ndarray = _UP) -> np.ndarray | None:
     """Direction in plane (u, v) coords along which horizontal ring stripes
-    are separated: the projection of world +z onto the plane's in-plane
-    basis, normalized. None when the plane is near-horizontal (u, v then
-    span a ~horizontal patch, so +z projects to near-zero in-plane and there
-    is no meaningful "up" direction to rotate stripes onto)."""
-    proj = np.array([_UP @ plane.u, _UP @ plane.v])
+    are separated: the projection of world up (`up`, in the sensor frame)
+    onto the plane's in-plane basis, normalized. None when the plane is
+    near-horizontal (u, v then span a ~horizontal patch, so up projects to
+    near-zero in-plane and there is no meaningful "up" direction to rotate
+    stripes onto)."""
+    proj = np.array([up @ plane.u, up @ plane.v])
     norm = np.linalg.norm(proj)
     if norm < _MIN_UP_PROJ:
         return None
@@ -62,19 +63,21 @@ def _close_height_m(cand_points: np.ndarray, board: BoardConfig) -> float:
                 * np.tan(np.radians(board.vertical_gap_deg)))
 
 
-def _stance(corners_3d: np.ndarray) -> float:
+def _stance(corners_3d: np.ndarray, up: np.ndarray = _UP) -> float:
     """Diamond-stance score: how gravity-aligned is either diagonal.
 
     corners_3d is CCW-ordered (see pose.board_pose), so corners[2]-corners[0]
     and corners[3]-corners[1] are the two diagonals. A board standing on a
     corner has one diagonal ~vertical (stance ~1); an axis-aligned flat
-    panel has both diagonals at ~45 deg off vertical (stance ~0.71).
+    panel has both diagonals at ~45 deg off vertical (stance ~0.71). `up` is
+    the world-up direction in the sensor frame (`board.up_axis`) -- it is +z
+    on a REP-103 rig but not on a z-forward sensor like the Falcon.
     """
     d1 = corners_3d[2] - corners_3d[0]
     d2 = corners_3d[3] - corners_3d[1]
     d1 = d1 / np.linalg.norm(d1)
     d2 = d2 / np.linalg.norm(d2)
-    return float(max(abs(d1 @ _UP), abs(d2 @ _UP)))
+    return float(max(abs(d1 @ up), abs(d2 @ up)))
 
 
 def _quad_center(res: ScoreResult) -> np.ndarray:
@@ -94,6 +97,8 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
            voxel: float = 0.03,
            background: BackgroundModel | None = None) -> DetectOutcome:
     gen = GENERATORS[generator]
+    up = np.asarray(board.up_axis, dtype=float)
+    up = up / np.linalg.norm(up)
     t0 = time.perf_counter()
     dn = downsample(points, voxel)
     t1 = time.perf_counter()
@@ -112,7 +117,8 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
                 "generator 'e' (background_diff) requires a background "
                 "reference; pass detect(..., background=<BackgroundModel>)")
         cands = gen(dn, board, background=background,
-                    vertical_gap_deg=board.vertical_gap_deg)
+                    vertical_gap_deg=board.vertical_gap_deg,
+                    cluster_min_points=board.cluster_min_points)
     else:
         cands = gen(dn, board)
     t2 = time.perf_counter()
@@ -123,7 +129,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
         up_2d = None
         close_height_m = None
         if board.vertical_gap_deg > 0:
-            up_2d = _up_2d(cand.plane)
+            up_2d = _up_2d(cand.plane, up)
             if up_2d is not None:
                 close_height_m = _close_height_m(cand.points, board)
         coords = project_to_plane(cand.points, cand.plane)
@@ -173,7 +179,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             det = board_pose(cand.plane, refined_res)
             det = dataclasses.replace(det, score=refined_score)
             if board.stance_floor > 0:
-                if _stance(det.corners_3d) <= board.stance_floor:
+                if _stance(det.corners_3d, up) <= board.stance_floor:
                     continue
             if board.isolation:
                 density = isolation_density(dn, cand.plane,
@@ -189,7 +195,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             continue
         det = board_pose(cand.plane, res)
         if board.stance_weight > 0:
-            stance = _stance(det.corners_3d)
+            stance = _stance(det.corners_3d, up)
             w = board.stance_weight
             blended = res.score * ((1 - w) + w * stance)
             det = dataclasses.replace(det, score=blended)
