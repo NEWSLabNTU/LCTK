@@ -479,3 +479,14 @@ def test_isolation_rejects_board_sized_patch_of_a_big_wall():
     assert out_on.detection is None, (
         "isolation should reject a board-sized patch of a much larger "
         "coplanar wall")
+
+
+def test_detect_b_honours_cluster_min_points():
+    pts, _ = make_scene(rng=np.random.default_rng(3))
+    # Default density detects the synthetic board.
+    assert detect(pts, BoardConfig(), generator="b").detection is not None
+    # An impossibly high core-point density drops every point as noise, so
+    # generator B yields no candidate -> no detection. Proves the field is
+    # forwarded (before the fix, B ignored it and still detected).
+    starved = BoardConfig(cluster_min_points=10_000_000)
+    assert detect(pts, starved, generator="b").detection is None

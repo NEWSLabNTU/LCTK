@@ -110,7 +110,8 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     # model, it only forwards the caller's. observe()/finalize() happen
     # entirely outside, so "one call = one frame in, one outcome out" holds.
     if generator == "b":
-        cands = gen(dn, board, vertical_gap_deg=board.vertical_gap_deg)
+        cands = gen(dn, board, vertical_gap_deg=board.vertical_gap_deg,
+                    cluster_min_points=board.cluster_min_points)
     elif generator == "e":
         if background is None:
             raise ValueError(
