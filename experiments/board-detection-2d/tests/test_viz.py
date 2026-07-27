@@ -12,7 +12,7 @@ from boarddet.benchmark_e_loo import DEFAULT_BBOX_PATH
 from boarddet.board_config import BoardConfig
 from boarddet.detector import detect
 from boarddet.geometry import downsample
-from boarddet.viz_methode import render_methode
+from boarddet.viz import render_methode
 
 
 def _png_header(p) -> bytes:
@@ -75,3 +75,17 @@ def test_renders_with_empty_foreground(tmp_path):
     render_methode(scene, board, model, out, box, p)
     assert p.exists()
     assert _png_header(p) == _PNG_MAGIC
+
+
+def test_front_side_panel_convention():
+    """x=front, y=left, z=up: front view is y-z with the horizontal axis
+    inverted (left renders left); side view is x-z, +x (front) to the right."""
+    from boarddet.viz import _FRONT, _SIDE
+    ai, bi, invert_h, _, _, title = _FRONT
+    assert (ai, bi) == (1, 2)      # y-z projection (look along x)
+    assert invert_h is True        # +y (left) rendered on the left
+    assert "front" in title
+    ai, bi, invert_h, _, _, title = _SIDE
+    assert (ai, bi) == (0, 2)      # x-z projection (look along y)
+    assert invert_h is False       # +x (front) to the right
+    assert "side" in title
