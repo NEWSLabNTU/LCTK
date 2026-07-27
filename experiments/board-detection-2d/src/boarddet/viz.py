@@ -26,6 +26,7 @@ import numpy as np  # noqa: E402
 from .background import BackgroundModel  # noqa: E402
 from .bbox_ref import BoxRef  # noqa: E402
 from .board_config import BoardConfig  # noqa: E402
+from .candidates.cluster_after_ground import big_plane_residual  # noqa: E402
 from .detector import DetectOutcome  # noqa: E402
 from .geometry import downsample  # noqa: E402
 from .pose import BoardDetection  # noqa: E402
@@ -224,3 +225,14 @@ def render_methode(frame_xyz: np.ndarray, board: BoardConfig,
     fg = background.foreground_points(dn)
     render_six_panel(dn, fg, box, outcome, path,
                      f"foreground diff ({len(fg)} pts total)")
+
+
+def render_noe(frame_xyz: np.ndarray, board: BoardConfig,
+               outcome: DetectOutcome, box: BoxRef, path: Path,
+               voxel: float = 0.03) -> None:
+    """No-Method-E 6-panel view: foreground = generator B's big-plane residual
+    (RANSAC-stripped ground/walls), the crop-free analog of a background diff."""
+    dn = downsample(frame_xyz, voxel)
+    fg = big_plane_residual(dn, board, board.vertical_gap_deg)
+    render_six_panel(dn, fg, box, outcome, path,
+                     f"after big-plane removal ({len(fg)} pts)")

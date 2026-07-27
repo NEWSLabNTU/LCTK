@@ -89,3 +89,34 @@ def test_front_side_panel_convention():
     assert (ai, bi) == (0, 2)      # x-z projection (look along y)
     assert invert_h is False       # +x (front) to the right
     assert "side" in title
+
+
+def test_render_noe_writes_valid_png(tmp_path):
+    """No-E 6-panel: foreground is generator B's big-plane residual; renders a
+    valid PNG on a synthetic scene with a detectable board."""
+    from boarddet.synth import make_scene
+    from boarddet.viz import render_noe
+    pts, _ = make_scene(rng=np.random.default_rng(1))
+    board = BoardConfig(side_m=1.0)
+    out = detect(pts, board, generator="b")
+    box = load_bbox(DEFAULT_BBOX_PATH)
+    p = tmp_path / "noe.png"
+    render_noe(pts, board, out, box, p)
+    assert p.exists()
+    assert _png_header(p) == _PNG_MAGIC
+    assert p.stat().st_size > 3000
+
+
+def test_render_noe_handles_no_detection(tmp_path):
+    """The None-detection path must render, not crash (empty scene -> no board)."""
+    from boarddet.viz import render_noe
+    pts = np.random.default_rng(9).normal(scale=0.05, size=(200, 3)).astype(
+        np.float32)
+    board = BoardConfig(side_m=1.0)
+    out = detect(pts, board, generator="b")
+    assert out.detection is None
+    box = load_bbox(DEFAULT_BBOX_PATH)
+    p = tmp_path / "noe_none.png"
+    render_noe(pts, board, out, box, p)
+    assert p.exists()
+    assert _png_header(p) == _PNG_MAGIC
