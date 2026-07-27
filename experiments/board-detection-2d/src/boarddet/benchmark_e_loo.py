@@ -29,7 +29,7 @@ from .bbox_ref import BoxRef, load_bbox
 from .board_config import BoardConfig
 from .detector import detect
 from .ingest import Frame, load_bag_frames, load_frames
-from .viz_methode import render_methode
+from .viz import render_methode
 
 # The pcap rig's reference, used by stages 3-8 and Method E. Other rigs
 # (e.g. the recorded TWO_LIDAR bags) supply their own via --bbox.
