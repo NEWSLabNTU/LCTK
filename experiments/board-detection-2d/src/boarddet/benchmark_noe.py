@@ -22,7 +22,7 @@ from .bbox_ref import BoxRef, load_bbox
 from .board_config import BoardConfig
 from .detector import detect
 from .ingest import Frame, load_bag_frames, load_frames
-from .viz import save_overlay
+from .viz import render_noe
 
 DEFAULT_BBOX_PATH = (Path(__file__).resolve().parents[4]
                      / "ros" / "lctk_launch" / "config" / "board"
@@ -75,8 +75,8 @@ def run_noe(sources: dict[str, list[Frame]], board: BoardConfig,
             )) if outcomes else 0.0,
         }
         for i in _overlay_indices(outcomes, save_overlays):
-            save_overlay(frames[i].xyz, outcomes[i],
-                         out_dir / f"overlay_{name}_frame{i:04d}.png")
+            render_noe(frames[i].xyz, board, outcomes[i], box,
+                       out_dir / f"overlay_{name}_frame{i:04d}.png")
         c = captures[name]
         prec = "n/a" if c["precision"] is None else f"{c['precision']:.1%}"
         print(f"{name}: recall={c['recall']:.1%} true={c['n_true_board']} "
