@@ -2,7 +2,8 @@ import numpy as np
 from boarddet.board_config import BoardConfig
 from boarddet.candidates.cluster_after_ground import \
     _anisotropic_scaled, _merge_coplanar_clusters, _remove_big_planes, \
-    generate_cluster_after_ground
+    generate_cluster_after_ground, big_plane_residual, _BIG_PLANE_DIST, \
+    _BIG_PLANE_MIN_FRAC
 from boarddet.geometry import downsample
 from boarddet.synth import make_board, make_scene
 
@@ -221,3 +222,17 @@ def test_horizontal_separation_not_over_merged_by_anisotropic_scaling():
     for c in cands:
         ext_y = c.points[:, 1].max() - c.points[:, 1].min()
         assert ext_y < center_sep
+
+
+def test_big_plane_residual_is_subset_and_matches_strip():
+    pts, _ = make_scene(rng=np.random.default_rng(5))
+    board = BoardConfig(side_m=1.0)
+    res = big_plane_residual(pts, board, board.vertical_gap_deg)
+    # Strip removes the big ground/wall planes -> strictly fewer points.
+    assert 0 < len(res) < len(pts)
+    # Reproduces the generator's own strip exactly (shared params + seeded
+    # RANSAC make this deterministic), so a viz of `res` shows what the
+    # detector actually clustered.
+    direct = _remove_big_planes(pts, board, _BIG_PLANE_DIST,
+                                _BIG_PLANE_MIN_FRAC, board.vertical_gap_deg)
+    assert np.array_equal(res, direct)

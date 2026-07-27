@@ -9,6 +9,12 @@ from ..board_config import BoardConfig
 from ..geometry import extent_2d, fit_plane, project_to_plane
 
 
+# Generator B's big-plane strip params, shared so a viz of the residual
+# matches exactly what detection clustered (see big_plane_residual).
+_BIG_PLANE_DIST = 0.05
+_BIG_PLANE_MIN_FRAC = 0.08
+
+
 def _anisotropic_scaled(points: np.ndarray, eps_h: float,
                         vertical_gap_deg: float) -> np.ndarray:
     """Return a z-compressed COPY of `points` for clustering only.
@@ -98,6 +104,20 @@ def _remove_big_planes(points: np.ndarray, board: BoardConfig,
     return remaining.astype(np.float32)
 
 
+def big_plane_residual(points: np.ndarray, board: BoardConfig,
+                       vertical_gap_deg: float = 3.0) -> np.ndarray:
+    """Points surviving generator B's big-plane strip -- the 'foreground' its
+    clustering step sees, and the no-Method-E analog of a background diff.
+
+    Shares the generator's own strip params (`_BIG_PLANE_DIST`,
+    `_BIG_PLANE_MIN_FRAC`); `_remove_big_planes` seeds RANSAC, so this is
+    deterministic and identical to what `generate_cluster_after_ground`
+    strips internally for the same input and `vertical_gap_deg`.
+    """
+    return _remove_big_planes(points, board, _BIG_PLANE_DIST,
+                              _BIG_PLANE_MIN_FRAC, vertical_gap_deg)
+
+
 def _merge_coplanar_clusters(points: np.ndarray, labels: np.ndarray,
                              board: BoardConfig,
                              seed_min_points: int = 40,
@@ -162,8 +182,8 @@ def _merge_coplanar_clusters(points: np.ndarray, labels: np.ndarray,
 
 
 def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
-                                  big_plane_dist: float = 0.05,
-                                  big_plane_min_frac: float = 0.08,
+                                  big_plane_dist: float = _BIG_PLANE_DIST,
+                                  big_plane_min_frac: float = _BIG_PLANE_MIN_FRAC,
                                   cluster_eps: float = 0.15,
                                   cluster_min_points: int = 30,
                                   vertical_gap_deg: float = 3.0
