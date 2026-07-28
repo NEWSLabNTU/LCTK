@@ -9,8 +9,15 @@ import cv2
 import numpy as np
 
 from .board_config import BoardConfig
+from .reject import RejectReason, Stage, band, lower, upper
 
 _MIN_POINTS = 60
+
+
+def _structural(stage: Stage, gate: str, value: float,
+                thr: float) -> RejectReason:
+    """A structural gate (no tunable BoardConfig param); margin left at 0."""
+    return RejectReason(stage, gate, None, float(value), float(thr), 0.0)
 
 
 @dataclass
@@ -171,8 +178,12 @@ def _closing_kernel(cell: float, close_height_m: float | None) -> np.ndarray:
 
 def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
                     up_2d: np.ndarray | None = None,
-                    close_height_m: float | None = None) -> ScoreResult | None:
+                    close_height_m: float | None = None,
+                    rejects: list[RejectReason] | None = None) -> ScoreResult | None:
     if len(coords_2d) < _MIN_POINTS:
+        if rejects is not None:
+            rejects.append(_structural(Stage.MIN_POINTS, "min_points",
+                                       len(coords_2d), _MIN_POINTS))
         return None
     cell = board.cell_m
     anisotropic = up_2d is not None and close_height_m is not None
@@ -196,6 +207,9 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
     # poison _refine_sides into pulling in points from the adjacent edge.
     img, origin = _rasterize(work_coords, cell)
     if img.shape[0] > 4000 or img.shape[1] > 4000:
+        if rejects is not None:
+            rejects.append(_structural(Stage.RASTER_SIZE, "raster_size",
+                                       float(max(img.shape)), 4000.0))
         return None  # candidate far larger than any board
     kernel = _closing_kernel(cell, close_height_m if anisotropic else None)
     closed = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
@@ -209,6 +223,9 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
         rect = cv2.minAreaRect(coords_2d.astype(np.float32))  # ((cx,cy),(w,h),angle)
         (rw, rh) = rect[1]
         if min(rw, rh) < 3 * cell:
+            if rejects is not None:
+                rejects.append(_structural(Stage.MINAREA_SIZE, "minarea_size",
+                                           float(min(rw, rh)), 3 * cell))
             return None
         quad_plane = cv2.boxPoints(rect)
     else:
@@ -220,11 +237,17 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
         contours, _ = cv2.findContours(
             closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
+            if rejects is not None:
+                rejects.append(_structural(Stage.MINAREA_SIZE, "no_contour",
+                                           0.0, 3.0))
             return None
         contour = max(contours, key=cv2.contourArea)
         rect = cv2.minAreaRect(contour)  # ((cx,cy),(w,h),angle) in px
         (rw, rh) = rect[1]
         if min(rw, rh) < 3:
+            if rejects is not None:
+                rejects.append(_structural(Stage.MINAREA_SIZE, "minarea_size",
+                                           float(min(rw, rh)), 3.0))
             return None
         quad_px = cv2.boxPoints(rect)
         quad_plane = _px_to_plane(quad_px, origin, cell)
@@ -232,9 +255,12 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
     # size gate on the coarse quad
     sides = np.linalg.norm(np.roll(quad_plane, -1, axis=0) - quad_plane,
                            axis=1)
-    if not (board.side_m * (1 - 2 * board.side_tol)
-            < sides.mean()
-            < board.side_m * (1 + 2 * board.side_tol)):
+    lo = board.side_m * (1 - 2 * board.side_tol)
+    hi = board.side_m * (1 + 2 * board.side_tol)
+    if not (lo < sides.mean() < hi):
+        if rejects is not None:
+            rejects.append(band(Stage.SIZE_GATE, "size_gate", "side_tol",
+                                float(sides.mean()), lo, hi))
         return None
 
     if anisotropic:
@@ -273,6 +299,9 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
     if board.strict_squareness:
         max_ang_dev = float(np.max(np.abs(np.array(angs) - 90.0)))
         if max_ang_dev > 8.0:
+            if rejects is not None:
+                rejects.append(upper(Stage.STRICT_SQUARENESS, "strict_squareness",
+                                     "strict_squareness", max_ang_dev, 8.0))
             return None
 
     if board.stance_floor > 0 and up_2d is not None:
@@ -284,7 +313,11 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
         # plane has no meaningful "stand on a corner" direction -- up_2d is
         # None there (see detector._up_2d) and the gate is skipped rather
         # than guessing.
-        if _diamond_stance_2d(corners, up_2d) <= board.stance_floor:
+        stance = _diamond_stance_2d(corners, up_2d)
+        if stance <= board.stance_floor:
+            if rejects is not None:
+                rejects.append(lower(Stage.STANCE_2D, "stance_2d",
+                                     "stance_floor", stance, board.stance_floor))
             return None
 
     # Always computed (cheap) so callers/tests can inspect it even with the
@@ -292,6 +325,10 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
     edge_support = _edge_support(coords_2d, corners, cell, close_height_m)
     if (board.edge_support_min > 0
             and float(edge_support.min()) < board.edge_support_min):
+        if rejects is not None:
+            rejects.append(lower(Stage.EDGE_SUPPORT, "edge_support",
+                                 "edge_support_min", float(edge_support.min()),
+                                 board.edge_support_min))
         return None
 
     # fill ratio: fraction of raster cells inside the quad that are occupied.
@@ -307,7 +344,11 @@ def score_candidate(coords_2d: np.ndarray, board: BoardConfig,
 
     side_err = (float(np.std(sides) / np.mean(sides))
                 + abs(float(np.mean(sides)) - board.side_m) / board.side_m)
-    if abs(float(np.mean(sides)) - board.side_m) > board.side_tol * board.side_m:
+    side_dev = abs(float(np.mean(sides)) - board.side_m)
+    if side_dev > board.side_tol * board.side_m:
+        if rejects is not None:
+            rejects.append(upper(Stage.SIDE_ERR, "side_err", "side_tol",
+                                 side_dev, board.side_tol * board.side_m))
         return None
     # The recorded board is a hollow diamond (3 punched holes, see
     # board_detector.json5's hole_radius/hole_center_shift): even a perfect,
