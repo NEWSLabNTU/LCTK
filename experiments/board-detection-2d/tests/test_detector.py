@@ -490,3 +490,39 @@ def test_detect_b_honours_cluster_min_points():
     # forwarded (before the fix, B ignored it and still detected).
     starved = BoardConfig(cluster_min_points=10_000_000)
     assert detect(pts, starved, generator="b").detection is None
+
+
+# --- Task 5: reject-reason diagnostics wired into detect() ---------------
+# make_scene / detect / BoardConfig are already imported at the top of this
+# file (see existing imports: `from boarddet.synth import ... make_scene`);
+# add only the reject import.
+from boarddet.reject import Stage
+
+
+def test_detect_no_clusters_reports_no_clusters():
+    # too few points to cluster: generator emits nothing, no patch rejects
+    board = BoardConfig(side_m=1.0)
+    out = detect(np.zeros((3, 3)), board, generator="b")
+    assert out.detection is None
+    assert out.reject_reason is not None
+    assert out.reject_reason.stage is Stage.NO_CLUSTERS
+
+
+def test_detect_success_has_no_reject_reason():
+    # same scene the existing test_detects_board_in_synthetic_scene solves
+    pts, truth = make_scene(rng=np.random.default_rng(13))
+    out = detect(pts, BoardConfig(side_m=1.0), generator="a")
+    assert out.detection is not None
+    assert out.reject_reason is None
+
+
+def test_detect_min_score_reject_names_param():
+    # mirrors the existing min_score=0.99 forced-reject test: the board is
+    # found geometrically but scored below threshold -> MIN_SCORE reason.
+    pts, _ = make_scene(rng=np.random.default_rng(13))
+    out = detect(pts, BoardConfig(side_m=1.0, min_score=0.99), generator="a")
+    assert out.detection is None
+    assert out.reject_reason is not None
+    assert out.reject_reason.stage is Stage.MIN_SCORE
+    assert out.reject_reason.param == "min_score"
+    assert out.reject_reason.margin > 0
