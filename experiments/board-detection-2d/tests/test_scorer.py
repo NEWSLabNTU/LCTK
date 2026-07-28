@@ -1,7 +1,8 @@
 import numpy as np
 from boarddet.board_config import BoardConfig
 from boarddet.geometry import fit_plane, project_to_plane
-from boarddet.scorer import score_candidate
+from boarddet.reject import Stage
+from boarddet.scorer import ScoreResult, score_candidate
 from boarddet.synth import make_board
 
 
@@ -393,3 +394,45 @@ def test_strict_diamond_gates_default_off_no_regression():
     assert score_candidate(square, board, up_2d=_UP_2D,
                            close_height_m=0.15) is not None
     assert score_candidate(skewed, board) is not None
+
+
+def _square_coords(side=1.0, step=0.02):
+    g = np.arange(-side / 2, side / 2, step)
+    xx, yy = np.meshgrid(g, g)
+    return np.column_stack([xx.ravel(), yy.ravel()])
+
+
+def test_scorer_reject_min_points():
+    board = BoardConfig()
+    rejects = []
+    out = score_candidate(np.zeros((10, 2)), board, rejects=rejects)
+    assert out is None
+    assert rejects[-1].stage is Stage.MIN_POINTS
+    assert rejects[-1].param is None
+
+
+def test_scorer_reject_size_gate():
+    # a dense square far larger than side_m trips the coarse size gate
+    board = BoardConfig(side_m=1.0, side_tol=0.05)
+    coords = _square_coords(side=3.0, step=0.03)
+    rejects = []
+    out = score_candidate(coords, board, rejects=rejects)
+    assert out is None
+    assert rejects[-1].stage in (Stage.SIZE_GATE, Stage.SIDE_ERR)
+    assert rejects[-1].param == "side_tol"
+
+
+def test_scorer_accept_collects_nothing_and_returns_scoreresult():
+    board = BoardConfig(side_m=1.0, side_tol=0.20)
+    coords = _square_coords(side=1.0, step=0.02)
+    rejects = []
+    out = score_candidate(coords, board, rejects=rejects)
+    assert isinstance(out, ScoreResult)
+    assert rejects == []
+
+
+def test_scorer_kwarg_omitted_byte_identical():
+    board = BoardConfig(side_m=1.0, side_tol=0.20)
+    coords = _square_coords(side=1.0, step=0.02)
+    assert isinstance(score_candidate(coords, board), ScoreResult)
+    assert score_candidate(np.zeros((10, 2)), board) is None
