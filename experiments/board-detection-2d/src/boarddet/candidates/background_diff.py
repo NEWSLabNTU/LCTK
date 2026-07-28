@@ -19,6 +19,7 @@ import open3d as o3d
 from . import Candidate, plausible_board_patch
 from ..background import BackgroundModel
 from ..board_config import BoardConfig
+from ..reject import RejectReason
 from .cluster_after_ground import _anisotropic_scaled
 
 
@@ -26,7 +27,8 @@ def generate_background_diff(points: np.ndarray, board: BoardConfig, *,
                              background: BackgroundModel,
                              cluster_eps: float = 0.15,
                              cluster_min_points: int = 30,
-                             vertical_gap_deg: float = 3.0
+                             vertical_gap_deg: float = 3.0,
+                             rejects: list[RejectReason] | None = None
                              ) -> list[Candidate]:
     fg = background.foreground_points(points)
     if len(fg) < cluster_min_points:
@@ -40,7 +42,7 @@ def generate_background_diff(points: np.ndarray, board: BoardConfig, *,
     for lbl in np.unique(labels):
         if lbl < 0:
             continue
-        cand = plausible_board_patch(fg[labels == lbl], board)
+        cand = plausible_board_patch(fg[labels == lbl], board, rejects=rejects)
         if cand is not None:
             out.append(cand)
     return out

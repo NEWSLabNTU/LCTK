@@ -9,11 +9,13 @@ from scipy.spatial import cKDTree
 
 from . import Candidate, plausible_board_patch
 from ..board_config import BoardConfig
+from ..reject import RejectReason
 
 
 def generate_region_growing(points: np.ndarray, board: BoardConfig,
                             knn: int = 16, angle_deg: float = 12.0,
-                            min_region: int = 40) -> list[Candidate]:
+                            min_region: int = 40,
+                            rejects: list[RejectReason] | None = None) -> list[Candidate]:
     pc = o3d.geometry.PointCloud(
         o3d.utility.Vector3dVector(points.astype(np.float64)))
     pc.estimate_normals(
@@ -55,7 +57,8 @@ def generate_region_growing(points: np.ndarray, board: BoardConfig,
                     region.append(int(nb))
                     queue.append(int(nb))
         if len(region) >= min_region:
-            cand = plausible_board_patch(points[np.array(region)], board)
+            cand = plausible_board_patch(points[np.array(region)], board,
+                                         rejects=rejects)
             if cand is not None:
                 out.append(cand)
     return out

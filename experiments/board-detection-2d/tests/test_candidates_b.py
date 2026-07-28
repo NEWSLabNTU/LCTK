@@ -236,3 +236,24 @@ def test_big_plane_residual_is_subset_and_matches_strip():
     direct = _remove_big_planes(pts, board, _BIG_PLANE_DIST,
                                 _BIG_PLANE_MIN_FRAC, board.vertical_gap_deg)
     assert np.array_equal(res, direct)
+
+
+def test_generator_forwards_rejects_kwarg():
+    from boarddet.reject import RejectReason
+
+    board = BoardConfig()
+    # a scene with clusters that fail the patch gate produces patch rejects;
+    # here we only assert the kwarg is accepted and the list type is honored.
+    rng = np.random.default_rng(0)
+    scene = rng.uniform(-1, 1, size=(500, 3))
+    rejects: list[RejectReason] = []
+    out = generate_cluster_after_ground(
+        scene, board, vertical_gap_deg=board.vertical_gap_deg,
+        cluster_min_points=board.cluster_min_points, rejects=rejects)
+    assert isinstance(out, list)
+    # kwarg omitted still works and is byte-identical in shape
+    out2 = generate_cluster_after_ground(
+        scene, board, vertical_gap_deg=board.vertical_gap_deg,
+        cluster_min_points=board.cluster_min_points)
+    assert isinstance(out2, list)
+    assert len(out) == len(out2)

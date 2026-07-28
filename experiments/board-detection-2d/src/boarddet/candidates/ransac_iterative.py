@@ -6,13 +6,15 @@ import open3d as o3d
 
 from . import Candidate, plausible_board_patch
 from ..board_config import BoardConfig
+from ..reject import RejectReason
 
 
 def generate_ransac_iterative(points: np.ndarray, board: BoardConfig,
                               max_planes: int = 8,
                               dist_thresh: float = 0.05,
                               min_inliers: int = 60,
-                              component_eps: float = 0.20) -> list[Candidate]:
+                              component_eps: float = 0.20,
+                              rejects: list[RejectReason] | None = None) -> list[Candidate]:
     # dist_thresh was 0.02 in the synthetic-only design (sigma=0.01 noise).
     # Real VLP-32C board patches fit a plane with RMS ~0.03 m (the noise
     # floor CLAUDE.md documents from the ICP history, C-04) -- the flatness
@@ -55,7 +57,8 @@ def generate_ransac_iterative(points: np.ndarray, board: BoardConfig,
         for lbl in np.unique(labels):
             if lbl < 0:
                 continue
-            cand = plausible_board_patch(inliers[labels == lbl], board)
+            cand = plausible_board_patch(inliers[labels == lbl], board,
+                                         rejects=rejects)
             if cand is not None:
                 out.append(cand)
         mask = np.ones(len(remaining), dtype=bool)
