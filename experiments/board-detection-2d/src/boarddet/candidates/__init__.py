@@ -8,6 +8,7 @@ import numpy as np
 from ..board_config import BoardConfig
 from ..geometry import PlaneModel, extent_2d, fit_plane, plane_rms, \
     project_to_plane
+from ..reject import RejectReason, Stage, band, upper
 
 # m. CLAUDE.md / board_detector.json5's icp_good_fit_threshold documents the
 # VLP-32C's own range noise as the reason ICP loss asymptotes at 0.026-0.029 m
@@ -21,6 +22,12 @@ _FLATNESS_RMS_MAX = 0.035  # m; above VLP-32C noise floor, below "not a plane"
 _MIN_PATCH_POINTS = 60
 
 
+def lower_points(n: int) -> RejectReason:
+    """PATCH_POINTS reject: structural count gate, no tunable param, margin 0."""
+    return RejectReason(Stage.PATCH_POINTS, "patch_points", None,
+                        float(n), float(_MIN_PATCH_POINTS), 0.0)
+
+
 @dataclass
 class Candidate:
     points: np.ndarray  # (N,3)
@@ -28,7 +35,8 @@ class Candidate:
 
 
 def plausible_board_patch(points_3d: np.ndarray, board: BoardConfig,
-                          flatness_rms_max: float | None = None
+                          flatness_rms_max: float | None = None,
+                          rejects: list[RejectReason] | None = None
                           ) -> Candidate | None:
     """Gate a 3D patch: enough points, flat, board-sized. None if implausible.
 
@@ -36,17 +44,29 @@ def plausible_board_patch(points_3d: np.ndarray, board: BoardConfig,
     falling back to the module constant if board lacks that attribute --
     board.flatness_rms_max itself defaults to _FLATNESS_RMS_MAX, so the
     default call path is byte-identical to pre-Task-20 behavior.
+
+    rejects, when given, collects a RejectReason at each gate that fires
+    (side channel; does not change the accept/reject decision or return type).
     """
     if len(points_3d) < _MIN_PATCH_POINTS:
+        if rejects is not None:
+            rejects.append(lower_points(len(points_3d)))
         return None
     threshold = flatness_rms_max
     if threshold is None:
         threshold = getattr(board, "flatness_rms_max", _FLATNESS_RMS_MAX)
     plane = fit_plane(points_3d)
-    if plane_rms(points_3d, plane) > threshold:
+    rms = plane_rms(points_3d, plane)
+    if rms > threshold:
+        if rejects is not None:
+            rejects.append(upper(Stage.PATCH_FLATNESS, "flatness",
+                                 "flatness_rms_max", rms, threshold))
         return None
     ext = extent_2d(project_to_plane(points_3d, plane))
     diag = board.side_m * np.sqrt(2.0)
-    if not (0.5 * board.side_m <= ext <= 1.8 * diag):
+    lo, hi = 0.5 * board.side_m, 1.8 * diag
+    if not (lo <= ext <= hi):
+        if rejects is not None:
+            rejects.append(band(Stage.PATCH_EXTENT, "extent", None, ext, lo, hi))
         return None
     return Candidate(points=points_3d, plane=plane)

@@ -1,6 +1,6 @@
 import numpy as np
 from boarddet.board_config import BoardConfig
-from boarddet.candidates import plausible_board_patch
+from boarddet.candidates import Candidate, plausible_board_patch
 from boarddet.candidates.ransac_iterative import generate_ransac_iterative
 from boarddet.geometry import downsample
 from boarddet.synth import make_scene
@@ -78,3 +78,62 @@ def test_flatness_rms_max_default_none_reads_board_config():
     loose_board = BoardConfig(side_m=1.0, flatness_rms_max=0.045)
     assert plausible_board_patch(patch, strict_board) is None
     assert plausible_board_patch(patch, loose_board) is not None
+
+
+# Task 2: plausible_board_patch collects patch-stage rejects
+from boarddet.reject import Stage
+
+
+def _flat_square(side=1.0, n=40, z=0.0):
+    g = np.linspace(-side / 2, side / 2, n)
+    xx, yy = np.meshgrid(g, g)
+    pts = np.column_stack([xx.ravel(), yy.ravel(), np.full(xx.size, z)])
+    return pts
+
+
+def test_patch_reject_too_few_points():
+    board = BoardConfig()
+    rejects = []
+    out = plausible_board_patch(np.zeros((10, 3)), board, rejects=rejects)
+    assert out is None
+    assert len(rejects) == 1
+    assert rejects[0].stage is Stage.PATCH_POINTS
+    assert rejects[0].param is None
+
+
+def test_patch_reject_not_flat():
+    board = BoardConfig()
+    pts = _flat_square()
+    pts[:, 2] += np.random.default_rng(0).normal(0, 0.2, len(pts))  # thick
+    rejects = []
+    out = plausible_board_patch(pts, board, rejects=rejects)
+    assert out is None
+    assert rejects[-1].stage is Stage.PATCH_FLATNESS
+    assert rejects[-1].param == "flatness_rms_max"
+    assert rejects[-1].margin > 0
+
+
+def test_patch_reject_wrong_extent():
+    board = BoardConfig(side_m=1.0)
+    pts = _flat_square(side=0.1)  # far too small in extent
+    rejects = []
+    out = plausible_board_patch(pts, board, rejects=rejects)
+    assert out is None
+    assert rejects[-1].stage is Stage.PATCH_EXTENT
+    assert rejects[-1].param is None
+
+
+def test_patch_accept_collects_nothing():
+    board = BoardConfig(side_m=1.0)
+    pts = _flat_square(side=1.0)
+    rejects = []
+    out = plausible_board_patch(pts, board, rejects=rejects)
+    assert isinstance(out, Candidate)
+    assert rejects == []
+
+
+def test_patch_kwarg_omitted_byte_identical():
+    board = BoardConfig(side_m=1.0)
+    pts = _flat_square(side=1.0)
+    assert isinstance(plausible_board_patch(pts, board), Candidate)
+    assert plausible_board_patch(np.zeros((10, 3)), board) is None
