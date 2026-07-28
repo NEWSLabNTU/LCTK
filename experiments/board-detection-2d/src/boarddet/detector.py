@@ -16,6 +16,7 @@ from .candidates.region_growing import generate_region_growing
 from .geometry import PlaneModel, downsample, project_to_plane
 from .isolation import isolation_density
 from .pose import BoardDetection, board_pose
+from .reject import RejectReason, Stage, furthest, lower, upper
 from .scorer import ScoreResult, score_candidate
 from .square_fit import fit_fixed_square
 
@@ -33,6 +34,7 @@ class DetectOutcome:
     timings_ms: dict[str, float]
     n_candidates: int
     best_rejected: BoardDetection | None = None
+    reject_reason: RejectReason | None = None
 
 
 _UP = np.array([0.0, 0.0, 1.0])
@@ -109,9 +111,11 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     # detect() stays stateless: it never owns or mutates the background
     # model, it only forwards the caller's. observe()/finalize() happen
     # entirely outside, so "one call = one frame in, one outcome out" holds.
+    rejects: list[RejectReason] = []
     if generator == "b":
         cands = gen(dn, board, vertical_gap_deg=board.vertical_gap_deg,
-                    cluster_min_points=board.cluster_min_points)
+                    cluster_min_points=board.cluster_min_points,
+                    rejects=rejects)
     elif generator == "e":
         if background is None:
             raise ValueError(
@@ -119,9 +123,10 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
                 "reference; pass detect(..., background=<BackgroundModel>)")
         cands = gen(dn, board, background=background,
                     vertical_gap_deg=board.vertical_gap_deg,
-                    cluster_min_points=board.cluster_min_points)
+                    cluster_min_points=board.cluster_min_points,
+                    rejects=rejects)
     else:
-        cands = gen(dn, board)
+        cands = gen(dn, board, rejects=rejects)
     t2 = time.perf_counter()
     best: BoardDetection | None = None
     best_rejected: BoardDetection | None = None
@@ -134,10 +139,12 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             if up_2d is not None:
                 close_height_m = _close_height_m(cand.points, board)
         coords = project_to_plane(cand.points, cand.plane)
-        res = score_candidate(coords, board, up_2d=up_2d,
-                              close_height_m=close_height_m)
 
         if board.square_icp:
+            # scorer reason is non-fatal here (rescued by fit_fixed_square),
+            # so do NOT collect it.
+            res = score_candidate(coords, board, up_2d=up_2d,
+                                  close_height_m=close_height_m)
             # Refine-after-quad (Task 23, corrected): the raw-point quad's
             # angle is untrustworthy on sparse frames PERIOD -- whether the
             # quad was accepted by score_candidate (refine) or rejected
@@ -161,6 +168,14 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
                 coords, board.side_m, init_center=seed_center,
                 init_theta=None)
             if fit is None or fit.residual >= board.square_icp_residual_max:
+                if rejects is not None:
+                    val = np.inf if fit is None else fit.residual
+                    rejects.append(upper(
+                        Stage.SQUARE_FIT, "square_fit",
+                        "square_icp_residual_max",
+                        float(val) if np.isfinite(val) else
+                        board.square_icp_residual_max * 2,
+                        board.square_icp_residual_max))
                 continue
             refined_score = 1.0 / (1.0 + fit.residual)
             if res is not None:
@@ -180,18 +195,28 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             det = board_pose(cand.plane, refined_res)
             det = dataclasses.replace(det, score=refined_score)
             if board.stance_floor > 0:
-                if _stance(det.corners_3d, up) <= board.stance_floor:
+                stance3d = _stance(det.corners_3d, up)
+                if stance3d <= board.stance_floor:
+                    rejects.append(lower(Stage.STANCE_3D, "stance_3d",
+                                         "stance_floor", stance3d,
+                                         board.stance_floor))
                     continue
             if board.isolation:
                 density = isolation_density(dn, cand.plane,
                                            det.result.corners_2d)
                 if density > board.isolation_max_density:
+                    rejects.append(upper(Stage.ISOLATION, "isolation",
+                                         "isolation_max_density", density,
+                                         board.isolation_max_density))
                     continue
             if fit.residual < best_residual:
                 best_residual = fit.residual
                 best = det
             continue
 
+        # non-icp path
+        res = score_candidate(coords, board, up_2d=up_2d,
+                              close_height_m=close_height_m, rejects=rejects)
         if res is None:
             continue
         det = board_pose(cand.plane, res)
@@ -201,17 +226,27 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
             blended = res.score * ((1 - w) + w * stance)
             det = dataclasses.replace(det, score=blended)
         if det.score < board.min_score:
+            rejects.append(lower(Stage.MIN_SCORE, "min_score", "min_score",
+                                 det.score, board.min_score))
             if best_rejected is None or det.score > best_rejected.score:
                 best_rejected = det
             continue
         if board.isolation:
             density = isolation_density(dn, cand.plane, det.result.corners_2d)
             if density > board.isolation_max_density:
+                rejects.append(upper(Stage.ISOLATION, "isolation",
+                                     "isolation_max_density", density,
+                                     board.isolation_max_density))
                 continue
         if best is None or det.score > best.score:
             best = det
     if best is not None:
         best_rejected = None
+        reject_reason = None
+    else:
+        reason = furthest(rejects)
+        reject_reason = reason if reason is not None else RejectReason(
+            Stage.NO_CLUSTERS, "no_clusters", None, None, None, 0.0)
     t3 = time.perf_counter()
     return DetectOutcome(
         detection=best,
@@ -223,4 +258,5 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
         },
         n_candidates=len(cands),
         best_rejected=best_rejected,
+        reject_reason=reject_reason,
     )
