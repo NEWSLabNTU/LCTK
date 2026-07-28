@@ -526,3 +526,125 @@ def test_detect_min_score_reject_names_param():
     assert out.reject_reason.stage is Stage.MIN_SCORE
     assert out.reject_reason.param == "min_score"
     assert out.reject_reason.margin > 0
+
+
+# --- Task 7: icp-path + patch-stage reject reason coverage ---------------
+# GAP 1: square_icp=True's own two reject stages (SQUARE_FIT, STANCE_3D)
+# were previously untested. Both reuse the already-defined
+# `_make_clipped_diamond` fixture / stubbed-`GENERATORS` pattern that the
+# existing icp-path tests above already established, so the only thing
+# under test here is that detect() surfaces the RIGHT RejectReason for
+# each icp-only gate -- not the fit/stance math itself (that's
+# test_square_fit.py's job).
+
+def test_square_icp_reject_names_square_fit():
+    """A real partial-occlusion fixture (two opposite corners clipped, see
+    `_make_clipped_diamond`'s docstring) recovers a stable ~0.40 coverage
+    residual -- genuine partial-coverage, not a bad fit (that's exactly why
+    board_config.py's default square_icp_residual_max is 0.45, raised off an
+    old 0.35 that used to reject this same case). Tightening the threshold
+    back below the observed residual must make detect() report SQUARE_FIT
+    naming its own param, not silently fall through to some other stage."""
+    rng = np.random.default_rng(21)
+    side = 1.0
+    center = np.array([4.0, 0.5, 0.3])
+    normal = np.array([-1.0, 0.15, 0.05])
+    up_hint = np.array([0.0, 0.0, 1.0])
+    pts, _truth = _make_clipped_diamond(side, center, normal, up_hint,
+                                        depth=0.34, spacing=0.008,
+                                        noise=0.004, rng=rng)
+
+    def fake_gen(dn, board, **kwargs):
+        return [Candidate(points=pts, plane=fit_plane(pts))]
+
+    GENERATORS["_clipped_tight"] = fake_gen
+    try:
+        board = BoardConfig(side_m=side, vertical_gap_deg=3.0,
+                            square_icp=True, square_icp_residual_max=0.35)
+        out = detect(pts, board, generator="_clipped_tight")
+    finally:
+        del GENERATORS["_clipped_tight"]
+
+    assert out.detection is None
+    assert out.reject_reason is not None
+    assert out.reject_reason.stage is Stage.SQUARE_FIT
+    assert out.reject_reason.param == "square_icp_residual_max"
+    assert out.reject_reason.margin > 0
+
+
+def test_square_icp_reject_names_stance_3d():
+    """An axis-aligned upright square (sides parallel to world y/z, NOT
+    standing on a corner) fits the fixed-size square cleanly -- residual
+    ~0, so it clears SQUARE_FIT easily -- but its 3D stance is the flat-
+    panel value (~0.71, see test_stance_diamond_beats_axis_aligned), which
+    a stance_floor above that must reject at STANCE_3D specifically, not
+    SQUARE_FIT or ISOLATION."""
+    rng = np.random.default_rng(9)
+    plane = PlaneModel(center=np.array([4.0, 0.5, 0.3]),
+                       normal=np.array([1.0, 0.0, 0.0]),
+                       u=np.array([0.0, 1.0, 0.0]),
+                       v=np.array([0.0, 0.0, 1.0]))
+    half = 0.5
+    xs = np.arange(-half, half, 0.01)
+    xx, yy = np.meshgrid(xs, xs)
+    sq_2d = np.stack([xx.ravel(), yy.ravel()], axis=1)
+    pts = unproject(sq_2d, plane)
+    pts = (pts + rng.normal(0.0, 0.004, size=(len(pts), 1)) * plane.normal
+          ).astype(np.float32)
+
+    def fake_gen(dn, board, **kwargs):
+        return [Candidate(points=pts, plane=fit_plane(pts))]
+
+    GENERATORS["_axis_aligned_sq"] = fake_gen
+    try:
+        board = BoardConfig(side_m=1.0, vertical_gap_deg=0.0,
+                            square_icp=True, stance_floor=0.9)
+        out = detect(pts, board, generator="_axis_aligned_sq")
+    finally:
+        del GENERATORS["_axis_aligned_sq"]
+
+    assert out.detection is None
+    assert out.reject_reason is not None
+    assert out.reject_reason.stage is Stage.STANCE_3D
+    assert out.reject_reason.param == "stance_floor"
+    assert out.reject_reason.margin > 0
+
+
+# GAP 2: no existing test drove a reject all the way from a real generator's
+# candidate-formation step (plausible_board_patch, candidates/__init__.py)
+# through detect() into .reject_reason -- every prior reject-reason test
+# above hits the scorer/detector band (MIN_SCORE, SQUARE_FIT, STANCE_3D) or
+# NO_CLUSTERS. This drives generator "c" (region_growing -- fully
+# deterministic, no RANSAC/DBSCAN randomness to fight) over a single small,
+# flat, well-populated patch: region growing finds one coherent-normal
+# region spanning all the points (comfortably above region_growing's own
+# min_region=40 after voxel downsampling), so it reaches
+# plausible_board_patch and is rejected there -- specifically at the extent
+# gate (its 0.3 m span sits below `side_m=1.0`'s 0.5 m floor), not the point-
+# count or flatness gates.
+
+def test_patch_extent_reject_propagates_through_generator():
+    rng = np.random.default_rng(5)
+    ys = np.arange(-0.15, 0.15, 0.01)
+    zs = np.arange(-0.15, 0.15, 0.01)
+    yy, zz = np.meshgrid(ys, zs)
+    pts = np.stack([
+        np.full(yy.size, 4.0),
+        yy.ravel(),
+        zz.ravel(),
+    ], axis=1).astype(np.float32)
+    pts[:, 0] += rng.normal(0.0, 0.001, size=len(pts))  # tiny out-of-plane
+                                                         # noise, well under
+                                                         # flatness_rms_max
+    board = BoardConfig(side_m=1.0)
+    out = detect(pts, board, generator="c")
+
+    assert out.n_candidates == 0, (
+        "fixture should die at candidate-formation (plausible_board_patch), "
+        "never reaching the scorer -- otherwise this isn't proving "
+        "patch-stage propagation")
+    assert out.detection is None
+    assert out.reject_reason is not None
+    assert out.reject_reason.stage is Stage.PATCH_EXTENT
+    assert out.reject_reason.gate == "extent"
+    assert out.reject_reason.margin > 0
