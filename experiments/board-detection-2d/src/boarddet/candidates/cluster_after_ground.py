@@ -7,6 +7,7 @@ import open3d as o3d
 from . import Candidate, plausible_board_patch
 from ..board_config import BoardConfig
 from ..geometry import extent_2d, fit_plane, project_to_plane
+from ..reject import RejectReason
 
 
 # Generator B's big-plane strip params, shared so a viz of the residual
@@ -186,7 +187,8 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
                                   big_plane_min_frac: float = _BIG_PLANE_MIN_FRAC,
                                   cluster_eps: float = 0.15,
                                   cluster_min_points: int = 30,
-                                  vertical_gap_deg: float = 3.0
+                                  vertical_gap_deg: float = 3.0,
+                                  rejects: list[RejectReason] | None = None
                                   ) -> list[Candidate]:
     # big_plane_min_frac was 0.15 in the synthetic-only design; real VLP-32C
     # scenes carry far more non-ground clutter (background structures, poles,
@@ -215,7 +217,7 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
                                           min_points=cluster_min_points))
     out: list[Candidate] = []
     for group_pts in _merge_coplanar_clusters(rest, labels, board):
-        cand = plausible_board_patch(group_pts, board)
+        cand = plausible_board_patch(group_pts, board, rejects=rejects)
         if cand is not None:
             out.append(cand)
     return out
