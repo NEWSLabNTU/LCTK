@@ -34,6 +34,9 @@ required-environments = [
 # plugins (launch_testing) into this ROS-free venv. Load no external plugins.
 addopts = "--disable-plugin-autoload"
 testpaths = ["tests"]
+markers = [
+    "realdata: integration test that needs the sample pcaps + velodyne_decoder",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]

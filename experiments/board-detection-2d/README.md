@@ -129,3 +129,20 @@ uv run pytest
 Covers geometry/scorer/pose primitives, all three candidate generators
 against synthetic scenes (`src/boarddet/synth.py`), ingest, and the
 benchmark harness itself.
+
+`tests/test_realdata_recall.py` is marked `realdata`: it runs the real LOO
+benchmark (`benchmark_e_loo.run_loo`) on the cached sample pcaps at the
+`presets.production_config()` operating point and asserts per-fold, pooled,
+and precision recall floors -- the only automated guard on the Method E
+88.4%-recall headline. It dominates the suite's wall-time (~80s of the
+~110s total on this machine) because it decodes real pcap frames instead of
+synthetic scenes. Skip it for fast local iteration:
+
+```bash
+uv run pytest -m "not realdata"
+```
+
+It skips itself (with an explicit reason) when the sample pcaps
+(`ros/lctk_sample_data/data/{1..5}/lidar.pcap`) or `velodyne_decoder` are
+absent; run the full suite including it before finalizing a change to the
+Method E pipeline.
