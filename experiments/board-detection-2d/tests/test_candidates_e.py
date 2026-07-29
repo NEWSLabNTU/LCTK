@@ -66,6 +66,28 @@ def test_consensus_background_keeps_board_of_the_held_out_scene():
     assert _matches_truth(cands, truth)
 
 
+def test_e_merges_coplanar_stripe_clusters(monkeypatch):
+    """E must route through the shared _merge_coplanar_clusters tail (same as
+    B), so a board fragmented into ring stripes is merged before gating."""
+    import boarddet.candidates.cluster_after_ground as cag
+    calls = {"n": 0}
+    real = cag._merge_coplanar_clusters
+
+    def spy(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(cag, "_merge_coplanar_clusters", spy)
+
+    bg_pts, _ = make_scene(rng=np.random.default_rng(20), include_board=False)
+    reveal, truth = make_scene(rng=np.random.default_rng(21), include_board=True)
+    model = _model_from([bg_pts])
+    cands = generate_background_diff(
+        downsample(reveal, 0.03), BoardConfig(side_m=1.0), background=model)
+    assert calls["n"] >= 1
+    assert _matches_truth(cands, truth)
+
+
 def test_non_planar_blob_alone_is_not_a_candidate():
     """The roadmap's own Method-E caveat ('person + board move together')
     is already handled downstream: a non-planar newly-appeared object fails

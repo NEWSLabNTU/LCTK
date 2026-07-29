@@ -182,6 +182,30 @@ def _merge_coplanar_clusters(points: np.ndarray, labels: np.ndarray,
     return groups
 
 
+def _cluster_and_gate(fg: np.ndarray, board: BoardConfig, *,
+                      cluster_eps: float, cluster_min_points: int,
+                      vertical_gap_deg: float,
+                      rejects: list[RejectReason] | None) -> list[Candidate]:
+    """Shared B/E tail: anisotropic DBSCAN -> coplanar-stripe merge -> gate.
+
+    B and E differ only in how `fg` (the foreground point set) is produced;
+    from here down they are identical.
+    """
+    if len(fg) < cluster_min_points:
+        return []
+    scaled = _anisotropic_scaled(fg.astype(np.float64), cluster_eps,
+                                 vertical_gap_deg)
+    pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scaled))
+    labels = np.asarray(pc.cluster_dbscan(eps=cluster_eps,
+                                          min_points=cluster_min_points))
+    out: list[Candidate] = []
+    for group_pts in _merge_coplanar_clusters(fg, labels, board):
+        cand = plausible_board_patch(group_pts, board, rejects=rejects)
+        if cand is not None:
+            out.append(cand)
+    return out
+
+
 def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
                                   big_plane_dist: float = _BIG_PLANE_DIST,
                                   big_plane_min_frac: float = _BIG_PLANE_MIN_FRAC,
@@ -199,8 +223,6 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
     # could ever contribute.
     rest = _remove_big_planes(points, board, big_plane_dist,
                               big_plane_min_frac, vertical_gap_deg)
-    if len(rest) < cluster_min_points:
-        return []
     # cluster_eps was 0.10 in the synthetic-only design. Real VLP-32C rings
     # leave gaps on the board face itself at ~2 m range (not just on the
     # ground), which fragmented a single 1 m board into 2-3 DBSCAN pieces
@@ -210,14 +232,7 @@ def generate_cluster_after_ground(points: np.ndarray, board: BoardConfig,
     # only (see _anisotropic_scaled) so it keeps working past the ~2 m regime
     # this comment was written for; vertical_gap_deg=0 reproduces the plain
     # isotropic call exactly.
-    scaled = _anisotropic_scaled(rest.astype(np.float64), cluster_eps,
-                                 vertical_gap_deg)
-    pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scaled))
-    labels = np.asarray(pc.cluster_dbscan(eps=cluster_eps,
-                                          min_points=cluster_min_points))
-    out: list[Candidate] = []
-    for group_pts in _merge_coplanar_clusters(rest, labels, board):
-        cand = plausible_board_patch(group_pts, board, rejects=rejects)
-        if cand is not None:
-            out.append(cand)
-    return out
+    return _cluster_and_gate(
+        rest, board, cluster_eps=cluster_eps,
+        cluster_min_points=cluster_min_points,
+        vertical_gap_deg=vertical_gap_deg, rejects=rejects)
