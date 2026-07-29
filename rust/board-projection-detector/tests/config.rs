@@ -1,4 +1,4 @@
-use board_projection_detector::config::{production_config, BoardConfig, ForegroundMethod};
+use board_projection_detector::config::{production_config, ForegroundMethod};
 use std::str::FromStr;
 
 #[test]
