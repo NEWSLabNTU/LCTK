@@ -1,0 +1,16 @@
+[package]
+name = "board-projection-detector"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85.0"
+
+[dependencies]
+nalgebra = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+json5 = { workspace = true }
+hollow-board-detector = { path = "../hollow-board-detector" }
+log = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
