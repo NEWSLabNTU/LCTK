@@ -648,3 +648,19 @@ def test_patch_extent_reject_propagates_through_generator():
     assert out.reject_reason.stage is Stage.PATCH_EXTENT
     assert out.reject_reason.gate == "extent"
     assert out.reject_reason.margin > 0
+
+
+def test_detect_tolerates_non_finite_points():
+    import numpy as np
+    from boarddet.board_config import BoardConfig
+    from boarddet.detector import detect
+    from boarddet.synth import make_scene
+    pts, _ = make_scene(rng=np.random.default_rng(0))
+    poisoned = np.vstack([pts, np.full((5, 3), np.nan, dtype=pts.dtype)])
+    out = detect(poisoned, BoardConfig(), generator="b")
+    # A NaN-free run on the same seed detects; the poisoned run must not
+    # crash, must not return a NaN pose, and must still detect (NaN rows
+    # must not silently starve the pipeline into NO_CLUSTERS).
+    assert out.detection is not None
+    assert np.isfinite(out.detection.center).all()
+    assert np.isfinite(out.detection.rotation).all()
