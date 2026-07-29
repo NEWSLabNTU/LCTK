@@ -13,7 +13,7 @@ from .candidates.background_diff import generate_background_diff
 from .candidates.cluster_after_ground import generate_cluster_after_ground
 from .candidates.ransac_iterative import generate_ransac_iterative
 from .candidates.region_growing import generate_region_growing
-from .geometry import PlaneModel, downsample, project_to_plane
+from .geometry import PlaneModel, downsample, finite_only, project_to_plane
 from .isolation import isolation_density
 from .pose import BoardDetection, board_pose
 from .reject import RejectReason, Stage, furthest, lower, upper
@@ -102,6 +102,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
     up = np.asarray(board.up_axis, dtype=float)
     up = up / np.linalg.norm(up)
     t0 = time.perf_counter()
+    points = finite_only(points)
     dn = downsample(points, voxel)
     t1 = time.perf_counter()
     # Generators B and E take extra arguments; A and C keep their stage-1
