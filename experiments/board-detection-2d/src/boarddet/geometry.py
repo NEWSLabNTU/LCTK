@@ -40,6 +40,18 @@ def unproject(coords_2d: np.ndarray, plane: PlaneModel) -> np.ndarray:
             + coords_2d[:, 1:] * plane.v)
 
 
+def finite_only(points: np.ndarray) -> np.ndarray:
+    """Drop rows with any non-finite (NaN/inf) coordinate.
+
+    Raw LiDAR PointCloud2 encodes invalid returns as NaN; fit_plane's SVD
+    would otherwise propagate a NaN normal and poison every downstream pose.
+    """
+    points = np.asarray(points)
+    if len(points) == 0:
+        return points
+    return points[np.isfinite(points).all(axis=1)]
+
+
 def downsample(points: np.ndarray, voxel: float = 0.03) -> np.ndarray:
     pc = o3d.geometry.PointCloud(
         o3d.utility.Vector3dVector(points.astype(np.float64)))
