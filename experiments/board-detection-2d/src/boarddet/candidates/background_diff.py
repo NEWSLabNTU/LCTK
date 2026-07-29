@@ -14,13 +14,11 @@ VLP-32C rings, so ring-gap fragmentation survives the diff untouched.
 from __future__ import annotations
 
 import numpy as np
-import open3d as o3d
 
-from . import Candidate, plausible_board_patch
+from . import Candidate
 from ..background import BackgroundModel
 from ..board_config import BoardConfig
 from ..reject import RejectReason
-from .cluster_after_ground import _anisotropic_scaled
 
 
 def generate_background_diff(points: np.ndarray, board: BoardConfig, *,
@@ -31,18 +29,8 @@ def generate_background_diff(points: np.ndarray, board: BoardConfig, *,
                              rejects: list[RejectReason] | None = None
                              ) -> list[Candidate]:
     fg = background.foreground_points(points)
-    if len(fg) < cluster_min_points:
-        return []
-    scaled = _anisotropic_scaled(fg.astype(np.float64), cluster_eps,
-                                 vertical_gap_deg)
-    pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scaled))
-    labels = np.asarray(pc.cluster_dbscan(eps=cluster_eps,
-                                          min_points=cluster_min_points))
-    out: list[Candidate] = []
-    for lbl in np.unique(labels):
-        if lbl < 0:
-            continue
-        cand = plausible_board_patch(fg[labels == lbl], board, rejects=rejects)
-        if cand is not None:
-            out.append(cand)
-    return out
+    from .cluster_after_ground import _cluster_and_gate
+    return _cluster_and_gate(
+        fg, board, cluster_eps=cluster_eps,
+        cluster_min_points=cluster_min_points,
+        vertical_gap_deg=vertical_gap_deg, rejects=rejects)
