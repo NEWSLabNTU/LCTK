@@ -193,7 +193,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
                     angle_err_deg=0.0,
                     raster=np.zeros((1, 1), dtype=np.uint8),
                     origin=np.zeros(2), cell_m=board.cell_m)
-            det = board_pose(cand.plane, refined_res)
+            det = board_pose(cand.plane, refined_res, up)
             det = dataclasses.replace(det, score=refined_score)
             if board.stance_floor > 0:
                 stance3d = _stance(det.corners_3d, up)
@@ -220,7 +220,7 @@ def detect(points: np.ndarray, board: BoardConfig, generator: str,
                               close_height_m=close_height_m, rejects=rejects)
         if res is None:
             continue
-        det = board_pose(cand.plane, res)
+        det = board_pose(cand.plane, res, up)
         if board.stance_weight > 0:
             stance = _stance(det.corners_3d, up)
             w = board.stance_weight
