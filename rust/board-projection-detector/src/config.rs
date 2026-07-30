@@ -66,10 +66,10 @@ pub fn production_config(side_m: f64, up_axis: [f64; 3], cluster_min_points: usi
         side_tol: 0.20,
         cell_m: 0.02,
         vertical_gap_deg: 3.0,
-        flatness_rms_max: 0.045,   // presets.py
-        stance_floor: 0.9,          // presets.py
+        flatness_rms_max: 0.045, // presets.py
+        stance_floor: 0.9,       // presets.py
         square_icp_residual_max: 0.45,
-        isolation: true,            // presets.py
+        isolation: true, // presets.py
         isolation_max_density: 0.3,
     }
 }
