@@ -19,7 +19,13 @@ fn production_config_matches_python_preset() {
 
 #[test]
 fn foreground_method_from_str() {
-    assert!(matches!(ForegroundMethod::from_str("plane_strip"), Ok(ForegroundMethod::PlaneStrip)));
-    assert!(matches!(ForegroundMethod::from_str("background_subtraction"), Ok(ForegroundMethod::BackgroundSubtraction)));
+    assert!(matches!(
+        ForegroundMethod::from_str("plane_strip"),
+        Ok(ForegroundMethod::PlaneStrip)
+    ));
+    assert!(matches!(
+        ForegroundMethod::from_str("background_subtraction"),
+        Ok(ForegroundMethod::BackgroundSubtraction)
+    ));
     assert!(ForegroundMethod::from_str("bogus").is_err());
 }
