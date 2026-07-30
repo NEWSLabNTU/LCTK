@@ -4,3 +4,4 @@ pub mod config;
 pub mod dbscan;
 pub mod geometry;
 pub mod scorer;
+pub mod square_fit;
