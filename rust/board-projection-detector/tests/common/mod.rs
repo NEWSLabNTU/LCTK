@@ -255,6 +255,16 @@ pub fn assert_candidate_parity(f: &Fixture) {
     );
 }
 
+/// Reconstruct `board_pose`'s `corners_3d` via a full `detect()` run on the
+/// fixture's raw input and check it against `golden.selected_corners_3d`.
+///
+/// Not implemented until Task 9 (`detect()` doesn't exist yet); the only
+/// caller (`tests/pose.rs::pose_corners_parity_against_python`) is
+/// `#[ignore]`d until then, so this stub is never invoked.
+pub fn assert_pose_corners_parity(_f: &Fixture) {
+    unimplemented!("needs detect() from Task 9")
+}
+
 pub fn load_all() -> Vec<Fixture> {
     let dir = fixtures_dir();
     let mut out = vec![];
