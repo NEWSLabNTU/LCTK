@@ -234,74 +234,117 @@ This task ships NO ported algorithm — it builds the test scaffolding every lat
 ```json
 {
   "generator": "background_subtraction",
+  "dataset": 3,
   "voxel": 0.03,
   "up_axis": [0.0, 0.0, 1.0],
   "cluster_min_points": 30,
-  "background_keys": [/* int64, sorted; present only for background_subtraction */],
-  "background_params": {"voxel": 0.06, "dilation_radius": 1, "min_sources": 1},
+  "background_keys_file": "ds3.bgkeys.i64",
+  "background_params": {"voxel": 0.06, "dilation_radius": 1, "min_sources": 3},
   "foreground_xyz": [[x,y,z], ...],
   "n_candidates": 2,
-  "candidate_centroids": [[x,y,z], ...],
-  "candidate_extents": [1.31, 0.44],
-  "selected_index": 0,
   "selected_centroid": [x,y,z],
   "selected_corners_3d": [[x,y,z], x4],
-  "detected": true
+  "detected": true,
+  "true_board": true
 }
 ```
+- `background_keys_file` (background_subtraction only): a sibling file of raw little-endian `i64` = the finalized LOO background's sorted voxel keys, dumped separately because a dataset's room is tens of thousands of voxels (too big to inline). `plane_strip` fixtures omit it.
+- `true_board`: `box.contains(selected_centroid)` using the pcap rig's `bbox.json5` (`boarddet.bbox_ref.load_bbox`) — the recall/precision truth label (Task 9). `false`/absent when `detected` is false.
+- **E background is cross-dataset LOO**, not single-frame warmup — that is what the 88.4/100 numbers measured. For a fixture from held-out dataset `D`, the background is built from the OTHER four datasets (`build_background(sources, held_out=str(D), 0.06, 1, min_sources=3)`).
 
 - [ ] **Step 1: Write the Python exporter**
 
-`tools/export_golden.py` (run via `uv run python -m tools.export_golden` or `uv run tools/export_golden.py`). It imports the same functions the benchmark uses. Curate a small, decisive frame set: for EACH dataset 1–5 pick ~3 frames known to contain the board (a hit) and ~1 known clutter/empty frame (a miss), from the cached `.npz` ingest. Use `production_config(side_m=1.0, up_axis=(0,0,1), cluster_min_points=<per-dataset>)`.
+`tools/export_golden.py` (run via `cd experiments/board-detection-2d && uv run python tools/export_golden.py`). Reuse the real APIs — do NOT re-derive them:
+- `boarddet.ingest.load_frames(ds) -> list[Frame]`; `Frame.xyz` is the raw `(N,3) float32` cloud (the detector's input).
+- `boarddet.benchmark_e_loo.build_background(sources, held_out, voxel, dilation_radius, min_sources)` — builds the cross-dataset LOO background (one source per dataset, finalized).
+- `boarddet.candidates.cluster_after_ground.big_plane_residual(dn, board, vertical_gap_deg)` — the `plane_strip` foreground.
+- `boarddet.bbox_ref.load_bbox(path)` → `box`; `box.contains(center)` is the true-board label. Path: `ros/lctk_launch/config/board/bbox.json5` (see `benchmark_e_loo.DEFAULT_BBOX_PATH`).
+- `boarddet.geometry.{finite_only, downsample}`; `boarddet.detector.detect`.
 
-Skeleton (fill dataset/frame selection from `boarddet.ingest`/the existing benchmark loaders):
+Board config = the production operating point (same object for both generators):
+```python
+from boarddet.board_config import BoardConfig
+board = BoardConfig(side_m=1.0, up_axis=(0.0,0.0,1.0), cluster_min_points=30,
+                    square_icp=True, stance_floor=0.9, isolation=True,
+                    flatness_rms_max=0.045)  # == presets.production_config()
+```
+
+Concrete exporter:
 ```python
 import json, numpy as np, pathlib
-from boarddet.presets import production_config
-from boarddet.detector import detect, GENERATORS
+from boarddet.ingest import load_frames
+from boarddet.benchmark_e_loo import build_background, DEFAULT_BBOX_PATH
+from boarddet.bbox_ref import load_bbox
 from boarddet.geometry import finite_only, downsample
-from boarddet.background import BackgroundModel
-from boarddet.candidates.cluster_after_ground import generate_cluster_after_ground
-from boarddet.candidates.background_diff import generate_background_diff
+from boarddet.candidates.cluster_after_ground import big_plane_residual
+from boarddet.detector import detect
+from boarddet.board_config import BoardConfig
 
-OUT = pathlib.Path(__file__).resolve().parents[2] / "rust/board-projection-detector/tests/fixtures"
+OUT = pathlib.Path(__file__).resolve().parents[1] / "../rust/board-projection-detector/tests/fixtures"
+OUT = OUT.resolve()
+OUT.mkdir(parents=True, exist_ok=True)
+VOXEL = 0.03
+BOX = load_bbox(DEFAULT_BBOX_PATH)
+def board(): return BoardConfig(side_m=1.0, up_axis=(0.0,0.0,1.0),
+    cluster_min_points=30, square_icp=True, stance_floor=0.9,
+    isolation=True, flatness_rms_max=0.045)
 
-def dump_frame(name, raw_points, board, generator, background=None):
-    raw = np.ascontiguousarray(raw_points[:, :3], dtype=np.float32)
+def dump(name, raw, generator, background=None, ds=None):
+    raw = np.ascontiguousarray(raw[:, :3], dtype=np.float32)
     (OUT / f"{name}.input.f32").write_bytes(raw.tobytes())
-    dn = downsample(finite_only(raw.astype(np.float64)), 0.03)
-    # foreground (mirror detect(): B strips planes, E diffs background)
+    b = board()
+    dn = downsample(finite_only(raw.astype(np.float64)), VOXEL)
     if generator == "background_subtraction":
         fg = background.foreground_points(dn)
+        gen = "e"
     else:
-        from boarddet.candidates.cluster_after_ground import big_plane_residual
-        fg = big_plane_residual(dn, board, board.vertical_gap_deg)
-    out = detect(raw.astype(np.float64), board,
-                 generator="e" if generator == "background_subtraction" else "b",
-                 background=background)
+        fg = big_plane_residual(dn, b, b.vertical_gap_deg)
+        gen = "b"
+    out = detect(raw.astype(np.float64), b, generator=gen, background=background)
     det = out.detection
-    g = {
-        "generator": generator, "voxel": 0.03,
-        "up_axis": list(board.up_axis),
-        "cluster_min_points": board.cluster_min_points,
-        "foreground_xyz": fg.astype(float).tolist(),
-        "n_candidates": out.n_candidates,
-        "detected": det is not None,
-    }
-    if background is not None:
-        g["background_keys"] = background._keys.tolist()
-        g["background_params"] = {"voxel": background.voxel,
-                                  "dilation_radius": background.dilation_radius,
-                                  "min_sources": background.min_sources}
+    g = {"generator": generator, "dataset": ds, "voxel": VOXEL,
+         "up_axis": list(b.up_axis), "cluster_min_points": b.cluster_min_points,
+         "foreground_xyz": np.asarray(fg, float).tolist(),
+         "n_candidates": out.n_candidates, "detected": det is not None}
     if det is not None:
         g["selected_centroid"] = det.center.astype(float).tolist()
         g["selected_corners_3d"] = det.corners_3d.astype(float).tolist()
+        g["true_board"] = bool(BOX.contains(det.center))
+    if background is not None:
+        keys = np.asarray(background.keys() if hasattr(background, "keys") else background._keys, dtype="<i8")
+        kf = f"{name}.bgkeys.i64"; (OUT / kf).write_bytes(keys.tobytes())
+        g["background_keys_file"] = kf
+        g["background_params"] = {"voxel": background.voxel,
+            "dilation_radius": background.dilation_radius,
+            "min_sources": background.min_sources}
     (OUT / f"{name}.golden.json").write_text(json.dumps(g, indent=1))
-# ... loop over curated (dataset, frame) list, build per-dataset live-warmup
-#     BackgroundModel(min_sources=1) for the background_subtraction fixtures ...
-```
 
-Note: `detect()` maps the renamed generators back to the experiment's `"e"`/`"b"` — the RENAME lives only in the Rust crate; the Python experiment keeps `a/b/c/e`. Confirm the exact `.npz` frame accessor in `boarddet.ingest` / the benchmark before wiring the loop (do not guess the loader API).
+def pick(frames, gen, background=None, ds=None):
+    """Curate ~4 frames: first true-board hit, first non-detection, + a spread."""
+    b = board()
+    outs = [detect(f.xyz.astype(np.float64), b,
+                   generator=("e" if gen=="background_subtraction" else "b"),
+                   background=background) for f in frames]
+    hits = [i for i,o in enumerate(outs) if o.detection is not None]
+    miss = [i for i,o in enumerate(outs) if o.detection is None]
+    idxs = ([hits[0]] if hits else []) + ([miss[0]] if miss else [])
+    idxs += list(range(0, len(frames), max(1, len(frames)//3)))
+    seen = []
+    for i in idxs:
+        if i not in seen: seen.append(i)
+        if len(seen) >= 4: break
+    for i in seen:
+        dump(f"ds{ds}_f{i:04d}_{gen[:2]}", frames[i].xyz, gen, background, ds)
+
+DATASETS = [1,2,3,4,5]
+sources = {str(d): load_frames(d) for d in DATASETS}
+for d in DATASETS:
+    pick(sources[str(d)], "plane_strip", None, d)
+    bg = build_background(sources, held_out=str(d), voxel=0.06,
+                          dilation_radius=1, min_sources=3)
+    pick(sources[str(d)], "background_subtraction", bg, d)
+```
+Notes: `detect()` uses the experiment's `"e"`/`"b"` generator strings — the rename to `background_subtraction`/`plane_strip` lives only in the Rust crate. If `BackgroundModel` has no public `keys()` accessor, read `_keys` (the fallback above handles both). This exporter runs the WHOLE `boarddet` pipeline, so it also confirms the `uv`/open3d env is healthy on this box.
 
 - [ ] **Step 2: Generate the fixtures**
 
@@ -317,17 +360,29 @@ use serde::Deserialize;
 use std::{fs, path::{Path, PathBuf}};
 
 #[derive(Debug, Deserialize)]
+pub struct BgParams { pub voxel: f64, pub dilation_radius: i64, pub min_sources: usize }
+
+#[derive(Debug, Deserialize)]
 pub struct Golden {
     pub generator: String,
+    #[serde(default)] pub dataset: Option<u32>,
     pub voxel: f64,
     pub up_axis: [f64; 3],
     pub cluster_min_points: usize,
-    #[serde(default)] pub background_keys: Vec<i64>,
+    #[serde(default)] pub background_keys_file: Option<String>,
+    #[serde(default)] pub background_params: Option<BgParams>,
     #[serde(default)] pub foreground_xyz: Vec<[f64; 3]>,
     pub n_candidates: usize,
     #[serde(default)] pub selected_centroid: Option<[f64; 3]>,
     #[serde(default)] pub selected_corners_3d: Option<Vec<[f64; 3]>>,
     pub detected: bool,
+    #[serde(default)] pub true_board: bool,
+}
+
+// helper: load a sibling `<name>.bgkeys.i64` (raw LE i64) into a sorted Vec<i64>
+pub fn load_i64(path: &Path) -> Vec<i64> {
+    fs::read(path).unwrap().chunks_exact(8)
+        .map(|c| i64::from_le_bytes(c.try_into().unwrap())).collect()
 }
 
 pub struct Fixture { pub name: String, pub input: Vec<Point3<f64>>, pub golden: Golden }
@@ -1115,7 +1170,7 @@ git commit -m "feat(board-proj): detect() orchestration + end-to-end parity + re
 - Carry-forward #1 (corner ordering: ArUco uses `corners_3d`) → Task 8 `board_pose` CCW; the ROS wiring enforces "consume `corners_3d`" in sub-project 2 (out of scope here, noted).
 - Carry-forward #2 (far-board `cluster_min_points`) → `production_config(cluster_min_points)` param, threaded from fixture per-dataset. ✅
 
-**Deferred to sub-project 2 (ROS node) — NOT in this plan:** `detection_mode` param + `select_board_cluster` wiring into `process_pointcloud`; E warmup lifecycle (param-driven + `reset_background` service); mapping `selected_points`→existing Stage 2/3; json5 config file surfacing the ~20 constants; launch/`book` docs. This plan's deliverable is the parity-validated library only.
+**Deferred to sub-project 2 (ROS node) — NOT in this plan:** **Fold `board-projection-detector` from a standalone workspace back into the root workspace as a normal `rust/*` member** (remove its `[workspace]` table + the root `exclude` entry, switch inline dep versions to `{ workspace = true }` where a root workspace dep exists), and update the root `Cargo.lock` via `just build` (colcon, in the sourced ROS env — plain cargo cannot re-resolve the wildcard ROS crates). This is the agreed "convention-first, deferred for dev speed" debt: standalone now for fast parity-test iteration, member at integration when `lidar_board_detector` (a root member) depends on it. Also: `detection_mode` param + `select_board_cluster` wiring into `process_pointcloud`; E warmup lifecycle (param-driven + `reset_background` service); mapping `selected_points`→existing Stage 2/3; json5 config file surfacing the ~20 constants; launch/`book` docs. This plan's deliverable is the parity-validated library only.
 
 **Placeholder scan:** Every code step carries real Rust or a real Python skeleton. Two spots depend on names in existing files, flagged explicitly to confirm before use, not guess: Task 1 the `boarddet.ingest` frame accessor; Task 8 `isolation.py:isolation_density` (read the file — it was not quoted in full during design). No "TBD"/"add error handling"/"similar to Task N".
 
