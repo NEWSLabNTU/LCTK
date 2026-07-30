@@ -5,7 +5,12 @@
 //! `tests/fixtures/README.md` for the format and regeneration command.
 #![allow(dead_code)] // shared fixture-loader scaffolding; fields/helpers consumed by later tasks
 
-use board_projection_detector::{background::BackgroundModel, geometry};
+use board_projection_detector::{
+    background::BackgroundModel,
+    candidates::{generate_background_diff, generate_plane_strip},
+    config::production_config,
+    geometry,
+};
 use nalgebra::Point3;
 use serde::Deserialize;
 use std::{
@@ -147,6 +152,106 @@ pub fn assert_foreground_parity(f: &Fixture) {
         match_frac * 100.0,
         fg.len(),
         f.golden.foreground_xyz.len()
+    );
+}
+
+/// Mean of a candidate's member points (NOT the same quantity as
+/// `golden.selected_centroid`, which is the fitted board's 4-corner mean --
+/// see `assert_candidate_parity`).
+fn candidate_centroid(points: &[Point3<f64>]) -> [f64; 3] {
+    let n = points.len() as f64;
+    let sum = points.iter().fold([0.0; 3], |mut acc, p| {
+        acc[0] += p.x;
+        acc[1] += p.y;
+        acc[2] += p.z;
+        acc
+    });
+    [sum[0] / n, sum[1] / n, sum[2] / n]
+}
+
+fn dist3(a: &[f64; 3], b: &[f64; 3]) -> f64 {
+    let (dx, dy, dz) = (a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// Centroid-match tolerance (see `assert_candidate_parity`'s doc comment for
+/// why this isn't 0.02 m).
+///
+/// Measured (after fixing `voxel_downsample`'s iteration order -- see its
+/// doc comment -- to make `remove_big_planes`'s seeded RANSAC reproducible):
+/// across all 25 `detected=true` fixtures the nearest candidate centroid is
+/// 0.083-0.121 m from `golden.selected_centroid`; 0.13 m gives ~1 cm of
+/// margin above the observed max (0.1207 m, ds4_f0003_pl) without papering
+/// over a real mismatch -- a genuine miss would land far outside this band
+/// (unmatched RANSAC/clustering outcomes on this data measure in metres,
+/// see the `debug_outliers` investigation in this task's report).
+pub const CANDIDATE_CENTROID_TOL: f64 = 0.13;
+
+/// Run the fixture's matching candidate generator on `downsample(finite_only(input))`
+/// and check it against the golden vector produced by
+/// `experiments/board-detection-2d/tools/export_golden.py`.
+///
+/// Two assertions, chosen to be robust to the exact clustering split (which
+/// candidate boundaries fall on is not asserted point-for-point -- see the
+/// task-5 brief and Task 9's note on RANSAC-selection-only parity):
+/// - when `golden.detected`, at least one produced candidate exists and its
+///   centroid is within `CANDIDATE_CENTROID_TOL` of `golden.selected_centroid`.
+///   `selected_centroid` is `det.center`: the mean of the 4 ICP-square-fitted
+///   corners (`pose.py:board_pose`), a downstream (Task 9+) refinement --
+///   NOT the mean of the candidate's raw member points computed here. The
+///   two are close (both describe "the board") but not identical, so the
+///   natural gap is larger than a golden-vector point-for-point tolerance
+///   would be.
+/// - a sane floor: `detected` implies `n_candidates >= 1` from this port too.
+pub fn assert_candidate_parity(f: &Fixture) {
+    let finite = geometry::finite_only(&f.input);
+    let dn = geometry::voxel_downsample(&finite, f.golden.voxel);
+    let board = production_config(1.0, f.golden.up_axis, f.golden.cluster_min_points);
+
+    let cands = if f.generator_is_bg() {
+        let keys_file = f
+            .golden
+            .background_keys_file
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: missing background_keys_file", f.name));
+        let params = f
+            .golden
+            .background_params
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: missing background_params", f.name));
+        let keys = load_i64(&fixtures_dir().join(keys_file));
+        let bg = BackgroundModel::from_keys(
+            keys,
+            params.voxel,
+            params.dilation_radius,
+            params.min_sources,
+        );
+        generate_background_diff(&dn, &board, &bg)
+    } else {
+        generate_plane_strip(&dn, &board)
+    };
+
+    if !f.golden.detected {
+        return;
+    }
+    assert!(
+        !cands.is_empty(),
+        "{}: golden detected a board but this port produced 0 candidates",
+        f.name
+    );
+    let expected = f
+        .golden
+        .selected_centroid
+        .unwrap_or_else(|| panic!("{}: detected=true but no selected_centroid", f.name));
+    let best = cands
+        .iter()
+        .map(|c| dist3(&candidate_centroid(&c.points), &expected))
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        best <= CANDIDATE_CENTROID_TOL,
+        "{}: nearest candidate centroid is {best:.4} m from golden.selected_centroid \
+         (tol={CANDIDATE_CENTROID_TOL})",
+        f.name
     );
 }
 
