@@ -3,7 +3,7 @@
 //! Port of `experiments/board-detection-2d/src/boarddet/geometry.py`.
 
 use nalgebra::{DMatrix, Point3, Vector3};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// A fitted plane: center + orthonormal basis (`u`, `v` in-plane, `normal` out-of-plane).
 #[derive(Debug, Clone, Copy)]
@@ -104,8 +104,17 @@ pub fn extent_2d(coords: &[[f64; 2]]) -> f64 {
 ///
 /// Matches open3d's `voxel_down_sample`, which the Python `downsample`
 /// wraps — this is a centroid per voxel, not grid-snapping.
+///
+/// Uses a `BTreeMap` (not `HashMap`) so the emitted point ORDER is
+/// deterministic across runs, keyed by voxel index ascending. This matters
+/// downstream: `candidates::remove_big_planes` feeds this output straight
+/// into `arrsac::Arrsac`, whose seeded RNG draws samples by position in the
+/// input sequence -- a `HashMap`'s randomized-per-process iteration order
+/// would silently make RANSAC's result (and therefore candidate sets)
+/// non-reproducible run to run despite the seed, defeating the whole point
+/// of seeding it.
 pub fn voxel_downsample(points: &[Point3<f64>], voxel: f64) -> Vec<Point3<f64>> {
-    let mut voxels: HashMap<(i64, i64, i64), (Vector3<f64>, usize)> = HashMap::new();
+    let mut voxels: BTreeMap<(i64, i64, i64), (Vector3<f64>, usize)> = BTreeMap::new();
     for p in points {
         let key = (
             (p.x / voxel).floor() as i64,
