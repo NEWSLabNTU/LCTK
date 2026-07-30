@@ -128,7 +128,12 @@ pub fn assert_foreground_parity(f: &Fixture) {
         .as_ref()
         .unwrap_or_else(|| panic!("{}: missing background_params", f.name));
     let keys = load_i64(&fixtures_dir().join(keys_file));
-    let bg = BackgroundModel::from_keys(keys, params.voxel, params.dilation_radius, params.min_sources);
+    let bg = BackgroundModel::from_keys(
+        keys,
+        params.voxel,
+        params.dilation_radius,
+        params.min_sources,
+    );
 
     let finite = geometry::finite_only(&f.input);
     let dn = geometry::voxel_downsample(&finite, f.golden.voxel);
