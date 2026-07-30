@@ -25,7 +25,9 @@ const KEY_OFFSET: i64 = 1 << (KEY_BITS - 1);
 
 /// (biased voxel index) -> int64 key. Ports `background.py:_pack`.
 pub fn pack(idx: [i64; 3]) -> i64 {
-    (idx[0] & KEY_MASK) | ((idx[1] & KEY_MASK) << KEY_BITS) | ((idx[2] & KEY_MASK) << (2 * KEY_BITS))
+    (idx[0] & KEY_MASK)
+        | ((idx[1] & KEY_MASK) << KEY_BITS)
+        | ((idx[2] & KEY_MASK) << (2 * KEY_BITS))
 }
 
 fn voxel_idx(p: &Point3<f64>, voxel: f64) -> [i64; 3] {
@@ -131,7 +133,10 @@ impl BackgroundModel {
     /// If `finalize()` (or `from_keys`) hasn't been called since the last
     /// `observe()`.
     pub fn foreground_points(&self, dn: &[Point3<f64>]) -> Vec<Point3<f64>> {
-        let keys = self.keys.as_ref().expect("finalize() before foreground_points()");
+        let keys = self
+            .keys
+            .as_ref()
+            .expect("finalize() before foreground_points()");
         if keys.is_empty() || dn.is_empty() {
             return dn.to_vec();
         }
@@ -169,7 +174,10 @@ mod tests {
         let p = [Point3::new(1.0, 1.0, 1.0)];
         bg.observe(&p, "a");
         bg.finalize();
-        assert!(bg.keys().is_empty(), "single source must not satisfy min_sources=2");
+        assert!(
+            bg.keys().is_empty(),
+            "single source must not satisfy min_sources=2"
+        );
 
         bg.observe(&p, "b");
         bg.finalize();
