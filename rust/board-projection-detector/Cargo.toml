@@ -4,8 +4,8 @@
 # from the root workspace and rooting its own here lets plain `cargo test`
 # resolve it. Deps are all pure-Rust — notably NOT hollow-board-detector,
 # which drags in sfcgal-sys (native SFCGAL C lib); voxel_downsample is
-# implemented locally and RANSAC uses plane-estimator + arrsac directly
-# (the same pair hollow-board-detector's fit_plane_ransac is built from).
+# implemented locally and RANSAC is a hand-rolled plain seeded 300-iteration
+# fit (`candidates::ransac_plane_inliers`) matching open3d segment_plane.
 [workspace]
 
 [package]
@@ -20,9 +20,6 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 json5 = "0.4.1"
 log = "0.4.20"
-plane-estimator = { path = "../plane-estimator" }
-sample-consensus = "1.0.2"
-arrsac = "0.10.0"
 rand = "0.8"
 
 [dev-dependencies]
