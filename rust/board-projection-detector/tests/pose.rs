@@ -26,7 +26,13 @@ fn board_pose_normal_faces_sensor_and_winds_ccw() {
 
 #[test]
 fn pose_corners_parity_against_python() {
-    for f in common::load_all().into_iter().filter(|f| f.golden.detected) {
+    // Compare pose corners only where Python detected AND this port also detects
+    // in agreement -- the documented, controller-accepted per-frame divergences
+    // (`common::KNOWN_PER_FRAME_MISMATCHES`, RNG-driven) are frames Rust rejects,
+    // so there are no corners to compare. See detect_parity.rs / task-9 report.
+    for f in common::load_all().into_iter().filter(|f| {
+        f.golden.detected && !common::KNOWN_PER_FRAME_MISMATCHES.contains(&f.name.as_str())
+    }) {
         common::assert_pose_corners_parity(&f); // corners_3d set within a few cm of Python
     }
 }
