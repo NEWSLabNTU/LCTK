@@ -25,7 +25,6 @@ fn board_pose_normal_faces_sensor_and_winds_ccw() {
 }
 
 #[test]
-#[ignore] // needs detect() from Task 9; Task 9 removes the ignore
 fn pose_corners_parity_against_python() {
     for f in common::load_all().into_iter().filter(|f| f.golden.detected) {
         common::assert_pose_corners_parity(&f); // corners_3d set within a few cm of Python

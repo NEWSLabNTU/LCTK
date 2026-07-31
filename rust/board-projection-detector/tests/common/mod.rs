@@ -8,12 +8,14 @@
 use board_projection_detector::{
     background::BackgroundModel,
     candidates::{generate_background_diff, generate_plane_strip},
-    config::production_config,
+    config::{production_config, ForegroundMethod},
+    detector::detect,
     geometry,
 };
 use nalgebra::Point3;
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -255,14 +257,108 @@ pub fn assert_candidate_parity(f: &Fixture) {
     );
 }
 
+/// Map a fixture to its detector inputs: the foreground method and (for
+/// `background_subtraction` fixtures) the exported background model rebuilt
+/// from its `.bgkeys.i64` file.
+pub fn method_and_background(f: &Fixture) -> (ForegroundMethod, Option<BackgroundModel>) {
+    if f.generator_is_bg() {
+        let keys_file = f
+            .golden
+            .background_keys_file
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: missing background_keys_file", f.name));
+        let params = f
+            .golden
+            .background_params
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: missing background_params", f.name));
+        let keys = load_i64(&fixtures_dir().join(keys_file));
+        let bg = BackgroundModel::from_keys(
+            keys,
+            params.voxel,
+            params.dilation_radius,
+            params.min_sources,
+        );
+        (ForegroundMethod::BackgroundSubtraction, Some(bg))
+    } else {
+        (ForegroundMethod::PlaneStrip, None)
+    }
+}
+
 /// Reconstruct `board_pose`'s `corners_3d` via a full `detect()` run on the
 /// fixture's raw input and check it against `golden.selected_corners_3d`.
 ///
-/// Not implemented until Task 9 (`detect()` doesn't exist yet); the only
-/// caller (`tests/pose.rs::pose_corners_parity_against_python`) is
-/// `#[ignore]`d until then, so this stub is never invoked.
-pub fn assert_pose_corners_parity(_f: &Fixture) {
-    unimplemented!("needs detect() from Task 9")
+/// Corners may come back in a rotated/cyclic order, so this is a set match:
+/// every golden corner must have a Rust corner within `CORNER_MATCH_TOL`.
+pub const CORNER_MATCH_TOL: f64 = 0.03;
+
+pub fn assert_pose_corners_parity(f: &Fixture) {
+    let board = production_config(1.0, f.golden.up_axis, f.golden.cluster_min_points);
+    let (method, bg) = method_and_background(f);
+    let out = detect(&f.input, &board, method, f.golden.voxel, bg.as_ref());
+
+    let det = out.detection.unwrap_or_else(|| {
+        panic!(
+            "{}: detect() found no board on a detected=true fixture",
+            f.name
+        )
+    });
+    let golden = f
+        .golden
+        .selected_corners_3d
+        .as_ref()
+        .unwrap_or_else(|| panic!("{}: detected=true but no selected_corners_3d", f.name));
+
+    for g in golden {
+        let best = det
+            .corners_3d
+            .iter()
+            .map(|c| {
+                let (dx, dy, dz) = (c.x - g[0], c.y - g[1], c.z - g[2]);
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            best <= CORNER_MATCH_TOL,
+            "{}: golden corner {g:?} has no Rust corner within {CORNER_MATCH_TOL} m (nearest {best:.4} m)",
+            f.name
+        );
+    }
+}
+
+/// Aggregate detected-count per `(dataset, generator)` for both the golden
+/// truth and the Rust `run` closure, and assert they agree within the
+/// ±1-frame tolerance (Global Constraints).
+pub fn assert_recall_precision_parity(fixtures: &[Fixture], mut run: impl FnMut(&Fixture) -> bool) {
+    let mut py: BTreeMap<(u32, String), i64> = BTreeMap::new();
+    let mut rs: BTreeMap<(u32, String), i64> = BTreeMap::new();
+    for f in fixtures {
+        let ds = f
+            .golden
+            .dataset
+            .unwrap_or_else(|| panic!("{}: missing dataset id", f.name));
+        let key = (ds, f.golden.generator.clone());
+        py.entry(key.clone()).or_default();
+        rs.entry(key.clone()).or_default();
+        if f.golden.detected {
+            *py.get_mut(&key).unwrap() += 1;
+        }
+        if run(f) {
+            *rs.get_mut(&key).unwrap() += 1;
+        }
+    }
+
+    let mut mism = vec![];
+    for (key, &p) in &py {
+        let r = rs[key];
+        if (p - r).abs() > 1 {
+            mism.push(format!("{key:?}: python={p} rust={r}"));
+        }
+    }
+    assert!(
+        mism.is_empty(),
+        "per-(dataset,generator) detected-count mismatch > 1 frame: {mism:?}"
+    );
 }
 
 pub fn load_all() -> Vec<Fixture> {
