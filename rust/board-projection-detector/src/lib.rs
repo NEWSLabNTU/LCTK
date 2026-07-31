@@ -2,6 +2,7 @@ pub mod background;
 pub mod candidates;
 pub mod config;
 pub mod dbscan;
+pub mod detector;
 pub mod geometry;
 pub mod pose;
 pub mod scorer;
