@@ -108,8 +108,8 @@ pub fn extent_2d(coords: &[[f64; 2]]) -> f64 {
 /// Uses a `BTreeMap` (not `HashMap`) so the emitted point ORDER is
 /// deterministic across runs, keyed by voxel index ascending. This matters
 /// downstream: `candidates::remove_big_planes` feeds this output straight
-/// into `arrsac::Arrsac`, whose seeded RNG draws samples by position in the
-/// input sequence -- a `HashMap`'s randomized-per-process iteration order
+/// into `ransac_plane_inliers`, whose seeded RNG draws samples by index into
+/// the input sequence -- a `HashMap`'s randomized-per-process iteration order
 /// would silently make RANSAC's result (and therefore candidate sets)
 /// non-reproducible run to run despite the seed, defeating the whole point
 /// of seeding it.

@@ -7,11 +7,8 @@ use crate::background::BackgroundModel;
 use crate::config::BoardConfig;
 use crate::dbscan::{anisotropic_scaled, cluster_anisotropic, dbscan};
 use crate::geometry::{extent_2d, fit_plane, plane_rms, project_to_plane, PlaneModel};
-use arrsac::Arrsac;
 use nalgebra::{Point3, Vector3};
-use plane_estimator::PlaneEstimator;
-use rand::{rngs::StdRng, SeedableRng};
-use sample_consensus::Consensus;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Shared by generator B's big-plane strip and its `cluster_eps` for the
@@ -65,14 +62,60 @@ pub fn plausible_board_patch(points: &[Point3<f64>], board: &BoardConfig) -> Opt
     })
 }
 
+/// Plain seeded RANSAC plane fit, matching open3d's
+/// `segment_plane(distance_threshold=dist, ransac_n=3, num_iterations=300)`:
+/// 300 iterations of "sample 3 distinct points, fit a plane, count inliers
+/// within `dist`", keeping the largest inlier set. Deterministic (seed 0),
+/// so `remove_big_planes` is reproducible. Returns inlier indices into `pts`.
+///
+/// Replaces the earlier `arrsac::Arrsac` port, whose preemptive SPRT scored
+/// hypotheses on only a small point block before pruning and so discarded the
+/// dominant ground/wall plane on full scenes (~50 s/frame, 13/20 parity --
+/// see task-9 report). Exhaustive per-hypothesis inlier counting here is both
+/// faithful to open3d and far faster.
+fn ransac_plane_inliers(pts: &[Point3<f64>], dist: f64) -> Vec<usize> {
+    if pts.len() < 3 {
+        return vec![];
+    }
+    let mut rng = StdRng::seed_from_u64(0);
+    let mut best: Vec<usize> = vec![];
+    for _ in 0..300 {
+        // pick 3 distinct random indices
+        let a = rng.gen_range(0..pts.len());
+        let mut b = rng.gen_range(0..pts.len());
+        while b == a {
+            b = rng.gen_range(0..pts.len());
+        }
+        let mut c = rng.gen_range(0..pts.len());
+        while c == a || c == b {
+            c = rng.gen_range(0..pts.len());
+        }
+        let (pa, pb, pc) = (pts[a], pts[b], pts[c]);
+        let n = (pb.coords - pa.coords).cross(&(pc.coords - pa.coords));
+        let norm = n.norm();
+        if norm < 1e-9 {
+            continue; // collinear sample
+        }
+        let n = n / norm;
+        let d = -n.dot(&pa.coords);
+        let inliers: Vec<usize> = pts
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| (n.dot(&p.coords) + d).abs() <= dist)
+            .map(|(i, _)| i)
+            .collect();
+        if inliers.len() > best.len() {
+            best = inliers;
+        }
+    }
+    best
+}
+
 /// Iteratively strip planes whose inlier patch is far larger than a board.
 ///
-/// Ports `_remove_big_planes`. open3d's RANSAC (`segment_plane`) is replaced
-/// by `arrsac::Arrsac` + `plane_estimator::PlaneEstimator`, seeded
-/// deterministically once per call (mirrors Python's `o3d.utility.random.seed(0)`
-/// at the top of the function -- one seed for the whole loop, not per
-/// iteration, so RNG state carries across iterations just as it does for
-/// o3d's single seeded global generator).
+/// Ports `_remove_big_planes`. open3d's RANSAC (`segment_plane`) is
+/// reimplemented by `ransac_plane_inliers` (plain seeded 300-iteration
+/// RANSAC), seeded deterministically per RANSAC call.
 pub fn remove_big_planes(
     points: &[Point3<f64>],
     board: &BoardConfig,
@@ -82,18 +125,15 @@ pub fn remove_big_planes(
 ) -> Vec<Point3<f64>> {
     let diag = board.side_m * 2.0_f64.sqrt();
     let mut remaining: Vec<Point3<f64>> = points.to_vec();
-    let mut arrsac = Arrsac::new(dist, StdRng::seed_from_u64(0)).max_candidate_hypotheses(300);
-    let est = PlaneEstimator::new();
 
     for _ in 0..6 {
         if remaining.len() < 100 {
             break;
         }
-        let (_model, inlier_idx) = match arrsac.model_inliers(&est, remaining.iter().cloned()) {
-            Some(r) => r,
-            None => break,
-        };
-        let inlier_idx: Vec<usize> = inlier_idx.into_iter().collect();
+        let inlier_idx = ransac_plane_inliers(&remaining, dist);
+        if inlier_idx.is_empty() {
+            break;
+        }
         let cutoff = 100.max((min_frac * remaining.len() as f64) as usize);
         if inlier_idx.len() < cutoff {
             break;
