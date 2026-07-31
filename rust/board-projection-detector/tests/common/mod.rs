@@ -395,6 +395,12 @@ pub fn assert_pose_corners_parity(f: &Fixture) {
     }
 }
 
+/// NOTE: this is a DETECTION-PARITY subset guard over the ~4 curated fixtures
+/// per (dataset, generator) — it compares Rust-detected vs Python-detected
+/// counts within ±1. It is NOT the 88.4%/100% recall/precision-vs-ground-truth
+/// headline metric (that lives in the experiment + task-9 report). The golden
+/// `true_board` and `n_candidates` fields are intentionally not asserted here.
+///
 /// Aggregate detected-count per `(dataset, generator)` for both the golden
 /// truth and the Rust `run` closure, and assert they agree within the
 /// ±1-frame tolerance (Global Constraints).

@@ -51,11 +51,19 @@ pub fn board_pose(
     }
 
     // Board X axis: center -> up-most corner, projected in-plane.
-    let top = corners_3d_vec
-        .iter()
-        .copied()
-        .max_by(|a, b| (a.coords.dot(&up)).total_cmp(&b.coords.dot(&up)))
-        .expect("4 corners");
+    // Pick the up-most corner; strict > keeps the FIRST max on ties (matches numpy argmax).
+    let (top_i, _) = corners_3d_vec.iter().enumerate().fold(
+        (0usize, f64::NEG_INFINITY),
+        |(max_i, max_v), (i, c)| {
+            let v = c.coords.dot(&up);
+            if v > max_v {
+                (i, v)
+            } else {
+                (max_i, max_v)
+            }
+        },
+    );
+    let top = corners_3d_vec[top_i];
     let mut x = top - center;
     x -= n * x.dot(&n);
     x = x.normalize();
