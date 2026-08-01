@@ -1,2 +1,9 @@
 /target
 /Cargo.lock
+
+# Golden-vector parity fixtures are kept LOCAL, never committed (~51 MB of
+# binary point clouds + golden JSON). Regenerate with the exporter — see
+# tests/fixtures/README.md. README.md itself stays tracked.
+/tests/fixtures/*.f32
+/tests/fixtures/*.i64
+/tests/fixtures/*.json
