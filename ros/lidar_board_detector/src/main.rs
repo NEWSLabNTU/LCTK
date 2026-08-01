@@ -1,4 +1,5 @@
 mod bbox;
+mod bbox_free;
 
 use crate::bbox::BBox;
 use anyhow::{anyhow, Result};
