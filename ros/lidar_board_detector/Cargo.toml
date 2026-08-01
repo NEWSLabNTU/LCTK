@@ -26,6 +26,7 @@ sensor_msgs.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 std_msgs.workspace = true
+std_srvs = "*"
 vision_msgs.workspace = true
 visualization_msgs.workspace = true
 

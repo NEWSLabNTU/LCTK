@@ -300,6 +300,8 @@ pub struct CalibrationBoardLocatorNode {
     // Shared Method-E background state (kept alive for the processing thread; mutated by
     // reset_background in Task 6)
     _background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
+    // Task 6: reset_background service handle — kept alive so it isn't dropped
+    _reset_service: rclrs::Service<std_srvs::srv::Empty>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -423,6 +425,22 @@ impl CalibrationBoardLocatorNode {
                 }
                 _ => None,
             }));
+
+        // Task 6: runtime `reset_background` control (service path — rclrs 0.7's
+        // `node.create_service::<T, _>(name, callback)` with `Fn(Request) -> Response` is
+        // available and `std_srvs` resolves, so no fallback to a watched parameter was needed).
+        // Re-enters warmup so an operator can re-capture the empty scene after moving the rig.
+        let reset_bg = Arc::clone(&background_state);
+        let reset_service = node.create_service::<std_srvs::srv::Empty, _>(
+            "~/reset_background",
+            move |_request: std_srvs::srv::Empty_Request| {
+                if let Some(state) = reset_bg.lock().unwrap().as_mut() {
+                    state.reset();
+                    log_info!(LOGGER_NAME, "background reset — re-entering warmup");
+                }
+                std_srvs::srv::Empty_Response::default()
+            },
+        )?;
 
         log_info!(
             LOGGER_NAME,
@@ -691,6 +709,7 @@ impl CalibrationBoardLocatorNode {
             _bbox_params: bbox_params,
             _processing_thread: processing_thread,
             _background_state: background_state,
+            _reset_service: reset_service,
         })
     }
 
