@@ -5,7 +5,9 @@
 //! thread; the ROS wiring stays thin.
 
 use anyhow::{bail, Result};
+use board_projection_detector::background::BackgroundModel;
 use board_projection_detector::config::{BoardConfig, ForegroundMethod};
+use nalgebra::Point3;
 use serde::Deserialize;
 use std::str::FromStr;
 
@@ -61,10 +63,127 @@ pub fn parse_detection_config(json5_text: &str) -> Result<DetectionConfig> {
     Ok(json5::from_str(json5_text)?)
 }
 
+/// Fixed single live session: one background source.
+const MIN_SOURCES: usize = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarmupOutcome {
+    Warming { seen: usize, needed: usize },
+    Ready,
+}
+
+enum Phase {
+    Warming { model: BackgroundModel, seen: usize },
+    Ready { model: BackgroundModel },
+}
+
+pub struct BackgroundState {
+    phase: Phase,
+    voxel: f64,
+    dilation_radius: i64,
+    warmup_frames: usize,
+}
+
+impl BackgroundState {
+    pub fn new(voxel: f64, params: &BackgroundParams) -> Self {
+        Self {
+            phase: Phase::Warming {
+                model: BackgroundModel::new(voxel, params.dilation_radius, MIN_SOURCES),
+                seen: 0,
+            },
+            voxel,
+            dilation_radius: params.dilation_radius,
+            warmup_frames: params.warmup_frames,
+        }
+    }
+
+    pub fn observe_frame(&mut self, points: &[Point3<f64>]) -> WarmupOutcome {
+        match &mut self.phase {
+            Phase::Ready { .. } => WarmupOutcome::Ready,
+            Phase::Warming { model, seen } => {
+                model.observe(points, "live");
+                *seen += 1;
+                if *seen >= self.warmup_frames {
+                    // Move the model out of Warming into Ready, finalized.
+                    let Phase::Warming { mut model, .. } =
+                        std::mem::replace(&mut self.phase, Phase::Ready {
+                            model: BackgroundModel::new(self.voxel, self.dilation_radius, MIN_SOURCES),
+                        })
+                    else {
+                        unreachable!("just matched Warming");
+                    };
+                    model.finalize();
+                    self.phase = Phase::Ready { model };
+                    WarmupOutcome::Ready
+                } else {
+                    WarmupOutcome::Warming { seen: *seen, needed: self.warmup_frames }
+                }
+            }
+        }
+    }
+
+    pub fn model(&self) -> Option<&BackgroundModel> {
+        match &self.phase {
+            Phase::Ready { model } => Some(model),
+            Phase::Warming { .. } => None,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.phase = Phase::Warming {
+            model: BackgroundModel::new(self.voxel, self.dilation_radius, MIN_SOURCES),
+            seen: 0,
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use board_projection_detector::config::ForegroundMethod;
+    use nalgebra::Point3;
+
+    fn cloud(n: usize, offset: f64) -> Vec<Point3<f64>> {
+        (0..n).map(|i| Point3::new(offset + i as f64 * 0.001, 0.0, 0.0)).collect()
+    }
+
+    #[test]
+    fn warmup_observes_then_becomes_ready() {
+        let params = BackgroundParams { dilation_radius: 1, warmup_frames: 3 };
+        let mut state = BackgroundState::new(0.05, &params);
+        assert!(state.model().is_none());
+
+        // Frames 1 and 2: still warming, no model yet.
+        for i in 1..=2 {
+            match state.observe_frame(&cloud(50, 999.0)) {
+                WarmupOutcome::Warming { seen, needed } => {
+                    assert_eq!(seen, i);
+                    assert_eq!(needed, 3);
+                }
+                WarmupOutcome::Ready => panic!("ready too early"),
+            }
+            assert!(state.model().is_none());
+        }
+
+        // Frame 3: reaches the count, finalizes, becomes Ready.
+        assert!(matches!(state.observe_frame(&cloud(50, 999.0)), WarmupOutcome::Ready));
+        assert!(state.model().is_some());
+
+        // Subsequent frames stay Ready and do NOT observe.
+        assert!(matches!(state.observe_frame(&cloud(50, 0.0)), WarmupOutcome::Ready));
+    }
+
+    #[test]
+    fn reset_reenters_warming() {
+        let params = BackgroundParams { dilation_radius: 1, warmup_frames: 1 };
+        let mut state = BackgroundState::new(0.05, &params);
+        assert!(matches!(state.observe_frame(&cloud(50, 999.0)), WarmupOutcome::Ready));
+        assert!(state.model().is_some());
+
+        state.reset();
+        assert!(state.model().is_none());
+        assert!(matches!(state.observe_frame(&cloud(50, 999.0)), WarmupOutcome::Ready));
+    }
 
     const SHIPPED: &str = include_str!(
         "../../lctk_launch/config/board/board_detector.json5"
