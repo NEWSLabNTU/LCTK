@@ -300,8 +300,10 @@ pub struct CalibrationBoardLocatorNode {
     // Shared Method-E background state (kept alive for the processing thread; mutated by
     // reset_background in Task 6)
     _background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
-    // Task 6: reset_background service handle — kept alive so it isn't dropped
-    _reset_service: rclrs::Service<std_srvs::srv::Empty>,
+    // Task 6: reset_background service handle — kept alive so it isn't dropped.
+    // Only created (Some) when the bbox_free background-subtraction path is active;
+    // `None` in default bbox mode so the service isn't registered unnecessarily.
+    _reset_service: Option<rclrs::Service<std_srvs::srv::Empty>>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -418,9 +420,13 @@ impl CalibrationBoardLocatorNode {
         // so an `Arc<Mutex<Option<..>>>` is sufficient (the design's `ArcSwap<BackgroundState>` is
         // simplified to this — there is only one observer thread). `None` when the bbox_free path
         // is off or uses plane_strip (no background).
+        let background_active = matches!(
+            bbox_free_cfg.as_ref(),
+            Some(bf) if bf.method()? == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction
+        );
         let background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>> =
             Arc::new(std::sync::Mutex::new(match bbox_free_cfg.as_ref() {
-                Some(bf) if bf.method()? == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction => {
+                Some(bf) if background_active => {
                     Some(bbox_free::BackgroundState::new(bf.voxel, &bf.background))
                 }
                 _ => None,
@@ -430,17 +436,27 @@ impl CalibrationBoardLocatorNode {
         // `node.create_service::<T, _>(name, callback)` with `Fn(Request) -> Response` is
         // available and `std_srvs` resolves, so no fallback to a watched parameter was needed).
         // Re-enters warmup so an operator can re-capture the empty scene after moving the rig.
-        let reset_bg = Arc::clone(&background_state);
-        let reset_service = node.create_service::<std_srvs::srv::Empty, _>(
-            "~/reset_background",
-            move |_request: std_srvs::srv::Empty_Request| {
-                if let Some(state) = reset_bg.lock().unwrap().as_mut() {
-                    state.reset();
-                    log_info!(LOGGER_NAME, "background reset — re-entering warmup");
-                }
-                std_srvs::srv::Empty_Response::default()
-            },
-        )?;
+        // Only registered when background subtraction is active (`background_state` is Some) —
+        // in default bbox mode it would be a permanent no-op, so skip the registration entirely.
+        let reset_service = if background_active {
+            let reset_bg = Arc::clone(&background_state);
+            Some(node.create_service::<std_srvs::srv::Empty, _>(
+                "~/reset_background",
+                move |_request: std_srvs::srv::Empty_Request| {
+                    if let Some(state) = reset_bg
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_mut()
+                    {
+                        state.reset();
+                        log_info!(LOGGER_NAME, "background reset — re-entering warmup");
+                    }
+                    std_srvs::srv::Empty_Response::default()
+                },
+            )?)
+        } else {
+            None
+        };
 
         log_info!(
             LOGGER_NAME,
@@ -1133,7 +1149,9 @@ impl CalibrationBoardLocatorNode {
 
         // Method E: run the warmup lifecycle to obtain a finalized background.
         let outcome = if method == ForegroundMethod::BackgroundSubtraction {
-            let mut guard = background_state.lock().unwrap();
+            let mut guard = background_state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let state = guard.as_mut().ok_or_else(|| {
                 anyhow!("bbox_free background_subtraction selected but no BackgroundState initialized")
             })?;
