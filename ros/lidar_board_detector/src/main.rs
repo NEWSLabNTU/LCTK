@@ -297,6 +297,9 @@ pub struct CalibrationBoardLocatorNode {
     _bbox_params: BBoxParameters,
     // Processing thread that handles point cloud processing
     _processing_thread: JoinHandle<()>,
+    // Shared Method-E background state (kept alive for the processing thread; mutated by
+    // reset_background in Task 6)
+    _background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -391,6 +394,35 @@ impl CalibrationBoardLocatorNode {
                 "Voxel downsampling DISABLED (preserving all points for ICP)"
             );
         }
+
+        // Crop-box-free detection config (same file, separate typed view).
+        let detection_text = fs::read_to_string(PathBuf::from(&*board_detector_file_param))?;
+        let detection_cfg = bbox_free::parse_detection_config(&detection_text)?;
+        let detection_mode = bbox_free::DetectionMode::parse(&detection_cfg.detection_mode)?;
+        let bbox_free_cfg: Option<Arc<bbox_free::BboxFreeRaw>> = match detection_mode {
+            bbox_free::DetectionMode::BboxFree => {
+                let bf = detection_cfg
+                    .bbox_free
+                    .ok_or_else(|| anyhow!("detection_mode=bbox_free but no bbox_free block in config"))?;
+                bf.method()?; // validate foreground_method early
+                Some(Arc::new(bf))
+            }
+            bbox_free::DetectionMode::Bbox => None,
+        };
+        log_info!(LOGGER_NAME, "detection_mode = {}", detection_cfg.detection_mode);
+
+        // Shared Method-E background state. `BackgroundState` is observed per frame by the single
+        // processing thread; `reset_background` (Task 6) mutates it from a service/param callback,
+        // so an `Arc<Mutex<Option<..>>>` is sufficient (the design's `ArcSwap<BackgroundState>` is
+        // simplified to this — there is only one observer thread). `None` when the bbox_free path
+        // is off or uses plane_strip (no background).
+        let background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>> =
+            Arc::new(std::sync::Mutex::new(match bbox_free_cfg.as_ref() {
+                Some(bf) if bf.method()? == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction => {
+                    Some(bbox_free::BackgroundState::new(bf.voxel, &bf.background))
+                }
+                _ => None,
+            }));
 
         log_info!(
             LOGGER_NAME,
@@ -542,6 +574,10 @@ impl CalibrationBoardLocatorNode {
         // Clone bbox params for processing thread
         let bbox_params_for_callback = bbox_params.clone();
 
+        // Clone crop-box-free config/state for processing thread
+        let bbox_free_for_thread = bbox_free_cfg.clone();
+        let background_for_thread = Arc::clone(&background_state);
+
         // Use ArcSwap to store only the latest message - subscription callback just updates this
         // Processing happens in a separate thread to avoid blocking the executor
         let latest_msg: Arc<ArcSwap<Option<Arc<PointCloud2>>>> =
@@ -603,6 +639,8 @@ impl CalibrationBoardLocatorNode {
                             &bbox_params_for_callback,
                             &board_debug_shared,
                             &icp_debug_shared,
+                            &bbox_free_for_thread,
+                            &background_for_thread,
                         );
                     }));
                     if result.is_err() {
@@ -652,6 +690,7 @@ impl CalibrationBoardLocatorNode {
             _icp_debug_publishers: icp_debug_publishers,
             _bbox_params: bbox_params,
             _processing_thread: processing_thread,
+            _background_state: background_state,
         })
     }
 
@@ -702,6 +741,8 @@ impl CalibrationBoardLocatorNode {
         bbox_params: &BBoxParameters,
         board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
+        bbox_free_cfg: &Option<Arc<bbox_free::BboxFreeRaw>>,
+        background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
     ) {
         let start_time = Instant::now();
 
@@ -734,6 +775,8 @@ impl CalibrationBoardLocatorNode {
             bbox_params,
             board_debug_publishers,
             icp_debug_publishers,
+            bbox_free_cfg,
+            background_state,
         );
 
         let processing_duration = start_time.elapsed();
@@ -762,6 +805,8 @@ impl CalibrationBoardLocatorNode {
         bbox_params: &BBoxParameters,
         board_debug_publishers: &Option<BoardDebugPublishers>,
         icp_debug_publishers: &Option<IcpDebugPublishers>,
+        bbox_free_cfg: &Option<Arc<bbox_free::BboxFreeRaw>>,
+        background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
     ) -> Result<Detection3DArray> {
         // Convert PointCloud2 to nalgebra points
         let points = {
@@ -795,14 +840,29 @@ impl CalibrationBoardLocatorNode {
             points
         };
 
-        // Stage 1: Filter points by bounding box (reads current parameter values)
-        let active_points =
-            Self::filter_points_by_bbox(&points, bbox_params, &msg.header, board_debug_publishers)?;
+        // Stage 1: select the board cluster — bbox crop (default) or crop-box-free detector.
+        let active_points = match bbox_free_cfg {
+            None => {
+                // Existing bounding-box path, unchanged.
+                Self::filter_points_by_bbox(&points, bbox_params, &msg.header, board_debug_publishers)?
+            }
+            Some(bf) => {
+                match Self::select_board_cluster(&points, bf, background_state, &msg.header)? {
+                    Some(pts) => pts,
+                    None => {
+                        return Ok(Detection3DArray {
+                            header: msg.header.clone(),
+                            detections: Vec::new(),
+                        });
+                    }
+                }
+            }
+        };
 
         if active_points.is_empty() {
             log_debug!(
                 LOGGER_NAME,
-                "No points within bounding box - continuing with empty detection"
+                "Stage 1 produced no points - continuing with empty detection"
             );
             return Ok(Detection3DArray {
                 header: msg.header.clone(),
@@ -1038,6 +1098,48 @@ impl CalibrationBoardLocatorNode {
             num_detections
         );
         Ok(detection_array)
+    }
+
+    /// Crop-box-free Stage 1: returns the detector's selected board-cluster points,
+    /// or `None` to publish an empty detection (still warming, or nothing selected).
+    fn select_board_cluster(
+        points: &[na::Point3<f64>],
+        bf: &bbox_free::BboxFreeRaw,
+        background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
+        _header: &Header,
+    ) -> Result<Option<Vec<na::Point3<f64>>>> {
+        use board_projection_detector::{config::ForegroundMethod, detector::detect};
+
+        let method = bf.method()?;
+
+        // Method E: run the warmup lifecycle to obtain a finalized background.
+        let outcome = if method == ForegroundMethod::BackgroundSubtraction {
+            let mut guard = background_state.lock().unwrap();
+            let state = guard.as_mut().ok_or_else(|| {
+                anyhow!("bbox_free background_subtraction selected but no BackgroundState initialized")
+            })?;
+            match state.observe_frame(points) {
+                bbox_free::WarmupOutcome::Warming { seen, needed } => {
+                    log_info!(LOGGER_NAME, "background warmup {seen}/{needed}");
+                    return Ok(None);
+                }
+                bbox_free::WarmupOutcome::Ready => {
+                    let model = state.model().expect("Ready implies a finalized model");
+                    detect(points, &bf.board, method, bf.voxel, Some(model))
+                }
+            }
+        } else {
+            // Method B (plane_strip): no background.
+            detect(points, &bf.board, method, bf.voxel, None)
+        };
+
+        match outcome.selected_points {
+            Some(pts) if !pts.is_empty() => Ok(Some(pts)),
+            _ => {
+                // TODO(Task 5): log outcome.reject diagnostics here.
+                Ok(None)
+            }
+        }
     }
 
     // Stage 1: Bounding box filter
@@ -2970,5 +3072,15 @@ mod covariance_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn shipped_config_is_bbox_mode_by_default() {
+        let text = include_str!("../../lctk_launch/config/board/board_detector.json5");
+        let cfg = crate::bbox_free::parse_detection_config(text).unwrap();
+        assert_eq!(
+            crate::bbox_free::DetectionMode::parse(&cfg.detection_mode).unwrap(),
+            crate::bbox_free::DetectionMode::Bbox
+        );
     }
 }
