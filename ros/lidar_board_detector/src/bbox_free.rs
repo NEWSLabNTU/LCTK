@@ -7,9 +7,25 @@
 use anyhow::{bail, Result};
 use board_projection_detector::background::BackgroundModel;
 use board_projection_detector::config::{BoardConfig, ForegroundMethod};
+use board_projection_detector::detector::RejectReason;
 use nalgebra::Point3;
 use serde::Deserialize;
 use std::str::FromStr;
+
+/// Human-readable one-liner for a detector reject reason.
+pub fn describe_reject(reason: &RejectReason) -> &'static str {
+    match reason {
+        RejectReason::NoClusters => "no candidate clusters survived foreground extraction",
+        RejectReason::Flatness => "best candidate exceeded flatness_rms_max (not planar enough)",
+        RejectReason::Extent => "best candidate failed the board-size extent gate",
+        RejectReason::SizeGate => "best candidate failed the coarse square size gate",
+        RejectReason::SquareResidual => "square fit residual exceeded square_icp_residual_max",
+        RejectReason::Stance => "best candidate failed the 3D diamond-stance gate",
+        RejectReason::Isolation => {
+            "best candidate failed the isolation-density gate (embedded clutter)"
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetectionMode {
