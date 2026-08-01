@@ -1,12 +1,11 @@
-# Standalone cargo workspace: this crate is ROS-free, but the root LCTK
-# workspace pulls ROS message crates (aruco-detector -> sensor_msgs = "*",
-# yanked on crates.io) that only resolve under colcon. Excluding this crate
-# from the root workspace and rooting its own here lets plain `cargo test`
-# resolve it. Deps are all pure-Rust — notably NOT hollow-board-detector,
-# which drags in sfcgal-sys (native SFCGAL C lib); voxel_downsample is
-# implemented locally and RANSAC is a hand-rolled plain seeded 300-iteration
-# fit (`candidates::ransac_plane_inliers`) matching open3d segment_plane.
-[workspace]
+# Root workspace member. ROS-free crate (deps are all pure-Rust: nalgebra,
+# anyhow, serde, json5, log, rand). Folded in from a former standalone
+# workspace at sub-project 2 so `lidar_board_detector` can path-depend on it.
+# NOTE: as a root member it now shares the ROS-poisoned root resolve
+# (aruco-detector -> sensor_msgs = "*", yanked), so plain `cargo test` here no
+# longer works — build/test only via colcon (`just build` / `just test`).
+# Parity fixtures (~51 MB) stay local/gitignored (regenerate via
+# experiments/board-detection-2d/tools/export_golden.py).
 
 [package]
 name = "board-projection-detector"
@@ -15,13 +14,13 @@ edition = "2021"
 rust-version = "1.85.0"
 
 [dependencies]
-nalgebra = { version = "0.32.3", features = ["serde-serialize"] }
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-json5 = "0.4.1"
-log = "0.4.20"
-rand = "0.8"
+nalgebra = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+json5 = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
-approx = "0.5.1"
-serde_json = "1.0"
+approx = { workspace = true }
+serde_json = { workspace = true }
