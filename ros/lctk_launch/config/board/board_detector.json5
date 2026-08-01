@@ -61,5 +61,41 @@
     "hole_radius": "150mm",     // mm
     // suppose the center of board is (0, 0)
     // the center of hole will be at (+/- shift, +/- shift)
-    "hole_center_shift": "200mm" // mm
+    "hole_center_shift": "200mm", // mm
+
+    // ========================================
+    // Crop-box-free detection (board-projection-detector)
+    // ========================================
+    // "bbox" (default, existing bounding-box crop) | "bbox_free"
+    "detection_mode": "bbox",
+    // Read only when detection_mode == "bbox_free".
+    "bbox_free": {
+        // "background_subtraction" (Method E, ~34-69ms, shipping) |
+        // "plane_strip" (Method B, ~157-202ms, over budget)
+        "foreground_method": "background_subtraction",
+        // Voxel edge (m) for the detector's internal downsample (the detect() `voxel` arg).
+        "voxel": 0.05,
+        // Deserialized into board-projection-detector's BoardConfig. These MUST be the
+        // production operating point spelled out explicitly: BoardConfig's serde defaults
+        // are the frozen library defaults (flatness 0.035, stance_floor 0.0, isolation false),
+        // NOT these.
+        "board": {
+            "side_m": 1.0,
+            "up_axis": [0.0, 0.0, 1.0],
+            "cluster_min_points": 30,
+            "side_tol": 0.20,
+            "cell_m": 0.02,
+            "vertical_gap_deg": 3.0,
+            "flatness_rms_max": 0.045,
+            "stance_floor": 0.9,
+            "square_icp_residual_max": 0.45,
+            "isolation": true,
+            "isolation_max_density": 0.3
+        },
+        // Method-E background model + warmup. min_sources is fixed at 1 (single live session).
+        "background": {
+            "dilation_radius": 1,
+            "warmup_frames": 20
+        }
+    }
 }
