@@ -117,6 +117,12 @@ impl BackgroundState {
         match &mut self.phase {
             Phase::Ready { .. } => WarmupOutcome::Ready,
             Phase::Warming { model, seen } => {
+                // `BackgroundModel::observe` early-returns on an empty cloud, contributing
+                // nothing to the model — don't let an empty/invalid frame advance the warmup
+                // counter either, or warmup can "complete" on frames that taught it nothing.
+                if points.is_empty() {
+                    return WarmupOutcome::Warming { seen: *seen, needed: self.warmup_frames };
+                }
                 model.observe(points, "live");
                 *seen += 1;
                 if *seen >= self.warmup_frames {
@@ -187,6 +193,37 @@ mod tests {
 
         // Subsequent frames stay Ready and do NOT observe.
         assert!(matches!(state.observe_frame(&cloud(50, 0.0)), WarmupOutcome::Ready));
+    }
+
+    #[test]
+    fn empty_frame_during_warming_does_not_advance_seen() {
+        let params = BackgroundParams { dilation_radius: 1, warmup_frames: 3 };
+        let mut state = BackgroundState::new(0.05, &params);
+
+        // One real frame: seen advances to 1.
+        match state.observe_frame(&cloud(50, 999.0)) {
+            WarmupOutcome::Warming { seen, needed } => {
+                assert_eq!(seen, 1);
+                assert_eq!(needed, 3);
+            }
+            WarmupOutcome::Ready => panic!("ready too early"),
+        }
+
+        // Empty frame: must NOT advance seen, and must stay Warming.
+        match state.observe_frame(&[]) {
+            WarmupOutcome::Warming { seen, needed } => {
+                assert_eq!(seen, 1, "empty cloud must not advance warmup progress");
+                assert_eq!(needed, 3);
+            }
+            WarmupOutcome::Ready => panic!("empty frame must not finalize warmup"),
+        }
+        assert!(state.model().is_none());
+
+        // Another empty frame for good measure — still stuck at seen=1.
+        match state.observe_frame(&[]) {
+            WarmupOutcome::Warming { seen, .. } => assert_eq!(seen, 1),
+            WarmupOutcome::Ready => panic!("empty frame must not finalize warmup"),
+        }
     }
 
     #[test]
