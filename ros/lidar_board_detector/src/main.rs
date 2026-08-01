@@ -1136,7 +1136,14 @@ impl CalibrationBoardLocatorNode {
         match outcome.selected_points {
             Some(pts) if !pts.is_empty() => Ok(Some(pts)),
             _ => {
-                // TODO(Task 5): log outcome.reject diagnostics here.
+                match &outcome.reject {
+                    Some(reason) => log_info!(
+                        LOGGER_NAME,
+                        "bbox_free: no board selected — {}",
+                        bbox_free::describe_reject(reason)
+                    ),
+                    None => log_info!(LOGGER_NAME, "bbox_free: no board selected (no reject reason)"),
+                }
                 Ok(None)
             }
         }
