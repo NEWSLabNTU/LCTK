@@ -1363,6 +1363,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "board-projection-detector"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx",
+ "json5",
+ "log",
+ "nalgebra 0.32.6",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bstr"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4172,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "geometry_msgs"
-version = "4.9.1"
+version = "4.9.0"
 dependencies = [
  "rosidl_runtime_rs",
  "std_msgs",
@@ -5032,7 +5046,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -5809,6 +5823,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "aruco-config",
+ "board-projection-detector",
  "env_logger",
  "geometry_msgs",
  "hollow-board-config",
@@ -7225,15 +7240,6 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
-version = "4.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bb71e1b3fa6ca1c61f383464aaf2bb0e2f8e772a1f01d486832464de363b951"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "ordered-float"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
@@ -8035,7 +8041,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8072,7 +8078,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -11347,7 +11353,7 @@ dependencies = [
 
 [[package]]
 name = "sensor_msgs"
-version = "4.9.1"
+version = "4.9.0"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -11899,7 +11905,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "std_msgs"
-version = "4.9.1"
+version = "4.9.0"
 dependencies = [
  "builtin_interfaces",
  "rosidl_runtime_rs",
@@ -13022,7 +13028,7 @@ dependencies = [
 
 [[package]]
 name = "visualization_msgs"
-version = "4.9.1"
+version = "4.9.0"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -13493,7 +13499,7 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "once_cell",
- "ordered-float 4.6.0",
+ "ordered-float 5.3.0",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",

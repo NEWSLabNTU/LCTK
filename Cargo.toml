@@ -8,9 +8,6 @@ members = [
     "ros/lidar_board_detector",
 ]
 exclude = [
-    # Standalone workspace: ROS-free crate kept out of the ROS-poisoned root
-    # resolve (see the crate's Cargo.toml header).
-    "rust/board-projection-detector",
     # Launch-only package without Cargo.toml
     "ros/lctk_launch",
     "ros/lctk_sample_data",
