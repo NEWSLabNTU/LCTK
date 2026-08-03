@@ -171,15 +171,14 @@ test:
     python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
-lidar-camera:
+lidar-camera CONFIG='seyond_left.yaml':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/sample_data.yaml
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$CONFIG \
+        config_file:=$(ros2 pkg prefix lctk_launch --share)/config/examples/{{ CONFIG }} \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
@@ -193,14 +192,17 @@ two-lidar:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    CONFIG=$(ros2 pkg prefix lctk_launch --share)/config/examples/two_lidar.yaml
+    SHARE=$(ros2 pkg prefix lctk_launch --share)
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$CONFIG \
+        config_file:=$SHARE/config/examples/two_lidar.yaml \
+        rviz_config:=$SHARE/config/rviz/two_lidar_calibration.rviz \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }}
+        mode:={{ mode }} \
+        enable_rviz:={{ rviz_enabled }} \
+        use_advanced_solver:={{ use_advanced_solver }}
 
 # Launch sample data playback only
 sample-data:
@@ -258,3 +260,9 @@ advanced-solver-controller:
     set -eo pipefail
     source install/setup.bash
     ros2 run interactive_solver_controller interactive_solver_controller
+
+republish which:
+    ros2 run image_transport republish compressed raw \
+      --ros-args \
+      -r in/compressed:=/camera/{{ which }}/image_raw/compressed \
+      -r out:=/camera/{{ which }}/image_raw

@@ -14,11 +14,14 @@
 devices:
   lidars:
     top_lidar:
-      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
-      frame_id: velodyne_top
+      pointcloud_topic: /lidar/vlp32/velodyne_points
+      frame_id: velodyne
+      board_config: $(find-pkg-share lctk_launch)/config/board/board_detector_vlp32.json5
+      bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox_2_lidar_vlp32.json5
     front_lidar:
-      pointcloud_topic: /sensing/lidar/front/pointcloud_raw
-      frame_id: velodyne_front
+      pointcloud_topic: /lidar/falcon/iv_points
+      frame_id: seyond
+      bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox_2_lidar_seyond.json5
 
 markers:
   calibration_board:

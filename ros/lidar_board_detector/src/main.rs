@@ -1502,94 +1502,13 @@ impl CalibrationBoardLocatorNode {
                     temp_board_model.right_corner(),
                 ];
 
-                // Gravity's answer: the corner with the lowest z (total_cmp is NaN-safe;
-                // partial_cmp().unwrap() would panic on a NaN corner).
-                let (gravity_index, _) = corners
+                // Find the corner with the lowest z-coordinate (total_cmp is
+                // NaN-safe; partial_cmp().unwrap() would panic on a NaN corner).
+                let (lowest_index, lowest_corner) = corners
                     .iter()
                     .enumerate()
                     .min_by(|a, b| a.1.z.total_cmp(&b.1.z))
                     .unwrap();
-
-                // M-14: prefer the answer the *data* gives. The plate's 4-fold in-plane
-                // symmetry is broken by the three holes, which sit at three of the four
-                // diagonal positions with the fourth empty, so each candidate origin corner
-                // implies a different hole layout and the measured points can say which one
-                // they actually came from. Gravity is kept only as a tie-break, because it
-                // encodes an assumption -- one corner clearly lowest, LiDAR frame
-                // gravity-aligned -- that a 45deg roll or a diamond-mounted board breaks.
-                let board_centre = temp_board_model.board_center();
-                let candidate_losses: Vec<Option<f64>> = (0..4)
-                    .map(|k| {
-                        let angle = FRAC_PI_2 * k as f64;
-                        let rot = na::UnitQuaternion::from_axis_angle(&board_normal, angle);
-                        let about_centre = na::Isometry3::from_parts(
-                            na::Translation3::from(board_centre - na::Point3::origin()),
-                            rot,
-                        ) * na::Isometry3::from_parts(
-                            na::Translation3::from(na::Point3::origin() - board_centre),
-                            na::UnitQuaternion::identity(),
-                        );
-                        let candidate = BoardModel {
-                            pose: about_centre * temp_board_model.pose,
-                            board_shape: temp_board_model.board_shape.clone(),
-                            marker_paper_size: temp_board_model.marker_paper_size,
-                        };
-                        candidate.correspondence_loss(state.inlier_points.iter().copied())
-                    })
-                    .collect();
-
-                let scored: Vec<(usize, f64)> = candidate_losses
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(k, l)| l.map(|l| (k, l)))
-                    .collect();
-
-                let lowest_index = if scored.len() == 4 {
-                    let mut ranked = scored.clone();
-                    ranked.sort_by(|a, b| a.1.total_cmp(&b.1));
-                    let (best_k, best_loss) = ranked[0];
-                    let (_, runner_up) = ranked[1];
-
-                    // "Clearly better" means the runner-up is at least 5% worse. Below that the
-                    // holes are not separating the candidates for this view -- too few rim
-                    // returns, a grazing incidence -- and gravity is the better guess.
-                    let separated = runner_up > best_loss * 1.05;
-                    if separated {
-                        if best_k != gravity_index {
-                            log_info!(
-                                LOGGER_NAME,
-                                "Origin corner from hole asymmetry: index={} (loss {:.5}, \
-                                 runner-up {:.5}); gravity would have chosen {}. Trusting the \
-                                 measurement over the mounting assumption (M-14).",
-                                best_k,
-                                best_loss,
-                                runner_up,
-                                gravity_index
-                            );
-                        }
-                        best_k
-                    } else {
-                        log_warn!(
-                            LOGGER_NAME,
-                            "Hole asymmetry does not separate the four candidate origin \
-                             corners (best loss {:.5} vs runner-up {:.5}); falling back to \
-                             lowest-z. If the board is near a 45deg roll or the LiDAR frame is \
-                             not gravity-aligned, this pose may carry a 90deg in-plane error.",
-                            best_loss,
-                            runner_up
-                        );
-                        gravity_index
-                    }
-                } else {
-                    log_warn!(
-                        LOGGER_NAME,
-                        "Could not score all four candidate origin corners; falling back to \
-                         lowest-z (M-14)."
-                    );
-                    gravity_index
-                };
-
-                let lowest_corner = &corners[lowest_index];
 
                 // M-14: the board origin corner is disambiguated purely by "lowest
                 // world z" -- an unstated assumption that exactly one corner is

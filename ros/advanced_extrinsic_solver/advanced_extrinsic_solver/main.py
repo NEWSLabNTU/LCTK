@@ -26,18 +26,16 @@ License: MIT
 """
 
 import json
-import sys
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 import rclpy
-from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
-from lctk_quality import build_report, distinct_placements
-from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
     AdjustTransform,
@@ -75,32 +73,6 @@ class BoardDetection:
     position: Tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
     orientation: Tuple[float, float, float, float]  # quaternion x, y, z, w
 
-    # M-13: the board-pose covariance from the detector's ICP fit, 6x6 row-major in the ROS
-    # PoseWithCovariance order [x, y, z, rx, ry, rz]. It is strongly ANISOTROPIC: interior LiDAR
-    # returns constrain only the out-of-plane DoF, so a board with few edge/hole-rim returns is
-    # tightly determined along its normal and nearly free within its own plane.
-    #
-    # This used to be discarded, and the solver treated every board pose as exact -- which is the
-    # errors-in-variables bias: solvePnP assumes the 3D points are noiseless, while they are model
-    # corners pushed through this very pose.
-    covariance: Optional[np.ndarray] = (
-        None  # 6x6, or None for a detector that does not publish it
-    )
-
-    @property
-    def position_sigma_m(self) -> Optional[np.ndarray]:
-        """Per-axis translation standard deviation, metres. None if no covariance was published."""
-        if self.covariance is None:
-            return None
-        return np.sqrt(np.abs(np.diag(self.covariance)[:3]))
-
-    @property
-    def rotation_sigma_deg(self) -> Optional[np.ndarray]:
-        """Per-axis rotation standard deviation, degrees."""
-        if self.covariance is None:
-            return None
-        return np.degrees(np.sqrt(np.abs(np.diag(self.covariance)[3:])))
-
 
 class AdvancedExtrinsicSolver(Node):
     """
@@ -134,23 +106,7 @@ class AdvancedExtrinsicSolver(Node):
         self.declare_parameter("aruco_config_file", "")
         self.declare_parameter("debug_mode", True)
         self.declare_parameter("publishing_rate", 10.0)
-        # H-07: this is a minimum number of buffered FRAMES before a solve is attempted. It is
-        # NOT a measure of how well-constrained the calibration is -- twenty frames of a board that
-        # never moved are one board placement and cannot determine the extrinsic. The constraint
-        # that matters is the number of DISTINCT placements, which is measured and reported by
-        # lctk_quality (H-09) rather than gated on here.
-        self.declare_parameter("min_frames_required", 2)
-
-        # H-07: pose-diversity gate. The PnP correspondences all lie on one 500 mm
-        # coplanar ArUco patch, so a near-coplanar / single-depth buffer leaves a
-        # rotation about the correspondence centroid almost unconstrained (the board
-        # overlay stays glued while the background tilts). Gate the solve on the
-        # GEOMETRY of the accumulated poses, not just their count.
-        self.declare_parameter("min_normal_spread_deg", 20.0)
-        self.declare_parameter("min_depth_range_m", 1.0)
-        # Warn by default (so the sample single-placement demo still solves), refuse
-        # only when explicitly enforced.
-        self.declare_parameter("enforce_pose_diversity", False)
+        self.declare_parameter("min_poses_required", 2)
         self.declare_parameter("axis_length", 0.3)  # Length of axis arrows in meters
         self.declare_parameter("axis_diameter", 0.02)  # Diameter of axis arrows
         self.declare_parameter("use_best_effort_qos", True)
@@ -173,23 +129,8 @@ class AdvancedExtrinsicSolver(Node):
         publishing_rate = (
             self.get_parameter("publishing_rate").get_parameter_value().double_value
         )
-        self.min_frames_required = (
-            self.get_parameter("min_frames_required")
-            .get_parameter_value()
-            .integer_value
-        )
-        self.min_normal_spread_deg = (
-            self.get_parameter("min_normal_spread_deg")
-            .get_parameter_value()
-            .double_value
-        )
-        self.min_depth_range_m = (
-            self.get_parameter("min_depth_range_m").get_parameter_value().double_value
-        )
-        self.enforce_pose_diversity = (
-            self.get_parameter("enforce_pose_diversity")
-            .get_parameter_value()
-            .bool_value
+        self.min_poses_required = (
+            self.get_parameter("min_poses_required").get_parameter_value().integer_value
         )
         self.axis_length = (
             self.get_parameter("axis_length").get_parameter_value().double_value
@@ -206,14 +147,10 @@ class AdvancedExtrinsicSolver(Node):
         sync_queue_size = (
             self.get_parameter("sync_queue_size").get_parameter_value().integer_value
         )
-        sync_drop_policy_str = (
-            self.get_parameter("sync_drop_policy").get_parameter_value().string_value
-        )
-        sync_drop_policy = (
-            DropPolicy.DROP_OLDEST
-            if sync_drop_policy_str == "drop_oldest"
-            else DropPolicy.REJECT_NEW
-        )
+        # sync_drop_policy declared for launch compat but unused — manual nearest-
+        # timestamp matching has no shared buffer / overflow policy.
+        self.sync_tolerance_ms = sync_tolerance_ms
+        self.sync_queue_size = sync_queue_size
 
         # Load ArUco pattern configuration
         self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
@@ -222,7 +159,7 @@ class AdvancedExtrinsicSolver(Node):
         self.detection_buffer: List[Tuple[Detection2DArray, Detection3DArray]] = []
 
         # Latest synchronized detection pair (cached for service calls)
-        # Uses conflux_py for time synchronization
+        # Manual nearest-timestamp matching keeps this fresh
         self.latest_sync_pair: Optional[Tuple[Detection2DArray, Detection3DArray]] = (
             None
         )
@@ -232,30 +169,6 @@ class AdvancedExtrinsicSolver(Node):
         self.last_transform: Optional[TransformStamped] = None
         self.publishing_enabled = False
         self.last_solve_status = "No calibration performed yet"
-
-        # H-09: quality report for the last solve (None until one succeeds), plus the per-frame
-        # arrays it needs. Kept per-frame, not concatenated, because N is the number of DISTINCT
-        # board placements -- buffering one placement a hundred times is duplication, not
-        # information.
-        self.last_quality = None
-        # M-12: pose-granularity outlier rejection. On by default -- one bad pose silently
-        # corrupting the extrinsic is the failure this exists to prevent -- but switchable,
-        # because with very few poses the honest answer is to capture more, not to drop any.
-        self.declare_parameter("reject_outlier_poses", True)
-        self.reject_outlier_poses = (
-            self.get_parameter("reject_outlier_poses").get_parameter_value().bool_value
-        )
-        self.declare_parameter("outlier_pose_mad_k", 4.0)
-        self.outlier_pose_mad_k = (
-            self.get_parameter("outlier_pose_mad_k").get_parameter_value().double_value
-        )
-
-        self._per_frame_object_points = []
-        self._per_frame_image_points = []
-        self._per_frame_board_poses = []
-        # M-13: per-frame weight from the board-pose covariance. A pose whose ICP fit is loose
-        # contributes less to the solve than one that is tight.
-        self._per_frame_weights = []
         self.total_correspondences = 0
 
         # Pose state: solved (from PnP) and current (with manual adjustments)
@@ -278,7 +191,7 @@ class AdvancedExtrinsicSolver(Node):
         qos_profile = QoSProfile(
             reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1,
+            depth=sync_queue_size,
         )
         self.get_logger().info(
             f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
@@ -299,24 +212,30 @@ class AdvancedExtrinsicSolver(Node):
             1.0 / publishing_rate, self._publishing_timer_callback
         )
 
-        # Create synchronizer for ArUco and board detections
-        # This ensures we only cache detection pairs that are time-synchronized
+        # Manual nearest-timestamp synchronization (replaces Conflux).
+        # Conflux's FIFO oldest-of-each matching + shared reject_new buffer froze
+        # under the aruco(~30Hz)/board(~1Hz) rate mismatch: aruco saturated the
+        # buffer, board starved, and the sync stopped emitting pairs after a few
+        # seconds — leaving latest_sync_pair permanently stale.
+        #
+        # aruco is the fast stream -> buffered. Each board detection (slow stream)
+        # triggers pairing with the nearest aruco by timestamp.
+        self._aruco_buf: Deque[Detection2DArray] = deque(maxlen=sync_queue_size)
+        self._aruco_count = 0
+        self._board_count = 0
+        self._pair_count = 0
+        self._last_pair_time: Optional[float] = None
         self.get_logger().info(
-            f"Using Conflux synchronization (window={int(sync_tolerance_ms)}ms, buffer={sync_queue_size})"
+            f"Manual nearest-timestamp sync "
+            f"(window={'infinite' if sync_tolerance_ms <= 0 else f'{int(sync_tolerance_ms)}ms'}, "
+            f"buf={sync_queue_size})"
         )
-        self.sync = ROS2Synchronizer(
-            self,
-            window_size_ms=int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None,
-            buffer_size=sync_queue_size,
-            drop_policy=sync_drop_policy,
-            qos=qos_profile,
+        self.create_subscription(
+            Detection2DArray, "aruco_detections", self._cb_aruco, qos_profile
         )
-        self.sync.add_subscription(Detection2DArray, "aruco_detections")
-        self.sync.add_subscription(Detection3DArray, "calibration_board_detections")
-
-        @self.sync.on_synchronized
-        def on_sync(group: SyncGroup):
-            self._handle_synchronized_detections(group)
+        self.create_subscription(
+            Detection3DArray, "calibration_board_detections", self._cb_board, qos_profile
+        )
 
         # Derive camera_info topic from camera_topic parameter
         camera_topic = (
@@ -402,8 +321,8 @@ class AdvancedExtrinsicSolver(Node):
         self.get_logger().info(
             f"Advanced Extrinsic Solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
-            f"Using conflux_py for time-synchronized detection pairs\n"
-            f"Minimum frames before solving: {self.min_frames_required}\n"
+            f"Using manual nearest-timestamp matching for detection pairs\n"
+            f"Minimum poses required: {self.min_poses_required}\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled), axis_markers\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
@@ -416,46 +335,50 @@ class AdvancedExtrinsicSolver(Node):
             self.camera_info = msg
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
 
-    def _handle_synchronized_detections(self, group: SyncGroup):
+    @staticmethod
+    def _stamp_ns(msg) -> int:
+        s = msg.header.stamp
+        return s.sec * 1_000_000_000 + s.nanosec
+
+    def _cb_aruco(self, msg: Detection2DArray):
+        """Fast stream — buffer non-empty ArUco detections for later pairing."""
+        self._aruco_count += 1
+        if msg.detections:
+            self._aruco_buf.append(msg)
+
+    def _cb_board(self, msg: Detection3DArray):
         """
-        Handle synchronized ArUco and board detections.
-
-        This callback is invoked by conflux_py when both ArUco and board
-        detections are available within the time window. The synchronized
-        pair is cached for use by the add_detection service.
+        Slow stream — pair the board detection with the nearest buffered ArUco
+        by timestamp and cache the pair for the add_detection service.
         """
-        # Debug: log available keys in the sync group
-        available_keys = group.topics()
-        self.get_logger().debug(f"SyncGroup keys: {available_keys}")
+        self._board_count += 1
+        if not msg.detections:
+            self.get_logger().warn("Ignoring empty board detection")
+            return
+        if not self._aruco_buf:
+            self.get_logger().debug("No ArUco buffered, skipping board detection")
+            return
 
-        # Safely get messages with error handling
-        aruco_msg = group.get("aruco_detections")
-        board_msg = group.get("calibration_board_detections")
+        t_board = self._stamp_ns(msg)
+        aruco_msg = min(
+            self._aruco_buf, key=lambda m: abs(self._stamp_ns(m) - t_board)
+        )
+        diff_ms = abs(self._stamp_ns(aruco_msg) - t_board) / 1e6
 
-        if aruco_msg is None or board_msg is None:
-            self.get_logger().warn(
-                f"Incomplete sync group received. Available keys: {available_keys}, "
-                f"aruco={aruco_msg is not None}, board={board_msg is not None}"
+        if self.sync_tolerance_ms > 0 and diff_ms > self.sync_tolerance_ms:
+            self.get_logger().debug(
+                f"No ArUco within {self.sync_tolerance_ms:.0f}ms (best={diff_ms:.0f}ms)"
             )
             return
 
+        with self.lock:
+            self.latest_sync_pair = (aruco_msg, msg)
+        self._pair_count += 1
+        self._last_pair_time = time.monotonic()
         self.get_logger().debug(
-            f"Synchronized detection pair at t={group.timestamp:.6f}s: "
-            f"{len(aruco_msg.detections)} ArUco markers, "
-            f"{len(board_msg.detections)} boards"
+            f"Cached detection pair (dt={diff_ms:.0f}ms): "
+            f"{len(aruco_msg.detections)} ArUco, {len(msg.detections)} boards"
         )
-
-        # Only cache non-empty detection pairs
-        if aruco_msg.detections and board_msg.detections:
-            with self.lock:
-                self.latest_sync_pair = (aruco_msg, board_msg)
-        else:
-            if not aruco_msg.detections:
-                self.get_logger().debug(
-                    "Ignoring sync group with empty ArUco detection"
-                )
-            if not board_msg.detections:
-                self.get_logger().warn("Ignoring sync group with empty board detection")
 
     def _publishing_timer_callback(self):
         """Continuously publish the last solved transform when enabled."""
@@ -525,7 +448,7 @@ class AdvancedExtrinsicSolver(Node):
 
         This triggers a complete re-solve using all buffered detections,
         potentially improving calibration accuracy with more data.
-        Note: Only synchronized detection pairs (from conflux_py) are used.
+        Note: Only nearest-timestamp synchronized detection pairs are used.
         """
         with self.lock:
             sync_pair = self.latest_sync_pair
@@ -554,70 +477,46 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(response.message)
             return response
 
-        # H-07: accept the frame, but tell the operator NOW whether it is a new board placement or
-        # a duplicate of one already buffered. This is the only moment the feedback can change what
-        # they do — by the time they read the solve log, they have already put the board down.
-        #
-        # Duplicates are still buffered (they do average down the per-frame noise), but they add no
-        # geometry, and the pipeline used to count them as "poses" and report success.
+        # Add to buffer (no similarity check - allow multiple detections to average out)
         with self.lock:
             self.detection_buffer.append((aruco_msg, board_msg))
             buffer_size = len(self.detection_buffer)
-            placements_before = self._count_placements(exclude_last=True)
-            placements_after = self._count_placements()
 
+        # Log successful addition
         board_pos = board_msg.detections[0].results[0].pose.pose.position
-        is_new_placement = placements_after > placements_before
-
-        if is_new_placement:
-            self.get_logger().info(
-                f"Added detection #{buffer_size}: NEW board placement "
-                f"#{placements_after} at "
-                f"({board_pos.x:.2f}, {board_pos.y:.2f}, {board_pos.z:.2f}) m"
-            )
-        else:
-            self.get_logger().warn(
-                f"Added detection #{buffer_size}, but it is a DUPLICATE of a board placement "
-                f"already buffered — still {placements_after} distinct placement(s).\n"
-                "  Repeated frames of the same board placement average down the noise but add no "
-                "geometry, and cannot constrain the extrinsic.\n"
-                "  MOVE THE BOARD: a new distance, or a new yaw/pitch."
-            )
+        self.get_logger().info(
+            f"Added detection pair #{buffer_size} to buffer\n"
+            f"  Board position: ({board_pos.x:.4f}, {board_pos.y:.4f}, {board_pos.z:.4f})"
+        )
 
         # Re-solve calibration from entire buffer
         success = self._solve_from_buffer()
 
-        response.buffer_size = buffer_size
-
         if success:
-            # H-07: the response is what the operator actually reads when they hit Add. It used to
-            # say "solved calibration successfully (320 correspondences from 20 poses)" — and both
-            # of those numbers are the exact lies H-09 disproved: 20 frames of one placement are
-            # not 20 poses, and 320 correspondences are not 320 pieces of information. Report the
-            # quality verdict instead, so the operator cannot collect a degenerate buffer while
-            # being congratulated twenty times.
-            response.success = True
-            response.message = self.last_solve_status
-
-            if self.last_quality is not None and self.last_quality.is_degenerate:
-                self.get_logger().warn(response.message)
-            else:
-                self.get_logger().info(response.message)
-        elif placements_after < MIN_PLACEMENTS_FOR_SPREAD:
-            # Not an error — just not enough distinct geometry yet to say anything.
             response.success = True
             response.message = (
-                f"Buffered: {buffer_size} frame(s), {placements_after} distinct placement(s). "
-                f"Need {MIN_PLACEMENTS_FOR_SPREAD} distinct placements before the uncertainty can "
-                "be estimated. Move the board and add more."
+                f"Added detection pair and solved calibration successfully "
+                f"({self.total_correspondences} correspondences from {buffer_size} poses)"
             )
+            response.buffer_size = buffer_size
             self.get_logger().info(response.message)
         else:
-            response.success = False
-            response.message = (
-                f"Added to buffer but calibration failed: {self.last_solve_status}"
-            )
-            self.get_logger().error(response.message)
+            # Check if we just need more poses (not an error, just waiting)
+            if buffer_size < self.min_poses_required:
+                response.success = True  # Detection was added successfully
+                response.message = (
+                    f"Detection buffered ({buffer_size}/{self.min_poses_required} poses). "
+                    f"Add {self.min_poses_required - buffer_size} more to solve calibration."
+                )
+                response.buffer_size = buffer_size
+                self.get_logger().info(response.message)
+            else:
+                response.success = False
+                response.message = (
+                    f"Added to buffer but calibration failed: {self.last_solve_status}"
+                )
+                response.buffer_size = buffer_size
+                self.get_logger().error(response.message)
 
         return response
 
@@ -643,14 +542,7 @@ class AdvancedExtrinsicSolver(Node):
         return response
 
     def get_status_callback(self, request, response):
-        """Service callback: Return buffer status.
-
-        H-07: `last_solve_status` now carries the quality verdict from lctk_quality, so the
-        interactive controller shows "DEGENERATE | 2 placements (18 frames) | ..." rather than
-        "Calibration successful". `buffer_size` and `total_correspondences` are still frame counts,
-        and are still misleading on their own — the placement count is the number that matters, so
-        it goes into the status string where a reader cannot miss it.
-        """
+        """Service callback: Return buffer status."""
         with self.lock:
             response.buffer_size = len(self.detection_buffer)
             response.total_correspondences = self.total_correspondences
@@ -778,45 +670,12 @@ class AdvancedExtrinsicSolver(Node):
 
         try:
             save_data = {
-                # v3 (H-10): 2D detections now persist the real ArUco corners in
-                # `results`, not just the axis-aligned bbox. v1/v2 files carry no
-                # corners and reload into a biased (C-01) solve.
-                "version": 3,
+                "version": 2,  # Bumped version for new format with transform
                 "num_detections": buffer_size,
                 "detections": detections_data,
             }
             if transform_data:
                 save_data["transform"] = transform_data
-
-            # H-09: a saved calibration carries its own quality record, so it can be judged
-            # later without re-deriving it. Unknown keys are ignored by older loaders.
-            if self.last_quality is not None:
-                q = self.last_quality
-                save_data["quality"] = {
-                    "status": q.status_line(),
-                    "is_degenerate": q.is_degenerate,
-                    "n_frames": q.n_frames,
-                    "n_distinct_placements": q.n_placements,
-                    "reprojection_rms_px": q.residuals.rms_px,
-                    "reprojection_max_px": q.residuals.max_px,
-                    "per_pose_rms_px": q.residuals.per_pose_rms_px,
-                    "cond_JtJ": q.conditioning.cond,
-                    "diversity": {
-                        "normal_span_deg": q.diversity.normal_span_deg,
-                        "depth_range_m": q.diversity.depth_range_m,
-                        "lateral_span_m": q.diversity.lateral_span_m,
-                    },
-                    "uncertainty": (
-                        {
-                            "rot_deg": q.spread.rot_deg,
-                            "trans_mm": q.spread.trans_mm,
-                            "n_subsets": q.spread.n_subsets,
-                        }
-                        if q.spread is not None
-                        else None
-                    ),
-                    "warnings": q.warnings(),
-                }
 
             with open(file_path, "w") as f:
                 json.dump(save_data, f, indent=2)
@@ -848,24 +707,12 @@ class AdvancedExtrinsicSolver(Node):
                 data = json.load(f)
 
             version = data.get("version", 0)
-            if version not in [1, 2, 3]:
+            if version not in [1, 2]:
                 response.success = False
                 response.message = "Invalid or unsupported file format"
                 response.num_detections = 0
                 response.buffer_size = len(self.detection_buffer)
                 return response
-
-            # H-10: files written before v3 carry no real ArUco corners, so the
-            # solver falls back to the axis-aligned bbox and reintroduces C-01 --
-            # a systematically biased extrinsic for any angled board view. Warn
-            # loudly rather than degrading silently.
-            if version < 3:
-                self.get_logger().warn(
-                    f"Loaded a version {version} detection file: it contains no real "
-                    "ArUco corners (only the axis-aligned bounding box), so any solve "
-                    "from it will be biased for non-fronto-parallel board views (C-01). "
-                    "Re-capture and re-save to get a version 3 file with corners."
-                )
 
             loaded_detections = []
             for detection_pair in data.get("detections", []):
@@ -905,7 +752,7 @@ class AdvancedExtrinsicSolver(Node):
                     self.get_logger().info(
                         "Restored manual transform adjustments from file"
                     )
-                elif buffer_size >= self.min_frames_required:
+                elif buffer_size >= self.min_poses_required:
                     # No saved transform, re-solve from detections
                     self._solve_from_buffer()
 
@@ -995,9 +842,9 @@ class AdvancedExtrinsicSolver(Node):
         with self.lock:
             buffer_size = len(self.detection_buffer)
 
-            if buffer_size < self.min_frames_required:
+            if buffer_size < self.min_poses_required:
                 response.success = False
-                response.message = f"Cannot reset: need at least {self.min_frames_required} frames in buffer (have {buffer_size})"
+                response.message = f"Cannot reset: need at least {self.min_poses_required} poses in buffer (have {buffer_size})"
                 return response
 
         # Re-solve from buffer (this will reset current_rvec/current_tvec to the solved values)
@@ -1074,21 +921,6 @@ class AdvancedExtrinsicSolver(Node):
                         "size_x": d.bbox.size_x,
                         "size_y": d.bbox.size_y,
                     },
-                    # H-10: persist the real ArUco corners carried in `results`
-                    # (one per corner, C-01). Without this a reloaded capture falls
-                    # back to the axis-aligned bbox and re-introduces C-01.
-                    "results": [
-                        {
-                            "class_id": r.hypothesis.class_id,
-                            "score": r.hypothesis.score,
-                            "position": {
-                                "x": r.pose.pose.position.x,
-                                "y": r.pose.pose.position.y,
-                                "z": r.pose.pose.position.z,
-                            },
-                        }
-                        for r in d.results
-                    ],
                 }
                 for d in msg.detections
             ],
@@ -1131,12 +963,7 @@ class AdvancedExtrinsicSolver(Node):
 
     def _deserialize_detection2d_array(self, data: dict) -> Detection2DArray:
         """Deserialize Detection2DArray from JSON-compatible dict."""
-        from vision_msgs.msg import (
-            Detection2D,
-            BoundingBox2D,
-            ObjectHypothesisWithPose,
-        )
-        from geometry_msgs.msg import PoseWithCovariance, Pose
+        from vision_msgs.msg import Detection2D, BoundingBox2D
 
         msg = Detection2DArray()
         msg.header.stamp.sec = data["header"]["stamp"]["sec"]
@@ -1152,24 +979,6 @@ class AdvancedExtrinsicSolver(Node):
             detection.bbox.center.position.y = d_data["bbox"]["center"]["y"]
             detection.bbox.size_x = d_data["bbox"]["size_x"]
             detection.bbox.size_y = d_data["bbox"]["size_y"]
-
-            # H-10: restore the real ArUco corners (results) so the solver uses
-            # them rather than reconstructing an axis-aligned box (C-01). Files
-            # written before version 3 carry no results and are handled/warned in
-            # load_detections_callback.
-            for r_data in d_data.get("results", []):
-                result = ObjectHypothesisWithPose()
-                result.hypothesis.class_id = r_data.get("class_id", "")
-                result.hypothesis.score = r_data.get("score", 1.0)
-                result.pose = PoseWithCovariance()
-                result.pose.pose = Pose()
-                pos = r_data["position"]
-                result.pose.pose.position.x = pos["x"]
-                result.pose.pose.position.y = pos["y"]
-                result.pose.pose.position.z = pos.get("z", 0.0)
-                result.pose.pose.orientation.w = 1.0
-                detection.results.append(result)
-
             msg.detections.append(detection)
 
         return msg
@@ -1202,65 +1011,6 @@ class AdvancedExtrinsicSolver(Node):
 
         return msg
 
-    def _count_placements(self, exclude_last: bool = False) -> int:
-        """How many DISTINCT board placements are in the buffer.
-
-        H-07/H-09: this — not `len(self.detection_buffer)` — is the number that says how much the
-        capture actually constrains. Twenty frames of a board that never moved are one placement.
-        Caller must hold `self.lock`.
-        """
-        buffer = self.detection_buffer[:-1] if exclude_last else self.detection_buffer
-        if not buffer:
-            return 0
-
-        poses = []
-        for _, board_msg in buffer:
-            if not board_msg.detections:
-                continue
-            pose = board_msg.detections[0].results[0].pose.pose
-            poses.append(
-                (
-                    (pose.position.x, pose.position.y, pose.position.z),
-                    (
-                        pose.orientation.x,
-                        pose.orientation.y,
-                        pose.orientation.z,
-                        pose.orientation.w,
-                    ),
-                )
-            )
-        return len(distinct_placements(poses)) if poses else 0
-
-    def _assess_quality(self, rvec: np.ndarray, tvec: np.ndarray) -> None:
-        """Compute the H-09 quality report and surface it.
-
-        Reports and warns; never rejects. C-04 was a gate whose threshold was unreachable, and it
-        silently discarded every detection for months — quality thresholds get validated against
-        field data before anything is allowed to refuse.
-        """
-        K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
-
-        self.last_quality = build_report(
-            self._per_frame_object_points,
-            self._per_frame_image_points,
-            self._per_frame_board_poses,
-            K,
-            rvec,
-            tvec,
-        )
-        if self.last_quality is None:
-            return
-
-        # `last_solve_status` is already a string, so the metric reaches the operator and the
-        # interactive controller with no .srv change and no lctk_interfaces rebuild.
-        self.last_solve_status = self.last_quality.status_line()
-
-        warnings = self.last_quality.warnings()
-        if warnings:
-            self.get_logger().warn("\n".join(warnings))
-        else:
-            self.get_logger().info(f"Calibration quality: {self.last_solve_status}")
-
     def _solve_from_buffer(self) -> bool:
         """
         Solve extrinsic calibration using all buffered detection pairs.
@@ -1277,11 +1027,13 @@ class AdvancedExtrinsicSolver(Node):
             return False
 
         # Check minimum poses requirement for multi-pose calibration
-        if buffer_size < self.min_frames_required:
-            self.last_solve_status = f"Insufficient frames: {buffer_size}/{self.min_frames_required} required"
+        if buffer_size < self.min_poses_required:
+            self.last_solve_status = (
+                f"Insufficient poses: {buffer_size}/{self.min_poses_required} required"
+            )
             self.get_logger().warn(
-                f"Buffered {buffer_size} frame(s), need {self.min_frames_required} minimum. "
-                f"Add {self.min_frames_required - buffer_size} more to start calibration."
+                f"Buffered {buffer_size} pose(s), need {self.min_poses_required} minimum. "
+                f"Add {self.min_poses_required - buffer_size} more pose(s) to start calibration."
             )
             return False
 
@@ -1291,20 +1043,9 @@ class AdvancedExtrinsicSolver(Node):
             f"{'#' * 80}\n"
         )
 
-        # Accumulate all correspondences from buffer.
-        #
-        # H-09: keep the PER-FRAME arrays and the board poses as well as the concatenated set. The
-        # quality metrics need them, because `N` is the number of DISTINCT board placements, not the
-        # number of buffered frames — buffering one placement a hundred times is duplication, not
-        # information, and a metric that cannot tell the difference reports its highest confidence
-        # exactly when the calibration is worst.
+        # Accumulate all correspondences from buffer
         all_object_points = []
         all_image_points = []
-        pose_board_detections = []  # H-07: for the pose-diversity gate
-        self._per_frame_object_points = []
-        self._per_frame_image_points = []
-        self._per_frame_board_poses = []
-        self._per_frame_weights = []
 
         for pose_idx, (aruco_msg, board_msg) in enumerate(self.detection_buffer, 1):
             self.get_logger().info(
@@ -1316,7 +1057,6 @@ class AdvancedExtrinsicSolver(Node):
             board_detection = self._detection3d_to_board_detection(
                 board_msg.detections[0]
             )
-            pose_board_detections.append(board_detection)
 
             # Create correspondences for this pose
             object_points, image_points = self._create_point_correspondences(
@@ -1330,22 +1070,9 @@ class AdvancedExtrinsicSolver(Node):
             all_object_points.extend(object_points)
             all_image_points.extend(image_points)
 
-            self._per_frame_object_points.append(
-                np.asarray(object_points, dtype=np.float64)
-            )
-            self._per_frame_image_points.append(
-                np.asarray(image_points, dtype=np.float64)
-            )
-            self._per_frame_board_poses.append(
-                (board_detection.position, board_detection.orientation)
-            )
-            self._per_frame_weights.append(
-                self._pose_weight(board_detection, object_points)
-            )
-
         # Convert to numpy arrays
-        all_object_points = np.array(all_object_points, dtype=np.float64)
-        all_image_points = np.array(all_image_points, dtype=np.float64)
+        all_object_points = np.array(all_object_points, dtype=np.float32)
+        all_image_points = np.array(all_image_points, dtype=np.float32)
 
         num_correspondences = len(all_object_points)
 
@@ -1360,121 +1087,18 @@ class AdvancedExtrinsicSolver(Node):
             f"Accumulated {num_correspondences} correspondences from {buffer_size} poses"
         )
 
-        # H-07: pose-diversity gate. Every correspondence lies on a 500 mm coplanar
-        # patch, so a near-coplanar / single-depth buffer under-constrains the
-        # extrinsic (rotation about the correspondence centroid is a near-null
-        # direction: the board overlay stays glued while the background tilts).
-        # Buffering more frames of the same placement does NOT help -- only new
-        # board orientations and depths do.
-        normal_spread_deg, depth_range_m = self._compute_pose_diversity(
-            pose_board_detections
-        )
-        self.get_logger().info(
-            f"Pose diversity: board-normal spread = {normal_spread_deg:.1f} deg "
-            f"(min {self.min_normal_spread_deg:.0f}), depth range = {depth_range_m:.2f} m "
-            f"(min {self.min_depth_range_m:.2f})"
-        )
-        if (
-            normal_spread_deg < self.min_normal_spread_deg
-            or depth_range_m < self.min_depth_range_m
-        ):
-            diversity_msg = (
-                f"Low pose diversity (board-normal spread {normal_spread_deg:.1f} deg, "
-                f"depth range {depth_range_m:.2f} m): the accumulated poses are nearly "
-                f"coplanar / at one depth, so the extrinsic is under-constrained about "
-                f"the board centroid and the background will tilt. Capture the board at "
-                f"more orientations (>~{self.min_normal_spread_deg:.0f} deg apart) and "
-                f"depths (>~{self.min_depth_range_m:.1f} m range); more frames of the same "
-                f"placement will NOT help."
-            )
-            if self.enforce_pose_diversity:
-                self.last_solve_status = (
-                    f"Refused: insufficient pose diversity "
-                    f"(normal spread {normal_spread_deg:.1f} deg, "
-                    f"depth range {depth_range_m:.2f} m)"
-                )
-                self.get_logger().error(diversity_msg)
-                return False
-            self.get_logger().warn(diversity_msg)
-
         # Solve PnP
         self.get_logger().info(
             f"\n{'=' * 80}\n"
             f"Solving PnP with {num_correspondences} total correspondences...\n"
             f"{'=' * 80}"
         )
-        weights = self._expand_weights_to_correspondences()
-        success, rvec, tvec = self._solve_pnp(
-            all_object_points, all_image_points, weights=weights
-        )
+        success, rvec, tvec = self._solve_pnp(all_object_points, all_image_points)
 
         if not success:
             self.last_solve_status = "PnP solver failed"
             self.get_logger().error(self.last_solve_status)
             return False
-
-        # M-12: one bad pose corrupts the whole solve, and every corner of that pose is an
-        # outlier together. Now that there is an estimate to measure against, look at the
-        # per-pose reprojection error and re-solve without any pose that stands out.
-        if self.reject_outlier_poses:
-            K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
-            rejected, per_pose_rms = self._reject_outlier_poses(
-                self._per_frame_object_points,
-                self._per_frame_image_points,
-                K,
-                rvec,
-                tvec,
-                k=self.outlier_pose_mad_k,
-            )
-            self.get_logger().info(
-                f"Per-pose reprojection RMS (px): {[round(r, 2) for r in per_pose_rms]}"
-            )
-
-            if rejected:
-                keep = [
-                    i
-                    for i in range(len(self._per_frame_object_points))
-                    if i not in rejected
-                ]
-                kept_object = np.vstack(
-                    [self._per_frame_object_points[i] for i in keep]
-                )
-                kept_image = np.vstack([self._per_frame_image_points[i] for i in keep])
-                kept_weights = None
-                if weights is not None:
-                    kept_weights = np.concatenate(
-                        [
-                            np.full(
-                                len(self._per_frame_object_points[i]),
-                                self._per_frame_weights[i],
-                                dtype=np.float64,
-                            )
-                            for i in keep
-                        ]
-                    )
-
-                ok_retry, rvec_retry, tvec_retry = self._solve_pnp(
-                    kept_object, kept_image, weights=kept_weights
-                )
-                if ok_retry:
-                    self.get_logger().warning(
-                        f"Rejected {len(rejected)} outlier pose(s) {rejected} with "
-                        f"reprojection RMS "
-                        f"{[round(per_pose_rms[i], 2) for i in rejected]} px against a "
-                        f"median of {round(float(np.median(per_pose_rms)), 2)} px, and "
-                        f"re-solved on the remaining {len(keep)}. A pose this far out is "
-                        f"usually a bad board fit or a quarter-turned origin corner (M-14)."
-                    )
-                    rvec, tvec = rvec_retry, tvec_retry
-                else:
-                    self.get_logger().warning(
-                        "Re-solve without the outlier poses failed; keeping the original "
-                        "estimate."
-                    )
-
-        # H-09: assess the solve. This does not change the estimate and does not block publishing;
-        # it says how much the estimate is worth, which the pipeline previously could not.
-        self._assess_quality(rvec, tvec)
 
         # Store solved and current rvec/tvec
         with self.lock:
@@ -1529,94 +1153,38 @@ class AdvancedExtrinsicSolver(Node):
     def _detection2d_to_aruco_markers(
         self, detection_msg: Detection2DArray
     ) -> List[ArUcoMarker]:
-        """Convert ROS Detection2DArray to ArUcoMarker objects.
-
-        The real detected marker corners are carried in ``detection.results``
-        (one entry per corner, in detector order TL, TR, BR, BL) by the ArUco
-        locator node; the axis-aligned bounding box is only a fallback.
-        """
+        """Convert ROS Detection2DArray to ArUcoMarker objects."""
         markers = []
 
         for detection in detection_msg.detections:
             bbox = detection.bbox
-            center = (bbox.center.position.x, bbox.center.position.y)
+            center_x = bbox.center.position.x
+            center_y = bbox.center.position.y
+            size_x = bbox.size_x
+            size_y = bbox.size_y
 
-            # C-01: prefer the real per-corner pixel coordinates. Reconstructing
-            # corners from `center +/- size/2` discards rotation and perspective,
-            # biasing the PnP correspondences for any angled view of the board.
-            if len(detection.results) >= 4:
-                corners = [
-                    (r.pose.pose.position.x, r.pose.pose.position.y)
-                    for r in detection.results[:4]
-                ]
-            else:
-                size_x = bbox.size_x
-                size_y = bbox.size_y
-                cx, cy = center
-                corners = [
-                    (cx - size_x / 2.0, cy - size_y / 2.0),  # Top-left
-                    (cx + size_x / 2.0, cy - size_y / 2.0),  # Top-right
-                    (cx + size_x / 2.0, cy + size_y / 2.0),  # Bottom-right
-                    (cx - size_x / 2.0, cy + size_y / 2.0),  # Bottom-left
-                ]
+            # Convert bounding box to 4 corner points
+            corners = [
+                (center_x - size_x / 2.0, center_y - size_y / 2.0),  # Top-left
+                (center_x + size_x / 2.0, center_y - size_y / 2.0),  # Top-right
+                (center_x + size_x / 2.0, center_y + size_y / 2.0),  # Bottom-right
+                (center_x - size_x / 2.0, center_y + size_y / 2.0),  # Bottom-left
+            ]
 
             marker_id = detection.id if hasattr(detection, "id") else 0
 
-            markers.append(ArUcoMarker(id=marker_id, corners=corners, center=center))
+            markers.append(
+                ArUcoMarker(id=marker_id, corners=corners, center=(center_x, center_y))
+            )
 
         return markers
-
-    def _compute_pose_diversity(
-        self, board_detections: List[BoardDetection]
-    ) -> Tuple[float, float]:
-        """H-07: geometric diversity of the accumulated board poses.
-
-        Returns ``(max_board_normal_spread_deg, depth_range_m)``:
-
-        - ``max_board_normal_spread_deg`` -- the largest angle between any two board
-          plane normals. A near-parallel set cannot constrain the extrinsic rotation.
-          Normals are compared unsigned (a normal and its flip describe the same plane).
-        - ``depth_range_m`` -- the span of board-centroid ranges from the sensor.
-
-        Both are 0.0 for fewer than two poses.
-        """
-        if len(board_detections) < 2:
-            return 0.0, 0.0
-
-        normals = []
-        depths = []
-        for det in board_detections:
-            rot = R.from_quat(det.orientation).as_matrix()
-            # Board plane normal is the board frame's +Z axis in the LiDAR frame.
-            normals.append(rot @ np.array([0.0, 0.0, 1.0]))
-            depths.append(float(np.linalg.norm(det.position)))
-
-        max_angle_deg = 0.0
-        for i in range(len(normals)):
-            for j in range(i + 1, len(normals)):
-                cos_angle = abs(float(np.dot(normals[i], normals[j])))
-                cos_angle = min(1.0, max(-1.0, cos_angle))
-                angle_deg = float(np.degrees(np.arccos(cos_angle)))
-                max_angle_deg = max(max_angle_deg, angle_deg)
-
-        depth_range_m = max(depths) - min(depths)
-        return max_angle_deg, depth_range_m
 
     def _detection3d_to_board_detection(self, detection) -> BoardDetection:
         """Convert ROS Detection3D to BoardDetection object."""
         if not detection.results:
             raise ValueError("No detection results available")
 
-        result = detection.results[0]
-        pose = result.pose.pose
-
-        # M-13: read the board-pose covariance the detector now publishes. An all-zero covariance
-        # means the detector did not compute one (too few correspondences, or an older detector) --
-        # treat that as "unknown", NOT as "exact".
-        covariance = np.array(result.pose.covariance, dtype=np.float64).reshape(6, 6)
-        if not np.any(covariance):
-            covariance = None
-
+        pose = detection.results[0].pose.pose
         return BoardDetection(
             position=(pose.position.x, pose.position.y, pose.position.z),
             orientation=(
@@ -1625,7 +1193,6 @@ class AdvancedExtrinsicSolver(Node):
                 pose.orientation.z,
                 pose.orientation.w,
             ),
-            covariance=covariance,
         )
 
     def _load_aruco_pattern_config(self, config_file_path: str) -> dict:
@@ -1668,13 +1235,6 @@ class AdvancedExtrinsicSolver(Node):
         marker_square_size_ratio = config["marker_square_size_ratio"]
         num_squares = config["num_squares_per_side"]
         marker_ids = config["marker_ids"]
-        # M-09: the 2x2 board layout indexes marker_ids[0..3]; fail with a clear
-        # message instead of an IndexError deep inside the solve service.
-        if len(marker_ids) < 4:
-            raise ValueError(
-                f"ArUco config must define at least 4 marker_ids for the 2x2 board, "
-                f"got {len(marker_ids)}: {marker_ids}"
-            )
 
         square_size = (board_size - 2.0 * board_border_size) / num_squares
         marker_size = square_size * marker_square_size_ratio
@@ -1721,9 +1281,9 @@ class AdvancedExtrinsicSolver(Node):
         image_points = []
 
         board_rotation = (
-            R.from_quat(board_detection.orientation).as_matrix().astype(np.float64)
+            R.from_quat(board_detection.orientation).as_matrix().astype(np.float32)
         )
-        board_position = np.array(board_detection.position, dtype=np.float64)
+        board_position = np.array(board_detection.position, dtype=np.float32)
 
         board_frame_corners = self._compute_multi_marker_corners()
 
@@ -1744,203 +1304,28 @@ class AdvancedExtrinsicSolver(Node):
                 )
                 continue
 
-            local_corners = np.array(board_frame_corners[marker_id], dtype=np.float64)
+            local_corners = np.array(board_frame_corners[marker_id], dtype=np.float32)
             world_corners = (board_rotation @ local_corners.T).T + board_position
 
-            image_corners = np.array(marker.corners, dtype=np.float64)
+            image_corners = np.array(marker.corners, dtype=np.float32)
 
             object_points.extend(world_corners)
             image_points.extend(image_corners)
 
-        return np.array(object_points, dtype=np.float64), np.array(
-            image_points, dtype=np.float64
+        return np.array(object_points, dtype=np.float32), np.array(
+            image_points, dtype=np.float32
         )
-
-    @staticmethod
-    def _pose_weight(
-        board_detection: BoardDetection, object_points: np.ndarray
-    ) -> float:
-        """M-13: how much this board pose should count, from its ICP covariance.
-
-        `cv2.solvePnP` assumes the 3D points are exact. They are not — they are ideal ArUco corners
-        pushed through the board pose that ICP fitted, so the board-pose uncertainty lands squarely
-        in the "known" 3D points. That is an errors-in-variables problem, and the estimate is
-        *biased*, not merely noisy.
-
-        Propagate the pose covariance onto the corners it generated. A corner at lever arm `c` from
-        the pose origin moves under a pose perturbation as `dt + dtheta x c`, so
-
-            J_corner = [ I | -[c]_x ]   (3x6)      Sigma_corner = J Sigma_pose J^T
-
-        and the weight is the inverse of the resulting positional standard deviation. A pose whose
-        board sat at a grazing angle with few edge returns is loose in-plane, produces sloppy 3D
-        corners, and now contributes proportionally less.
-
-        Returns 1.0 when no covariance was published, so an older detector behaves exactly as
-        before rather than silently down-weighting everything.
-        """
-        if board_detection.covariance is None or len(object_points) == 0:
-            return 1.0
-
-        origin = np.asarray(board_detection.position, dtype=np.float64)
-        cov = board_detection.covariance
-
-        total_var = 0.0
-        for corner in np.asarray(object_points, dtype=np.float64):
-            lever = corner - origin
-            skew = np.array(
-                [
-                    [0.0, -lever[2], lever[1]],
-                    [lever[2], 0.0, -lever[0]],
-                    [-lever[1], lever[0], 0.0],
-                ]
-            )
-            jac = np.hstack([np.eye(3), -skew])  # 3x6
-            total_var += float(np.trace(jac @ cov @ jac.T))
-
-        mean_var = total_var / len(object_points)
-        sigma = np.sqrt(max(mean_var, 1e-12))
-
-        # 1 cm is the scale of a healthy board fit (VLP-32C range noise is ~3 cm, and the ICP loss
-        # asymptotes near 2.6 cm), so a good pose lands near weight 1 and a badly-conditioned one
-        # falls off smoothly rather than being cliff-edged out.
-        weight = 1.0 / (1.0 + sigma / 0.01)
-        return float(np.clip(weight, 1e-3, 1.0))
-
-    @staticmethod
-    def _pose_reprojection_rms(
-        object_points: np.ndarray,
-        image_points: np.ndarray,
-        K: np.ndarray,
-        rvec: np.ndarray,
-        tvec: np.ndarray,
-    ) -> float:
-        """RMS reprojection error, in pixels, for one pose's corners."""
-        projected, _ = cv2.projectPoints(
-            object_points, rvec, tvec, K, np.zeros(5, dtype=np.float64)
-        )
-        err = projected.reshape(-1, 2) - image_points.reshape(-1, 2)
-        return float(np.sqrt(np.mean(np.sum(err**2, axis=1))))
-
-    @staticmethod
-    def _reject_outlier_poses(
-        per_frame_object_points: List[np.ndarray],
-        per_frame_image_points: List[np.ndarray],
-        K: np.ndarray,
-        rvec: np.ndarray,
-        tvec: np.ndarray,
-        k: float = 4.0,
-        min_keep: int = 3,
-        floor_px: float = 2.0,
-    ) -> Tuple[List[int], List[float]]:
-        """Identify poses whose reprojection error marks them as outliers (M-12).
-
-        Rejection is at **pose** granularity, never per corner. A pose's corners share one rigid
-        `T_board`, so when the pose is wrong all of its corners are wrong *together* -- one rigid
-        misplacement observed 16 times, not 16 independent draws. Rejecting individual corners
-        would treat correlated error as if it were independent, which is what least squares
-        already assumes and already gets wrong here.
-
-        The threshold is robust by construction: `median + k * 1.4826 * MAD` over the per-pose RMS.
-        A mean-and-sigma rule would be inflated by the very outlier it is meant to catch.
-
-        Two guards keep this from eating good data:
-
-        - `floor_px` -- with a tight, clean buffer the MAD is nearly zero, so any spread at all
-          would look significant. Nothing is rejected unless it also exceeds this absolute floor.
-        - `min_keep` -- refuse to reject if too few poses would survive. An under-constrained
-          solve is worse than one contaminated pose, and pose diversity is already the scarce
-          resource (H-07).
-
-        Returns the indices to reject and the per-pose RMS for every pose, so callers can log the
-        residuals whether or not anything was rejected.
-        """
-        rms = [
-            AdvancedExtrinsicSolver._pose_reprojection_rms(obj, img, K, rvec, tvec)
-            for obj, img in zip(per_frame_object_points, per_frame_image_points)
-        ]
-        if len(rms) < min_keep + 1:
-            # Rejecting anything here would drop the buffer below what a solve needs.
-            return [], rms
-
-        arr = np.asarray(rms, dtype=np.float64)
-        median = float(np.median(arr))
-        mad = float(np.median(np.abs(arr - median)))
-        threshold = max(median + k * 1.4826 * mad, median + floor_px)
-
-        candidates = [i for i, r in enumerate(rms) if r > threshold]
-
-        # Never fall below min_keep: drop the worst offenders first and stop.
-        max_rejects = max(len(rms) - min_keep, 0)
-        if len(candidates) > max_rejects:
-            candidates = sorted(candidates, key=lambda i: rms[i], reverse=True)[
-                :max_rejects
-            ]
-
-        return sorted(candidates), rms
-
-    def _expand_weights_to_correspondences(self) -> Optional[np.ndarray]:
-        """One weight per correspondence, from the per-frame board-pose weights.
-
-        Returns None when every pose is equally trusted (no covariance anywhere), so the solve
-        takes the plain unweighted path.
-        """
-        if not self._per_frame_weights:
-            return None
-        if all(w >= 1.0 for w in self._per_frame_weights):
-            return None
-
-        weights = []
-        for w, obj in zip(self._per_frame_weights, self._per_frame_object_points):
-            weights.extend([w] * len(obj))
-        return np.asarray(weights, dtype=np.float64)
-
-    def _refine_pnp_weighted(
-        self,
-        object_points: np.ndarray,
-        image_points: np.ndarray,
-        K: np.ndarray,
-        rvec: np.ndarray,
-        tvec: np.ndarray,
-        weights: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Weighted Levenberg-Marquardt polish of the reprojection cost.
-
-        M-12 added `cv2.solvePnPRefineLM`, but **no OpenCV PnP entry point accepts per-point
-        weights** — not solvePnP, not RefineLM, not RefineVVS. So to consume M-13's covariance at
-        all, the polish has to be ours. This is the same LM refinement, with each residual scaled by
-        its pose's weight.
-        """
-        from scipy.optimize import least_squares
-
-        dist = np.zeros(5, dtype=np.float64)
-        w = np.repeat(weights, 2)  # one weight per residual component (u and v)
-
-        def residuals(params: np.ndarray) -> np.ndarray:
-            r = params[:3].reshape(3, 1)
-            t = params[3:].reshape(3, 1)
-            projected, _ = cv2.projectPoints(object_points, r, t, K, dist)
-            err = (projected.reshape(-1, 2) - image_points).ravel()
-            return w * err
-
-        seed = np.concatenate([rvec.ravel(), tvec.ravel()])
-        result = least_squares(residuals, seed, method="lm", max_nfev=200)
-
-        return result.x[:3].reshape(3, 1), result.x[3:].reshape(3, 1)
 
     def _solve_pnp(
-        self,
-        object_points: np.ndarray,
-        image_points: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        self, object_points: np.ndarray, image_points: np.ndarray
     ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
         """Solve the Perspective-n-Point problem using OpenCV."""
         if len(object_points) < 4:
             self.get_logger().error("PnP requires at least 4 point correspondences")
             return False, None, None
 
-        K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
-        dist_coeffs = np.zeros(5, dtype=np.float64)
+        K = np.array(self.camera_info.k, dtype=np.float32).reshape(3, 3)
+        dist_coeffs = np.zeros(5, dtype=np.float32)
 
         self.get_logger().info(f"Solving PnP with {len(object_points)} correspondences")
 
@@ -1954,35 +1339,6 @@ class AdvancedExtrinsicSolver(Node):
             )
 
             if success:
-                # M-12: SQPnP is a direct global solver and performs no nonlinear polish of the
-                # reprojection cost, so refine the initialisation with Levenberg-Marquardt.
-                #
-                # M-13: when the detector publishes a board-pose covariance, the poses are NOT
-                # equally trustworthy, and no OpenCV PnP entry point accepts per-point weights.
-                # So the polish becomes a weighted LM of our own; without covariance we fall back
-                # to OpenCV's, which is exactly the previous behaviour.
-                if weights is not None:
-                    try:
-                        rvec, tvec = self._refine_pnp_weighted(
-                            object_points, image_points, K, rvec, tvec, weights
-                        )
-                        self.get_logger().info(
-                            f"Weighted LM refine (M-13): pose weights "
-                            f"{np.round(self._per_frame_weights, 2).tolist()}"
-                        )
-                    except (ValueError, np.linalg.LinAlgError) as refine_err:
-                        self.get_logger().warning(
-                            f"Weighted refine failed ({refine_err}); using SQPnP result"
-                        )
-                else:
-                    try:
-                        rvec, tvec = cv2.solvePnPRefineLM(
-                            object_points, image_points, K, dist_coeffs, rvec, tvec
-                        )
-                    except cv2.error as refine_err:
-                        self.get_logger().warning(
-                            f"solvePnPRefineLM skipped ({refine_err}); using SQPnP result"
-                        )
                 self.get_logger().info(
                     f"PnP solved successfully!\nTranslation: {tvec.flatten()}"
                 )
@@ -2000,20 +1356,6 @@ class AdvancedExtrinsicSolver(Node):
     ) -> TransformStamped:
         """Create ROS TransformStamped message from PnP solution."""
         rotation_matrix, _ = cv2.Rodrigues(rvec)
-
-        # M-01: publish with ROS TF semantics.
-        #
-        # solvePnP returns (R, t) with p_cam = R @ p_lidar + t -- that is T_camera<-lidar.
-        # A transform labelled `frame_id=lidar, child_frame_id=camera` means the *opposite* in
-        # TF: the camera's pose expressed in lidar coordinates. Publishing the raw solve under
-        # those labels pointed every tf2 consumer the wrong way, which is the one thing standing
-        # between this output and a correct Autoware sensor_kit_calibration.yaml.
-        #
-        # The dumped JSON keeps the raw rvec/tvec -- that is what the exporter consumes, and it
-        # is deliberately not touched here.
-        rotation_matrix = rotation_matrix.T
-        translation = -rotation_matrix @ tvec.reshape(3, 1)
-
         quaternion = self._rotation_matrix_to_quaternion(rotation_matrix)
 
         transform_msg = TransformStamped()
@@ -2022,7 +1364,7 @@ class AdvancedExtrinsicSolver(Node):
         transform_msg.header.frame_id = self.parent_frame
         transform_msg.child_frame_id = self.child_frame
 
-        t = translation.flatten()
+        t = tvec.flatten()
         transform_msg.transform.translation = Vector3(
             x=float(t[0]), y=float(t[1]), z=float(t[2])
         )
@@ -2084,34 +1426,24 @@ def main(args=None):
     finally:
         # Log final synchronization statistics
         try:
-            stats = node.sync.statistics
             node.get_logger().info(
                 f"Final sync statistics: "
-                f"received={stats.total_received()}, "
-                f"rejected={stats.total_rejected()}, "
-                f"groups={stats.groups_synchronized}, "
-                f"rejection_rate={stats.rejection_rate():.1%}"
+                f"aruco_received={node._aruco_count}, "
+                f"board_received={node._board_count}, "
+                f"pairs_cached={node._pair_count}"
             )
-            for topic in stats.messages_received:
-                topic_rate = stats.rejection_rate(topic)
-                node.get_logger().info(
-                    f"  {topic}: received={stats.messages_received[topic]}, "
-                    f"rejected={stats.messages_rejected[topic]}, "
-                    f"rejection_rate={topic_rate:.1%}"
-                )
-        except Exception as e:
-            node.get_logger().warning(f"Failed to log final sync statistics: {e}")
+        except Exception:
+            pass  # Ignore errors during statistics logging
 
         try:
             node.destroy_node()
-        except Exception as e:
-            node.get_logger().warning(f"Error while destroying node: {e}")
+        except Exception:
+            pass  # Ignore errors during cleanup
         try:
             if rclpy.ok():
                 rclpy.shutdown()
-        except Exception as e:
-            # Context may already be invalid at this point; log to stderr.
-            print(f"Error during rclpy shutdown: {e}", file=sys.stderr)
+        except Exception:
+            pass  # Ignore errors if context is already invalid
 
 
 if __name__ == "__main__":
