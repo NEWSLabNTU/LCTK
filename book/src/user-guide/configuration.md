@@ -53,6 +53,51 @@ Adjust these if detection fails:
 - **Noisy point clouds:** Increase `plane_ransac_max_iterations`
 - **False detections:** Decrease `plane_ransac_inlier_threshold`
 
+#### Crop-box-free detection (optional)
+
+By default the detector crops to a bounding box (`detection_mode: "bbox"`).
+To detect the board **without** a bounding box, set `detection_mode:
+"bbox_free"` and add a `bbox_free` block to the same file:
+
+```json5
+{
+  // ... RANSAC/ICP keys above ...
+  "detection_mode": "bbox_free",   // "bbox" (default) | "bbox_free"
+  "bbox_free": {
+    // "background_subtraction" (fast, needs warmup) | "plane_strip" (slower, no warmup)
+    "foreground_method": "background_subtraction",
+    "voxel": 0.05,                 // internal downsample edge (m)
+    "board": {                     // board shape/size gates (production operating point)
+      "side_m": 1.0,
+      "up_axis": [0.0, 0.0, 1.0],
+      "cluster_min_points": 30,
+      "flatness_rms_max": 0.045,
+      "stance_floor": 0.9,
+      "isolation": true
+      // ... plus side_tol, cell_m, vertical_gap_deg, square_icp_residual_max, isolation_max_density
+    },
+    "background": {
+      "dilation_radius": 1,
+      "warmup_frames": 20          // board-FREE frames to observe before detecting
+    }
+  }
+}
+```
+
+**`background_subtraction` warmup:** start the node with the scene **empty**
+(no board). It observes `warmup_frames` clouds to learn the static
+background, then begins detecting. Walk the board in afterward. To
+re-learn the background at runtime (e.g. after moving the rig):
+
+```bash
+ros2 service call /lidar_board_detector/reset_background std_srvs/srv/Empty
+```
+
+> **Note:** the `bbox_free.board` values must be the production operating
+> point spelled out explicitly (`flatness_rms_max: 0.045`, `stance_floor:
+> 0.9`, `isolation: true`) — the library's own defaults are looser and are
+> not the tuned values.
+
 ### 3. ArUco Pattern Configuration
 
 **Location:** `config/aruco/aruco_pattern.json5`
