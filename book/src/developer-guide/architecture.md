@@ -94,13 +94,45 @@ flowchart LR
 The board detector uses a multi-stage approach:
 
 ```
-Pointcloud → Bounding Box Filter → RANSAC Plane → PCA Initial Pose → ICP Refinement → Pose
+Pointcloud → Stage 1: cluster selection → RANSAC/PCA Plane → PCA Initial Pose → ICP Refinement → Pose
 ```
 
-1. **Bounding box** filters points to region of interest
-2. **RANSAC** detects the dominant plane (calibration board surface)
-3. **PCA** computes initial pose from plane inliers
-4. **ICP** refines pose by matching model to observed points
+Stage 1 selects the candidate board cluster, and its mode is chosen by
+`detection_mode` in `board_detector.json5`:
+
+- **`bbox`** (default): a fixed bounding box crops points to a region of
+  interest. Simple, but the board must stay inside a hand-tuned box.
+- **`bbox_free`**: no bounding box — the `board-projection-detector`
+  library isolates the board cluster from the whole cloud by projecting
+  candidate planes to 2D and gating on board shape/size/stance. Its
+  selected points feed the same downstream engine (Option C: the library's
+  square-fit corners gate cluster selection only; the final pose is still
+  the node's ICP, not the library's corners).
+
+Downstream stages are identical for both modes:
+
+1. **RANSAC / PCA** fits the dominant plane on the selected points (RANSAC,
+   or PCA directly when `skip_ransac: true`)
+2. **PCA** computes initial pose from plane inliers
+3. **ICP** refines pose by matching model to observed points
+
+#### Crop-box-free foreground methods (`bbox_free`)
+
+`foreground_method` picks how `bbox_free` extracts foreground points:
+
+- **`background_subtraction`** (Method E, the shipping path, ~34–69 ms/frame):
+  builds a background voxel model during a warmup phase (the first
+  `warmup_frames` board-free clouds are observed, then the model is
+  finalized), then keeps only points absent from that background. Re-run
+  the warmup at runtime by calling the `~/reset_background`
+  (`std_srvs/srv/Empty`) service — e.g. after moving the rig.
+- **`plane_strip`** (Method B, ~157–202 ms/frame, over the ~100 ms budget):
+  RANSAC-strips large background planes. No warmup/background needed, but
+  slower; not the default.
+
+When `bbox_free` finds nothing, the node logs the furthest-progressing
+reject reason (no clusters / flatness / extent / size / square residual /
+stance / isolation) instead of silently publishing an empty detection.
 
 ## Configuration Flow
 
