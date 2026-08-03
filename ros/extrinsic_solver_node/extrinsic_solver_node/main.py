@@ -19,13 +19,14 @@ License: MIT
 """
 
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 import cv2  # OpenCV for computer vision tasks
 import numpy as np  # Ubuntu 22.04 default (1.x)
 import rclpy
-from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Quaternion, TransformStamped, Vector3
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -126,14 +127,11 @@ class EducationalExtrinsicSolver(Node):
         sync_queue_size = (
             self.get_parameter("sync_queue_size").get_parameter_value().integer_value
         )
-        sync_drop_policy_str = (
-            self.get_parameter("sync_drop_policy").get_parameter_value().string_value
-        )
-        sync_drop_policy = (
-            DropPolicy.DROP_OLDEST
-            if sync_drop_policy_str == "drop_oldest"
-            else DropPolicy.REJECT_NEW
-        )
+        # sync_drop_policy is declared for launch compatibility but unused — manual
+        # nearest-timestamp matching has no shared buffer / overflow policy.
+
+        self.sync_tolerance_ms = sync_tolerance_ms
+        self.sync_queue_size = sync_queue_size
 
         # Load ArUco pattern configuration
         self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
@@ -153,7 +151,7 @@ class EducationalExtrinsicSolver(Node):
         qos_profile = QoSProfile(
             reliability=reliability,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1,
+            depth=sync_queue_size,
         )
         self.get_logger().info(
             f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
@@ -164,25 +162,32 @@ class EducationalExtrinsicSolver(Node):
             TransformStamped, "extrinsic_transform", qos_profile
         )
 
-        # Create synchronizer for ArUco and board detections
-        # Educational note: conflux_py synchronizes messages from multiple topics
-        # within a configurable time window, ensuring matched detection pairs
+        # Manual nearest-timestamp synchronization (replaces Conflux).
+        # Conflux's FIFO oldest-of-each matching + shared reject_new buffer froze
+        # under the aruco(~30Hz)/board(~1Hz) rate mismatch: aruco saturated the
+        # buffer, board starved, and the sync loop stopped emitting groups after
+        # a few seconds (observed ~93% aruco rejection, then permanent freeze).
+        #
+        # aruco is the fast stream -> buffered. Each board detection (slow stream)
+        # triggers pairing with the nearest aruco by timestamp.
+        self._aruco_buf: Deque[Detection2DArray] = deque(maxlen=sync_queue_size)
+        self._aruco_count = 0
+        self._board_count = 0
+        self._pair_count = 0
+        self._no_match_count = 0
+        self._last_pair_time: Optional[float] = None
         self.get_logger().info(
-            f"Using Conflux synchronization (window={int(sync_tolerance_ms)}ms, buffer={sync_queue_size}, policy={sync_drop_policy.name})"
+            f"Manual nearest-timestamp sync "
+            f"(window={'infinite' if sync_tolerance_ms <= 0 else f'{int(sync_tolerance_ms)}ms'}, "
+            f"buf={sync_queue_size})"
         )
-        self.sync = ROS2Synchronizer(
-            self,
-            window_size_ms=int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None,
-            buffer_size=sync_queue_size,
-            drop_policy=sync_drop_policy,
-            qos=qos_profile,
+        self.create_subscription(
+            Detection2DArray, "aruco_detections", self._cb_aruco, qos_profile
         )
-        self.sync.add_subscription(Detection2DArray, "aruco_detections")
-        self.sync.add_subscription(Detection3DArray, "calibration_board_detections")
-
-        @self.sync.on_synchronized
-        def on_sync(group: SyncGroup):
-            self._handle_synchronized_detections(group)
+        self.create_subscription(
+            Detection3DArray, "calibration_board_detections", self._cb_board, qos_profile
+        )
+        self.create_timer(10.0, self._log_stats)
 
         # Derive camera_info topic from camera_topic parameter (image_pipeline convention)
         camera_topic = (
@@ -211,7 +216,7 @@ class EducationalExtrinsicSolver(Node):
         self.get_logger().info(
             f"Educational Extrinsic Solver initialized\n"
             f"Educational Mode: Simplified PnP calibration using OpenCV\n"
-            f"Using conflux_py for time-synchronized detection pairs\n"
+            f"Using manual nearest-timestamp matching for detection pairs\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}\n"
@@ -230,53 +235,71 @@ class EducationalExtrinsicSolver(Node):
             self.camera_info = msg
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
 
-    def _handle_synchronized_detections(self, group: SyncGroup):
-        """
-        Handle synchronized ArUco and board detections.
+    @staticmethod
+    def _stamp_ns(msg) -> int:
+        s = msg.header.stamp
+        return s.sec * 1_000_000_000 + s.nanosec
 
-        Educational note: This callback is invoked by conflux_py when it has
-        received messages from all subscribed topics within the time window.
-        This ensures that ArUco and board detections are from the same moment.
-        """
-        # Debug: log available keys in the sync group
-        available_keys = group.topics()
-        self.get_logger().debug(f"SyncGroup keys: {available_keys}")
+    def _cb_aruco(self, msg: Detection2DArray):
+        """Fast stream — buffer non-empty ArUco detections for later pairing."""
+        self._aruco_count += 1
+        if msg.detections:
+            self._aruco_buf.append(msg)
+        self.get_logger().debug(
+            f"RX aruco #{self._aruco_count} buf={len(self._aruco_buf)} "
+            f"stamp={msg.header.stamp.sec}.{msg.header.stamp.nanosec // 1_000_000:03d}s"
+        )
 
-        # Safely get messages with error handling
-        aruco_msg = group.get("aruco_detections")
-        board_msg = group.get("calibration_board_detections")
+    def _cb_board(self, msg: Detection3DArray):
+        """Slow stream — trigger nearest-timestamp pairing with buffered ArUco."""
+        self._board_count += 1
+        if not msg.detections:
+            self.get_logger().warn("Received empty board detection")
+            return
+        if not self._aruco_buf:
+            self._no_match_count += 1
+            self.get_logger().debug("No ArUco buffered, skipping board detection")
+            return
 
-        if aruco_msg is None or board_msg is None:
-            self.get_logger().warn(
-                f"Incomplete sync group received. Available keys: {available_keys}, "
-                f"aruco={aruco_msg is not None}, board={board_msg is not None}"
+        t_board = self._stamp_ns(msg)
+        aruco_msg = min(
+            self._aruco_buf, key=lambda m: abs(self._stamp_ns(m) - t_board)
+        )
+        diff_ms = abs(self._stamp_ns(aruco_msg) - t_board) / 1e6
+
+        if self.sync_tolerance_ms > 0 and diff_ms > self.sync_tolerance_ms:
+            self._no_match_count += 1
+            self.get_logger().debug(
+                f"No ArUco within {self.sync_tolerance_ms:.0f}ms (best={diff_ms:.0f}ms)"
             )
             return
 
-        self.get_logger().debug(
-            f"Synchronized detection pair at t={group.timestamp:.6f}s: "
-            f"{len(aruco_msg.detections)} ArUco markers, "
-            f"{len(board_msg.detections)} boards"
-        )
-
-        # Skip if either detection is empty
-        if not aruco_msg.detections:
-            self.get_logger().debug("Ignoring empty ArUco detection in sync group")
-            return
-        if not board_msg.detections:
-            self.get_logger().warn("Received empty board detection in sync group")
-            return
-
         self.get_logger().info(
-            f"Processing synchronized detection pair: "
+            f"Processing detection pair (dt={diff_ms:.0f}ms): "
             f"{len(aruco_msg.detections)} ArUco markers, "
-            f"{len(board_msg.detections)} boards"
+            f"{len(msg.detections)} boards"
         )
 
         try:
-            self._solve_extrinsic_calibration(aruco_msg, board_msg)
+            if self._solve_extrinsic_calibration(aruco_msg, msg):
+                self._pair_count += 1
+                self._last_pair_time = time.monotonic()
         except Exception as e:
             self.get_logger().error(f"Calibration failed: {e}")
+
+    def _log_stats(self):
+        """Periodic diagnostics: receipt counts, buffer depth, pair staleness."""
+        stale_str = " | no transform yet"
+        if self._last_pair_time is not None:
+            gap = time.monotonic() - self._last_pair_time
+            stale_str = f" | last_transform={gap:.1f}s ago"
+            if gap > 5.0:
+                stale_str += " *** STALE ***"
+        self.get_logger().info(
+            f"[STATS] rx: aruco={self._aruco_count}(buf={len(self._aruco_buf)}) "
+            f"board={self._board_count} | pairs={self._pair_count} "
+            f"no_match={self._no_match_count}{stale_str}"
+        )
 
     def _solve_extrinsic_calibration(
         self, aruco_msg: Detection2DArray, board_msg: Detection3DArray
@@ -872,8 +895,6 @@ def main(args=None):
     Educational note: This is the standard ROS2 node entry point.
     It initializes ROS2, creates the node, and handles shutdown.
     """
-    import time
-
     rclpy.init(args=args)
 
     node = EducationalExtrinsicSolver()
@@ -899,21 +920,13 @@ def main(args=None):
     finally:
         # Log final synchronization statistics
         try:
-            stats = node.sync.statistics
             node.get_logger().info(
                 f"Final sync statistics: "
-                f"received={stats.total_received()}, "
-                f"rejected={stats.total_rejected()}, "
-                f"groups={stats.groups_synchronized}, "
-                f"rejection_rate={stats.rejection_rate():.1%}"
+                f"aruco_received={node._aruco_count}, "
+                f"board_received={node._board_count}, "
+                f"pairs={node._pair_count}, "
+                f"no_match={node._no_match_count}"
             )
-            for topic in stats.messages_received:
-                topic_rate = stats.rejection_rate(topic)
-                node.get_logger().info(
-                    f"  {topic}: received={stats.messages_received[topic]}, "
-                    f"rejected={stats.messages_rejected[topic]}, "
-                    f"rejection_rate={topic_rate:.1%}"
-                )
         except Exception:
             pass  # Ignore errors during statistics logging
 

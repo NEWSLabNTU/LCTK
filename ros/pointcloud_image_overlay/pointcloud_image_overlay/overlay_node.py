@@ -193,6 +193,11 @@ class EducationalOverlayNode(Node):
             None  # Debug inlier points
         )
 
+        # === PARAMETER DECLARATIONS ===
+        # Depth range for color-coding (meters)
+        self.declare_parameter("min_depth", 0.0)
+        self.declare_parameter("max_depth", 20.0)
+
         # === ROS 2 QUALITY OF SERVICE CONFIGURATION ===
         # Educational note: QoS affects message delivery reliability
         self.declare_parameter("use_best_effort_qos", True)
@@ -228,9 +233,13 @@ class EducationalOverlayNode(Node):
         # Subscribe to plane inliers from board detector for visualization
         self.inlier_pointcloud_subscription = self.create_subscription(
             PointCloud2,
-            "/calibration/lidar_board_detector/debug/plane_inliers",
+            "plane_inliers",
             self.on_inlier_pointcloud_received,
-            qos,
+            QoSProfile(
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                durability=DurabilityPolicy.VOLATILE,
+                depth=1,  # Prevent buffering delays
+            ),
         )
 
         # Camera intrinsic parameters (sensor_msgs/CameraInfo)
@@ -250,7 +259,7 @@ class EducationalOverlayNode(Node):
         # Educational highlight: Real-time calibration from solver instead of static file
         self.extrinsic_subscription = self.create_subscription(
             TransformStamped,
-            "/calibration/extrinsic_solver/extrinsic_transform",  # Live calibration output
+            "extrinsic_transform",
             self.on_extrinsic_received,
             qos,
         )
@@ -293,6 +302,9 @@ class EducationalOverlayNode(Node):
 
         # Convert ROS transform to OpenCV rvec and tvec for projectPoints
         self.extrinsic_rvec, self.extrinsic_tvec = transform_to_rvec_tvec(msg)
+        # self.extrinsic_rvec = np.array([-0.506223279, -0.50280546, -1.6])
+        # self.extrinsic_tvec = np.array([1.93833247, -1.33525032,  0.77690338])
+        
 
         # Educational logging (every 10th message to avoid spam)
         if self.message_counts["extrinsics"] % 10 == 0:
@@ -468,7 +480,17 @@ class EducationalOverlayNode(Node):
             self.get_logger().debug(f"[DEBUG] Extrinsic rvec: {self.extrinsic_rvec}")
             self.get_logger().debug(f"[DEBUG] Extrinsic tvec: {self.extrinsic_tvec}")
 
-            # === STEP 3: PROJECT LIDAR POINTS TO 2D IMAGE COORDINATES ===
+            # === STEP 4: PRESERVE THE DEPTH VALUE BEFORE PROJECTION ===
+            # Convert rotation vector to a 3x3 rotation matrix
+            R, _ = cv2.Rodrigues(self.extrinsic_rvec)
+
+            # Transform the 3D points from World space to Camera space
+            points_camera = (R @ lidar_points.T).T + self.extrinsic_tvec.flatten()
+
+            # The Z-component is the true depth (shape N, 1)
+            depth_z = points_camera[:, 2:3] 
+
+            # === STEP 5: PROJECT LIDAR POINTS TO 2D IMAGE COORDINATES ===
             # Educational note: Let cv2.projectPoints handle the full transformation
             # - Applies extrinsic transform (LiDAR → Camera frame) using rvec/tvec
             # - Projects to 2D using camera intrinsics
@@ -502,7 +524,7 @@ class EducationalOverlayNode(Node):
                 f"[DEBUG] Projected Y range: [{np.min(image_points[:, 1]):.1f}, {np.max(image_points[:, 1]):.1f}]"
             )
 
-            # === STEP 4: FILTER POINTS OUTSIDE IMAGE BOUNDS ===
+            # === STEP 6: FILTER POINTS OUTSIDE IMAGE BOUNDS ===
             # Educational note: Filter points that project outside the image
             h, w = self.latest_image.height, self.latest_image.width
             bounds_mask = (
@@ -512,6 +534,7 @@ class EducationalOverlayNode(Node):
                 & (image_points[:, 1] <= h)
             )
             image_points = image_points[bounds_mask]
+            depth_z = depth_z[bounds_mask]
 
             if len(image_points) == 0:
                 self._draw_status_message_on_image(
@@ -523,7 +546,7 @@ class EducationalOverlayNode(Node):
                 f"[DEBUG] Points within image bounds: {len(image_points)}"
             )
 
-            # === STEP 5: PROJECT AND FILTER INLIER POINTS (IF AVAILABLE) ===
+            # === STEP 7: PROJECT AND FILTER INLIER POINTS (IF AVAILABLE) ===
             inlier_image_points = None
             if self.latest_inlier_pointcloud is not None:
                 inlier_points = pointcloud2_to_xyz(self.latest_inlier_pointcloud)
@@ -547,14 +570,14 @@ class EducationalOverlayNode(Node):
                     )
                     inlier_image_points = inlier_image_points[inlier_bounds_mask]
 
-            # === STEP 6: VISUAL OVERLAY ===
+            # === STEP 8: VISUAL OVERLAY ===
             # Draw projected LiDAR points on undistorted camera image
             # Inlier points (bright colors) drawn on top of full pointcloud (darker colors)
             overlay_image = self._create_visual_overlay(
-                undistorted_image, image_points, inlier_image_points
+                undistorted_image, image_points, inlier_image_points, depth_z
             )
 
-            # === STEP 7: PUBLISH RESULT ===
+            # === STEP 9: PUBLISH RESULT ===
             # Convert back to ROS Image message and publish
             self._publish_overlay(overlay_image)
 
@@ -580,6 +603,7 @@ class EducationalOverlayNode(Node):
         cv_image: np.ndarray,
         image_points: np.ndarray,
         inlier_image_points: Optional[np.ndarray] = None,
+        depth: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
         Educational Helper: Create visual overlay of LiDAR points on camera image
@@ -593,15 +617,27 @@ class EducationalOverlayNode(Node):
             np.ndarray: Camera image with LiDAR points overlaid
         """
         h, w = cv_image.shape[:2]
+        min_depth = self.get_parameter("min_depth").get_parameter_value().double_value
+        max_depth = self.get_parameter("max_depth").get_parameter_value().double_value
+        depth_range = max(max_depth - min_depth, 1e-6)
 
-        # Draw full pointcloud with darker/subdued colors
+        if depth is None:
+            depth = np.full((len(image_points), 1), (min_depth + max_depth) / 2.0)
+
+        # Calculate colors for all points at once
+        normalized_depth = np.clip((depth - min_depth) / depth_range, 0, 1)
+        colors = (1 - normalized_depth) * np.array([200, 0, 0]) + normalized_depth * np.array([25, 100, 255])
+        colors = colors.astype(np.uint8)
+
+        # Calculate radii: inversely proportional to depth
+        # Clamp radius between 1 and 5 pixels
+        radii = np.clip(1.0 / (normalized_depth + 1e-6), 1, 5).astype(int)
+
+        # Draw full pointcloud with depth-based colors and radii
         lidar_points_drawn = 0
-        for u, v in image_points:
-            # Only draw points that fall within image boundaries
-            if 0 <= u < w and 0 <= v < h:
-                # Draw darker green point (full LiDAR scan) - thicker circle
-                cv2.circle(cv_image, (int(u), int(v)), 2, (0, 128, 0), -1)
-                lidar_points_drawn += 1
+        for (u, v), color, radius in zip(image_points, colors, radii):
+            cv2.circle(cv_image, (int(u), int(v)), int(radius), tuple(color.tolist()), -1)
+            lidar_points_drawn += 1
 
         # Draw inlier points with bright colors on top
         inlier_points_drawn = 0
