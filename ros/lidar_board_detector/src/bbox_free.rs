@@ -27,6 +27,24 @@ pub fn describe_reject(reason: &RejectReason) -> &'static str {
     }
 }
 
+/// Unit / comparison hint for a reject reason's `measured` vs `threshold`
+/// numbers (see `RejectDetail`). Used to annotate the reject log so the operator
+/// knows how narrowly a gate failed and in what units the config knob is set.
+pub fn reject_unit(reason: &RejectReason) -> &'static str {
+    match reason {
+        // measured > threshold fails
+        RejectReason::SquareResidual => "coverage residual, unitless; fail when measured >= max",
+        RejectReason::Isolation => "points per metre of quad perimeter; fail when measured > max",
+        RejectReason::Flatness => "RMS metres; fail when measured > max",
+        // measured <= threshold fails
+        RejectReason::Stance => {
+            "normalized diagonal·up 0-1 (~0.71 flat, ~1.0 corner-standing); fail when measured <= floor"
+        }
+        RejectReason::Extent | RejectReason::SizeGate => "metres; board-size gate",
+        RejectReason::NoClusters => "candidate count",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetectionMode {
     Bbox,
