@@ -8,7 +8,7 @@
 use nalgebra::Point3;
 
 use crate::background::BackgroundModel;
-use crate::candidates::{generate_background_diff, generate_plane_strip};
+use crate::candidates::foreground_and_candidates;
 use crate::config::{BoardConfig, ForegroundMethod};
 use crate::geometry::{self, project_to_plane, PlaneModel};
 use crate::pose::{board_pose, isolation_density, stance_3d, BoardDetection};
@@ -52,6 +52,15 @@ impl RejectReason {
 /// `selected_points` / `selected_plane` are the winning candidate's member
 /// points and fitted plane — the sub-project-2 output fed to RANSAC+ICP.
 /// `detection` (the square-fit pose) is used here only for gating/selection.
+/// Measured value vs threshold for the furthest-progressed rejected candidate.
+/// Lets a caller log HOW NARROWLY a frame missed each gate instead of just the
+/// reason. `measured`/`threshold` are in the gate's own units (see `detect`).
+#[derive(Debug, Clone, Copy)]
+pub struct RejectDetail {
+    pub measured: f64,
+    pub threshold: f64,
+}
+
 #[derive(Debug, Clone)]
 pub struct DetectOutcome {
     pub detection: Option<BoardDetection>,
@@ -59,6 +68,17 @@ pub struct DetectOutcome {
     pub selected_plane: Option<PlaneModel>,
     pub n_candidates: usize,
     pub reject: Option<RejectReason>,
+    /// Numbers behind `reject` for the furthest candidate (None if accepted or
+    /// no candidate reached any gate). Units by reason:
+    /// SquareResidual = coverage residual (unitless); Stance = normalized
+    /// diagonal·up (0-1); Isolation = points per metre of quad perimeter.
+    pub reject_detail: Option<RejectDetail>,
+    /// The RAW per-method foreground — the point set fed to `cluster_and_gate`
+    /// BEFORE clustering / coplanar merge / board-patch gating (Method E:
+    /// background-subtracted points; Method B: non-big-plane remainder), on the
+    /// voxel-downsampled cloud. Published as a debug cloud so the true foreground
+    /// is visible, independent of surviving clusters or downstream `plane_inliers`.
+    pub foreground_points: Vec<Point3<f64>>,
 }
 
 /// Detect the calibration board in one frame.
@@ -77,33 +97,52 @@ pub fn detect(
     let pts = geometry::finite_only(points);
     let dn = geometry::voxel_downsample(&pts, voxel);
 
-    let cands = match method {
-        ForegroundMethod::PlaneStrip => generate_plane_strip(&dn, board),
-        ForegroundMethod::BackgroundSubtraction => match background {
-            Some(bg) => generate_background_diff(&dn, board, bg),
-            None => {
-                return DetectOutcome {
-                    detection: None,
-                    selected_points: None,
-                    selected_plane: None,
-                    n_candidates: 0,
-                    reject: Some(RejectReason::NoClusters),
-                };
-            }
-        },
-    };
+    // No background yet for Method E: nothing to diff against.
+    if method == ForegroundMethod::BackgroundSubtraction && background.is_none() {
+        return DetectOutcome {
+            detection: None,
+            selected_points: None,
+            selected_plane: None,
+            n_candidates: 0,
+            reject: Some(RejectReason::NoClusters),
+            reject_detail: None,
+            foreground_points: Vec::new(),
+        };
+    }
+
+    // `foreground_points` is the RAW per-method foreground (Method E:
+    // background-subtracted points; Method B: non-big-plane remainder), captured
+    // BEFORE clustering/merge/gate — the true foreground, not surviving clusters.
+    let (foreground_points, cands) =
+        foreground_and_candidates(&dn, board, method, background);
     let n_candidates = cands.len();
 
     let mut best_residual = f64::INFINITY;
     let mut best_det: Option<BoardDetection> = None;
     let mut best_points: Option<Vec<Point3<f64>>> = None;
     let mut best_plane: Option<PlaneModel> = None;
-    let mut furthest_reject: Option<RejectReason> = None;
-    let note = |r: RejectReason, cur: &mut Option<RejectReason>| {
-        if cur.map(|c| r.rank() > c.rank()).unwrap_or(true) {
-            *cur = Some(r);
-        }
-    };
+    // Track the furthest-progressed reject AND its measured/threshold numbers.
+    // Furthest wins by rank; ties (same gate) keep the candidate that missed by
+    // the smallest margin — the most informative "how close was it" reading.
+    let mut furthest: Option<(RejectReason, RejectDetail)> = None;
+    let consider =
+        |r: RejectReason, measured: f64, threshold: f64, cur: &mut Option<(RejectReason, RejectDetail)>| {
+            let take = match cur {
+                None => true,
+                Some((cr, cd)) => {
+                    if r.rank() > cr.rank() {
+                        true
+                    } else if r.rank() == cr.rank() {
+                        (measured - threshold).abs() < (cd.measured - cd.threshold).abs()
+                    } else {
+                        false
+                    }
+                }
+            };
+            if take {
+                *cur = Some((r, RejectDetail { measured, threshold }));
+            }
+        };
 
     for cand in &cands {
         let coords = project_to_plane(&cand.points, &cand.plane);
@@ -111,8 +150,24 @@ pub fn detect(
         let fit = fit_fixed_square(&coords, board.side_m, Some(seed), None);
         let fit = match fit {
             Some(f) if f.residual < board.square_icp_residual_max => f,
-            _ => {
-                note(RejectReason::SquareResidual, &mut furthest_reject);
+            // Failed square fit: report the residual (NaN when the fit itself
+            // returned nothing, e.g. too few points) against its threshold.
+            Some(f) => {
+                consider(
+                    RejectReason::SquareResidual,
+                    f.residual,
+                    board.square_icp_residual_max,
+                    &mut furthest,
+                );
+                continue;
+            }
+            None => {
+                consider(
+                    RejectReason::SquareResidual,
+                    f64::NAN,
+                    board.square_icp_residual_max,
+                    &mut furthest,
+                );
                 continue;
             }
         };
@@ -124,18 +179,25 @@ pub fn detect(
             board.up_axis,
         );
 
-        if board.stance_floor > 0.0
-            && stance_3d(&det.corners_3d, board.up_axis) <= board.stance_floor
-        {
-            note(RejectReason::Stance, &mut furthest_reject);
-            continue;
+        if board.stance_floor > 0.0 {
+            let stance = stance_3d(&det.corners_3d, board.up_axis);
+            if stance <= board.stance_floor {
+                consider(RejectReason::Stance, stance, board.stance_floor, &mut furthest);
+                continue;
+            }
         }
 
-        if board.isolation
-            && isolation_density(&dn, &cand.plane, &fit.corners_2d) > board.isolation_max_density
-        {
-            note(RejectReason::Isolation, &mut furthest_reject);
-            continue;
+        if board.isolation {
+            let density = isolation_density(&dn, &cand.plane, &fit.corners_2d);
+            if density > board.isolation_max_density {
+                consider(
+                    RejectReason::Isolation,
+                    density,
+                    board.isolation_max_density,
+                    &mut furthest,
+                );
+                continue;
+            }
         }
 
         if fit.residual < best_residual {
@@ -146,10 +208,13 @@ pub fn detect(
         }
     }
 
-    let reject = if best_det.is_some() {
-        None
+    let (reject, reject_detail) = if best_det.is_some() {
+        (None, None)
     } else {
-        Some(furthest_reject.unwrap_or(RejectReason::NoClusters))
+        match furthest {
+            Some((r, d)) => (Some(r), Some(d)),
+            None => (Some(RejectReason::NoClusters), None),
+        }
     };
 
     DetectOutcome {
@@ -158,5 +223,7 @@ pub fn detect(
         selected_plane: best_plane,
         n_candidates,
         reject,
+        reject_detail,
+        foreground_points,
     }
 }

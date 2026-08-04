@@ -4,7 +4,7 @@
 //! `cluster_after_ground.py` and `background_diff.py`.
 
 use crate::background::BackgroundModel;
-use crate::config::BoardConfig;
+use crate::config::{BoardConfig, ForegroundMethod};
 use crate::dbscan::{anisotropic_scaled, cluster_anisotropic, dbscan};
 use crate::geometry::{extent_2d, fit_plane, plane_rms, project_to_plane, PlaneModel};
 use nalgebra::{Point3, Vector3};
@@ -361,4 +361,41 @@ pub fn generate_background_diff(
         board.cluster_min_points,
         board.vertical_gap_deg,
     )
+}
+
+/// Compute the RAW per-method foreground and the gated candidates in one pass.
+///
+/// `foreground` is the exact point set handed to `cluster_and_gate` BEFORE any
+/// clustering / coplanar merge / board-patch gating — Method E: the
+/// background-subtracted points; Method B: the non-big-plane remainder. Exposed
+/// so a caller can visualize the true foreground (not just surviving clusters).
+/// Returns `(foreground, candidates)`. Background-subtraction with no model
+/// yields empty for both.
+pub fn foreground_and_candidates(
+    dn: &[Point3<f64>],
+    board: &BoardConfig,
+    method: ForegroundMethod,
+    background: Option<&BackgroundModel>,
+) -> (Vec<Point3<f64>>, Vec<Candidate>) {
+    let fg = match method {
+        ForegroundMethod::BackgroundSubtraction => match background {
+            Some(bg) => bg.foreground_points(dn),
+            None => return (Vec::new(), Vec::new()),
+        },
+        ForegroundMethod::PlaneStrip => remove_big_planes(
+            dn,
+            board,
+            BIG_PLANE_DIST,
+            BIG_PLANE_MIN_FRAC,
+            board.vertical_gap_deg,
+        ),
+    };
+    let cands = cluster_and_gate(
+        &fg,
+        board,
+        CLUSTER_EPS,
+        board.cluster_min_points,
+        board.vertical_gap_deg,
+    );
+    (fg, cands)
 }
