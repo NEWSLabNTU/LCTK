@@ -121,6 +121,26 @@ impl BackgroundModel {
         self.keys.as_deref().unwrap_or(&[])
     }
 
+    /// Cell-center points of the finalized consensus background, for debug
+    /// visualization (e.g. an RViz PointCloud2 of what warmup baked in).
+    /// Empty until `finalize()`/`from_keys` has run. Inverse of `pack`/`voxel_idx`.
+    pub fn voxel_centers(&self) -> Vec<Point3<f64>> {
+        let half = self.voxel / 2.0;
+        self.keys()
+            .iter()
+            .map(|&k| {
+                let ix = (k & KEY_MASK) - KEY_OFFSET;
+                let iy = ((k >> KEY_BITS) & KEY_MASK) - KEY_OFFSET;
+                let iz = ((k >> (2 * KEY_BITS)) & KEY_MASK) - KEY_OFFSET;
+                Point3::new(
+                    ix as f64 * self.voxel + half,
+                    iy as f64 * self.voxel + half,
+                    iz as f64 * self.voxel + half,
+                )
+            })
+            .collect()
+    }
+
     /// Points of `dn` whose own voxel AND every dilation-stencil neighbour
     /// are unoccupied in the consensus background.
     ///

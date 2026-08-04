@@ -12,8 +12,8 @@ use hollow_board_config::{BoardModel, BoardShape};
 use hollow_board_detector::{
     algo::{fit_plane_ransac, voxel_downsample, BoardIcpIterator},
     detection::{BoardIcpState, BoardModelParams, IcpStatistics, PlaneRansacData},
-    init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
-    Detector as BoardDetector,
+    config::SensorUpAxis, init_logging, Config as BoardDetectorConfig,
+    Detection as BoardDetection, Detector as BoardDetector,
 };
 use nalgebra as na;
 use plane_estimator::PlaneModel;
@@ -51,6 +51,13 @@ struct IcpDebugPublishers {
 struct BoardDebugPublishers {
     all_points: Arc<Publisher<PointCloud2>>,
     filtered_points: Arc<Publisher<PointCloud2>>,
+    /// bbox_free only: the RAW Method-E / plane-strip foreground (points before
+    /// clustering/merge/gate), on the downsampled cloud. Silent in bbox mode.
+    foreground_points: Arc<Publisher<PointCloud2>>,
+    /// bbox_free background_subtraction only: cell centers of the finalized
+    /// warmup background model — what "static scene" got baked in. Silent in
+    /// bbox mode and during warmup.
+    background_voxels: Arc<Publisher<PointCloud2>>,
     plane_inliers: Arc<Publisher<PointCloud2>>,
     downsampled_points: Arc<Publisher<PointCloud2>>,
     plane_marker: Arc<Publisher<MarkerArray>>,
@@ -506,6 +513,12 @@ impl CalibrationBoardLocatorNode {
             let mut filtered_points_opts = PublisherOptions::new("debug/filtered_points");
             filtered_points_opts.qos = debug_qos;
 
+            let mut foreground_points_opts = PublisherOptions::new("debug/foreground_points");
+            foreground_points_opts.qos = debug_qos;
+
+            let mut background_voxels_opts = PublisherOptions::new("debug/background_voxels");
+            background_voxels_opts.qos = debug_qos;
+
             let mut plane_inliers_opts = PublisherOptions::new("debug/plane_inliers");
             plane_inliers_opts.qos = debug_qos;
 
@@ -536,6 +549,8 @@ impl CalibrationBoardLocatorNode {
             Some(BoardDebugPublishers {
                 all_points: Arc::new(node.create_publisher(all_points_opts)?),
                 filtered_points: Arc::new(node.create_publisher(filtered_points_opts)?),
+                foreground_points: Arc::new(node.create_publisher(foreground_points_opts)?),
+                background_voxels: Arc::new(node.create_publisher(background_voxels_opts)?),
                 plane_inliers: Arc::new(node.create_publisher(plane_inliers_opts)?),
                 downsampled_points: Arc::new(node.create_publisher(downsampled_points_opts)?),
                 plane_marker: Arc::new(node.create_publisher(plane_marker_opts)?),
@@ -705,7 +720,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats, debug/pca_eigenvectors"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/foreground_points (bbox_free), debug/background_voxels (bbox_free), debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats, debug/pca_eigenvectors"
             );
         }
 
@@ -882,7 +897,13 @@ impl CalibrationBoardLocatorNode {
                 Self::filter_points_by_bbox(&points, bbox_params, &msg.header, board_debug_publishers)?
             }
             Some(bf) => {
-                match Self::select_board_cluster(&points, bf, background_state, &msg.header)? {
+                match Self::select_board_cluster(
+                    &points,
+                    bf,
+                    background_state,
+                    &msg.header,
+                    board_debug_publishers,
+                )? {
                     Some(pts) => pts,
                     None => {
                         return Ok(Detection3DArray {
@@ -1141,11 +1162,16 @@ impl CalibrationBoardLocatorNode {
         points: &[na::Point3<f64>],
         bf: &bbox_free::BboxFreeRaw,
         background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
-        _header: &Header,
+        header: &Header,
+        board_debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Result<Option<Vec<na::Point3<f64>>>> {
         use board_projection_detector::{config::ForegroundMethod, detector::detect};
 
         let method = bf.method()?;
+
+        // Cell centers of the finalized background model, captured under the lock
+        // for debug publishing once the guard is released. None for plane_strip.
+        let mut background_centers: Option<Vec<na::Point3<f64>>> = None;
 
         // Method E: run the warmup lifecycle to obtain a finalized background.
         let outcome = if method == ForegroundMethod::BackgroundSubtraction {
@@ -1162,6 +1188,7 @@ impl CalibrationBoardLocatorNode {
                 }
                 bbox_free::WarmupOutcome::Ready => {
                     let model = state.model().expect("Ready implies a finalized model");
+                    background_centers = Some(model.voxel_centers());
                     detect(points, &bf.board, method, bf.voxel, Some(model))
                 }
             }
@@ -1170,15 +1197,59 @@ impl CalibrationBoardLocatorNode {
             detect(points, &bf.board, method, bf.voxel, None)
         };
 
+        // Publish the finalized background voxel centers so the "static scene"
+        // baked in during warmup is visible in RViz (diagnoses a warmup that
+        // absorbed the board). Static once Ready; republished each frame so the
+        // display is populated whenever the operator adds it.
+        if let (Some(debug_pubs), Some(centers)) = (board_debug_publishers, &background_centers) {
+            match Self::create_debug_pointcloud(centers, header) {
+                Ok(cloud) => {
+                    if let Err(e) = debug_pubs.background_voxels.publish(cloud) {
+                        log_warn!(LOGGER_NAME, "Failed to publish background voxels: {e}");
+                    }
+                }
+                Err(e) => log_warn!(LOGGER_NAME, "Failed to build background voxel cloud: {e}"),
+            }
+        }
+
+        // Publish the RAW Method-E / plane-strip foreground (points before
+        // clustering/merge/gate) so it is visible in RViz independently of the
+        // downstream RANSAC plane_inliers, which only appears AFTER a board is
+        // selected. Shows everything background subtraction kept, not just clusters.
+        if let Some(debug_pubs) = board_debug_publishers {
+            match Self::create_debug_pointcloud(&outcome.foreground_points, header) {
+                Ok(cloud) => {
+                    if let Err(e) = debug_pubs.foreground_points.publish(cloud) {
+                        log_warn!(LOGGER_NAME, "Failed to publish foreground points: {e}");
+                    }
+                }
+                Err(e) => log_warn!(LOGGER_NAME, "Failed to build foreground debug cloud: {e}"),
+            }
+        }
+
         match outcome.selected_points {
             Some(pts) if !pts.is_empty() => Ok(Some(pts)),
             _ => {
                 match &outcome.reject {
-                    Some(reason) => log_info!(
-                        LOGGER_NAME,
-                        "bbox_free: no board selected — {}",
-                        bbox_free::describe_reject(reason)
-                    ),
+                    // Include the measured value, the threshold it missed, and the unit,
+                    // so tuning is data-driven instead of trial-and-error.
+                    Some(reason) => match outcome.reject_detail {
+                        Some(d) => log_info!(
+                            LOGGER_NAME,
+                            "bbox_free: no board selected — {}; measured={:.4} vs threshold={:.4} [{}]; candidates={}",
+                            bbox_free::describe_reject(reason),
+                            d.measured,
+                            d.threshold,
+                            bbox_free::reject_unit(reason),
+                            outcome.n_candidates
+                        ),
+                        None => log_info!(
+                            LOGGER_NAME,
+                            "bbox_free: no board selected — {}; candidates={}",
+                            bbox_free::describe_reject(reason),
+                            outcome.n_candidates
+                        ),
+                    },
                     None => log_info!(LOGGER_NAME, "bbox_free: no board selected (no reject reason)"),
                 }
                 Ok(None)
@@ -1371,6 +1442,8 @@ impl CalibrationBoardLocatorNode {
             plane_model,
             plane_inlier_points,
             board_width.as_meters(),
+            &config.sensor_up_axis,
+            config.initial_inplane_rotation_deg,
             header,
             board_debug_publishers,
         )?;
@@ -1502,33 +1575,37 @@ impl CalibrationBoardLocatorNode {
                     temp_board_model.right_corner(),
                 ];
 
-                // Find the corner with the lowest z-coordinate (total_cmp is
-                // NaN-safe; partial_cmp().unwrap() would panic on a NaN corner).
+                // Find the vertically lowest corner along the configured sensor "up"
+                // axis (Seyond: X=up, so gravity-down is -X, not -Z). Projecting onto
+                // up_vector generalizes the old hardcoded ".z" comparison. total_cmp is
+                // NaN-safe; partial_cmp().unwrap() would panic on a NaN corner.
+                let up_vector = config.sensor_up_axis.as_vector();
+                let height = |c: &na::Point3<f64>| c.coords.dot(&up_vector);
                 let (lowest_index, lowest_corner) = corners
                     .iter()
                     .enumerate()
-                    .min_by(|a, b| a.1.z.total_cmp(&b.1.z))
+                    .min_by(|a, b| height(a.1).total_cmp(&height(b.1)))
                     .unwrap();
 
                 // M-14: the board origin corner is disambiguated purely by "lowest
-                // world z" -- an unstated assumption that exactly one corner is
-                // clearly lowest. Near a 45deg roll, a diamond-mounted board, or a
-                // LiDAR frame that is not gravity-aligned, the two lowest corners are
-                // nearly tied and the wrong one can win, rotating the board frame 90deg
-                // and silently biasing the extrinsic for this pose. Warn when the
-                // disambiguation is marginal instead of failing silently.
+                // height along the sensor up axis" -- an unstated assumption that exactly
+                // one corner is clearly lowest. Near a 45deg roll or a diamond-mounted
+                // board, the two lowest corners are nearly tied and the wrong one can win,
+                // rotating the board frame 90deg and silently biasing the extrinsic for
+                // this pose. Warn when the disambiguation is marginal instead of failing
+                // silently.
                 {
-                    let mut zs: Vec<f64> = corners.iter().map(|c| c.z).collect();
-                    zs.sort_by(|a, b| a.total_cmp(b));
-                    let z_spread = zs[3] - zs[0];
-                    if z_spread > 1e-9 && (zs[1] - zs[0]) < 0.15 * z_spread {
+                    let mut hs: Vec<f64> = corners.iter().map(|c| height(c)).collect();
+                    hs.sort_by(|a, b| a.total_cmp(b));
+                    let h_spread = hs[3] - hs[0];
+                    if h_spread > 1e-9 && (hs[1] - hs[0]) < 0.15 * h_spread {
                         log_warn!(
                             LOGGER_NAME,
                             "Board origin corner is ambiguous: the two lowest corners are \
-                             within {:.0}% of the corner z-spread. The board may be near a \
+                             within {:.0}% of the corner height-spread. The board may be near a \
                              45deg roll or the LiDAR frame may not be gravity-aligned; the \
                              extrinsic could be off by a 90deg in-plane rotation for this pose.",
-                            100.0 * (zs[1] - zs[0]) / z_spread
+                            100.0 * (hs[1] - hs[0]) / h_spread
                         );
                     }
                 }
@@ -1607,10 +1684,17 @@ impl CalibrationBoardLocatorNode {
     }
 
     /// Compute initial board pose using plane normal alignment (from wayside-portal)
+    /// Build the initial board pose from the fitted plane.
+    ///
+    /// The board's local frame: Z = board normal (toward sensor), Y ≈ world "up" projected
+    /// onto the board plane, X = cross(Y, Z). `sensor_up_axis` selects which world axis
+    /// is "up" — must match the LiDAR's coordinate convention (Seyond: X=up, Z=forward).
     fn compute_initial_pose_from_plane(
         plane_model: &PlaneModel,
         plane_inlier_points: &[na::Point3<f64>],
         board_width_meters: f64,
+        sensor_up_axis: &SensorUpAxis,
+        initial_inplane_rotation_deg: f64,
         _header: &Header,
         _debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Option<na::Isometry3<f64>> {
@@ -1655,37 +1739,59 @@ impl CalibrationBoardLocatorNode {
             plane_normal.z
         );
 
-        // Step 3: Let the xy-plane projections of board normal and plane normal overlap
-        // This decreases the chance of falling into local minimum
+        // Step 3: Build initial rotation from plane geometry.
+        //
+        // Board local frame: Z → plane_normal (toward sensor),
+        //                    Y → world "up" projected onto board plane,
+        //                    X → cross(Y, Z)
+        //
+        // This avoids the hardcoded XY projection that breaks when the sensor's
+        // up axis is not Z (e.g. Seyond LiDAR: X=up, Z=forward).
         let rotation = {
-            // Create lifting rotation: -90° around Y-axis, then -45° around Z-axis
-            let lifting_rotation = na::UnitQuaternion::from_euler_angles(0.0, -FRAC_PI_2, 0.0)
-                * na::UnitQuaternion::from_euler_angles(0.0, 0.0, -std::f64::consts::FRAC_PI_4);
+            let board_z = plane_normal;
+            let up = sensor_up_axis.as_vector();
 
-            let lifted_normal = lifting_rotation * na::Vector3::z_axis();
+            // Project world "up" onto the board plane (remove component along board_z)
+            let up_projected = up - up.dot(&board_z) * board_z;
+
+            let board_y = if up_projected.norm() > 1e-6 {
+                up_projected.normalize()
+            } else {
+                // "up" is parallel to the board normal — pick an arbitrary perpendicular
+                let alt = if board_z.x.abs() < 0.9 {
+                    na::Vector3::x()
+                } else {
+                    na::Vector3::y()
+                };
+                (alt - alt.dot(&board_z) * board_z).normalize()
+            };
+
+            let board_x = board_y.cross(&board_z);
 
             log_debug!(
                 LOGGER_NAME,
-                "Lifted normal: ({:.3}, {:.3}, {:.3})",
-                lifted_normal.x,
-                lifted_normal.y,
-                lifted_normal.z
+                "Board axes — X: ({:.3},{:.3},{:.3}), Y: ({:.3},{:.3},{:.3}), Z: ({:.3},{:.3},{:.3})",
+                board_x.x, board_x.y, board_x.z,
+                board_y.x, board_y.y, board_y.z,
+                board_z.x, board_z.y, board_z.z,
             );
 
-            // Create planar rotation to align lifted normal with plane normal's XY projection
-            let planar_rotation = {
-                let planar_plane_normal = na::Vector3::new(plane_normal.x, plane_normal.y, 0.0);
-                na::UnitQuaternion::rotation_between(&lifted_normal, &planar_plane_normal)
-                    .unwrap_or_else(|| {
-                        if lifted_normal.dot(&planar_plane_normal) >= 0.0 {
-                            na::UnitQuaternion::identity()
-                        } else {
-                            na::UnitQuaternion::from_euler_angles(0.0, 0.0, std::f64::consts::PI)
-                        }
-                    })
-            };
+            let base_rotation = na::UnitQuaternion::from_matrix(&na::Matrix3::from_columns(&[
+                board_x, board_y, board_z,
+            ]));
 
-            planar_rotation * lifting_rotation
+            // Apply configurable in-plane rotation offset around the board normal.
+            // Corrects a fixed rotational bias visible in RViz (set via initial_inplane_rotation_deg).
+            if initial_inplane_rotation_deg.abs() > 1e-6 {
+                let angle_rad = initial_inplane_rotation_deg.to_radians();
+                let offset = na::UnitQuaternion::from_axis_angle(
+                    &na::Unit::new_normalize(board_z),
+                    angle_rad,
+                );
+                offset * base_rotation
+            } else {
+                base_rotation
+            }
         };
 
         // Step 4: Create initial pose with board center at inlier centroid
