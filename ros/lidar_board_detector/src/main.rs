@@ -409,20 +409,20 @@ impl CalibrationBoardLocatorNode {
         // Crop-box-free detection config (same file, separate typed view).
         let detection_text = fs::read_to_string(PathBuf::from(&*board_detector_file_param))?;
         let detection_cfg = bbox_free::parse_detection_config(&detection_text)?;
-        let detection_mode = bbox_free::DetectionMode::parse(&detection_cfg.detection_mode)?;
+        let detection_mode_str = detection_cfg.detection_mode.clone();
+        let detection_mode = bbox_free::DetectionMode::parse(&detection_mode_str)?;
         let bbox_free_cfg: Option<Arc<bbox_free::BboxFreeRaw>> = match detection_mode {
             bbox_free::DetectionMode::BboxFree => {
-                let bf = detection_cfg
-                    .bbox_free
-                    .ok_or_else(|| anyhow!("detection_mode=bbox_free but no bbox_free block in config"))?;
+                // Detector params are flat in the config; bundle them.
+                let bf = detection_cfg.into_bbox_free();
                 bf.method()?; // validate foreground_method early
                 Some(Arc::new(bf))
             }
             bbox_free::DetectionMode::Bbox => None,
         };
-        log_info!(LOGGER_NAME, "detection_mode = {}", detection_cfg.detection_mode);
+        log_info!(LOGGER_NAME, "detection_mode = {detection_mode_str}");
 
-        // Shared Method-E background state. `BackgroundState` is observed per frame by the single
+        // Shared background-subtraction state. `BackgroundState` is observed per frame by the single
         // processing thread; `reset_background` (Task 6) mutates it from a service/param callback,
         // so an `Arc<Mutex<Option<..>>>` is sufficient (the design's `ArcSwap<BackgroundState>` is
         // simplified to this — there is only one observer thread). `None` when the bbox_free path
@@ -1236,18 +1236,20 @@ impl CalibrationBoardLocatorNode {
                     Some(reason) => match outcome.reject_detail {
                         Some(d) => log_info!(
                             LOGGER_NAME,
-                            "bbox_free: no board selected — {}; measured={:.4} vs threshold={:.4} [{}]; candidates={}",
+                            "bbox_free: no board selected — {}; measured={:.4} vs threshold={:.4} [{}]; candidates={}, foreground_pts={}",
                             bbox_free::describe_reject(reason),
                             d.measured,
                             d.threshold,
                             bbox_free::reject_unit(reason),
-                            outcome.n_candidates
+                            outcome.n_candidates,
+                            outcome.foreground_points.len()
                         ),
                         None => log_info!(
                             LOGGER_NAME,
-                            "bbox_free: no board selected — {}; candidates={}",
+                            "bbox_free: no board selected — {}; candidates={}, foreground_pts={}",
                             bbox_free::describe_reject(reason),
-                            outcome.n_candidates
+                            outcome.n_candidates,
+                            outcome.foreground_points.len()
                         ),
                     },
                     None => log_info!(LOGGER_NAME, "bbox_free: no board selected (no reject reason)"),
@@ -1671,9 +1673,19 @@ impl CalibrationBoardLocatorNode {
                 },
             })
         } else {
-            log_debug!(
+            // INFO, not debug: this is the actual reject reason once a board has
+            // reached the ICP stage (initial pose published, no final result). At
+            // debug level it was invisible at the default log_level, so the only
+            // visible reject was the unrelated bbox_free "no candidate clusters"
+            // from sparser frames — misleading. Name which gate failed.
+            let why = if state.inlier_points.len() < config.icp_min_inlier_points {
+                "inliers < icp_min_inlier_points"
+            } else {
+                "final_loss > icp_good_fit_threshold"
+            };
+            log_info!(
                 LOGGER_NAME,
-                "Board detection failed: final_loss={:.6}, inliers={}, threshold={:.6}, min_inliers={}",
+                "Board detection failed at ICP ({why}): final_loss={:.6}, inliers={}, icp_good_fit_threshold={:.6}, icp_min_inlier_points={}",
                 state.avg_loss,
                 state.inlier_points.len(),
                 config.icp_good_fit_threshold,

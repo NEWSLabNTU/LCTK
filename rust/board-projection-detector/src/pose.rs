@@ -104,10 +104,6 @@ pub fn stance_3d(corners_3d: &[Point3<f64>; 4], up: [f64; 3]) -> f64 {
     d1.dot(&up).abs().max(d2.dot(&up).abs())
 }
 
-const COPLANAR_TOL: f64 = 0.03;
-const BAND_LO: f64 = 0.05;
-const BAND_HI: f64 = 0.30;
-
 /// Point-to-segment distance in 2D: `pts` vs segment `a -> b`.
 fn segment_dists(pts: &[[f64; 2]], a: [f64; 2], b: [f64; 2]) -> Vec<f64> {
     let ab = [b[0] - a[0], b[1] - a[1]];
@@ -158,11 +154,14 @@ pub fn isolation_density(
     dn: &[Point3<f64>],
     plane: &PlaneModel,
     corners_2d: &[[f64; 2]; 4],
+    coplanar_tol: f64,
+    band_lo: f64,
+    band_hi: f64,
 ) -> f64 {
     let coords2d = project_to_plane(dn, plane);
     let coplanar: Vec<bool> = dn
         .iter()
-        .map(|p| ((p.coords - plane.center.coords).dot(&plane.normal)).abs() < COPLANAR_TOL)
+        .map(|p| ((p.coords - plane.center.coords).dot(&plane.normal)).abs() < coplanar_tol)
         .collect();
 
     let edges: [([f64; 2], [f64; 2]); 4] =
@@ -182,7 +181,7 @@ pub fn isolation_density(
         .zip(coplanar.iter())
         .filter(|((c, &md), &cop)| {
             let inside = point_in_polygon(corners_2d, **c);
-            let band = !inside && (BAND_LO..=BAND_HI).contains(&md);
+            let band = !inside && (band_lo..=band_hi).contains(&md);
             band && cop
         })
         .count();

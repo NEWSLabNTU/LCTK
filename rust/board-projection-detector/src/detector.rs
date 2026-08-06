@@ -188,7 +188,14 @@ pub fn detect(
         }
 
         if board.isolation {
-            let density = isolation_density(&dn, &cand.plane, &fit.corners_2d);
+            let density = isolation_density(
+                &dn,
+                &cand.plane,
+                &fit.corners_2d,
+                board.isolation_coplanar_tol,
+                board.isolation_band_lo,
+                board.isolation_band_hi,
+            );
             if density > board.isolation_max_density {
                 consider(
                     RejectReason::Isolation,

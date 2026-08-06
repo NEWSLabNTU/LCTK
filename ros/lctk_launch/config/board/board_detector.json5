@@ -1,117 +1,121 @@
 {
+    // ============================================================
+    // Board detector — annotated TEMPLATE (neutral defaults)
+    //
+    // Parameters are grouped by PIPELINE STAGE, in execution order; globals
+    // first. Copy this file per sensor and override what differs (see
+    // board_detector_seyond.json5 / board_detector_velodyne.json5).
+    //
+    // Pipeline:
+    //   GLOBAL
+    //   -> STAGE 1 (selected by `detection_mode`):
+    //        "bbox"      -> crop box, SEPARATE FILE bbox.json5
+    //        "bbox_free" -> crop-box-free detector (params below)
+    //   -> STAGE 2  RANSAC plane        (shared)
+    //   -> STAGE 3a voxel downsample    (shared, pre-ICP)
+    //   -> STAGE 3b ICP + initial pose  (shared)
+    //
+    // [EXPOSED] marks a knob that was formerly hardcoded in the Rust; its
+    // value here is the former default, so behaviour is unchanged.
+    // ============================================================
+
     // ========================================
-    // RANSAC Plane Fitting Parameters
+    // GLOBAL — board geometry + Stage-1 selector
     // ========================================
-    // max number of RANSAC steps
+    "board_width": "1000mm",        // board edge length (also seeds initial pose scale)
+    "hole_radius": "150mm",         // hole radius
+    "hole_center_shift": "200mm",   // hole center offset from board center
+    // Stage-1 path: "bbox" (crop box, see bbox.json5) | "bbox_free" (detector below)
+    "detection_mode": "bbox",
+
+    // ========================================
+    // STAGE 1a — BBOX CROP  (detection_mode == "bbox")
+    // ========================================
+    // The crop box lives in a SEPARATE file: config/board/bbox.json5
+    // (translation / rotation / size), also runtime-tunable via `ros2 param set`
+    // (bbox_center_*, bbox_rotation_*, bbox_size_*). Not duplicated here.
+
+    // ========================================
+    // STAGE 1b — BBOX-FREE detector  (detection_mode == "bbox_free")
+    // Sub-stages below follow the detector's internal order.
+    // ========================================
+
+    // -- foreground method --
+    // "background_subtraction" (fast, needs an empty-scene warmup) |
+    // "plane_strip" (no warmup, slower; strips big planes instead)
+    "foreground_method": "background_subtraction",
+
+    // -- detector voxel downsample (distinct from the Stage-3a downsample) --
+    "bbf_voxel": 0.05,              // detector downsample leaf (m)
+
+    // -- foreground: background subtraction --
+    "bg_dilation_radius": 1,        // query stencil radius (cells); (2r+1)^3 neighbours must be empty
+    "bg_warmup_frames": 20,         // empty-scene frames observed before the background finalizes
+
+    // -- foreground: plane-strip (only when foreground_method == "plane_strip") --
+    "strip_plane_dist": 0.05,       // [EXPOSED] RANSAC inlier distance (m) for big-plane removal
+    "strip_plane_min_frac": 0.08,   // [EXPOSED] min inlier fraction to treat a plane as "big"
+
+    // -- DBSCAN cluster --
+    "cluster_eps": 0.15,            // DBSCAN neighbour radius (m). Raise for a far/sparse board.
+    "cluster_min_points": 30,       // DBSCAN core min neighbours; also the cluster early-out floor
+    "vertical_gap_deg": 3.0,        // anisotropic z-compression for ring-gap bridging (0 = isotropic)
+
+    // -- coplanar merge (rejoin split fragments of one board) --
+    "merge_seed_min_points": 40,    // [EXPOSED] min cluster size to seed a merge group
+    "merge_offset_tol": 0.02,       // [EXPOSED] max mean point-to-plane offset (m) to absorb a cluster
+    "merge_dist_factor": 1.6,       // [EXPOSED] max centroid gap to merge = factor * board diagonal
+
+    // -- board-patch gate (is this cluster board-sized and planar?) --
+    "patch_min_points": 60,         // [EXPOSED] min points for a patch to be a candidate
+    "flatness_rms_max": 0.045,      // max plane-fit RMS (m). reject: Flatness
+    "patch_extent_lo_frac": 0.5,    // [EXPOSED] accept extent >= frac * side_m
+    "patch_extent_hi_diag_frac": 1.8, // [EXPOSED] accept extent <= frac * board diagonal
+
+    // -- fixed-square fit --
+    "side_m": 1.0,                  // board side (m); drives diagonal, extent bounds, merge distance
+    "side_tol": 0.20,               // fractional tolerance on min-area-rect mean side vs side_m
+    "cell_m": 0.02,                 // min-rect min side must exceed 3*cell_m to trust its center
+    "square_icp_residual_max": 0.45,// max square coverage residual (unitless). reject: SquareResidual
+
+    // -- pose / stance --
+    "up_axis": [0.0, 0.0, 1.0],     // scene up for stance + board-X orientation (Z-up default)
+    "stance_floor": 0.9,            // min normalized diagonal.up 0-1 (~0.71 flat, ~1.0 corner). 0 = off
+
+    // -- isolation (reject a board embedded in coplanar clutter) --
+    "isolation": true,              // enable exterior-band clutter gate
+    "isolation_max_density": 0.3,   // max exterior points per metre of perimeter. reject: Isolation
+    "isolation_coplanar_tol": 0.03, // [EXPOSED] max |point-to-plane| (m) counted as coplanar
+    "isolation_band_lo": 0.05,      // [EXPOSED] inner edge of the exterior density band (m)
+    "isolation_band_hi": 0.30,      // [EXPOSED] outer edge of the exterior density band (m)
+
+    // ========================================
+    // STAGE 2 — RANSAC plane fit  (shared: selected Stage-1 points feed here)
+    // ========================================
+    "skip_ransac": true,            // skip RANSAC; use a PCA plane over Stage-1 points (plane_ransac_* unused)
     "plane_ransac_max_iterations": 2000,
-    // the loss threshold that a point is considered an inlier (5cm - reasonable for calibration)
-    "plane_ransac_inlier_threshold": 0.05,
-    // skip RANSAC and use all bbox-filtered points directly for ICP (for testing/debugging)
-    "skip_ransac": true,
+    "plane_ransac_inlier_threshold": 0.05, // inlier distance threshold (m)
 
     // ========================================
-    // ICP Algorithm Parameters
+    // STAGE 3a — voxel downsample  (shared, pre-ICP; distinct from bbf_voxel)
     // ========================================
-    // max number of ICP iterations (increased for observing convergence behavior)
+    "voxel_downsample_enabled": true,
+    "voxel_downsample_size": 0.015,        // voxel edge (m)
+    "voxel_downsample_use_centroid": false,// centroid vs first-point per voxel
+    "voxel_parallel_threshold": 50000,     // point count above which the parallel path is used
+
+    // ========================================
+    // STAGE 3b — ICP + initial pose  (shared)
+    // ========================================
+    // -- sensor convention (drives initial in-plane pose + lowest-corner fixup) --
+    "sensor_up_axis": "z",          // "x"|"y"|"z". Z-up sensors (Velodyne) -> "z"; Seyond X-up -> "x"
+    "initial_inplane_rotation_deg": 0.0, // extra in-plane rotation of the initial pose (deg)
+    // -- ICP --
     "max_icp_iterations": 50,
-    // pose weight is amount of pose change per iteration
-    // the ICP terminates if pose weight is below this threshold several times
-    "icp_pose_weight_threshold": 1e-4,
-    // the maximum accepted ICP loss (balanced for stability)
-    "icp_rejection_threshold": 0.008,
-    // Maximum mean point-to-model distance, in metres, for a board fit to be ACCEPTED.
-    //
-    // This must sit ABOVE the sensor's own range noise, or no fit can ever pass. A VLP-32C is
-    // spec'd at roughly +/-3 cm range accuracy, and the measured ICP loss on the sample data
-    // asymptotes at 0.026-0.029 (the same range CLAUDE.md's profiling section records as normal).
-    // So ~0.026 is the noise floor, not a bad fit.
-    //
-    // It was 0.012 between commit 19a82f3 and 2026-07-13, i.e. below that floor -- so the gate
-    // could never pass and the detector published empty detections forever (see docs/issues/C-04).
-    // 0.035 clears the observed maximum (0.0286) with margin while still rejecting gross misfits.
-    "icp_good_fit_threshold": 0.035,
-    // outlier rejection threshold for correspondence filtering - DISABLED (set to infinity to keep all points)
-    "icp_outlier_threshold": 0.050,  // Effectively disabled - keep all correspondences
-    // damping factor for pose updates (increased for better convergence)
-    "icp_damping_factor": 0.5,  // Increased from 0.35 to 0.6
-    // minimum number of inlier points required to continue ICP iterations - LOWERED to avoid early termination
-    "icp_min_inlier_points": 500,  // Lowered from 1500 to avoid stopping when points are good
-
-    // ========================================
-    // Voxel Downsampling (Performance Optimization)
-    // ========================================
-    // Reduces point cloud density while preserving geometry
-    // Recommended for large point clouds (>10K points) to improve ICP speed
-    "voxel_downsample_enabled": true,       // Default: disabled (preserve current behavior)
-    "voxel_downsample_size": 0.015,           // 3cm voxels for aggressive downsampling
-                                              // 0.015m: conservative (60-70% reduction)
-                                              // 0.02m: balanced (70-80% reduction)
-                                              // 0.03m: aggressive (85-90% reduction)
-    "voxel_downsample_use_centroid": false,  // Use first point in voxel (preserves plane geometry)
-                                              // true: better edge preservation, but moves points off plane
-                                              // false: faster, preserves RANSAC plane inlier positions
-    "voxel_parallel_threshold": 50000,       // Use parallel for >50K points (requires 'parallel' feature)
-
-    // ========================================
-    // Board Geometry Parameters
-    // ========================================
-    // the length of border margin
-    "board_width": "1000mm",    // mm
-    // the radius of circle holes
-    "hole_radius": "150mm",     // mm
-    // suppose the center of board is (0, 0)
-    // the center of hole will be at (+/- shift, +/- shift)
-    "hole_center_shift": "200mm", // mm
-
-    // ========================================
-    // Sensor Coordinate Convention (legacy ICP pose stage)
-    // ========================================
-    // Axis pointing "up" in the sensor frame: "x", "y", or "z" (default: "z").
-    // Drives the board's initial in-plane pose AND the post-fixup lowest-corner pick.
-    // Seyond LiDAR: X=up, Z=forward → "x". Velodyne/standard ROS: Z=up → "z".
-    "sensor_up_axis": "x",
-    // Extra in-plane rotation applied to the initial board pose (degrees, default: 0).
-    // Corrects a fixed rotational offset visible in RViz. Positive = CCW from sensor.
-    // Try 45, -45, 90, -90 if the board frame is rotated off the surface.
-    "initial_inplane_rotation_deg": 45.0,
-
-    // ========================================
-    // Crop-box-free detection (board-projection-detector)
-    // ========================================
-    // "bbox" (default, existing bounding-box crop) | "bbox_free"
-    // Testing bbox_free (Method-E) against the 2026golf seyond+camera rosbags.
-    "detection_mode": "bbox_free",
-    // Read only when detection_mode == "bbox_free".
-    "bbox_free": {
-        // "background_subtraction" (Method E, ~34-69ms, shipping) |
-        // "plane_strip" (Method B, ~157-202ms, over budget)
-        "foreground_method": "background_subtraction",
-        // Voxel edge (m) for the detector's internal downsample (the detect() `voxel` arg).
-        "voxel": 0.05,
-        // Deserialized into board-projection-detector's BoardConfig. These MUST be the
-        // production operating point spelled out explicitly: BoardConfig's serde defaults
-        // are the frozen library defaults (flatness 0.035, stance_floor 0.0, isolation false),
-        // NOT these.
-        // Units are stated so tuning is data-driven: the node logs on each reject
-        // "measured=X vs threshold=Y [unit]; candidates=N" — compare against these.
-        "board": {
-            "side_m": 1.0,                    // board edge length, metres
-            // Seyond LiDAR: X=up, Z=forward. (VLP/sample-data used [0,0,1].)
-            "up_axis": [1.0, 0.0, 0.0],
-            "cluster_min_points": 20,         // min points for a DBSCAN cluster to survive (count)
-            "side_tol": 0.20,                 // allowed |cluster extent − side_m|, metres
-            "cell_m": 0.02,                   // occupancy grid cell edge, metres
-            "vertical_gap_deg": 3.0,          // plane-strip vertical band half-width, degrees
-            "flatness_rms_max": 0.045,        // max plane-fit RMS, metres (reject: Flatness)
-            "stance_floor": 0.9,              // min normalized diagonal·up 0-1 (~0.71 flat, ~1.0 corner); reject: Stance when <=
-            "square_icp_residual_max": 0.45,  // max square coverage residual, unitless; reject: SquareResidual when >=
-            "isolation": true,
-            "isolation_max_density": 0.3      // max exterior-band density, points per metre of perimeter; reject: Isolation when >
-        },
-        // Method-E background model + warmup. min_sources is fixed at 1 (single live session).
-        "background": {
-            "dilation_radius": 1,
-            "warmup_frames": 20
-        }
-    }
+    "icp_pose_weight_threshold": 1e-4,     // pose-change convergence threshold
+    "icp_rejection_threshold": 0.008,      // max accepted per-iteration ICP loss
+    "icp_good_fit_threshold": 0.035,       // max mean point-to-model dist to ACCEPT (m); keep above sensor noise floor
+    "icp_outlier_threshold": 0.050,        // correspondence outlier reject dist (effectively disabled)
+    "icp_damping_factor": 0.5,             // pose-update damping
+    "icp_min_inlier_points": 500,          // min inliers to keep iterating ICP (lower for sparse/far boards)
 }
