@@ -11,14 +11,6 @@ use nalgebra::{Point3, Vector3};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Shared by generator B's big-plane strip and its `cluster_eps` for the
-/// final clustering stage -- kept here so a caller inspecting the residual
-/// (post-strip foreground) sees exactly what detection clustered.
-const BIG_PLANE_DIST: f64 = 0.05;
-const BIG_PLANE_MIN_FRAC: f64 = 0.08;
-const CLUSTER_EPS: f64 = 0.15;
-
-const MIN_PATCH_POINTS: usize = 60;
 
 /// A plausible board-plane patch: its member points and fitted plane.
 #[derive(Debug, Clone)]
@@ -41,7 +33,7 @@ fn centroid(points: &[Point3<f64>]) -> Point3<f64> {
 /// path only -- no `rejects` side channel; that's a diagnostics feature not
 /// in this port's scope).
 pub fn plausible_board_patch(points: &[Point3<f64>], board: &BoardConfig) -> Option<Candidate> {
-    if points.len() < MIN_PATCH_POINTS {
+    if points.len() < board.patch_min_points {
         return None;
     }
     let threshold = board.flatness_rms_max;
@@ -52,7 +44,10 @@ pub fn plausible_board_patch(points: &[Point3<f64>], board: &BoardConfig) -> Opt
     }
     let ext = extent_2d(&project_to_plane(points, &plane));
     let diag = board.side_m * 2.0_f64.sqrt();
-    let (lo, hi) = (0.5 * board.side_m, 1.8 * diag);
+    let (lo, hi) = (
+        board.patch_extent_lo_frac * board.side_m,
+        board.patch_extent_hi_diag_frac * diag,
+    );
     if !(lo <= ext && ext <= hi) {
         return None;
     }
@@ -209,8 +204,8 @@ pub fn big_plane_residual(
     remove_big_planes(
         points,
         board,
-        BIG_PLANE_DIST,
-        BIG_PLANE_MIN_FRAC,
+        board.strip_plane_dist,
+        board.strip_plane_min_frac,
         vertical_gap_deg,
     )
 }
@@ -227,9 +222,9 @@ fn merge_coplanar_clusters(
     labels: &[i64],
     board: &BoardConfig,
 ) -> Vec<Vec<Point3<f64>>> {
-    const SEED_MIN_POINTS: usize = 40;
-    const OFFSET_TOL: f64 = 0.02;
-    const MERGE_DIST_FACTOR: f64 = 1.6;
+    let seed_min_points = board.merge_seed_min_points;
+    let offset_tol = board.merge_offset_tol;
+    let merge_dist_factor = board.merge_dist_factor;
 
     let diag = board.side_m * 2.0_f64.sqrt();
 
@@ -265,7 +260,7 @@ fn merge_coplanar_clusters(
         }
         used.insert(seed);
         let mut group_pts = clusters[&seed].clone();
-        if group_pts.len() >= SEED_MIN_POINTS {
+        if group_pts.len() >= seed_min_points {
             let mut plane = fit_plane(&group_pts);
             let mut center = centroid(&group_pts);
             let mut grew = true;
@@ -277,7 +272,7 @@ fn merge_coplanar_clusters(
                     }
                     let pts = &clusters[&lbl];
                     let pts_center = centroid(pts);
-                    if (pts_center.coords - center.coords).norm() > MERGE_DIST_FACTOR * diag {
+                    if (pts_center.coords - center.coords).norm() > merge_dist_factor * diag {
                         continue;
                     }
                     let mean_offset: f64 = pts
@@ -285,7 +280,7 @@ fn merge_coplanar_clusters(
                         .map(|p| (p.coords - plane.center.coords).dot(&plane.normal).abs())
                         .sum::<f64>()
                         / pts.len() as f64;
-                    if mean_offset > OFFSET_TOL {
+                    if mean_offset > offset_tol {
                         continue;
                     }
                     used.insert(lbl);
@@ -331,14 +326,14 @@ pub fn generate_plane_strip(points: &[Point3<f64>], board: &BoardConfig) -> Vec<
     let rest = remove_big_planes(
         points,
         board,
-        BIG_PLANE_DIST,
-        BIG_PLANE_MIN_FRAC,
+        board.strip_plane_dist,
+        board.strip_plane_min_frac,
         board.vertical_gap_deg,
     );
     cluster_and_gate(
         &rest,
         board,
-        CLUSTER_EPS,
+        board.cluster_eps,
         board.cluster_min_points,
         board.vertical_gap_deg,
     )
@@ -357,7 +352,7 @@ pub fn generate_background_diff(
     cluster_and_gate(
         &fg,
         board,
-        CLUSTER_EPS,
+        board.cluster_eps,
         board.cluster_min_points,
         board.vertical_gap_deg,
     )
@@ -385,15 +380,15 @@ pub fn foreground_and_candidates(
         ForegroundMethod::PlaneStrip => remove_big_planes(
             dn,
             board,
-            BIG_PLANE_DIST,
-            BIG_PLANE_MIN_FRAC,
+            board.strip_plane_dist,
+            board.strip_plane_min_frac,
             board.vertical_gap_deg,
         ),
     };
     let cands = cluster_and_gate(
         &fg,
         board,
-        CLUSTER_EPS,
+        board.cluster_eps,
         board.cluster_min_points,
         board.vertical_gap_deg,
     );

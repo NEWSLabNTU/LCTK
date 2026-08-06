@@ -1,0 +1,74 @@
+{
+    // ============================================================
+    // SEYOND / INNOVUSION FALCON (solid-state, z-forward) preset
+    // Layout mirrors board_detector.json5 (grouped by pipeline stage).
+    // detection_mode = bbox_free, foreground_method = background_subtraction.
+    // All detector values are spelled out (serde defaults are the library
+    // defaults, NOT this operating point).
+    // ============================================================
+
+    // ===== GLOBAL =====
+    "board_width": "1000mm",
+    "hole_radius": "150mm",
+    "hole_center_shift": "200mm",
+    "detection_mode": "bbox_free",
+
+    // ===== STAGE 1b — BBOX-FREE detector =====
+    "foreground_method": "background_subtraction",
+    "bbf_voxel": 0.05,              // detector downsample leaf (m)
+    // background subtraction
+    "bg_dilation_radius": 1,
+    "bg_warmup_frames": 20,
+    // plane-strip (unused while foreground_method == background_subtraction)
+    "strip_plane_dist": 0.05,
+    "strip_plane_min_frac": 0.08,
+    // DBSCAN cluster
+    "cluster_eps": 0.30,            // raised from 0.15: connects sparse long-range Falcon returns
+    "cluster_min_points": 20,       // dense solid-state; live Falcon-rig value
+    "vertical_gap_deg": 0.0,        // ring-less solid-state -> isotropic (gap>0 corrupts the dense cloud; recall 0->92.9%, 1.0->0%)
+    // coplanar merge
+    "merge_seed_min_points": 40,
+    "merge_offset_tol": 0.02,
+    "merge_dist_factor": 1.6,
+    // board-patch gate
+    "patch_min_points": 60,
+    "flatness_rms_max": 0.045,
+    "patch_extent_lo_frac": 0.5,
+    "patch_extent_hi_diag_frac": 1.8,
+    // fixed-square fit
+    "side_m": 1.0,
+    "side_tol": 0.20,
+    "cell_m": 0.02,
+    "square_icp_residual_max": 0.45,
+    // pose / stance
+    "up_axis": [1.0, 0.0, 0.0],     // Falcon: X = up, Z = forward
+    "stance_floor": 0.9,
+    // isolation
+    "isolation": false,             // far Falcon backing structure trips the exterior-band test
+    "isolation_max_density": 0.3,   // (unused while isolation = false)
+    "isolation_coplanar_tol": 0.03,
+    "isolation_band_lo": 0.05,
+    "isolation_band_hi": 0.30,
+
+    // ===== STAGE 2 — RANSAC plane =====
+    "skip_ransac": true,
+    "plane_ransac_max_iterations": 2000,
+    "plane_ransac_inlier_threshold": 0.05,
+
+    // ===== STAGE 3a — voxel downsample =====
+    "voxel_downsample_enabled": true,       // Falcon is dense (~92k pts/frame)
+    "voxel_downsample_size": 0.015,
+    "voxel_downsample_use_centroid": false,
+    "voxel_parallel_threshold": 50000,
+
+    // ===== STAGE 3b — ICP + initial pose =====
+    "sensor_up_axis": "x",          // Falcon X-up
+    "initial_inplane_rotation_deg": 45.0,
+    "max_icp_iterations": 50,
+    "icp_pose_weight_threshold": 1e-4,
+    "icp_rejection_threshold": 0.008,
+    "icp_good_fit_threshold": 0.035,
+    "icp_outlier_threshold": 0.050,
+    "icp_damping_factor": 0.5,
+    "icp_min_inlier_points": 300,   // sparse far board yields fewer plane inliers; 500 aborted ICP early
+}
