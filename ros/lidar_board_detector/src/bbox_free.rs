@@ -61,19 +61,61 @@ impl DetectionMode {
     }
 }
 
+/// The whole board_detector.json5 deserialized flat. The crop-box-free
+/// detector's parameters are top-level here (no nested `bbox_free` object) and
+/// the board sub-config is `#[serde(flatten)]`ed in, so its keys sit at the top
+/// level too. Legacy (bbox-mode) keys in the same file are read by a separate
+/// deserializer and ignored here. Every field defaults, so a bbox-mode file
+/// with none of these keys still parses.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DetectionConfig {
     #[serde(default = "default_mode")]
     pub detection_mode: String,
-    #[serde(default)]
-    pub bbox_free: Option<BboxFreeRaw>,
+    #[serde(default = "default_foreground_method")]
+    pub foreground_method: String,
+    #[serde(default = "default_bbf_voxel")]
+    pub bbf_voxel: f64,
+    #[serde(default = "default_dilation_radius")]
+    pub bg_dilation_radius: i64,
+    #[serde(default = "default_warmup_frames")]
+    pub bg_warmup_frames: usize,
+    #[serde(flatten)]
+    pub board: BoardConfig,
 }
 
 fn default_mode() -> String {
     "bbox".to_string()
 }
+fn default_foreground_method() -> String {
+    "background_subtraction".to_string()
+}
+fn default_bbf_voxel() -> f64 {
+    0.05
+}
+fn default_dilation_radius() -> i64 {
+    1
+}
+fn default_warmup_frames() -> usize {
+    20
+}
 
-#[derive(Debug, Clone, Deserialize)]
+impl DetectionConfig {
+    /// Collect the crop-box-free detector parameters into one bundle.
+    pub fn into_bbox_free(self) -> BboxFreeRaw {
+        BboxFreeRaw {
+            foreground_method: self.foreground_method,
+            voxel: self.bbf_voxel,
+            board: self.board,
+            background: BackgroundParams {
+                dilation_radius: self.bg_dilation_radius,
+                warmup_frames: self.bg_warmup_frames,
+            },
+        }
+    }
+}
+
+/// Crop-box-free detector parameters, assembled from the flat `DetectionConfig`.
+#[derive(Debug, Clone)]
 pub struct BboxFreeRaw {
     pub foreground_method: String,
     pub voxel: f64,
@@ -87,7 +129,7 @@ impl BboxFreeRaw {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct BackgroundParams {
     pub dilation_radius: i64,
     pub warmup_frames: usize,

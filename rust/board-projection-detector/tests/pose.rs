@@ -93,7 +93,7 @@ fn isolation_density_free_standing_quad_is_zero() {
         }
         u += 0.1;
     }
-    let density = isolation_density(&dn, &plane, &corners_2d);
+    let density = isolation_density(&dn, &plane, &corners_2d, 0.03, 0.05, 0.30);
     assert_eq!(density, 0.0);
 }
 
@@ -118,6 +118,6 @@ fn isolation_density_coplanar_wall_past_edge_is_positive() {
         }
         u += 0.05;
     }
-    let density = isolation_density(&dn, &plane, &corners_2d);
+    let density = isolation_density(&dn, &plane, &corners_2d, 0.03, 0.05, 0.30);
     assert!(density > 0.0, "density = {density}");
 }
