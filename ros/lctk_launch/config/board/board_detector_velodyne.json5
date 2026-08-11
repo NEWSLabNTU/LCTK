@@ -25,8 +25,8 @@
     "strip_plane_dist": 0.05,
     "strip_plane_min_frac": 0.08,
     // DBSCAN cluster
-    "cluster_eps": 0.15,            // far-range: raise toward 0.30 for a sparse ~9 m board
-    "cluster_min_points": 30,       // far-range (~9 m): lower to 20
+    "cluster_eps": 0.30,            // far-range: raise toward 0.30 for a sparse ~9 m board
+    "cluster_min_points": 20,       // far-range (~9 m): lower to 20
     "vertical_gap_deg": 3.0,        // spinning: bridges ring gaps; must NOT be 0. far-range: lower to ~1.0
     // coplanar merge
     "merge_seed_min_points": 40,

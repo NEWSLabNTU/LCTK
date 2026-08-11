@@ -38,6 +38,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
 | [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
+| [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md) | Medium | Shared initial-pose rewrite leaves the bbox path's "unchanged" guarantee unproven | 🔴 |
+| [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md) | Medium | No root `.cargo/config.toml` → Rust test suite unrunnable and the L-16 guard is inert | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -54,6 +56,9 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-14](./archive/L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🟢 |
 | [L-15](./archive/L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🟢 |
 | [L-16](./archive/L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🟢 |
+| [L-17](./L-17-boardconfig-defaults-duplicated.md) | Low | `BoardConfig` defaults defined twice — serde fns and `production_config` will drift | 🔴 |
+| [L-18](./L-18-overlay-node-commented-extrinsic-override.md) | Low | Overlay node ships commented-out hardcoded extrinsic overrides | 🔴 |
+| [L-19](./L-19-aruco-config-required-but-unused-for-lidar.md) | Low | `aruco_config` mandatory for LiDAR-only markers but never affects the LiDAR fit | 🔴 |
 
 ## Three headline gaps
 
