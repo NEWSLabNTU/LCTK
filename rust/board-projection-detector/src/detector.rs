@@ -8,7 +8,7 @@
 use nalgebra::Point3;
 
 use crate::background::BackgroundModel;
-use crate::candidates::foreground_and_candidates;
+use crate::candidates::{foreground_and_candidates, Candidate};
 use crate::config::{BoardConfig, ForegroundMethod};
 use crate::geometry::{self, project_to_plane, PlaneModel};
 use crate::pose::{board_pose, isolation_density, stance_3d, BoardDetection};
@@ -52,6 +52,7 @@ impl RejectReason {
 /// `selected_points` / `selected_plane` are the winning candidate's member
 /// points and fitted plane — the sub-project-2 output fed to RANSAC+ICP.
 /// `detection` (the square-fit pose) is used here only for gating/selection.
+
 /// Measured value vs threshold for the furthest-progressed rejected candidate.
 /// Lets a caller log HOW NARROWLY a frame missed each gate instead of just the
 /// reason. `measured`/`threshold` are in the gate's own units (see `detect`).
@@ -79,6 +80,11 @@ pub struct DetectOutcome {
     /// voxel-downsampled cloud. Published as a debug cloud so the true foreground
     /// is visible, independent of surviving clusters or downstream `plane_inliers`.
     pub foreground_points: Vec<Point3<f64>>,
+    /// Member points of the furthest-progressed REJECTED candidate — the cluster
+    /// that got closest to passing before failing `reject`. Empty on an accepted
+    /// frame or when no candidate reached a gate. Published so the operator can
+    /// see the shape that failed square-fit / stance / isolation.
+    pub rejected_cluster: Vec<Point3<f64>>,
 }
 
 /// Detect the calibration board in one frame.
@@ -107,6 +113,7 @@ pub fn detect(
             reject: Some(RejectReason::NoClusters),
             reject_detail: None,
             foreground_points: Vec::new(),
+            rejected_cluster: Vec::new(),
         };
     }
 
@@ -121,28 +128,40 @@ pub fn detect(
     let mut best_det: Option<BoardDetection> = None;
     let mut best_points: Option<Vec<Point3<f64>>> = None;
     let mut best_plane: Option<PlaneModel> = None;
-    // Track the furthest-progressed reject AND its measured/threshold numbers.
-    // Furthest wins by rank; ties (same gate) keep the candidate that missed by
-    // the smallest margin — the most informative "how close was it" reading.
-    let mut furthest: Option<(RejectReason, RejectDetail)> = None;
-    let consider =
-        |r: RejectReason, measured: f64, threshold: f64, cur: &mut Option<(RejectReason, RejectDetail)>| {
-            let take = match cur {
-                None => true,
-                Some((cr, cd)) => {
-                    if r.rank() > cr.rank() {
-                        true
-                    } else if r.rank() == cr.rank() {
-                        (measured - threshold).abs() < (cd.measured - cd.threshold).abs()
-                    } else {
-                        false
-                    }
+    // The furthest-progressed rejected candidate: which gate it failed, by how
+    // much, and its member points (published for debug so the operator can SEE
+    // the cluster that nearly passed). `None` until some candidate reaches a gate.
+    struct Furthest {
+        reason: RejectReason,
+        detail: RejectDetail,
+        points: Vec<Point3<f64>>,
+    }
+    let mut furthest: Option<Furthest> = None;
+    // Record a gate failure. The furthest reject wins by rank; ties (same gate)
+    // keep the candidate that missed by the smallest margin — the most
+    // informative "how close was it" reading.
+    let mut consider = |reason: RejectReason, measured: f64, threshold: f64, cand: &Candidate| {
+        let take = match &furthest {
+            None => true,
+            Some(f) => {
+                if reason.rank() > f.reason.rank() {
+                    true
+                } else if reason.rank() == f.reason.rank() {
+                    (measured - threshold).abs()
+                        < (f.detail.measured - f.detail.threshold).abs()
+                } else {
+                    false
                 }
-            };
-            if take {
-                *cur = Some((r, RejectDetail { measured, threshold }));
             }
         };
+        if take {
+            furthest = Some(Furthest {
+                reason,
+                detail: RejectDetail { measured, threshold },
+                points: cand.points.clone(),
+            });
+        }
+    };
 
     for cand in &cands {
         let coords = project_to_plane(&cand.points, &cand.plane);
@@ -157,7 +176,7 @@ pub fn detect(
                     RejectReason::SquareResidual,
                     f.residual,
                     board.square_icp_residual_max,
-                    &mut furthest,
+                    cand,
                 );
                 continue;
             }
@@ -166,7 +185,7 @@ pub fn detect(
                     RejectReason::SquareResidual,
                     f64::NAN,
                     board.square_icp_residual_max,
-                    &mut furthest,
+                    cand,
                 );
                 continue;
             }
@@ -182,26 +201,20 @@ pub fn detect(
         if board.stance_floor > 0.0 {
             let stance = stance_3d(&det.corners_3d, board.up_axis);
             if stance <= board.stance_floor {
-                consider(RejectReason::Stance, stance, board.stance_floor, &mut furthest);
+                consider(RejectReason::Stance, stance, board.stance_floor, cand);
                 continue;
             }
         }
 
         if board.isolation {
-            let density = isolation_density(
-                &dn,
-                &cand.plane,
-                &fit.corners_2d,
-                board.isolation_coplanar_tol,
-                board.isolation_band_lo,
-                board.isolation_band_hi,
-            );
+            let density =
+                isolation_density(&dn, &cand.plane, &fit.corners_2d, &board.isolation_band());
             if density > board.isolation_max_density {
                 consider(
                     RejectReason::Isolation,
                     density,
                     board.isolation_max_density,
-                    &mut furthest,
+                    cand,
                 );
                 continue;
             }
@@ -215,13 +228,13 @@ pub fn detect(
         }
     }
 
-    let (reject, reject_detail) = if best_det.is_some() {
-        (None, None)
-    } else {
-        match furthest {
-            Some((r, d)) => (Some(r), Some(d)),
-            None => (Some(RejectReason::NoClusters), None),
-        }
+    // On an accepted frame there is no reject to report and the rejected-cluster
+    // debug cloud is empty; otherwise report the furthest gate failure and the
+    // points of the candidate that produced it.
+    let (reject, reject_detail, rejected_cluster) = match (best_det.is_some(), furthest) {
+        (true, _) => (None, None, Vec::new()),
+        (false, Some(f)) => (Some(f.reason), Some(f.detail), f.points),
+        (false, None) => (Some(RejectReason::NoClusters), None, Vec::new()),
     };
 
     DetectOutcome {
@@ -232,5 +245,6 @@ pub fn detect(
         reject,
         reject_detail,
         foreground_points,
+        rejected_cluster,
     }
 }
