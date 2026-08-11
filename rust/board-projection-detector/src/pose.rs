@@ -5,6 +5,7 @@
 
 use nalgebra::{Matrix3, Point3, Vector3};
 
+use crate::config::IsolationBand;
 use crate::geometry::{project_to_plane, unproject, PlaneModel};
 
 /// A solved board pose: center + orthonormal rotation (columns = board x,
@@ -154,14 +155,12 @@ pub fn isolation_density(
     dn: &[Point3<f64>],
     plane: &PlaneModel,
     corners_2d: &[[f64; 2]; 4],
-    coplanar_tol: f64,
-    band_lo: f64,
-    band_hi: f64,
+    band: &IsolationBand,
 ) -> f64 {
     let coords2d = project_to_plane(dn, plane);
     let coplanar: Vec<bool> = dn
         .iter()
-        .map(|p| ((p.coords - plane.center.coords).dot(&plane.normal)).abs() < coplanar_tol)
+        .map(|p| ((p.coords - plane.center.coords).dot(&plane.normal)).abs() < band.coplanar_tol)
         .collect();
 
     let edges: [([f64; 2], [f64; 2]); 4] =
@@ -181,8 +180,8 @@ pub fn isolation_density(
         .zip(coplanar.iter())
         .filter(|((c, &md), &cop)| {
             let inside = point_in_polygon(corners_2d, **c);
-            let band = !inside && (band_lo..=band_hi).contains(&md);
-            band && cop
+            let in_band = !inside && (band.lo..=band.hi).contains(&md);
+            in_band && cop
         })
         .count();
 

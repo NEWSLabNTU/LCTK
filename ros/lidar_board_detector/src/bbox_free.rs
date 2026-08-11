@@ -4,13 +4,12 @@
 //! board config into these types and threads them through the processing
 //! thread; the ROS wiring stays thin.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use board_projection_detector::background::BackgroundModel;
 use board_projection_detector::config::{BoardConfig, ForegroundMethod};
 use board_projection_detector::detector::RejectReason;
 use nalgebra::Point3;
 use serde::Deserialize;
-use std::str::FromStr;
 
 /// Human-readable one-liner for a detector reject reason.
 pub fn describe_reject(reason: &RejectReason) -> &'static str {
@@ -45,18 +44,22 @@ pub fn reject_unit(reason: &RejectReason) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Deserializes directly from the config's `detection_mode` string, so an
+/// invalid value fails at parse time with serde naming the valid variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum DetectionMode {
+    #[default]
     Bbox,
     BboxFree,
 }
 
 impl DetectionMode {
-    pub fn parse(s: &str) -> Result<Self> {
-        match s {
-            "bbox" => Ok(Self::Bbox),
-            "bbox_free" => Ok(Self::BboxFree),
-            other => bail!("unknown detection_mode: {other} (expected \"bbox\" or \"bbox_free\")"),
+    /// The config spelling, for logging.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bbox => "bbox",
+            Self::BboxFree => "bbox_free",
         }
     }
 }
@@ -69,10 +72,10 @@ impl DetectionMode {
 /// with none of these keys still parses.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DetectionConfig {
-    #[serde(default = "default_mode")]
-    pub detection_mode: String,
+    #[serde(default)]
+    pub detection_mode: DetectionMode,
     #[serde(default = "default_foreground_method")]
-    pub foreground_method: String,
+    pub foreground_method: ForegroundMethod,
     #[serde(default = "default_bbf_voxel")]
     pub bbf_voxel: f64,
     #[serde(default = "default_dilation_radius")]
@@ -83,11 +86,8 @@ pub struct DetectionConfig {
     pub board: BoardConfig,
 }
 
-fn default_mode() -> String {
-    "bbox".to_string()
-}
-fn default_foreground_method() -> String {
-    "background_subtraction".to_string()
+fn default_foreground_method() -> ForegroundMethod {
+    ForegroundMethod::BackgroundSubtraction
 }
 fn default_bbf_voxel() -> f64 {
     0.05
@@ -103,7 +103,7 @@ impl DetectionConfig {
     /// Collect the crop-box-free detector parameters into one bundle.
     pub fn into_bbox_free(self) -> BboxFreeRaw {
         BboxFreeRaw {
-            foreground_method: self.foreground_method,
+            method: self.foreground_method,
             voxel: self.bbf_voxel,
             board: self.board,
             background: BackgroundParams {
@@ -117,16 +117,11 @@ impl DetectionConfig {
 /// Crop-box-free detector parameters, assembled from the flat `DetectionConfig`.
 #[derive(Debug, Clone)]
 pub struct BboxFreeRaw {
-    pub foreground_method: String,
+    /// Validated at parse time by serde — no post-parse re-validation needed.
+    pub method: ForegroundMethod,
     pub voxel: f64,
     pub board: BoardConfig,
     pub background: BackgroundParams,
-}
-
-impl BboxFreeRaw {
-    pub fn method(&self) -> Result<ForegroundMethod> {
-        ForegroundMethod::from_str(&self.foreground_method)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -305,15 +300,14 @@ mod tests {
     #[test]
     fn shipped_config_defaults_to_bbox() {
         let cfg = parse_detection_config(SHIPPED).unwrap();
-        assert_eq!(cfg.detection_mode, "bbox");
-        assert_eq!(DetectionMode::parse(&cfg.detection_mode).unwrap(), DetectionMode::Bbox);
+        assert_eq!(cfg.detection_mode, DetectionMode::Bbox);
     }
 
     #[test]
     fn shipped_bbox_free_is_production_operating_point() {
         let cfg = parse_detection_config(SHIPPED).unwrap();
-        let bf = cfg.bbox_free.expect("bbox_free block present");
-        assert_eq!(bf.method().unwrap(), ForegroundMethod::BackgroundSubtraction);
+        let bf = cfg.into_bbox_free();
+        assert_eq!(bf.method, ForegroundMethod::BackgroundSubtraction);
         assert_eq!(bf.voxel, 0.05);
         // Production operating point — NOT the BoardConfig serde defaults.
         assert_eq!(bf.board.flatness_rms_max, 0.045);
@@ -324,20 +318,29 @@ mod tests {
         assert_eq!(bf.background.dilation_radius, 1);
     }
 
+    // Both enums are validated by serde at parse time, so a typo fails when the
+    // config is read rather than surfacing later as silent non-detection.
     #[test]
-    fn detection_mode_parse_rejects_unknown() {
-        assert!(DetectionMode::parse("nope").is_err());
-        assert_eq!(DetectionMode::parse("bbox_free").unwrap(), DetectionMode::BboxFree);
+    fn detection_mode_rejects_unknown() {
+        assert!(parse_detection_config(r#"{ "detection_mode": "nope" }"#).is_err());
+        let cfg = parse_detection_config(r#"{ "detection_mode": "bbox_free" }"#).unwrap();
+        assert_eq!(cfg.detection_mode, DetectionMode::BboxFree);
     }
 
     #[test]
-    fn method_rejects_unknown() {
-        let raw = BboxFreeRaw {
-            foreground_method: "bogus".into(),
-            voxel: 0.05,
-            board: board_projection_detector::config::production_config(1.0, [0.0, 0.0, 1.0], 30),
-            background: BackgroundParams { dilation_radius: 1, warmup_frames: 20 },
-        };
-        assert!(raw.method().is_err());
+    fn foreground_method_rejects_unknown() {
+        assert!(parse_detection_config(r#"{ "foreground_method": "bogus" }"#).is_err());
+        let cfg = parse_detection_config(r#"{ "foreground_method": "plane_strip" }"#).unwrap();
+        assert_eq!(cfg.into_bbox_free().method, ForegroundMethod::PlaneStrip);
+    }
+
+    #[test]
+    fn omitted_keys_take_documented_defaults() {
+        let cfg = parse_detection_config("{}").unwrap();
+        assert_eq!(cfg.detection_mode, DetectionMode::Bbox);
+        let bf = cfg.into_bbox_free();
+        assert_eq!(bf.method, ForegroundMethod::BackgroundSubtraction);
+        assert_eq!(bf.voxel, 0.05);
+        assert_eq!(bf.background.warmup_frames, 20);
     }
 }

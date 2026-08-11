@@ -134,6 +134,30 @@ fn d_iso_band_hi() -> f64 {
     0.30
 }
 
+/// The exterior-band geometry the isolation gate measures over: how far off the
+/// board plane a point may sit and still count as coplanar, and the inner/outer
+/// radii of the ring outside the quad that the density is counted in.
+///
+/// These three always travel together; `BoardConfig` stores them as flat keys
+/// (the config file is flat by design) and hands them over as one value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IsolationBand {
+    pub coplanar_tol: f64,
+    pub lo: f64,
+    pub hi: f64,
+}
+
+impl BoardConfig {
+    /// The isolation gate's exterior-band geometry.
+    pub fn isolation_band(&self) -> IsolationBand {
+        IsolationBand {
+            coplanar_tol: self.isolation_coplanar_tol,
+            lo: self.isolation_band_lo,
+            hi: self.isolation_band_hi,
+        }
+    }
+}
+
 pub fn production_config(side_m: f64, up_axis: [f64; 3], cluster_min_points: usize) -> BoardConfig {
     BoardConfig {
         side_m,
@@ -167,7 +191,11 @@ pub fn load_board_config_json5(path: &Path) -> anyhow::Result<BoardConfig> {
     Ok(json5::from_str(&text)?)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Deserializes directly from the config's `foreground_method` string, so an
+/// invalid value fails at parse time with serde naming the valid variants —
+/// no separate validation pass, no `String` carried around post-parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ForegroundMethod {
     PlaneStrip,
     BackgroundSubtraction,

@@ -58,6 +58,10 @@ struct BoardDebugPublishers {
     /// warmup background model — what "static scene" got baked in. Silent in
     /// bbox mode and during warmup.
     background_voxels: Arc<Publisher<PointCloud2>>,
+    /// bbox_free only: points of the furthest-progressed REJECTED candidate on a
+    /// failed frame — the cluster that came closest to passing. Silent in bbox
+    /// mode and on a successful detection.
+    rejected_cluster: Arc<Publisher<PointCloud2>>,
     plane_inliers: Arc<Publisher<PointCloud2>>,
     downsampled_points: Arc<Publisher<PointCloud2>>,
     plane_marker: Arc<Publisher<MarkerArray>>,
@@ -409,18 +413,16 @@ impl CalibrationBoardLocatorNode {
         // Crop-box-free detection config (same file, separate typed view).
         let detection_text = fs::read_to_string(PathBuf::from(&*board_detector_file_param))?;
         let detection_cfg = bbox_free::parse_detection_config(&detection_text)?;
-        let detection_mode_str = detection_cfg.detection_mode.clone();
-        let detection_mode = bbox_free::DetectionMode::parse(&detection_mode_str)?;
+        let detection_mode = detection_cfg.detection_mode;
         let bbox_free_cfg: Option<Arc<bbox_free::BboxFreeRaw>> = match detection_mode {
             bbox_free::DetectionMode::BboxFree => {
                 // Detector params are flat in the config; bundle them.
-                let bf = detection_cfg.into_bbox_free();
-                bf.method()?; // validate foreground_method early
-                Some(Arc::new(bf))
+                // foreground_method was validated by serde at parse time.
+                Some(Arc::new(detection_cfg.into_bbox_free()))
             }
             bbox_free::DetectionMode::Bbox => None,
         };
-        log_info!(LOGGER_NAME, "detection_mode = {detection_mode_str}");
+        log_info!(LOGGER_NAME, "detection_mode = {}", detection_mode.as_str());
 
         // Shared background-subtraction state. `BackgroundState` is observed per frame by the single
         // processing thread; `reset_background` (Task 6) mutates it from a service/param callback,
@@ -429,7 +431,7 @@ impl CalibrationBoardLocatorNode {
         // is off or uses plane_strip (no background).
         let background_active = matches!(
             bbox_free_cfg.as_ref(),
-            Some(bf) if bf.method()? == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction
+            Some(bf) if bf.method == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction
         );
         let background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>> =
             Arc::new(std::sync::Mutex::new(match bbox_free_cfg.as_ref() {
@@ -519,6 +521,9 @@ impl CalibrationBoardLocatorNode {
             let mut background_voxels_opts = PublisherOptions::new("debug/background_voxels");
             background_voxels_opts.qos = debug_qos;
 
+            let mut rejected_cluster_opts = PublisherOptions::new("debug/rejected_cluster");
+            rejected_cluster_opts.qos = debug_qos;
+
             let mut plane_inliers_opts = PublisherOptions::new("debug/plane_inliers");
             plane_inliers_opts.qos = debug_qos;
 
@@ -551,6 +556,7 @@ impl CalibrationBoardLocatorNode {
                 filtered_points: Arc::new(node.create_publisher(filtered_points_opts)?),
                 foreground_points: Arc::new(node.create_publisher(foreground_points_opts)?),
                 background_voxels: Arc::new(node.create_publisher(background_voxels_opts)?),
+                rejected_cluster: Arc::new(node.create_publisher(rejected_cluster_opts)?),
                 plane_inliers: Arc::new(node.create_publisher(plane_inliers_opts)?),
                 downsampled_points: Arc::new(node.create_publisher(downsampled_points_opts)?),
                 plane_marker: Arc::new(node.create_publisher(plane_marker_opts)?),
@@ -720,7 +726,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/foreground_points (bbox_free), debug/background_voxels (bbox_free), debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats, debug/pca_eigenvectors"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/foreground_points (bbox_free), debug/background_voxels (bbox_free), debug/rejected_cluster (bbox_free), debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats, debug/pca_eigenvectors"
             );
         }
 
@@ -1167,7 +1173,7 @@ impl CalibrationBoardLocatorNode {
     ) -> Result<Option<Vec<na::Point3<f64>>>> {
         use board_projection_detector::{config::ForegroundMethod, detector::detect};
 
-        let method = bf.method()?;
+        let method = bf.method;
 
         // Cell centers of the finalized background model, captured under the lock
         // for debug publishing once the guard is released. None for plane_strip.
@@ -1202,29 +1208,32 @@ impl CalibrationBoardLocatorNode {
         // absorbed the board). Static once Ready; republished each frame so the
         // display is populated whenever the operator adds it.
         if let (Some(debug_pubs), Some(centers)) = (board_debug_publishers, &background_centers) {
-            match Self::create_debug_pointcloud(centers, header) {
-                Ok(cloud) => {
-                    if let Err(e) = debug_pubs.background_voxels.publish(cloud) {
-                        log_warn!(LOGGER_NAME, "Failed to publish background voxels: {e}");
-                    }
-                }
-                Err(e) => log_warn!(LOGGER_NAME, "Failed to build background voxel cloud: {e}"),
-            }
+            Self::publish_debug_cloud(
+                &debug_pubs.background_voxels,
+                centers,
+                header,
+                "background voxels",
+            );
         }
 
-        // Publish the RAW Method-E / plane-strip foreground (points before
-        // clustering/merge/gate) so it is visible in RViz independently of the
-        // downstream RANSAC plane_inliers, which only appears AFTER a board is
-        // selected. Shows everything background subtraction kept, not just clusters.
         if let Some(debug_pubs) = board_debug_publishers {
-            match Self::create_debug_pointcloud(&outcome.foreground_points, header) {
-                Ok(cloud) => {
-                    if let Err(e) = debug_pubs.foreground_points.publish(cloud) {
-                        log_warn!(LOGGER_NAME, "Failed to publish foreground points: {e}");
-                    }
-                }
-                Err(e) => log_warn!(LOGGER_NAME, "Failed to build foreground debug cloud: {e}"),
-            }
+            // The RAW foreground (points before clustering/merge/gate), visible
+            // independently of the downstream RANSAC plane_inliers, which only
+            // appears AFTER a board is selected.
+            Self::publish_debug_cloud(
+                &debug_pubs.foreground_points,
+                &outcome.foreground_points,
+                header,
+                "foreground points",
+            );
+            // The furthest-progressed rejected candidate (empty on a successful
+            // frame) — lets the operator see the cluster that failed the gates.
+            Self::publish_debug_cloud(
+                &debug_pubs.rejected_cluster,
+                &outcome.rejected_cluster,
+                header,
+                "rejected cluster",
+            );
         }
 
         match outcome.selected_points {
@@ -1995,6 +2004,24 @@ impl CalibrationBoardLocatorNode {
         );
 
         Ok(plane_model)
+    }
+
+    /// Build and publish a debug point cloud, warning (never failing the frame)
+    /// if either step errors. `what` names the cloud in those warnings.
+    fn publish_debug_cloud(
+        publisher: &Publisher<PointCloud2>,
+        points: &[na::Point3<f64>],
+        header: &std_msgs::msg::Header,
+        what: &str,
+    ) {
+        match Self::create_debug_pointcloud(points, header) {
+            Ok(cloud) => {
+                if let Err(e) = publisher.publish(cloud) {
+                    log_warn!(LOGGER_NAME, "Failed to publish {what}: {e}");
+                }
+            }
+            Err(e) => log_warn!(LOGGER_NAME, "Failed to build {what} cloud: {e}"),
+        }
     }
 
     fn create_debug_pointcloud(
@@ -3159,9 +3186,6 @@ mod covariance_tests {
     fn shipped_config_is_bbox_mode_by_default() {
         let text = include_str!("../../lctk_launch/config/board/board_detector.json5");
         let cfg = crate::bbox_free::parse_detection_config(text).unwrap();
-        assert_eq!(
-            crate::bbox_free::DetectionMode::parse(&cfg.detection_mode).unwrap(),
-            crate::bbox_free::DetectionMode::Bbox
-        );
+        assert_eq!(cfg.detection_mode, crate::bbox_free::DetectionMode::Bbox);
     }
 }
