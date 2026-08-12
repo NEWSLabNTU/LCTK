@@ -1,5 +1,5 @@
 mod common;
-use board_projection_detector::{candidates::*, config::production_config};
+use board_cluster_detector::{candidates::*, config::production_config};
 use nalgebra::Point3;
 
 #[test]

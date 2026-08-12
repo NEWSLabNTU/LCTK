@@ -1,4 +1,4 @@
-use board_projection_detector::square_fit::fit_fixed_square;
+use board_cluster_detector::square_fit::fit_fixed_square;
 
 #[test]
 fn fits_clean_unit_square_zero_residual() {

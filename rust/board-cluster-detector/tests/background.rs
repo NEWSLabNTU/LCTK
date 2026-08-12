@@ -1,5 +1,5 @@
 mod common;
-use board_projection_detector::background::BackgroundModel;
+use board_cluster_detector::background::BackgroundModel;
 use nalgebra::Point3;
 
 #[test]

@@ -102,7 +102,7 @@ Stage 1 selects the candidate board cluster, and its mode is chosen by
 
 - **`bbox`** (default): a fixed bounding box crops points to a region of
   interest. Simple, but the board must stay inside a hand-tuned box.
-- **`bbox_free`**: no bounding box — the `board-projection-detector`
+- **`bbox_free`**: no bounding box — the `board-cluster-detector`
   library isolates the board cluster from the whole cloud by projecting
   candidate planes to 2D and gating on board shape/size/stance. Its
   selected points feed the same downstream engine (Option C: the library's

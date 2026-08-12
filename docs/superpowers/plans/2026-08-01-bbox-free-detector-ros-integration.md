@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Wire the parity-validated `board-projection-detector` crate into the ROS
+**Goal:** Wire the parity-validated `board-cluster-detector` crate into the ROS
 `lidar_board_detector` node so a user can locate the calibration board with **no bounding box** by
 setting `detection_mode: bbox_free`, feeding the detector's `selected_points` into the node's
 existing PCA+ICP pose engine.
@@ -15,7 +15,7 @@ tests; the ROS wiring in `main.rs` stays thin. The bbox path is fully preserved 
 check.
 
 **Tech Stack:** Rust, rclrs 0.7, colcon (`just build`), cargo-nextest (`just test`), nalgebra
-0.32.3, json5, serde, arc-swap. The consumed crate `board-projection-detector` is
+0.32.3, json5, serde, arc-swap. The consumed crate `board-cluster-detector` is
 OpenCV/open3d-free (deps: nalgebra, anyhow, serde, json5, log, rand).
 
 ## Global Constraints
@@ -46,7 +46,7 @@ OpenCV/open3d-free (deps: nalgebra, anyhow, serde, json5, log, rand).
 
 ## File Structure
 
-- **Modify** `rust/board-projection-detector/Cargo.toml` — drop `[workspace]`, deps → `{ workspace = true }`.
+- **Modify** `rust/board-cluster-detector/Cargo.toml` — drop `[workspace]`, deps → `{ workspace = true }`.
 - **Modify** `Cargo.toml` (root) — remove crate from `exclude`.
 - **Modify** `ros/lidar_board_detector/Cargo.toml` — add path dep on the crate.
 - **Create** `ros/lidar_board_detector/src/bbox_free.rs` — pure config types + parsing +
@@ -60,26 +60,26 @@ OpenCV/open3d-free (deps: nalgebra, anyhow, serde, json5, log, rand).
 
 ---
 
-### Task 1: Fold `board-projection-detector` into the root workspace
+### Task 1: Fold `board-cluster-detector` into the root workspace
 
 Pays the sub-project-1 "standalone workspace for dev speed" debt: the node (a root member) must
 path-depend on the detector, which requires the detector to be a root member too.
 
 **Files:**
-- Modify: `rust/board-projection-detector/Cargo.toml`
+- Modify: `rust/board-cluster-detector/Cargo.toml`
 - Modify: `Cargo.toml` (root)
 - Modify: `ros/lidar_board_detector/Cargo.toml`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: crate `board-projection-detector` v0.1.0 resolvable as a root workspace member and as a
+- Produces: crate `board-cluster-detector` v0.1.0 resolvable as a root workspace member and as a
   path dependency of `lidar_board_detector`. Public API unchanged:
-  `board_projection_detector::{detector::detect, detector::DetectOutcome, detector::RejectReason,
+  `board_cluster_detector::{detector::detect, detector::DetectOutcome, detector::RejectReason,
   config::{BoardConfig, ForegroundMethod, load_board_config_json5}, background::BackgroundModel}`.
 
 - [ ] **Step 1: Remove the crate's `[workspace]` table and switch deps to workspace**
 
-In `rust/board-projection-detector/Cargo.toml`, delete the `[workspace]` line (keep the explanatory
+In `rust/board-cluster-detector/Cargo.toml`, delete the `[workspace]` line (keep the explanatory
 header comment but update it — see Step 2). Change `[dependencies]` and `[dev-dependencies]` to:
 
 ```toml
@@ -101,7 +101,7 @@ carries `features = ["serde-serialize"]`; `serde` already carries `features = ["
 
 - [ ] **Step 2: Update the crate header comment**
 
-Replace the top-of-file comment block in `rust/board-projection-detector/Cargo.toml` with:
+Replace the top-of-file comment block in `rust/board-cluster-detector/Cargo.toml` with:
 
 ```toml
 # Root workspace member. ROS-free crate (deps are all pure-Rust: nalgebra,
@@ -121,7 +121,7 @@ In root `Cargo.toml`, delete these two lines from the `exclude` array:
 ```toml
     # Standalone workspace: ROS-free crate kept out of the ROS-poisoned root
     # resolve (see the crate's Cargo.toml header).
-    "rust/board-projection-detector",
+    "rust/board-cluster-detector",
 ```
 
 The `members = ["rust/*", ...]` glob now picks the crate up automatically.
@@ -132,7 +132,7 @@ In `ros/lidar_board_detector/Cargo.toml`, under `[dependencies]` (alphabetical, 
 `aruco-config`), add:
 
 ```toml
-board-projection-detector = { version = "0.1.0", path = "../../rust/board-projection-detector" }
+board-cluster-detector = { version = "0.1.0", path = "../../rust/board-cluster-detector" }
 ```
 
 - [ ] **Step 5: Build to regenerate the lockfile and verify resolution**
@@ -143,7 +143,7 @@ Run:
 just build
 ```
 
-Expected: PASS. The root `Cargo.lock` now contains `board-projection-detector` resolved once for
+Expected: PASS. The root `Cargo.lock` now contains `board-cluster-detector` resolved once for
 the whole workspace. If the build fails on stale bindings, apply CLAUDE.md Known Issue 7
 (`rm -f build/.colcon/bindgen.lock`) and rebuild — do not delete `build/lctk_interfaces` unless a
 `.msg`/`.srv` changed (it did not).
@@ -156,13 +156,13 @@ Run:
 just test
 ```
 
-Expected: the `board-projection-detector` tests pass (they require the local 51 MB fixtures; if
+Expected: the `board-cluster-detector` tests pass (they require the local 51 MB fixtures; if
 absent, regenerate per Step 2's note). This confirms the crate still tests correctly as a member.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add rust/board-projection-detector/Cargo.toml Cargo.toml Cargo.lock ros/lidar_board_detector/Cargo.toml
+git add rust/board-cluster-detector/Cargo.toml Cargo.toml Cargo.lock ros/lidar_board_detector/Cargo.toml
 git commit -m "build(board-proj): fold detector crate into root workspace"
 ```
 
@@ -182,7 +182,7 @@ tested against the shipped config. The same json5 file is also parsed into the h
 - Test: `ros/lidar_board_detector/src/bbox_free.rs` (`#[cfg(test)]`)
 
 **Interfaces:**
-- Consumes: `board_projection_detector::config::{BoardConfig, ForegroundMethod}` (Task 1).
+- Consumes: `board_cluster_detector::config::{BoardConfig, ForegroundMethod}` (Task 1).
 - Produces:
   - `enum DetectionMode { Bbox, BboxFree }` with `DetectionMode::parse(&str) -> anyhow::Result<Self>`
     (`"bbox"` → `Bbox`, `"bbox_free"` → `BboxFree`, else error).
@@ -205,7 +205,7 @@ Append to `ros/lctk_launch/config/board/board_detector.json5` (before the closin
     "hole_center_shift": "200mm", // mm
 
     // ========================================
-    // Crop-box-free detection (board-projection-detector)
+    // Crop-box-free detection (board-cluster-detector)
     // ========================================
     // "bbox" (default, existing bounding-box crop) | "bbox_free"
     "detection_mode": "bbox",
@@ -216,7 +216,7 @@ Append to `ros/lctk_launch/config/board/board_detector.json5` (before the closin
         "foreground_method": "background_subtraction",
         // Voxel edge (m) for the detector's internal downsample (the detect() `voxel` arg).
         "voxel": 0.05,
-        // Deserialized into board-projection-detector's BoardConfig. These MUST be the
+        // Deserialized into board-cluster-detector's BoardConfig. These MUST be the
         // production operating point spelled out explicitly: BoardConfig's serde defaults
         // are the frozen library defaults (flatness 0.035, stance_floor 0.0, isolation false),
         // NOT these.
@@ -250,7 +250,7 @@ Create `ros/lidar_board_detector/src/bbox_free.rs` with only the test module fir
 #[cfg(test)]
 mod tests {
     use super::*;
-    use board_projection_detector::config::ForegroundMethod;
+    use board_cluster_detector::config::ForegroundMethod;
 
     const SHIPPED: &str = include_str!(
         "../../lctk_launch/config/board/board_detector.json5"
@@ -289,7 +289,7 @@ mod tests {
         let raw = BboxFreeRaw {
             foreground_method: "bogus".into(),
             voxel: 0.05,
-            board: board_projection_detector::config::production_config(1.0, [0.0, 0.0, 1.0], 30),
+            board: board_cluster_detector::config::production_config(1.0, [0.0, 0.0, 1.0], 30),
             background: BackgroundParams { dilation_radius: 1, warmup_frames: 20 },
         };
         assert!(raw.method().is_err());
@@ -323,7 +323,7 @@ Prepend to `ros/lidar_board_detector/src/bbox_free.rs` (above the test module):
 //! thread; the ROS wiring stays thin.
 
 use anyhow::{bail, Result};
-use board_projection_detector::config::{BoardConfig, ForegroundMethod};
+use board_cluster_detector::config::{BoardConfig, ForegroundMethod};
 use serde::Deserialize;
 use std::str::FromStr;
 
@@ -408,7 +408,7 @@ without a ROS context.
 - Test: `ros/lidar_board_detector/src/bbox_free.rs` (`#[cfg(test)]`)
 
 **Interfaces:**
-- Consumes: `board_projection_detector::background::BackgroundModel` (`::new(voxel, dilation_radius,
+- Consumes: `board_cluster_detector::background::BackgroundModel` (`::new(voxel, dilation_radius,
   min_sources)`, `.observe(&[Point3<f64>], &str)`, `.finalize()`), `BackgroundParams` (Task 2).
 - Produces:
   - `enum WarmupOutcome { Warming { seen: usize, needed: usize }, Ready }` — returned by
@@ -480,7 +480,7 @@ Expected: compile error — `BackgroundState` / `WarmupOutcome` not found.
 - [ ] **Step 3: Implement the state machine**
 
 Add to `bbox_free.rs` (above the test module), and add the imports
-`use board_projection_detector::background::BackgroundModel;` and `use nalgebra::Point3;` to the
+`use board_cluster_detector::background::BackgroundModel;` and `use nalgebra::Point3;` to the
 file header:
 
 ```rust
@@ -585,7 +585,7 @@ the bbox-path regression test (the pure logic it calls is already unit-tested in
 
 **Interfaces:**
 - Consumes: `bbox_free::{DetectionMode, DetectionConfig, BboxFreeRaw, BackgroundState,
-  WarmupOutcome, parse_detection_config}` (Tasks 2–3); `board_projection_detector::detector::detect`;
+  WarmupOutcome, parse_detection_config}` (Tasks 2–3); `board_cluster_detector::detector::detect`;
   `arc_swap::ArcSwap`.
 - Produces: a `process_pointcloud` that, when `detection_mode == BboxFree`, computes `active_points`
   via `detect(...).selected_points` instead of `filter_points_by_bbox`, then runs the unchanged
@@ -621,7 +621,7 @@ optional resolved bbox-free config + shared background state:
         // is off or uses plane_strip (no background).
         let background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>> =
             Arc::new(std::sync::Mutex::new(match bbox_free_cfg.as_ref() {
-                Some(bf) if bf.method()? == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction => {
+                Some(bf) if bf.method()? == board_cluster_detector::config::ForegroundMethod::BackgroundSubtraction => {
                     Some(bbox_free::BackgroundState::new(bf.voxel, &bf.background))
                 }
                 _ => None,
@@ -732,7 +732,7 @@ are added in Task 5 (leave the marked TODO comment for now — Task 5 fills it):
         background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
         _header: &Header,
     ) -> Result<Option<Vec<na::Point3<f64>>>> {
-        use board_projection_detector::{config::ForegroundMethod, detector::detect};
+        use board_cluster_detector::{config::ForegroundMethod, detector::detect};
 
         let method = bf.method()?;
 
@@ -812,7 +812,7 @@ Turn silent empty publishes into a named killer-gate log, and make a `None` back
 - Modify: `ros/lidar_board_detector/src/main.rs`
 
 **Interfaces:**
-- Consumes: `board_projection_detector::detector::{DetectOutcome, RejectReason}` (has
+- Consumes: `board_cluster_detector::detector::{DetectOutcome, RejectReason}` (has
   `outcome.reject: Option<RejectReason>`).
 - Produces: `select_board_cluster` logs the reject reason on no-selection; the `None`-background
   case is unreachable-by-construction and logged as an error if ever hit.
@@ -822,7 +822,7 @@ Turn silent empty publishes into a named killer-gate log, and make a `None` back
 Add to `bbox_free.rs` (it is pure, and keeps `main.rs` thin):
 
 ```rust
-use board_projection_detector::detector::RejectReason;
+use board_cluster_detector::detector::RejectReason;
 
 /// Human-readable one-liner for a detector reject reason.
 pub fn describe_reject(reason: &RejectReason) -> &'static str {

@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = { workspace = true }
 arc-swap = "1.7"
 aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
-board-projection-detector = { version = "0.1.0", path = "../../rust/board-projection-detector" }
+board-cluster-detector = { version = "0.1.0", path = "../../rust/board-cluster-detector" }
 env_logger = "0.11"
 geometry_msgs.workspace = true
 hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config", features = ["parallel"] }

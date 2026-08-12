@@ -1,6 +1,6 @@
 mod common;
 
-use board_projection_detector::{
+use board_cluster_detector::{
     config::IsolationBand,
     geometry::PlaneModel,
     pose::{board_pose, isolation_density, stance_3d},

@@ -1325,6 +1325,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "board-cluster-detector"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx",
+ "json5",
+ "log",
+ "nalgebra 0.32.6",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "board-fitter"
 version = "0.1.0"
 dependencies = [
@@ -1358,20 +1372,6 @@ name = "board-fitter-config"
 version = "0.1.0"
 dependencies = [
  "measurements",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "board-projection-detector"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "approx",
- "json5",
- "log",
- "nalgebra 0.32.6",
- "rand 0.8.6",
  "serde",
  "serde_json",
 ]
@@ -5823,7 +5823,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "aruco-config",
- "board-projection-detector",
+ "board-cluster-detector",
  "env_logger",
  "geometry_msgs",
  "hollow-board-config",
@@ -5841,6 +5841,7 @@ dependencies = [
  "serde",
  "serde_json",
  "std_msgs",
+ "std_srvs",
  "vision_msgs",
  "visualization_msgs",
 ]
@@ -11908,6 +11909,13 @@ name = "std_msgs"
 version = "4.9.0"
 dependencies = [
  "builtin_interfaces",
+ "rosidl_runtime_rs",
+]
+
+[[package]]
+name = "std_srvs"
+version = "4.9.0"
+dependencies = [
  "rosidl_runtime_rs",
 ]
 
