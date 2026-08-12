@@ -1,4 +1,4 @@
-use board_projection_detector::{config::production_config, scorer::*};
+use board_cluster_detector::{config::production_config, scorer::*};
 
 #[test]
 fn min_area_rect_of_axis_square() {

@@ -1,7 +1,7 @@
 //! End-to-end parity: full `detect()` pipeline vs the Python golden vectors.
 mod common;
 
-use board_projection_detector::{config::production_config, detector::detect};
+use board_cluster_detector::{config::production_config, detector::detect};
 
 /// Per-frame detect/no-detect regression guard (NOT bit-exact parity — see
 /// `common::KNOWN_PER_FRAME_MISMATCHES`). Asserts every per-frame divergence

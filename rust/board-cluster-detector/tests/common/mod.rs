@@ -5,7 +5,7 @@
 //! `tests/fixtures/README.md` for the format and regeneration command.
 #![allow(dead_code)] // shared fixture-loader scaffolding; fields/helpers consumed by later tasks
 
-use board_projection_detector::{
+use board_cluster_detector::{
     background::BackgroundModel,
     candidates::{generate_background_diff, generate_plane_strip},
     config::{production_config, ForegroundMethod},
@@ -190,7 +190,7 @@ fn dist3(a: &[f64; 3], b: &[f64; 3]) -> f64 {
 /// Method-B divergence leaves no board-near candidate — its centroid is far from
 /// golden by construction). Because our RANSAC/DBSCAN are seeded (seed 0), this
 /// set is reproducible run to run. Full evidence:
-/// `.superpowers/sdd/2026-07-29-board-projection-detector-rust-library/task-9-report.md`.
+/// `.superpowers/sdd/2026-07-29-board-cluster-detector-rust-library/task-9-report.md`.
 pub const KNOWN_PER_FRAME_MISMATCHES: &[&str] = &[
     // Method E — clean false positive: Rust's clustering (RNG-dependent) found a
     // clean board-shaped square (residual 0.25, stance 0.999, iso 0) that

@@ -431,7 +431,7 @@ impl CalibrationBoardLocatorNode {
         // is off or uses plane_strip (no background).
         let background_active = matches!(
             bbox_free_cfg.as_ref(),
-            Some(bf) if bf.method == board_projection_detector::config::ForegroundMethod::BackgroundSubtraction
+            Some(bf) if bf.method == board_cluster_detector::config::ForegroundMethod::BackgroundSubtraction
         );
         let background_state: Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>> =
             Arc::new(std::sync::Mutex::new(match bbox_free_cfg.as_ref() {
@@ -1171,7 +1171,7 @@ impl CalibrationBoardLocatorNode {
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
     ) -> Result<Option<Vec<na::Point3<f64>>>> {
-        use board_projection_detector::{config::ForegroundMethod, detector::detect};
+        use board_cluster_detector::{config::ForegroundMethod, detector::detect};
 
         let method = bf.method;
 

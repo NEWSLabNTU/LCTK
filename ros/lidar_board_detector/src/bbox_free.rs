@@ -5,9 +5,9 @@
 //! thread; the ROS wiring stays thin.
 
 use anyhow::Result;
-use board_projection_detector::background::BackgroundModel;
-use board_projection_detector::config::{BoardConfig, ForegroundMethod};
-use board_projection_detector::detector::RejectReason;
+use board_cluster_detector::background::BackgroundModel;
+use board_cluster_detector::config::{BoardConfig, ForegroundMethod};
+use board_cluster_detector::detector::RejectReason;
 use nalgebra::Point3;
 use serde::Deserialize;
 
@@ -217,7 +217,7 @@ impl BackgroundState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use board_projection_detector::config::ForegroundMethod;
+    use board_cluster_detector::config::ForegroundMethod;
     use nalgebra::Point3;
 
     fn cloud(n: usize, offset: f64) -> Vec<Point3<f64>> {

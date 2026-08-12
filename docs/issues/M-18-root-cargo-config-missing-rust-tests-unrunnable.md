@@ -46,7 +46,7 @@ resolves, and the patches are picked up:
 
 ```bash
 cd ros/lidar_board_detector
-cargo nextest run --cargo-profile test-release -p board-projection-detector -p lidar_board_detector
+cargo nextest run --cargo-profile test-release -p board-cluster-detector -p lidar_board_detector
 ```
 
 ## Suggested fix

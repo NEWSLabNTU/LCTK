@@ -1,5 +1,5 @@
 mod common;
-use board_projection_detector::geometry::*;
+use board_cluster_detector::geometry::*;
 use nalgebra::Point3;
 
 #[test]

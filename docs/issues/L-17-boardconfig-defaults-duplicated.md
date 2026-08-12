@@ -1,7 +1,7 @@
 # L-17 · `BoardConfig` defaults defined twice — serde fns and `production_config` will drift
 
 - **Severity:** Low
-- **Area:** board-projection-detector / config
+- **Area:** board-cluster-detector / config
 - **Status:** Open
 - **Verified:** By code review (2026-08-11, standards axis)
 

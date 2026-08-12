@@ -1,4 +1,4 @@
-use board_projection_detector::dbscan::*;
+use board_cluster_detector::dbscan::*;
 use nalgebra::Point3;
 
 #[test]

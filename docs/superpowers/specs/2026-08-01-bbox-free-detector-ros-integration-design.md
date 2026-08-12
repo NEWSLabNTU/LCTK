@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01
 **Branch:** `feat/method-e-background-subtraction`
-**Predecessor:** sub-project 1 (HEAD ~`d51c278`) delivered `rust/board-projection-detector`, a
+**Predecessor:** sub-project 1 (HEAD ~`d51c278`) delivered `rust/board-cluster-detector`, a
 parity-validated, OpenCV/open3d-free Rust port of the `boarddet` crop-box-free detector.
 
 ## Goal
@@ -37,10 +37,10 @@ root member and must path-depend on the detector.
 - **Crate `Cargo.toml`:** remove the `[workspace]` table. Switch inline deps to
   `{ workspace = true }` — all are present in the root `[workspace.dependencies]`: `nalgebra`,
   `anyhow`, `serde`, `json5`, `log`, `rand`; dev-deps `approx`, `serde_json`.
-- **Root `Cargo.toml`:** delete the `rust/board-projection-detector` line from `exclude`; the
+- **Root `Cargo.toml`:** delete the `rust/board-cluster-detector` line from `exclude`; the
   `rust/*` members glob then picks it up.
 - **Node `Cargo.toml`:** add
-  `board-projection-detector = { version = "0.1.0", path = "../../rust/board-projection-detector" }`.
+  `board-cluster-detector = { version = "0.1.0", path = "../../rust/board-cluster-detector" }`.
 - **Lockfile:** regenerate via `just build` (colcon, in the sourced ROS env:
   `source /opt/ros/humble/setup.bash && source install/setup.bash`). Plain `cargo update` aborts on
   the yanked wildcard `sensor_msgs` — see CLAUDE.md.

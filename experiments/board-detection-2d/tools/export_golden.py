@@ -1,8 +1,8 @@
-"""Export golden-vector parity fixtures for the Rust board-projection-detector port.
+"""Export golden-vector parity fixtures for the Rust board-cluster-detector port.
 
 Runs the validated `boarddet` pipeline (both candidate generators, all five
 sample datasets) and dumps per-(dataset, frame, generator) fixtures under
-`rust/board-projection-detector/tests/fixtures/`:
+`rust/board-cluster-detector/tests/fixtures/`:
 
 - `<name>.input.f32`: raw little-endian f32 [x0,y0,z0, x1,y1,z1, ...] -- the
   RAW cloud (pre-downsample), so the Rust harness exercises
@@ -31,7 +31,7 @@ from boarddet.board_config import BoardConfig
 
 # repo root = parents[3] of experiments/board-detection-2d/tools/export_golden.py
 OUT = (pathlib.Path(__file__).resolve().parents[3]
-       / "rust/board-projection-detector/tests/fixtures")
+       / "rust/board-cluster-detector/tests/fixtures")
 OUT.mkdir(parents=True, exist_ok=True)
 VOXEL = 0.03
 BOX = load_bbox(DEFAULT_BBOX_PATH)
