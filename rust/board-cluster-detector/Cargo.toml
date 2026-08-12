@@ -8,7 +8,7 @@
 # experiments/board-detection-2d/tools/export_golden.py).
 
 [package]
-name = "board-projection-detector"
+name = "board-cluster-detector"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85.0"
