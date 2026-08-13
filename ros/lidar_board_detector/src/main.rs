@@ -1976,7 +1976,14 @@ impl CalibrationBoardLocatorNode {
         let normal_idx = eigenvalues_indexed[0].0; // Smallest eigenvalue
         let normal_vec = eigen.eigenvectors.column(normal_idx).into_owned();
 
-        // Ensure normal points toward positive X (sensor direction)
+        // An eigenvector's sign is arbitrary, so pin it down deterministically by
+        // forcing a non-negative X component. This is NOT a claim that +X points at
+        // the sensor — that only ever held for the Seyond mounting; the Velodyne
+        // preset is Z-up (see `sensor_up_axis`). Nothing downstream depends on the
+        // choice for pose construction: `compute_initial_pose_from_plane` re-flips
+        // the normal toward the origin itself. The sign is observable only in debug
+        // output (`create_plane_marker` and the RANSAC-normal alignment log), so the
+        // branch stays to keep that output stable.
         let normal = if normal_vec.x >= 0.0 {
             na::Unit::new_normalize(normal_vec)
         } else {
@@ -2768,147 +2775,6 @@ impl CalibrationBoardLocatorNode {
         ];
 
         Self::create_debug_pointcloud(&points, header)
-    }
-
-    /// Create arrow markers for raw PCA eigenvectors before any orientation constraints
-    #[allow(dead_code)]
-    fn create_pca_eigenvector_markers(
-        centroid: &na::Vector3<f64>,
-        v1: &na::Vector3<f64>,
-        v2: &na::Vector3<f64>,
-        v3: &na::Vector3<f64>,
-        header: &Header,
-    ) -> Result<MarkerArray> {
-        let mut markers = Vec::new();
-
-        // Scale factor for eigenvector arrows
-        let scale = 0.3;
-
-        // V1 (1st PC - largest variance) - RED
-        let v1_marker = {
-            // Direction from centroid along v1
-            let direction = v1.normalize();
-            let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
-                .unwrap_or(na::UnitQuaternion::identity());
-
-            Marker {
-                header: header.clone(),
-                ns: "pca_eigenvectors".to_string(),
-                id: 0,
-                type_: 0,  // ARROW
-                action: 0, // ADD
-                pose: geometry_msgs::msg::Pose {
-                    position: Point {
-                        x: centroid.x,
-                        y: centroid.y,
-                        z: centroid.z,
-                    },
-                    orientation: Quaternion {
-                        x: q.i,
-                        y: q.j,
-                        z: q.k,
-                        w: q.w,
-                    },
-                },
-                scale: GeomVector3 {
-                    x: scale, // shaft length
-                    y: 0.02,  // shaft diameter
-                    z: 0.04,  // head diameter
-                },
-                color: ColorRGBA {
-                    r: 1.0, // RED
-                    g: 0.0,
-                    b: 0.0,
-                    a: 1.0,
-                },
-                ..Default::default()
-            }
-        };
-        markers.push(v1_marker);
-
-        // V2 (2nd PC) - GREEN
-        let v2_marker = {
-            let direction = v2.normalize();
-            let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
-                .unwrap_or(na::UnitQuaternion::identity());
-
-            Marker {
-                header: header.clone(),
-                ns: "pca_eigenvectors".to_string(),
-                id: 1,
-                type_: 0,  // ARROW
-                action: 0, // ADD
-                pose: geometry_msgs::msg::Pose {
-                    position: Point {
-                        x: centroid.x,
-                        y: centroid.y,
-                        z: centroid.z,
-                    },
-                    orientation: Quaternion {
-                        x: q.i,
-                        y: q.j,
-                        z: q.k,
-                        w: q.w,
-                    },
-                },
-                scale: GeomVector3 {
-                    x: scale,
-                    y: 0.02,
-                    z: 0.04,
-                },
-                color: ColorRGBA {
-                    r: 0.0,
-                    g: 1.0, // GREEN
-                    b: 0.0,
-                    a: 1.0,
-                },
-                ..Default::default()
-            }
-        };
-        markers.push(v2_marker);
-
-        // V3 (3rd PC - smallest variance, normal) - BLUE
-        let v3_marker = {
-            let direction = v3.normalize();
-            let q = na::UnitQuaternion::rotation_between(&na::Vector3::x(), &direction)
-                .unwrap_or(na::UnitQuaternion::identity());
-
-            Marker {
-                header: header.clone(),
-                ns: "pca_eigenvectors".to_string(),
-                id: 2,
-                type_: 0,  // ARROW
-                action: 0, // ADD
-                pose: geometry_msgs::msg::Pose {
-                    position: Point {
-                        x: centroid.x,
-                        y: centroid.y,
-                        z: centroid.z,
-                    },
-                    orientation: Quaternion {
-                        x: q.i,
-                        y: q.j,
-                        z: q.k,
-                        w: q.w,
-                    },
-                },
-                scale: GeomVector3 {
-                    x: scale,
-                    y: 0.02,
-                    z: 0.04,
-                },
-                color: ColorRGBA {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 1.0, // BLUE
-                    a: 1.0,
-                },
-                ..Default::default()
-            }
-        };
-        markers.push(v3_marker);
-
-        Ok(MarkerArray { markers })
     }
 
     fn correspondences_to_markers(state: &BoardIcpState, header: &Header) -> Result<MarkerArray> {
