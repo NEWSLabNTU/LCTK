@@ -40,6 +40,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
 | [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md) | Medium | Shared initial-pose rewrite leaves the bbox path's "unchanged" guarantee unproven | 🔴 |
 | [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md) | Medium | No root `.cargo/config.toml` → Rust test suite unrunnable and the L-16 guard is inert | 🔴 |
+| [M-19](./M-19-debug-assertions-compiled-out.md) | Medium | Every `debug_assert!` compiled out of `just build` and `just test`; the 51 in `hollow-board-config` are also rotation-invariant | 🔴 |
+| [M-20](./M-20-board-frame-edge-aligned-vs-diamond-naming.md) | Medium | Board model's axes run along edges while every accessor names a diamond → `initial_inplane_rotation_deg: 45.0` mandatory | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -59,6 +61,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-17](./L-17-boardconfig-defaults-duplicated.md) | Low | `BoardConfig` defaults defined twice — serde fns and `production_config` will drift | 🔴 |
 | [L-18](./L-18-overlay-node-commented-extrinsic-override.md) | Low | Overlay node ships commented-out hardcoded extrinsic overrides | 🔴 |
 | [L-19](./L-19-aruco-config-required-but-unused-for-lidar.md) | Low | `aruco_config` mandatory for LiDAR-only markers but never affects the LiDAR fit | 🔴 |
+| [L-20](./L-20-dead-bbox-parser-quaternion-order.md) | Low | Dead `BBox` JSON5 parser reads the quaternion w-first; two configs still carry `[1,0,0,0]` | 🔴 |
+| [L-21](./L-21-find-correspondences-duplicated-tests-wrong-body.md) | Low | `find_correspondences` duplicated; inline tests exercise the serial copy the node never runs | 🔴 |
 
 ## Three headline gaps
 
