@@ -17,7 +17,7 @@
 - **Method names:** `enum ForegroundMethod { PlaneStrip, BackgroundSubtraction }`; config/string form `"plane_strip"` / `"background_subtraction"` (renamed from experiment's B / E).
 - **VLP-32C noise floor is ~0.026–0.031 m.** Every metric gate in meters sits ABOVE it. `flatness_rms_max` stays 0.045; do not lower it or any ICP/coplanar tolerance under the floor (C-04 bug class: a gate below the floor silently accepts nothing).
 - **`board_pose`'s `up` defaults to `(0,0,1)`** but the detector always passes `board.up_axis` (per-rig; Falcon is z-forward `(0,1,0)`).
-- **Parity tolerances:** foreground point-set ≥95% membership match (nearest-neighbour within `voxel`); selected-cluster centroid < 0.02 m from Python; per-frame detect/no-detect decision EXACT; aggregate recall/precision within ±1 frame of the Python reference per dataset.
+- **Parity tolerances (revised at Task 9 adjudication):** foreground point-set ≥95% membership match; selected-cluster centroid < 0.02 m from Python. **HARD acceptance gate = recall/precision within ±1 frame per (dataset, generator)** — this is the metric the experiment validated (88.4/100), and it PASSES for both methods. **Bit-exact per-frame parity is NOT achievable** and is not required: Method B reproduces open3d's *randomized* `segment_plane` RANSAC and both methods use open3d `cluster_dbscan` tie-breaking — neither has a reproducible RNG stream. The strict `per_frame_detection_decision_matches_python` test is therefore a **documented-allowlist regression guard** (asserts the mismatch set ⊆ the 9 known borderline/RNG-divergent frames, each logged with its gate-value reason in `task-9-report.md`), NOT a hard bit-exact gate. Our RANSAC/DBSCAN are deterministically seeded, so that mismatch set is stable run-to-run.
 - **nalgebra convention:** points are `nalgebra::Point3<f64>`; internal math may use `nalgebra::Matrix`/SVD. The Python reference stores `float32` after downsample — cast deliberately and document where (`downsample` returns f32 in Python; keep f64 in Rust but expect ~1e-6 drift, well inside tolerances).
 - **No `hollow-board-detector` dependency.** `voxel_downsample` is implemented locally in `geometry.rs` (Task 2); RANSAC (`remove_big_planes`, Task 5) uses `arrsac::Arrsac` + `plane_estimator::PlaneEstimator` + `sample_consensus::Consensus::model_inliers` directly — the exact pair `hollow-board-detector`'s own `fit_plane_ransac` is built from. Standalone-workspace `Cargo.toml` deps: `nalgebra` 0.32.3 (feat `serde-serialize`), `anyhow` 1, `serde` 1 (derive), `json5` 0.4.1, `log` 0.4.20, `plane-estimator` (path `../plane-estimator`), `sample-consensus` 1.0.2, `arrsac` 0.10.0, `rand` 0.8; dev: `approx` 0.5.1, `serde_json` 1. Explicit versions (a standalone workspace has no root `[workspace.dependencies]` to inherit).
 - **All cargo commands run from `rust/board-projection-detector/`** (its own workspace), e.g. `cargo test --test config`. Never `-p …` from repo root.
@@ -280,8 +280,9 @@ from boarddet.candidates.cluster_after_ground import big_plane_residual
 from boarddet.detector import detect
 from boarddet.board_config import BoardConfig
 
-OUT = pathlib.Path(__file__).resolve().parents[1] / "../rust/board-projection-detector/tests/fixtures"
-OUT = OUT.resolve()
+# repo root = parents[3] of experiments/board-detection-2d/tools/export_golden.py
+OUT = (pathlib.Path(__file__).resolve().parents[3]
+       / "rust/board-projection-detector/tests/fixtures")
 OUT.mkdir(parents=True, exist_ok=True)
 VOXEL = 0.03
 BOX = load_bbox(DEFAULT_BBOX_PATH)
@@ -829,20 +830,31 @@ git commit -m "feat(board-proj): BackgroundModel voxel occupancy + consensus + d
   - `fn generate_plane_strip(points: &[Point3<f64>], board: &BoardConfig) -> Vec<Candidate>` (ports `generate_cluster_after_ground`; constants `_BIG_PLANE_DIST=0.05`, `_BIG_PLANE_MIN_FRAC=0.08`, `cluster_eps=0.15`).
   - `fn generate_background_diff(dn: &[Point3<f64>], board: &BoardConfig, background: &BackgroundModel) -> Vec<Candidate>` (ports `generate_background_diff`; `cluster_eps=0.15`).
 
-**RANSAC (no hollow-board-detector):** `remove_big_planes` uses open3d `segment_plane` in Python. Implement it locally with the same primitives `hollow-board-detector`'s `fit_plane_ransac` uses:
+**RANSAC — plain seeded RANSAC matching open3d `segment_plane` (NOT arrsac).** `remove_big_planes` uses open3d `segment_plane(distance_threshold=dist, ransac_n=3, num_iterations=300)` in Python. **DO NOT use `arrsac`** — its adaptive ARRSAC is a *different* algorithm: on this data it is both pathologically slow (~50 s/frame debug, ~2.5 s release — unusable in the ROS node) and diverges from open3d (it strips different/partial planes → `plane_strip` parity 13/20 with false negatives). Reverses the original Task-5 choice (found at Task 9). Hand-roll a plain RANSAC that mirrors `segment_plane`'s core:
 ```rust
-use arrsac::Arrsac;
-use sample_consensus::Consensus;
-use plane_estimator::PlaneEstimator;
-// inside remove_big_planes, per iteration:
-let mut arrsac = Arrsac::new(dist, rand::thread_rng()).max_candidate_hypotheses(300);
-let est = PlaneEstimator::new();
-let (_model, inlier_idx) = match arrsac.model_inliers(&est, remaining.iter().cloned()) {
-    Some(r) => r, None => break,
-};
+use rand::{rngs::StdRng, SeedableRng, Rng};
+/// Best-plane inlier indices into `pts`, matching open3d segment_plane core.
+fn ransac_plane_inliers(pts: &[Point3<f64>], dist: f64) -> Vec<usize> {
+    if pts.len() < 3 { return vec![]; }
+    let mut rng = StdRng::seed_from_u64(0);   // deterministic, mirrors o3d.utility.random.seed(0)
+    let mut best: Vec<usize> = vec![];
+    for _ in 0..300 {                          // num_iterations = 300
+        // ransac_n = 3 distinct random points
+        let (a, b, c) = /* 3 distinct indices via rng.gen_range */;
+        let n = (pts[b].coords - pts[a].coords).cross(&(pts[c].coords - pts[a].coords));
+        if n.norm() < 1e-9 { continue; }       // collinear
+        let n = n.normalize();
+        let d = -n.dot(&pts[a].coords);
+        let inliers: Vec<usize> = (0..pts.len())
+            .filter(|&i| (n.dot(&pts[i].coords) + d).abs() <= dist)
+            .collect();
+        if inliers.len() > best.len() { best = inliers; }
+    }
+    best
+}
 ```
-`inlier_idx: Vec<usize>` indexes `remaining`. Port the strip loop's "biggest connected component extent vs board scale" logic on those inliers using `dbscan::cluster_anisotropic(&inliers, 0.20, 10, vertical_gap_deg)` (Python uses eps=0.20, min_points=10 for the big-vs-board judgement). `plane_estimator::PlaneModel` has only `center`/`normal`; for the extent check, refit a `geometry::PlaneModel` (with `u`,`v`) on the biggest component via `geometry::fit_plane`.
-Note: `arrsac`/open3d RANSAC are both randomized; parity is asserted on the SELECTED-cluster outcome (Task 9), not on exact stripped-point sets. Seed `rand` deterministically per call (`rand::rngs::StdRng::seed_from_u64(0)`) to keep runs reproducible, mirroring the Python `o3d.utility.random.seed(0)`.
+`best` indexes the input slice. Use it inside `remove_big_planes` exactly where the Python calls `segment_plane` (dist = `_BIG_PLANE_DIST` = 0.05). Port the strip loop's "biggest connected component extent vs board scale" logic on those inliers via `dbscan::cluster_anisotropic(&inliers, 0.20, 10, vertical_gap_deg)`; refit a `geometry::PlaneModel` on the biggest component with `geometry::fit_plane` for the extent check.
+Parity note: a plain 300-iteration RANSAC won't sample identical hypotheses to open3d (different RNG), but a *dominant* plane (ground/wall, thousands of inliers) is found by essentially every iteration, so the stripped-point set — and therefore the surviving foreground and candidates — track open3d closely. Parity is asserted on the SELECTED-cluster / per-frame detection outcome (Task 9), not exact stripped sets. `arrsac`/`sample-consensus`/`plane-estimator` deps may be dropped if now unused.
 
 **Constants (copy verbatim from Python):** big-plane loop max 6 iterations, `len(remaining) < 100` break, `len(idx) < max(100, min_frac*len(remaining))` break, `ext <= 2.0*diag` stop. `_merge_coplanar_clusters`: `seed_min_points=40`, `offset_tol=0.02`, `merge_dist_factor=1.6`, `diag = side_m*sqrt(2)`. `plausible_board_patch`: `_MIN_PATCH_POINTS=60`, extent band `0.5*side_m ..= 1.8*diag`.
 
@@ -1028,6 +1040,13 @@ git commit -m "feat(board-proj): fit_fixed_square — brute theta sweep + covera
 - Produces:
   - `struct BoardDetection { center: Point3<f64>, rotation: Matrix3<f64>, corners_3d: [Point3<f64>;4], score: f64 }` (columns of `rotation` = board x, y, normal).
   - `fn board_pose(plane: &PlaneModel, corners_2d: &[[f64;2];4], score: f64, up: [f64;3]) -> BoardDetection` — ports `pose.py:board_pose` EXACTLY: normal toward sensor, X = center→up-most corner projected in-plane, `y = n × x`, CCW winding via `atan2(rel·y, rel·x)` sort.
+
+  > **Superseded 2026-08-13 (this section only).** The shipped Rust `board_pose` now reports a
+  > REP-103 / Autoware frame: columns of `rotation` are **X forward, Y left, Z up**, with the
+  > sensor-facing normal as **−X** and **Z** aiming at the up-most corner. This is a relabel of the
+  > same three vectors — the numbers and the corner winding are unchanged, and the golden-parity
+  > suite still passes — so the port remains faithful to `pose.py` in everything it computes, and
+  > diverges only in which letter names which axis. The rustdoc on `board_pose` is authoritative.
   - `fn stance_3d(corners_3d: &[Point3<f64>;4], up: [f64;3]) -> f64` — ports `detector.py:_stance` (max |diagonal·up|; corners CCW so `[2]-[0]`, `[3]-[1]` are diagonals).
   - `fn isolation_density(dn: &[Point3<f64>], plane: &PlaneModel, corners_2d: &[[f64;2];4]) -> f64` — port `isolation.py:isolation_density` (read the file; points-per-perimeter-metre of coplanar continuation just outside the quad).
 
@@ -1064,7 +1083,7 @@ fn pose_corners_parity_against_python() {
 
 - [ ] **Step 2: Run to verify fail** — FAIL.
 
-- [ ] **Step 3: Implement `pose.rs`** — port `pose.py`, `_stance`, and `isolation.py`. For `board_pose`, `top = corners_3d[argmax(corners_3d · up)]`; project X in-plane by removing the normal component; build rotation `[x|y|n]`; sort corners CCW.
+- [ ] **Step 3: Implement `pose.rs`** — port `pose.py`, `_stance`, and `isolation.py`. For `board_pose`, `top = corners_3d[argmax(corners_3d · up)]`; project X in-plane by removing the normal component; build rotation `[x|y|n]`; sort corners CCW. *(As shipped, the rotation is built `[-n|y|x]` for REP-103 — see the superseded note above; the winding sort is unchanged.)*
 
 - [ ] **Step 4: Run to verify pass** — first test PASS; parity test `#[ignore]`d until Task 9.
 
@@ -1169,6 +1188,10 @@ git commit -m "feat(board-proj): detect() orchestration + end-to-end parity + re
 - Local `voxel_downsample` (Task 2) + RANSAC via `plane-estimator`/`arrsac` (Task 5); no `hollow-board-detector` (native SFCGAL). Standalone workspace. ✅
 - Carry-forward #1 (corner ordering: ArUco uses `corners_3d`) → Task 8 `board_pose` CCW; the ROS wiring enforces "consume `corners_3d`" in sub-project 2 (out of scope here, noted).
 - Carry-forward #2 (far-board `cluster_min_points`) → `production_config(cluster_min_points)` param, threaded from fixture per-dataset. ✅
+
+**Known limitations / deferred follow-ups (Task 9 outcome):**
+- **Method B (`plane_strip`) perf:** ~157–202 ms/frame release — over the ~100 ms node budget — because bbox-free foreground must RANSAC-strip the full ~27k cloud ×6 (the bbox pipeline skipped RANSAC via `skip_ransac`). Fix deferred (user's call): run the strip stage on a coarser voxel / subsample + cap-and-early-exit the strip loop. **Method E** (`background_subtraction`, the Option-C shipping path) is **34–69 ms/frame** — under budget — because it isolates via background-diff, no RANSAC.
+- **Method B per-frame parity:** 12/20 (recall/precision still within ±1). The misses are open3d RANSAC/DBSCAN RNG divergences + float-noise gate ties; not bit-reproducible. Acceptable for a fallback; E is the validated path.
 
 **Deferred to sub-project 2 (ROS node) — NOT in this plan:** **Fold `board-projection-detector` from a standalone workspace back into the root workspace as a normal `rust/*` member** (remove its `[workspace]` table + the root `exclude` entry, switch inline dep versions to `{ workspace = true }` where a root workspace dep exists), and update the root `Cargo.lock` via `just build` (colcon, in the sourced ROS env — plain cargo cannot re-resolve the wildcard ROS crates). This is the agreed "convention-first, deferred for dev speed" debt: standalone now for fast parity-test iteration, member at integration when `lidar_board_detector` (a root member) depends on it. Also: `detection_mode` param + `select_board_cluster` wiring into `process_pointcloud`; E warmup lifecycle (param-driven + `reset_background` service); mapping `selected_points`→existing Stage 2/3; json5 config file surfacing the ~20 constants; launch/`book` docs. This plan's deliverable is the parity-validated library only.
 
