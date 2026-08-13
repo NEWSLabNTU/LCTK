@@ -24,7 +24,7 @@ just
 
 ## Project Structure
 
-- **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, board-fitter, plane-estimator, etc.)
+- **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, board-cluster-detector, plane-estimator, etc.)
 - **`ros/`**: ROS 2 packages
   - `lctk_launch/` - Unified launch system with config-driven calibration pipeline
   - `lctk_interfaces/` - Shared msg/srv definitions (solver services, quality report)

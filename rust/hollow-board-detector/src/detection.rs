@@ -27,16 +27,6 @@ pub struct PlaneRansacData {
 }
 
 #[derive(Debug, Clone)]
-pub struct FitBoardIcp {
-    pub board_pose: na::Isometry3<f64>,
-    pub icp_losses: Vec<f64>,
-    pub icp_data: IcpData,
-    pub successful: bool,
-    pub initial_pose: na::Isometry3<f64>,
-    pub icp_stats: IcpStatistics,
-}
-
-#[derive(Debug, Clone)]
 pub struct FitPlaneRansac<'a> {
     pub plane_model: PlaneModel,
     pub inlier_points: Vec<&'a na::Point3<f64>>,

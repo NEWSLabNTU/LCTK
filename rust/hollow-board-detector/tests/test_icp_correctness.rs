@@ -1,5 +1,9 @@
 use hollow_board_config::BoardShape;
-use hollow_board_detector::{algo::BoardIcpIterator, config::Config, detection::BoardModelParams};
+use hollow_board_detector::{
+    algo::BoardIcpIterator,
+    config::{Config, SensorUpAxis},
+    detection::BoardModelParams,
+};
 use measurements::Length;
 use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
 
@@ -19,6 +23,10 @@ fn create_test_config() -> Config {
         voxel_downsample_size: 0.02,
         voxel_downsample_use_centroid: true,
         voxel_parallel_threshold: 50_000,
+        // These tests seed BoardIcpIterator with an explicit pose, so neither
+        // field affects them; they only satisfy the struct literal.
+        sensor_up_axis: SensorUpAxis::Z,
+        initial_inplane_rotation_deg: 0.0,
         board_shape: BoardShape {
             board_width: Length::from_meters(0.5),
             hole_radius: Length::from_meters(0.05),
