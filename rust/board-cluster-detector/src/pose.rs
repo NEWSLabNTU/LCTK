@@ -2,33 +2,75 @@
 //!
 //! Port of `experiments/board-detection-2d/src/boarddet/pose.py` (`board_pose`),
 //! `detector.py:_stance`, and `isolation.py:isolation_density`.
+//!
+//! **Deliberate divergence from that Python source:** [`board_pose`] returns its
+//! rotation in the REP-103 / Autoware body convention (**X forward, Y left,
+//! Z up**), whereas `pose.py` returns columns `[up-direction, y, normal]`. The
+//! three axes are numerically identical in both; only their column order and
+//! the sign of the normal column differ. Everything else — the normal-sign
+//! flip, the up-most-corner search, and the physical corner winding — is a
+//! faithful port. See [`board_pose`] for the exact mapping.
 
 use nalgebra::{Matrix3, Point3, Vector3};
 
 use crate::config::IsolationBand;
 use crate::geometry::{project_to_plane, unproject, PlaneModel};
 
-/// A solved board pose: center + orthonormal rotation (columns = board x,
-/// board y, plane normal) + the CCW-wound 3D corners it was built from.
+/// A solved board pose: center + orthonormal, right-handed rotation in the
+/// REP-103 / Autoware body convention (**X forward, Y left, Z up**) + the 3D
+/// corners it was built from.
 #[derive(Debug, Clone)]
 pub struct BoardDetection {
     pub center: Point3<f64>,
-    /// Columns: board x, board y, normal.
+    /// Columns: board **X** (forward), board **Y** (left), board **Z** (up).
+    ///
+    /// The board faces the sensor, so the plane normal oriented *toward* the
+    /// sensor (call it `n`) is the board's **−X**: `+X` points out the back of
+    /// the board, away from the sensor at the origin. `+Z` points at the
+    /// board's up-most corner (the diamond "top"), projected into the board
+    /// plane. `+Y = Z × X` (equivalently `n × Z`) completes the right-handed
+    /// frame; `det(rotation) = +1`.
     pub rotation: Matrix3<f64>,
+    /// The four corners wound counter-clockwise **about the sensor-facing
+    /// normal `n = −X`** — i.e. CCW as seen from the sensor, which is
+    /// *clockwise* about this frame's `+X`. See [`board_pose`] for why that
+    /// sense (and not "CCW about +X") is the one produced.
     pub corners_3d: [Point3<f64>; 4],
     pub score: f64,
 }
 
-/// Port of `pose.py:board_pose`.
+/// Port of `pose.py:board_pose`, faithful in every number it computes but
+/// **diverging in the frame convention it reports**: `pose.py` stacks its
+/// columns as `[up-direction, y, n]` (n = normal toward the sensor); this port
+/// relabels the very same axes into REP-103 / Autoware order
+/// `[X = −n, Y = y, Z = up-direction]`. That is a pure column permutation plus
+/// one sign flip — `Y` is bit-for-bit the same vector in both, and no corner
+/// moves. Keep this note when touching the file: the provenance is still
+/// `pose.py`, only the labelling is ours.
 ///
 /// - Unprojects `corners_2d` via `plane`, takes their mean as `center`.
-/// - Orients the plane normal toward the sensor at the origin (flips if it
-///   points away).
-/// - Board X axis: `center -> up-most corner` (max `corners_3d . up`),
+/// - Orients the plane normal `n` toward the sensor at the origin (flips if it
+///   points away). Because the board *faces* the sensor, the board's forward
+///   axis is `x_axis = -n`, pointing out the back of the board.
+/// - Board Z axis: `center -> up-most corner` (max `corners_3d . up`),
 ///   projected in-plane by removing the normal component.
-/// - `y = n x x` (right-handed).
-/// - Corners are re-wound CCW about `n` in the `(x, y)` basis via
-///   `atan2(rel.y, rel.x)` ascending sort.
+/// - `y_axis = n x z_axis`, which is exactly `z_axis x x_axis` — so
+///   `[x_axis | y_axis | z_axis]` is right-handed (`det = +1`, since
+///   `y_axis x z_axis = -n = x_axis`).
+/// - Corners are re-wound by an ascending sort on `atan2(rel.y_axis,
+///   rel.z_axis)`. That angle increases when rotating `z_axis -> y_axis`,
+///   which is a rotation about `z_axis x y_axis = n`, i.e. **CCW about the
+///   sensor-facing normal `n = -x_axis`** — counter-clockwise as seen from the
+///   sensor, and therefore *clockwise* about the frame's own `+X`.
+///
+///   This physical sense is preserved verbatim from the pre-REP-103
+///   implementation (and from `pose.py`) on purpose. Re-defining the winding as
+///   "CCW about `+X`" would reverse the corner sequence for no geometric gain
+///   and would silently invalidate every consumer that has already pinned the
+///   order — the golden-vector corner fixtures, and any ArUco correspondence
+///   that indexes `corners_3d`. [`stance_3d`] survives either winding (it only
+///   needs `[2]-[0]` and `[3]-[1]` to be the diagonals), so it is not the
+///   deciding constraint; the pinned ordering is.
 pub fn board_pose(
     plane: &PlaneModel,
     corners_2d: &[[f64; 2]; 4],
@@ -51,7 +93,7 @@ pub fn board_pose(
         n = -n;
     }
 
-    // Board X axis: center -> up-most corner, projected in-plane.
+    // Board Z axis (up): center -> up-most corner, projected in-plane.
     // Pick the up-most corner; strict > keeps the FIRST max on ties (matches numpy argmax).
     let (top_i, _) = corners_3d_vec.iter().enumerate().fold(
         (0usize, f64::NEG_INFINITY),
@@ -65,22 +107,30 @@ pub fn board_pose(
         },
     );
     let top = corners_3d_vec[top_i];
-    let mut x = top - center;
-    x -= n * x.dot(&n);
-    x = x.normalize();
-    let y = n.cross(&x);
+    let mut z_axis = top - center;
+    z_axis -= n * z_axis.dot(&n);
+    z_axis = z_axis.normalize();
+    // The board faces the sensor, so its forward (+X) axis is the normal
+    // pointing AWAY from the sensor.
+    let x_axis = -n;
+    // Same vector as the Python port's `y = n x x`; also equals z_axis x x_axis,
+    // so [x_axis | y_axis | z_axis] is right-handed.
+    let y_axis = n.cross(&z_axis);
 
-    // Canonical CCW winding about n in the (x, y) basis.
+    // Canonical winding: CCW about n (== the frame's -X, i.e. CCW as seen from
+    // the sensor) in the (z_axis, y_axis) basis. Physically identical to the
+    // pre-REP-103 ordering — see the doc comment on why it is NOT re-based on
+    // the new +X.
     let mut corners_3d: Vec<Point3<f64>> = corners_3d_vec;
     corners_3d.sort_by(|a, b| {
         let rel_a = a - center;
         let rel_b = b - center;
-        let ang_a = rel_a.dot(&y).atan2(rel_a.dot(&x));
-        let ang_b = rel_b.dot(&y).atan2(rel_b.dot(&x));
+        let ang_a = rel_a.dot(&y_axis).atan2(rel_a.dot(&z_axis));
+        let ang_b = rel_b.dot(&y_axis).atan2(rel_b.dot(&z_axis));
         ang_a.total_cmp(&ang_b)
     });
 
-    let rotation = Matrix3::from_columns(&[x, y, n]);
+    let rotation = Matrix3::from_columns(&[x_axis, y_axis, z_axis]);
     let corners_3d: [Point3<f64>; 4] = corners_3d.try_into().expect("4 corners");
 
     BoardDetection {
@@ -93,9 +143,12 @@ pub fn board_pose(
 
 /// Port of `detector.py:_stance`.
 ///
-/// `corners_3d` must be CCW-ordered (as produced by [`board_pose`]), so
+/// `corners_3d` must be wound consistently around the board plane (as produced
+/// by [`board_pose`]: CCW about the sensor-facing normal), so that
 /// `corners_3d[2] - corners_3d[0]` and `corners_3d[3] - corners_3d[1]` are
-/// the two diagonals. Returns the max of `|diagonal . up|` over both
+/// the two diagonals. Only "opposite corners are two apart" matters here, so
+/// this is insensitive to the winding's handedness. Returns the max of
+/// `|diagonal . up|` over both
 /// diagonals (normalized): ~1 for a board standing on a corner, ~0.71 for an
 /// axis-aligned flat panel.
 pub fn stance_3d(corners_3d: &[Point3<f64>; 4], up: [f64; 3]) -> f64 {
