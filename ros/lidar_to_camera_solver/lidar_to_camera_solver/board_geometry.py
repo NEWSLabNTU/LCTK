@@ -12,10 +12,11 @@ Hence two rules for this module:
 
 1. It imports nothing from ``rclpy``, so the arithmetic is testable without a ROS
    graph. Logging is the caller's business.
-2. Its output is asserted against ``fixtures/marker_corners_world.golden.json``, the
+2. Its output is asserted against ``fixtures/board/marker_corners_world.golden.json``, the
    same fixture the Rust ``marker_layout_golden`` test uses.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -99,6 +100,71 @@ def load_aruco_pattern_config(config_file_path: str) -> dict:
         return json5.load(f)
 
 
+def marker_paper_placement(config: dict) -> Tuple[float, float]:
+    """Where the printed sheet is glued on the plate, in metres.
+
+    Returns ``(toward_left_corner, toward_top_corner)``: the offset of the paper's
+    centre from the PLATE's centre, resolved along the plate's two diagonals. It comes
+    from ``paper_placement`` in ``aruco_pattern.json5``, which is a **measurement** of
+    the physical board — the same number the Rust side reads. It is deliberately not
+    derived from the plate width here, so that Python and Rust cannot derive it
+    differently.
+    """
+    placement = config.get("paper_placement")
+    if not placement:
+        raise ValueError(
+            "ArUco config has no 'paper_placement': the marker sheet's position on the "
+            "plate is a measurement of the physical board, not something this code may "
+            "guess. Add it to aruco_pattern.json5 (see the comment there)."
+        )
+    return (
+        parse_dimension(placement["toward_left_corner"]),
+        parse_dimension(placement["toward_top_corner"]),
+    )
+
+
+def marker_paper_point(config: dict, u: float, v: float) -> Tuple[float, float, float]:
+    """Map a point in the marker paper's own coordinates into the board frame.
+
+    Paper coordinates run along the paper's edges, which are parallel to the plate's
+    edges and therefore at 45 degrees to the board frame's axes: the origin is the
+    paper corner nearest the plate's bottom corner, ``u`` runs toward the plate's left
+    corner and ``v`` toward its right corner, both spanning
+    ``[0, marker_paper_size]``.
+
+    This is the single place that knows where the paper sits on the plate, and the only
+    place bridging the paper's edge-aligned coordinates and the plate's corner-aligned
+    frame — mirroring Rust's ``BoardModel::marker_paper_point``. The marker layout's own
+    arithmetic therefore never has to learn about the plate's frame.
+
+    The board frame (``corner_aligned_plate_center_v1``): origin at the plate centre,
+    +X from the centre toward the LEFT corner, +Y toward the TOP corner, +Z the board
+    normal.
+    """
+    paper_size = parse_dimension(config["board_size"])
+    toward_left, toward_top = marker_paper_placement(config)
+
+    # The paper's edge directions in the board frame: bisectors of the two diagonals.
+    inv_sqrt2 = 1.0 / math.sqrt(2.0)
+    u_dir = (inv_sqrt2, inv_sqrt2)  # toward the plate's left corner from the bottom one
+    v_dir = (-inv_sqrt2, inv_sqrt2)  # toward the plate's right corner
+
+    half_paper = paper_size / 2.0
+    x = (
+        toward_left
+        - (u_dir[0] + v_dir[0]) * half_paper
+        + u_dir[0] * u
+        + v_dir[0] * v
+    )
+    y = (
+        toward_top
+        - (u_dir[1] + v_dir[1]) * half_paper
+        + u_dir[1] * u
+        + v_dir[1] * v
+    )
+    return (x, y, 0.0)
+
+
 def compute_multi_marker_corners(
     config: dict,
 ) -> Dict[int, List[Tuple[float, float, float]]]:
@@ -125,23 +191,28 @@ def compute_multi_marker_corners(
     marker_size = square_size * marker_square_size_ratio
     marker_border = (square_size - marker_size) / 2.0
 
-    def make_corners(base_x: float, base_y: float) -> List[Tuple[float, float, float]]:
-        """Create 4 corner points for a marker in board-local coordinates."""
-        bottom = (base_x, base_y, 0.0)
-        left = (base_x + marker_size, base_y, 0.0)
-        right = (base_x, base_y + marker_size, 0.0)
-        top = (base_x + marker_size, base_y + marker_size, 0.0)
+    def make_corners(base_u: float, base_v: float) -> List[Tuple[float, float, float]]:
+        """The 4 corners of one marker, in the board frame.
+
+        ``(base_u, base_v)`` is the marker's origin corner in the PAPER's coordinates;
+        every point goes through `marker_paper_point`, which is the only code that knows
+        where the paper sits on the plate.
+        """
+        bottom = marker_paper_point(config, base_u, base_v)
+        left = marker_paper_point(config, base_u + marker_size, base_v)
+        right = marker_paper_point(config, base_u, base_v + marker_size)
+        top = marker_paper_point(config, base_u + marker_size, base_v + marker_size)
         return [right, top, left, bottom]
 
-    origin_x = board_border_size + marker_border
-    origin_y = board_border_size + marker_border
+    origin_u = board_border_size + marker_border
+    origin_v = board_border_size + marker_border
 
     marker_corners = {}
-    marker_corners[marker_ids[0]] = make_corners(origin_x, origin_y)
-    marker_corners[marker_ids[1]] = make_corners(origin_x + square_size, origin_y)
-    marker_corners[marker_ids[2]] = make_corners(origin_x, origin_y + square_size)
+    marker_corners[marker_ids[0]] = make_corners(origin_u, origin_v)
+    marker_corners[marker_ids[1]] = make_corners(origin_u + square_size, origin_v)
+    marker_corners[marker_ids[2]] = make_corners(origin_u, origin_v + square_size)
     marker_corners[marker_ids[3]] = make_corners(
-        origin_x + square_size, origin_y + square_size
+        origin_u + square_size, origin_v + square_size
     )
 
     return marker_corners
@@ -228,6 +299,8 @@ __all__ = [
     "detection2d_to_aruco_markers",
     "frame_convention_error",
     "load_aruco_pattern_config",
+    "marker_paper_placement",
+    "marker_paper_point",
     "marker_geometry_summary",
     "parse_dimension",
     "rotation_matrix_to_quaternion",
