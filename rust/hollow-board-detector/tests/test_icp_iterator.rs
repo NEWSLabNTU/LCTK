@@ -1,4 +1,4 @@
-use hollow_board_config::BoardShape;
+use hollow_board_config::{BoardShape, MarkerPaperPlacement};
 use hollow_board_detector::{
     algo::BoardIcpIterator,
     config::{Config, SensorUpAxis},
@@ -27,25 +27,44 @@ fn create_test_config() -> Config {
         // field affects them; they only satisfy the struct literal.
         sensor_up_axis: SensorUpAxis::Z,
         initial_inplane_rotation_deg: 0.0,
-        board_shape: BoardShape {
-            board_width: Length::from_meters(0.5),
-            hole_radius: Length::from_meters(0.05),
-            hole_center_shift: Length::from_meters(0.0),
-        },
+        board_shape: test_board_shape(),
+    }
+}
+
+/// A board with its three holes actually separated.
+///
+/// A zero `hole_center_shift` — which this fixture used to carry — puts all three holes
+/// on top of each other at the plate centre, erasing the asymmetry that is the model's
+/// only witness to in-plane rotation. No test here depends on that asymmetry, but a
+/// fixture should still describe a board that could exist.
+fn test_board_shape() -> BoardShape {
+    BoardShape {
+        board_width: Length::from_meters(0.5),
+        hole_radius: Length::from_meters(0.05),
+        hole_center_shift: Length::from_meters(0.05),
     }
 }
 
 fn create_test_board_params() -> BoardModelParams {
     BoardModelParams {
-        board_shape: BoardShape {
-            board_width: Length::from_meters(0.5),
-            hole_radius: Length::from_meters(0.05),
-            hole_center_shift: Length::from_meters(0.0),
-        },
+        board_shape: test_board_shape(),
         marker_paper_size: Length::from_meters(0.1),
+        marker_paper_placement: MarkerPaperPlacement::flush_with_bottom_corner(
+            Length::from_meters(0.5),
+            Length::from_meters(0.1),
+        ),
     }
 }
 
+/// Four points hovering 1 m above the board plane.
+///
+/// **Deliberately not a sample of the board**, unlike `create_grid_points` in
+/// `test_icp_correctness.rs`. Every test in this file is structural — iteration counters,
+/// statelessness, termination reasons — and each one wants a point set that stays far
+/// enough from the model for the residual to sit above `icp_rejection_threshold`, so the
+/// "good fit" exit never masks the behaviour under test. The `x`/`y` spread is well
+/// inside the plate's diamond, so no point is silently off in the plate's *own* plane
+/// either; the whole offset is along the normal, which is what makes it obvious.
 fn create_test_points() -> Vec<Point3<f64>> {
     vec![
         Point3::new(0.0, 0.0, 1.0),
