@@ -65,6 +65,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-19](./L-19-aruco-config-required-but-unused-for-lidar.md) | Low | `aruco_config` mandatory for LiDAR-only markers but never affects the LiDAR fit | 🔴 |
 | [L-20](./L-20-dead-bbox-parser-quaternion-order.md) | Low | Dead `BBox` JSON5 parser reads the quaternion w-first; two configs still carry `[1,0,0,0]` | 🔴 |
 | [L-21](./archive/L-21-find-correspondences-duplicated-tests-wrong-body.md) | Low | `find_correspondences` duplicated; inline tests exercise the serial copy the node never runs | 🟢 |
+| [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) | Low | `advanced_extrinsic_solver` imports `lctk_interfaces` without declaring the dependency | 🔴 |
+| [L-23](./L-23-debug-mode-parameter-never-read.md) | Low | `debug_mode` declared by both solvers, read by neither | 🔴 |
 
 ## Three headline gaps
 
