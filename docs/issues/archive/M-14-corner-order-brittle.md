@@ -110,6 +110,36 @@ rotations by ICP loss against the asymmetric holes, or camera cross-validation �
 require board captures near 45° roll (not reproducible headlessly) and are best paired
 with the H-09 per-pose reprojection residual now that `lctk_quality` has landed.
 
+## Update (2026-08-13) — the frame changed under part 2
+
+Phase 1 of the corner-aligned board-frame work
+([M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md)) redefined the board model's canonical
+frame: the origin is now the plate **centre** and the in-plane axes run corner to corner. Part 2 of
+this issue is therefore no longer "two implementations that happen to agree" — the Rust and the two
+Python implementations are now on **different conventions**, and the resulting extrinsic error is
+wrong by 45° in-plane plus a ~707 mm origin shift. That is tracked as
+[H-11](./H-11-camera-solvers-stale-board-frame.md).
+
+Two things improved for this issue specifically:
+
+- **The Rust `multi_marker_corners` is no longer dead-and-untested.**
+  `rust/hollow-board-config/tests/marker_layout_golden.rs` now calls it and asserts **world**
+  coordinates against a checked-in fixture **keyed by ArUco marker id**, which pins the
+  marker-identity-to-position binding whose corruption is exactly the silent quarter-turn this issue
+  describes. The old `test_multi_marker_corners_basic`, which recomputed its own expectations and
+  never called the routine, is gone.
+- **That fixture is the cross-language seam** part 2 has always wanted. `tests/fixtures/` also ships
+  an independent Python generator, so asserting the two Python `_compute_multi_marker_corners`
+  against the same golden — from `ros/advanced_extrinsic_solver/test/` — is now a small, checkable
+  job. It replaces the ad-hoc `tmp/test_m14_corner_impls_agree.py`, which only proved the two Python
+  copies agreed with *each other*, not with the Rust model.
+
+Part 1 (robust origin disambiguation) is unchanged and still needs board captures near 45° roll.
+The ambiguity warning's *explanation* was also corrected in passing: it had named a diamond-mounted
+board as the marginal case, when a diamond's corner heights (−R, 0, 0, +R along the up axis) are in
+fact the well-conditioned case. The ill-conditioned one is an edge-aligned (square-on) board, whose
+bottom two corners sit at the same height.
+
 ## Resolution (2026-08-15) — robust origin disambiguation
 
 The remaining part (1a) is done: the origin corner is chosen from the data instead of from

@@ -22,6 +22,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-08](./archive/H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./archive/H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
 | [H-10](./archive/H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🟢 |
+| [H-11](./H-11-camera-solvers-stale-board-frame.md) | High | Camera solvers still use the old edge-aligned board frame → extrinsic wrong by 45°, half of it silently | 🔴 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -39,9 +40,10 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
 | [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
 | [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md) | Medium | Shared initial-pose rewrite leaves the bbox path's "unchanged" guarantee unproven | 🔴 |
-| [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md) | Medium | No root `.cargo/config.toml` → Rust test suite unrunnable and the L-16 guard is inert | 🔴 |
+| [M-18](./archive/M-18-root-cargo-config-missing-rust-tests-unrunnable.md) | Medium | No root `.cargo/config.toml` → Rust test suite unrunnable and the L-16 guard is inert | 🟢 |
 | [M-19](./M-19-debug-assertions-compiled-out.md) | Medium | Every `debug_assert!` compiled out of `just build` and `just test`; the 51 in `hollow-board-config` are also rotation-invariant | 🔴 |
-| [M-20](./M-20-board-frame-edge-aligned-vs-diamond-naming.md) | Medium | Board model's axes run along edges while every accessor names a diamond → `initial_inplane_rotation_deg: 45.0` mandatory | 🔴 |
+| [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) | Medium | Board model's axes run along edges while every accessor names a diamond → `initial_inplane_rotation_deg: 45.0` mandatory | 🟢 |
+| [M-21](./M-21-icp-stable-pose-exit-unreachable.md) | Medium | ICP's "stable pose" exit needs ~5× more iterations than any preset allows → `icp_pose_weight_threshold` is inert | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -62,7 +64,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-18](./L-18-overlay-node-commented-extrinsic-override.md) | Low | Overlay node ships commented-out hardcoded extrinsic overrides | 🔴 |
 | [L-19](./L-19-aruco-config-required-but-unused-for-lidar.md) | Low | `aruco_config` mandatory for LiDAR-only markers but never affects the LiDAR fit | 🔴 |
 | [L-20](./L-20-dead-bbox-parser-quaternion-order.md) | Low | Dead `BBox` JSON5 parser reads the quaternion w-first; two configs still carry `[1,0,0,0]` | 🔴 |
-| [L-21](./L-21-find-correspondences-duplicated-tests-wrong-body.md) | Low | `find_correspondences` duplicated; inline tests exercise the serial copy the node never runs | 🔴 |
+| [L-21](./archive/L-21-find-correspondences-duplicated-tests-wrong-body.md) | Low | `find_correspondences` duplicated; inline tests exercise the serial copy the node never runs | 🟢 |
 
 ## Three headline gaps
 
@@ -106,6 +108,29 @@ The lesson generalises, and it is the same one [H-09](./archive/H-09-no-extrinsi
 about the extrinsic: **this system has no way to tell you it is not working.** A gate that can never
 pass, a detector that publishes empty results, and a solver that reports `"Calibration successful"`
 are all the same failure — silence where a number should be.
+
+## The board frame changed under the camera solvers (2026-08-13)
+
+The calibration board's canonical local frame was corner-aligned in Phase 1 of
+[M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md): origin at the plate centre, in-plane
+axes running corner to corner, matching how the board is physically hung. `initial_inplane_rotation_deg`
+is now `0.0` in every config, and the magic `45.0` is gone. Phase 1 was **field-validated on the
+two-LiDAR rig on 2026-08-14** — the board's `+Y` arrow points at the physically up-most plate corner,
+which is what rules out the `−45°` conjugation that would have produced an identical-looking diamond
+with the corner labels a quarter turn out — so M-20 is now 🟢.
+
+The two Python solvers reimplement the board's marker geometry themselves and have **not** been
+updated — that is [H-11](./H-11-camera-solvers-stale-board-frame.md), Phase 2, deferred because the
+available recordings carry no camera stream. The 2026-08-14 validation does not touch it: with the
+LiDAR side now confirmed correct, H-11's 45° error is a **confirmed live defect**, not a predicted
+one.
+
+Read that issue before running any LiDAR-camera calibration from this tree. The failure is the
+tracker's recurring shape once again: the board pose is a board→sensor transform and the solvers feed
+board-local coordinates *into* it, so the convention sits on both sides of the product. Changing one
+side leaves a 45° in-plane error that the symmetric 2×2 marker grid absorbs with a low reprojection
+error — silent — alongside a ~707 mm origin shift that probably would be noticed. LiDAR-to-LiDAR
+calibration is unaffected: both of its sides come from the same detector.
 
 ## Verified against live source
 C-01, H-01, H-02 were confirmed by reading the current code during the audit; the rest of the

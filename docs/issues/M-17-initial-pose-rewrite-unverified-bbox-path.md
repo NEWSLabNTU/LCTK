@@ -43,3 +43,45 @@ If neither holds, gate the new frame construction so the legacy path keeps the o
 
 Note that the rewrite itself is *correct and necessary* for the Seyond rig — this issue is about the
 unproven blast radius on the legacy path, not about reverting it.
+
+## Update (2026-08-13) — the template's seed is now the *correct* seed, still unmeasured
+
+Phase 1 of the corner-aligned board-frame work
+([M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md), spec
+[`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md))
+redefines the board model's canonical frame so its in-plane axes run corner to corner. Under the new
+convention the base rotation the node builds — up axis projected into the board plane — is already
+the right one for a diamond-mounted board, so `initial_inplane_rotation_deg: 0.0` becomes correct
+rather than 45° off. `board_detector.json5` has always shipped `0.0`, so the template's seed (and
+with it `sample_data.yaml` and `vehicle.yaml`, the concrete case this issue tracks) should now be
+right by construction.
+
+**This issue stays open: "should now be right" is not a measurement.** The bbox path was not
+exercised and its extrinsic was not compared before and after, which is exactly the gap this issue
+exists to record. Both suggested fixes still apply — the equivalence unit test, or a golden bbox-mode
+calibration on sample data dataset 3 before and after.
+
+Note also that the "unchanged" claim now has to be read against the frame change, not just against
+commit `162a28e`: the seed *rotation* is unchanged by the flip (the conjugation cancels), but the
+frame's origin moves from a plate corner to the plate centre, so any before/after comparison must
+account for that half-diagonal offset rather than reading it as drift. `compute_initial_pose_from_plane`
+collapses accordingly: its translation is now the plane-inlier centroid directly, and its
+`board_width` argument is gone — which is a compiler-enforced migration, not a silent one.
+
+## Update (2026-08-14) — `bbox_free` is now field-validated; `bbox` still is not
+
+The corner-aligned frame was run against the real two-LiDAR rig (Seyond + Velodyne) using the
+`TWO_LIDAR_*` recordings: detection works at `initial_inplane_rotation_deg: 0.0` on both rigs, the
+board outline coincides with the real plate's LiDAR returns, the `+Y` arrow points at the physically
+up-most corner (ruling out the `−45°` conjugation), and the LiDAR-to-LiDAR extrinsic publishes plausible
+relative poses. See [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md), now fixed.
+
+**That run exercised the `bbox_free` path only.** The crop-box (`bbox`) path was not run, so
+everything this issue tracks is still open on it:
+
+- the shared `compute_initial_pose_from_plane` rewrite remains unproven for `bbox` mode — no
+  before/after extrinsic comparison, no equivalence unit test;
+- the two rig crop-box configs `ros/lctk_launch/config/board/bbox_2_lidar_seyond.json5` and
+  `bbox_2_lidar_vlp32.json5` carry recently corrected rotation values that **no run has touched**.
+
+Validating `bbox_free` is not evidence about `bbox`. Both suggested fixes above still stand.

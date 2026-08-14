@@ -93,6 +93,19 @@ ros2 topic hz /sensing/lidar/top/pointcloud_raw
    # Add PointCloud2 topic, check if board is visible
    ```
 
+5. **Check the board's mounting and the pose seed.** The detector seeds ICP
+   from a diamond-mounted board (standing on one corner) and the sensor's up
+   axis. If the plate arrives but ICP never converges — no detections, no
+   error — the seed is the usual cause:
+   - `sensor_up_axis` must name the sensor's own up axis (`"z"` for
+     Velodyne, `"x"` for the Seyond Falcon).
+   - `initial_inplane_rotation_deg` must be `0.0` for a diamond-mounted
+     board, which is every rig here. A 45° error is exactly the worst case:
+     it sits halfway between two of the square's symmetric orientations, so
+     ICP has no gradient to follow and silently finds nothing. Do not sweep
+     this parameter; see
+     [Configuration](./configuration.md#sensor_up_axis-and-initial_inplane_rotation_deg).
+
 ### 3. Poor Calibration Accuracy
 
 **Symptoms:** Misaligned point clouds on images, high reprojection error

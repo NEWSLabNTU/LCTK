@@ -1209,7 +1209,7 @@ Add to `experiments/board-detection-2d/README.md`, after the Method E LOO sectio
 ### Recorded bags (two-LiDAR: VLP-32C + solid-state Falcon)
 
 The `TWO_LIDAR_*` bags are gitignored — see
-[`ros/lctk_sample_data/bags/README.md`](../../ros/lctk_sample_data/bags/README.md).
+[`ros/lctk_sample_data/bags/README.md`](../../../ros/lctk_sample_data/bags/README.md).
 Export them once (needs ROS, runs outside this venv):
 
 ```bash
