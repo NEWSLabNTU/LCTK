@@ -35,6 +35,15 @@ import cv2
 import numpy as np
 import rclpy
 from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
+from lidar_to_camera_solver.board_geometry import (
+    ArUcoMarker,
+    compute_multi_marker_corners,
+    detection2d_to_aruco_markers,
+    load_aruco_pattern_config,
+    marker_geometry_summary,
+    parse_dimension,
+    rotation_matrix_to_quaternion,
+)
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
 from lctk_quality import build_report, distinct_placements
 from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
@@ -57,15 +66,6 @@ from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import ColorRGBA, Header
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
-
-
-@dataclass
-class ArUcoMarker:
-    """Represents an ArUco marker detection in image coordinates."""
-
-    id: int
-    corners: List[Tuple[float, float]]  # 4 corners in pixel coordinates
-    center: Tuple[float, float]  # Center point in pixels
 
 
 @dataclass
@@ -1529,42 +1529,8 @@ class LidarToCameraSolver(Node):
     def _detection2d_to_aruco_markers(
         self, detection_msg: Detection2DArray
     ) -> List[ArUcoMarker]:
-        """Convert ROS Detection2DArray to ArUcoMarker objects.
-
-        The real detected marker corners are carried in ``detection.results``
-        (one entry per corner, in detector order TL, TR, BR, BL) by the ArUco
-        locator node; the axis-aligned bounding box is only a fallback.
-        """
-        markers = []
-
-        for detection in detection_msg.detections:
-            bbox = detection.bbox
-            center = (bbox.center.position.x, bbox.center.position.y)
-
-            # C-01: prefer the real per-corner pixel coordinates. Reconstructing
-            # corners from `center +/- size/2` discards rotation and perspective,
-            # biasing the PnP correspondences for any angled view of the board.
-            if len(detection.results) >= 4:
-                corners = [
-                    (r.pose.pose.position.x, r.pose.pose.position.y)
-                    for r in detection.results[:4]
-                ]
-            else:
-                size_x = bbox.size_x
-                size_y = bbox.size_y
-                cx, cy = center
-                corners = [
-                    (cx - size_x / 2.0, cy - size_y / 2.0),  # Top-left
-                    (cx + size_x / 2.0, cy - size_y / 2.0),  # Top-right
-                    (cx + size_x / 2.0, cy + size_y / 2.0),  # Bottom-right
-                    (cx - size_x / 2.0, cy + size_y / 2.0),  # Bottom-left
-                ]
-
-            marker_id = detection.id if hasattr(detection, "id") else 0
-
-            markers.append(ArUcoMarker(id=marker_id, corners=corners, center=center))
-
-        return markers
+        """Convert ROS Detection2DArray to ArUcoMarker objects."""
+        return detection2d_to_aruco_markers(detection_msg)
 
     def _compute_pose_diversity(
         self, board_detections: List[BoardDetection]
@@ -1630,15 +1596,9 @@ class LidarToCameraSolver(Node):
 
     def _load_aruco_pattern_config(self, config_file_path: str) -> dict:
         """Load ArUco pattern configuration from JSON5 file."""
-        if not config_file_path:
-            raise ValueError("aruco_config_file parameter is required")
-
         self.get_logger().info(f"Loading ArUco pattern config from: {config_file_path}")
 
-        import json5
-
-        with open(config_file_path, "r") as f:
-            config = json5.load(f)
+        config = load_aruco_pattern_config(config_file_path)
 
         self.get_logger().info(
             f"Loaded ArUco config: {config['num_squares_per_side']}x{config['num_squares_per_side']} grid, "
@@ -1650,63 +1610,17 @@ class LidarToCameraSolver(Node):
 
     def _parse_dimension(self, dim_str: str) -> float:
         """Parse dimension string like '500mm' or '10mm' to meters."""
-        if dim_str.endswith("mm"):
-            return float(dim_str[:-2]) / 1000.0
-        elif dim_str.endswith("m"):
-            return float(dim_str[:-1])
-        else:
-            return float(dim_str)
+        return parse_dimension(dim_str)
 
     def _compute_multi_marker_corners(
         self,
     ) -> Dict[int, List[Tuple[float, float, float]]]:
         """Compute 3D corner positions for all ArUco markers in board frame."""
-        config = self.aruco_pattern_config
-
-        board_size = self._parse_dimension(config["board_size"])
-        board_border_size = self._parse_dimension(config["board_border_size"])
-        marker_square_size_ratio = config["marker_square_size_ratio"]
-        num_squares = config["num_squares_per_side"]
-        marker_ids = config["marker_ids"]
-        # M-09: the 2x2 board layout indexes marker_ids[0..3]; fail with a clear
-        # message instead of an IndexError deep inside the solve service.
-        if len(marker_ids) < 4:
-            raise ValueError(
-                f"ArUco config must define at least 4 marker_ids for the 2x2 board, "
-                f"got {len(marker_ids)}: {marker_ids}"
-            )
-
-        square_size = (board_size - 2.0 * board_border_size) / num_squares
-        marker_size = square_size * marker_square_size_ratio
-        marker_border = (square_size - marker_size) / 2.0
+        marker_corners = compute_multi_marker_corners(self.aruco_pattern_config)
 
         self.get_logger().debug(
-            f"Board geometry: square_size={square_size * 1000:.1f}mm, "
-            f"marker_size={marker_size * 1000:.1f}mm, "
-            f"marker_border={marker_border * 1000:.1f}mm"
+            f"Board geometry: {marker_geometry_summary(self.aruco_pattern_config)}"
         )
-
-        def make_corners(
-            base_x: float, base_y: float
-        ) -> List[Tuple[float, float, float]]:
-            """Create 4 corner points for a marker in board-local coordinates."""
-            bottom = (base_x, base_y, 0.0)
-            left = (base_x + marker_size, base_y, 0.0)
-            right = (base_x, base_y + marker_size, 0.0)
-            top = (base_x + marker_size, base_y + marker_size, 0.0)
-            return [right, top, left, bottom]
-
-        origin_x = board_border_size + marker_border
-        origin_y = board_border_size + marker_border
-
-        marker_corners = {}
-        marker_corners[marker_ids[0]] = make_corners(origin_x, origin_y)
-        marker_corners[marker_ids[1]] = make_corners(origin_x + square_size, origin_y)
-        marker_corners[marker_ids[2]] = make_corners(origin_x, origin_y + square_size)
-        marker_corners[marker_ids[3]] = make_corners(
-            origin_x + square_size, origin_y + square_size
-        )
-
         self.get_logger().debug(
             f"Computed corners for {len(marker_corners)} markers in board frame"
         )
@@ -2038,21 +1952,7 @@ class LidarToCameraSolver(Node):
 
     def _rotation_matrix_to_quaternion(self, rotation_matrix: np.ndarray) -> np.ndarray:
         """Convert 3x3 rotation matrix to quaternion."""
-        rvec, _ = cv2.Rodrigues(rotation_matrix)
-        angle = np.linalg.norm(rvec)
-
-        if angle < 1e-6:
-            return np.array([0.0, 0.0, 0.0, 1.0])
-
-        axis = rvec.flatten() / angle
-        half_angle = angle / 2.0
-
-        qx = axis[0] * np.sin(half_angle)
-        qy = axis[1] * np.sin(half_angle)
-        qz = axis[2] * np.sin(half_angle)
-        qw = np.cos(half_angle)
-
-        return np.array([qx, qy, qz, qw])
+        return rotation_matrix_to_quaternion(rotation_matrix)
 
 
 def main(args=None):
