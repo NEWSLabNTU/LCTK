@@ -116,6 +116,78 @@ Downstream stages are identical for both modes:
 2. **PCA** computes initial pose from plane inliers
 3. **ICP** refines pose by matching model to observed points
 
+#### The board model and its frame
+
+Everything downstream of Stage 1 is expressed in the board's **canonical
+local frame**, defined in `rust/hollow-board-config/src/lib.rs`. The plate
+is a square hung as a **diamond** — it stands on one corner — and the
+frame's in-plane axes run along its diagonals, corner to corner, so that
+every accessor name (`top_corner`, `left_circle_center`, …) means what it
+says:
+
+- **origin** — the plate's **centre**. A published board pose is therefore
+  a pose *of the plate centre*.
+- **+Z** — the board normal, pointing toward the sensor.
+- **+Y** — from the centre toward the **top** corner.
+- **+X** — `Y × Z`, from the centre toward the **left** corner.
+
+Viewed from the sensor (so +Z comes out of the page), with `W` the plate's
+edge length, `R = W/√2` its half-diagonal, `s` the configured
+`hole_center_shift` and `d = s√2`:
+
+```
+                             ▲ +Y
+                             ●  top corner (0, +R)
+                            ╱ ╲
+                           ╱   ╲
+                          ╱  ○  ╲         top hole (0, +d)
+                         ╱       ╲
+   right corner (−R, 0) ●   ○ + ○  ●──▶ +X   left corner (+R, 0)
+                         ╲       ╱
+    right hole (−d, 0)    ╲     ╱          left hole (+d, 0)
+                           ╲   ╱
+                            ╲ ╱
+                             ●  bottom corner (0, −R)
+```
+
+Two things in that picture look like mistakes and are not:
+
+- **The "left" corner is on the observer's right.** The corner accessors
+  are named from the *board's* point of view, not the sensor's. Renaming
+  them would silently reorder the corner lists every downstream consumer
+  depends on, so the naming is recorded and deliberately left alone.
+- **Z is the normal, not X.** `board-cluster-detector` uses the REP-103
+  convention, where X is the normal. Aligning the two is a separate change,
+  because the quality metric and the detection publisher both read this
+  rotation's third column as the normal.
+
+The three holes are the *only* feature that resolves the square's 90°
+symmetry: two sit on the horizontal diagonal at ±d, one on the vertical
+diagonal at +d, and none at −d. Board-interior points carry no in-plane
+information at all, so without that missing fourth hole the pose would be
+unobservable within the board plane.
+
+`hollow-board-config` also owns the **marker paper's** placement on the
+plate. Paper coordinates run along the paper's *edges*, i.e. at 45° to the
+board frame's axes; `marker_paper_point` is the single bridge between the
+two, and where the sheet sits is configuration
+(`paper_placement` in `aruco_pattern.json5`), not a derived constant.
+
+The contract above is enforced by `rust/hollow-board-config/tests/`:
+`board_frame.rs` (accessor coordinates dotted against the model's *own*
+axes, under randomised poses), `boundary_projection.rs` (the plate is the
+L¹ ball `|x| + |y| ≤ R`, checked against a brute-force nearest-point
+reference), and `marker_layout_golden.rs` (marker corners in **world**
+coordinates, keyed by ArUco marker id, with an independent Python generator
+in `tests/fixtures/`).
+
+> **Camera-side status.** The two Python solvers reimplement the marker
+> layout independently and still use the **previous, edge-aligned** frame.
+> Until that is corrected, LiDAR-camera calibration is not trustworthy —
+> see `docs/issues/H-11-camera-solvers-stale-board-frame.md` in the repo.
+> LiDAR-to-LiDAR calibration is unaffected, because both sides of it come
+> from the same detector.
+
 #### Crop-box-free foreground methods (`bbox_free`)
 
 `foreground_method` picks how `bbox_free` extracts foreground points:

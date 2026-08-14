@@ -1,0 +1,106 @@
+# H-11 · Camera solvers still build marker geometry in the old edge-aligned board frame → every LiDAR-camera extrinsic is wrong by 45°, half of it silently
+
+- **Severity:** High
+- **Area:** `ros/extrinsic_solver_node`, `ros/advanced_extrinsic_solver` / board frame convention
+- **Status:** Open — this is **Phase 2** of the corner-aligned board-frame work; Phase 1 has landed and was field-validated on the two-LiDAR rig 2026-08-14, which makes the error below a **confirmed live defect** rather than a predicted one
+- **Verified:** 2026-08-13 — `extrinsic_solver_node/main.py:475-575`, `advanced_extrinsic_solver/main.py:1589-1656`, read against the landed `rust/hollow-board-config/src/lib.rs`
+- **Spec:** [`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md) — "Out of Scope" and "Why the phase gap needs a guard rather than a note"
+- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./M-14-corner-order-brittle.md) (the duplicated corner layout), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps)
+
+## Problem
+
+Phase 1 redefined the calibration board's canonical local frame in
+`rust/hollow-board-config`: the origin moved from the plate's bottom corner to the plate
+**centre**, and the in-plane axes now run corner to corner (the plate is the diamond
+`|x| + |y| ≤ R`, `R = board_width/√2`) instead of along the plate's edges. `lidar_board_detector`
+publishes board poses in that frame today.
+
+The two Python solvers do **not** consume that model. Each reimplements the board's marker geometry
+from the ArUco pattern config in its own `_compute_multi_marker_corners`:
+
+- `ros/extrinsic_solver_node/extrinsic_solver_node/main.py:475`
+- `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1589`
+
+Both still emit corners as `(base_x, base_y, 0)` with the origin at the plate's origin corner and
+the axes along the plate's edges — the **previous** convention. Neither reads the new
+`paper_placement` field that Phase 1 added to `aruco_pattern.json5`, which is now the one place
+stating where the printed sheet sits on the plate.
+
+## Why this is High, not a tidy-up
+
+The published board pose is the transform **from board coordinates to sensor coordinates**, and the
+solvers supply *board-local* marker coordinates to it:
+
+```python
+world_corners = (board_rotation @ local_corners.T).T + board_position
+```
+
+The convention therefore appears on **both sides of that product**. Changing only the LiDAR side
+leaves two errors, and they are not equally visible:
+
+1. **A 45° in-plane rotation — silent.** The marker grid is a symmetric 2×2, so a quarter-turn's
+   worth of rotational error still produces a clean-looking PnP solve with low reprojection error.
+   Nothing in the pipeline reports it. This is the same class of failure as
+   [M-14](./M-14-corner-order-brittle.md)'s corner permutation and
+   [H-09](./archive/H-09-no-extrinsic-quality-metric.md)'s central point: the system has no way to
+   tell you it is not working.
+2. **An origin shift of `board_width/√2` ≈ 707 mm — probably caught.** The board-local origin moved
+   from a corner to the centre, so every object point is displaced by the plate's half-diagonal.
+
+Half the error is silent. That is precisely why documentation alone is insufficient here and a
+runtime guard is required.
+
+## Impact
+
+- **LiDAR-camera calibration is untrustworthy until this lands.** Any extrinsic solved from the
+  current tree — live, or exported to Autoware via `lctk_autoware_export` — carries the error above.
+- **LiDAR-to-LiDAR calibration is unaffected and must keep working.** Both sides of that solve come
+  from `lidar_board_detector`, so the convention cancels. Whatever guard lands must not block it
+  ([M-16](./M-16-l2l-pipeline-untested.md)).
+- **Saved detections predate the change.** Files written before Phase 1 are `version: 3`
+  (see CLAUDE.md, "Detection File Format"), which records no frame convention at all, so a v3 file
+  cannot be told apart from a post-change one.
+
+## Fix (the Phase 2 scope)
+
+1. **Port both `_compute_multi_marker_corners` to the corner-aligned frame.** Corners must come out
+   where `BoardModel::marker_paper_point` puts them: paper coordinates run along the paper's edges,
+   at 45° to the board frame's axes, and the sheet's position on the plate comes from
+   `paper_placement` in `aruco_pattern.json5` rather than being re-derived from the board width.
+2. **Assert it, cross-language.** `rust/hollow-board-config/tests/fixtures/marker_corners_world.golden.json`
+   is the checked-in seam: world-coordinate marker corners at a stated physical mounting, keyed by
+   ArUco marker id, with an independent Python generator alongside it. The Rust side asserts against
+   it already; a pytest in `ros/advanced_extrinsic_solver`'s test directory should assert the Python
+   implementations against the same file. That also discharges
+   [M-14](./M-14-corner-order-brittle.md)'s "corner order is defined twice and never verified", and
+   the shared golden is the natural place to finally collapse the two copies into one helper.
+3. **Add the frame-convention check.** The publishing half already exists:
+   `lidar_board_detector` publishes `corner_aligned_plate_center_v1` as a `std_msgs/String`, once,
+   latched (transient-local, depth 1), on the fixed topic `/lctk/board_frame_convention`
+   (`main.rs:300-323`, `:528-545`). Both solvers must subscribe and **refuse to start on mismatch**,
+   naming the reason — the board frame changed and this solver has not been updated. **Absence of
+   the tag must be treated as failure, not as consent**: a solver that starts before any detector
+   must not read silence as agreement. The topic is deliberately absolute rather than node-relative,
+   because the launch system generates one detector node per sensor-marker pair.
+4. **Bump the saved-detection format to version 4**, carrying that same identifier, so a
+   file solved under one convention cannot be silently reloaded under another. v3 files must load
+   with a loud warning, in the manner [H-10](./archive/H-10-dump-load-regresses-c01.md) established.
+
+## Notes
+
+Deliberately deferred from Phase 1, not overlooked: the recordings available here
+(`ros/lctk_sample_data/bags/TWO_LIDAR_*`) contain **no camera stream**, so nothing camera-side could
+be verified end to end. Landing an unverifiable rewrite of the camera geometry alongside the
+verifiable LiDAR-side one would have made a failure unattributable. Closing this issue requires a
+recording with both a LiDAR and a camera observing the board.
+
+**Update (2026-08-14).** The LiDAR side is now field-validated on the two-LiDAR rig
+([M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md), fixed): the published board
+pose is confirmed corner-aligned in the intended sense — the `+Y` arrow points at the physically
+up-most plate corner, which rules out the `−45°` conjugation. The mismatch described above is
+therefore no longer a prediction about what the detector emits; it is a **measured** property of one
+side of the product against unchanged Python on the other. Nothing camera-side was run — the
+`TWO_LIDAR_*` bags still carry no camera stream — so the closing condition is unchanged. Relatedly,
+`paper_placement`'s shipped values are now confirmed to be the board's **measured** sheet placement
+(lower quarter, top corner at the plate centre), so fix step 1 must read them rather than assume a
+centred sheet.

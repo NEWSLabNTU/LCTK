@@ -2,9 +2,10 @@
 
 - **Severity:** Medium
 - **Area:** build / test tooling
-- **Status:** Open
+- **Status:** Fixed
 - **Verified:** Reproduced 2026-08-11 — `cargo nextest` at the workspace root fails; running from a package directory succeeds
-- **Related:** [L-16](./archive/L-16-bindgen-lock-stale-skip.md), [L-14](./archive/L-14-lint-red-on-main.md), [L-15](./archive/L-15-build-dirties-worktree.md)
+- **Fixed:** 2026-08-14 — root config is now synthesised per build; 240/240 tests run from the repo root
+- **Related:** [L-16](./L-16-bindgen-lock-stale-skip.md), [L-14](./L-14-lint-red-on-main.md), [L-15](./L-15-build-dirties-worktree.md)
 
 ## Problem
 
@@ -62,3 +63,36 @@ Either:
 
 Whichever is chosen, add a check that fails loudly when the Rust tests cannot be collected, so an
 unrunnable suite is never mistaken for a passing one.
+
+## Resolution (2026-08-14)
+
+Fix 1 from above. `setup/scripts/sync-root-cargo-config.sh` synthesises
+`.cargo/config.toml` at the workspace root by copying the first (sorted, so the choice is
+deterministic and the file is byte-stable across runs) generated `ros/*/.cargo/config.toml` and
+rewriting the patch paths root-relative — `path = "../../build/x"` → `path = "build/x"`. The
+`[build] rustflags` are absolute already and carry over untouched.
+
+Fix 2 was rejected: it fixes the two known consumers but leaves the root a place where cargo
+still does not work, so the next person to type `cargo test`, `cargo clippy`, or `cargo audit` at
+the root hits the same yanked-`sensor_msgs` wall. Fix 1 makes the root work for every cargo
+command, and it repairs the L-16 guard without that guard having to know about package layout.
+
+**Staleness.** The script runs from `just build` twice — once before the L-16 guard, which reads
+the file it produces, and once after `colcon build`, so what lands is what colcon just wrote — and
+again from `just test`. It always overwrites; the file is never hand-maintained, which is what
+CLAUDE.md Known Issue 1 (`Unable to update .../install/.../rust`) warns about. `/.cargo/` stays
+gitignored. The pre-guard call is allowed to fail, because on a never-yet-built tree there are no
+per-package configs to copy from yet; the post-build call is not.
+
+The script refuses rather than guesses if colcon-cargo-ros2 ever emits a patch path that is not
+`../../…`, since the rewrite would otherwise silently produce a wrong root config.
+
+**Collection guard.** New `just test` prerequisite `_check-rust-tests-collectable` runs
+`cargo nextest list --workspace`, which compiles every test target without running one, and fails
+with a banner if the config cannot be synthesised, if the listing command fails, or if the listing
+is empty. It counts only stdout — cargo's `Compiling …`/`Finished` progress goes to stderr, and
+folding that in would let an empty suite report a nonzero test count.
+
+Also fixed in passing, same failure class: `just test` invoked bare `pytest`, but apt's
+`python3-pytest` installs the module and a `pytest-3` script and no `pytest` on `PATH`, so the
+Python half exited 127 without running. Now `python3 -m pytest`.
