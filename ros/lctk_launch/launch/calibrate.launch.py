@@ -179,9 +179,9 @@ def generate_nodes(context, *args, **kwargs) -> list:
         if use_advanced_solver:
             nodes.append(
                 Node(
-                    package="advanced_extrinsic_solver",
-                    executable="advanced_extrinsic_solver",
-                    name="advanced_extrinsic_solver",
+                    package="lidar_to_camera_solver",
+                    executable="lidar_to_camera_solver",
+                    name="lidar_to_camera_solver",
                     namespace=solver.namespace,
                     output="screen",
                     arguments=node_args,

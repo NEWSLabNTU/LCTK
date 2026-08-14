@@ -181,7 +181,7 @@ debug_mode=true            # Enable debug topics
 log_level=info             # ROS log level (debug/info/warn/error)
 rviz_enabled=true          # Launch RViz
 mode=offline               # offline (RELIABLE QoS, rosbags) or realtime (BEST_EFFORT, live)
-use_advanced_solver=false  # Use the multi-pose buffered advanced solver
+use_advanced_solver=false  # Use the multi-pose buffered lidar_to_camera_solver
 enable_overlay=true        # Point cloud / image overlay for visual validation
 enable_judge=true          # Calibration judge (IoU metrics)
 

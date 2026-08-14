@@ -10,7 +10,7 @@ package_path = os.path.join(os.path.dirname(__file__), '..', 'lib', python_versi
 if package_path not in sys.path:
     sys.path.insert(0, package_path)
 
-from advanced_extrinsic_solver.main import main
+from lidar_to_camera_solver.main import main
 
 if __name__ == '__main__':
     main()

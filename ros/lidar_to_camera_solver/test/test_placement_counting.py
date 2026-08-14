@@ -19,7 +19,7 @@ import pytest
 from scipy.spatial.transform import Rotation
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
-from advanced_extrinsic_solver.main import AdvancedExtrinsicSolver as S
+from lidar_to_camera_solver.main import LidarToCameraSolver as S
 
 
 def board_msg(position, yaw=0.0, pitch=0.0):

@@ -217,7 +217,7 @@ test: _check-rust-tests-collectable
     # `pytest-3` script but no bare `pytest` on PATH, so the plain name exits 127 and the
     # Python half never runs. Same failure class as M-18 -- a suite that silently is not
     # reached. Must be the system python3 (see _check-python-env).
-    python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ -v --no-header
+    python3 -m pytest ros/lctk_launch/test/ ros/lidar_to_camera_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
 lidar-camera CONFIG='seyond_left.yaml':

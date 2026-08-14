@@ -32,8 +32,8 @@ just
   - `aruco_generator_node/` - Prints the ArUco board pattern from `aruco_pattern.json5`
   - `lidar_board_detector/` - Calibration board detection from point clouds
   - `extrinsic_solver_node/` - Auto-publishing single-pose LiDAR-camera solver (default)
-  - `advanced_extrinsic_solver/` - Multi-pose buffered LiDAR-camera solver with services
-  - `interactive_solver_controller/` - Rich TUI driving the advanced solver
+  - `lidar_to_camera_solver/` - Multi-pose buffered LiDAR-camera solver with services
+  - `interactive_solver_controller/` - Rich TUI driving `lidar_to_camera_solver`
   - `lidar_to_lidar_solver/` - LiDAR-to-LiDAR calibration solver
   - `lctk_quality/` + `calibration_judge/` - Extrinsic quality metric (H-09)
   - `pointcloud_image_overlay/` - Projects the cloud onto the image for visual verification
@@ -369,7 +369,7 @@ hand `detect_markers` a rectified image.
 - `aruco_locator_node` - One per camera
 - LiDAR-camera solver (one per pair) - selected by `use_advanced_solver` argument:
   - `extrinsic_solver_node` (default) - Auto-publishes transform on each detection pair
-  - `advanced_extrinsic_solver` - Multi-pose buffered solver with manual control
+  - `lidar_to_camera_solver` - Multi-pose buffered solver with manual control
 - `lidar_to_lidar_solver` - One per lidar-lidar pair
 
 **Synchronizer Parameters (Conflux):**
@@ -414,11 +414,11 @@ The `extrinsic_solver_node` automatically publishes transforms whenever it recei
 
 Use this for quick calibration verification or when you want real-time transform updates.
 
-### Advanced Extrinsic Solver
+### LiDAR-to-Camera Solver (multi-pose)
 
-The `advanced_extrinsic_solver` node provides multi-pose calibration with manual adjustment capabilities. Enable with `use_advanced_solver=true`.
+The `lidar_to_camera_solver` node provides multi-pose calibration with manual adjustment capabilities. Enable with `use_advanced_solver=true`.
 
-**Services** (under `~/calibration/advanced_extrinsic_solver/advanced_extrinsic_solver/`):
+**Services** (under `~/calibration/<pair>/lidar_to_camera_solver/`):
 - `add_detection` - Add current ArUco + board detection pair to buffer
 - `clear_buffer` - Clear all buffered detections
 - `get_status` - Get buffer size, correspondences, solve status
@@ -449,7 +449,7 @@ Autoware exporter consumes. A saved calibration also carries its own quality rec
 
 ### Interactive Solver Controller
 
-Rich TUI for controlling the advanced_extrinsic_solver. Run via:
+Rich TUI for controlling `lidar_to_camera_solver`. Run via:
 ```bash
 ros2 run interactive_solver_controller interactive_solver_controller
 ```

@@ -3,7 +3,7 @@ from glob import glob
 
 from setuptools import find_packages, setup
 
-package_name = "advanced_extrinsic_solver"
+package_name = "lidar_to_camera_solver"
 
 setup(
     name=package_name,
@@ -14,7 +14,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
         # (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),  # No local config files
-        (os.path.join("lib", package_name), ["scripts/advanced_extrinsic_solver"]),
+        (os.path.join("lib", package_name), ["scripts/lidar_to_camera_solver"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -25,7 +25,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "advanced_extrinsic_solver = advanced_extrinsic_solver.main:main",
+            "lidar_to_camera_solver = lidar_to_camera_solver.main:main",
         ],
     },
 )

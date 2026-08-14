@@ -25,7 +25,7 @@
   <exec_depend>aruco_locator_node</exec_depend>
   <exec_depend>lidar_board_detector</exec_depend>
   <exec_depend>extrinsic_solver_node</exec_depend>
-  <exec_depend>advanced_extrinsic_solver</exec_depend>
+  <exec_depend>lidar_to_camera_solver</exec_depend>
   <exec_depend>lidar_to_lidar_solver</exec_depend>
   <exec_depend>pointcloud_image_overlay</exec_depend>
   <exec_depend>calibration_judge</exec_depend>
