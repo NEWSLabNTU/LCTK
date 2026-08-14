@@ -45,7 +45,8 @@ def test_exported_yaml_round_trips_through_xacro(tmp_path):
     detections.write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": 4,
+                "board_frame_convention": "corner_aligned_plate_center_v1",
                 "transform": {
                     "rvec": (axis * angle).tolist(),
                     "tvec": T_solve[:3, 3].tolist(),

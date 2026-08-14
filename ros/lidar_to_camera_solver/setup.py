@@ -26,6 +26,7 @@ setup(
     entry_points={
         "console_scripts": [
             "lidar_to_camera_solver = lidar_to_camera_solver.main:main",
+            "migrate_detections = lidar_to_camera_solver.migrate_detections:main",
         ],
     },
 )

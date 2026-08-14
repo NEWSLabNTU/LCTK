@@ -430,10 +430,11 @@ The `lidar_to_camera_solver` node provides multi-pose calibration with manual ad
 - `reset_transform` - Reset manual adjustments (re-solve from buffer)
 - `get_pose_info` - Get solved pose, current pose, and adjustment delta
 
-**Detection File Format** (version 3):
+**Detection File Format** (version 4):
 ```json
 {
-  "version": 3,
+  "version": 4,
+  "board_frame_convention": "corner_aligned_plate_center_v1",
   "num_detections": 5,
   "detections": [...],
   "transform": {
@@ -442,10 +443,22 @@ The `lidar_to_camera_solver` node provides multi-pose calibration with manual ad
   }
 }
 ```
-Version 3 (H-10) persists the real ArUco corner pixels inside each 2D detection's `results`;
-v1/v2 files reload but fall back to the axis-aligned bbox — a biased (C-01) solve — and the
-loader warns loudly. `transform` is the raw solver output (`T_optical←lidar`), the input the
-Autoware exporter consumes. A saved calibration also carries its own quality record (H-09).
+Version 4 (H-11) records the board-frame convention that produced the file and keeps the
+board pose's 6x6 covariance (v3 dropped it, so a reloaded buffer silently solved with
+uniform weight). Version 3 (H-10) persists the real ArUco corner pixels inside each 2D
+detection's `results`. `transform` is the raw solver output (`T_optical←lidar`), the input
+the Autoware exporter consumes. A saved calibration also carries its own quality record (H-09).
+
+**Versions below 4 are rejected, not migrated on load** — a v3 file cannot say which board
+frame produced it, and reinterpreting it would make its meaning depend on the build that
+opened it. Convert one you still trust:
+```bash
+ros2 run lidar_to_camera_solver migrate_detections \
+    --input ~/detections.json --output ~/detections-v4.json \
+    --assume-convention corner_aligned_plate_center_v1
+```
+`lctk_autoware_export` enforces the same check, because it writes into a file that reaches
+a vehicle.
 
 ### Interactive Solver Controller
 

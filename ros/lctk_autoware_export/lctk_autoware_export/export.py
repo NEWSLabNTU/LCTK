@@ -1,6 +1,6 @@
 """Patch an Autoware ``sensor_kit_calibration.yaml`` with an LCTK-solved extrinsic.
 
-Input is the advanced solver's ``dump_detections`` JSON (version 3), whose
+Input is ``lidar_to_camera_solver``'s ``dump_detections`` JSON (version 4), whose
 ``transform`` holds the raw solver rvec/tvec (``T_optical<-lidar``). The re-labeled
 TF topic is deliberately not an input — see M-01 and the Phase 6 design doc.
 """
@@ -23,14 +23,52 @@ class ExportError(Exception):
     """Refuse-to-guess failure; message tells the operator what to fix."""
 
 
+#: The dump format this exporter understands, and the board-frame convention its poses
+#: must have been produced in. Kept as literals rather than imported from
+#: `lidar_to_camera_solver` so this package stays independently installable; the pytest
+#: suite runs both and would catch a divergence.
+SUPPORTED_FORMAT_VERSION = 4
+SUPPORTED_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
+
+
+def check_format_version(path, data):
+    """H-11: refuse a dump whose format or frame convention this build cannot vouch for.
+
+    This exporter writes into a `sensor_kit_calibration.yaml` that ends up on a vehicle,
+    which makes it the single most important place for the check to exist. It had none:
+    it read only `transform.rvec`/`transform.tvec`, and its own fixtures declared
+    `"version": 2` and passed.
+    """
+    version = data.get("version", 0)
+    if version != SUPPORTED_FORMAT_VERSION:
+        raise ExportError(
+            f"{path}: detection file version {version}, expected "
+            f"{SUPPORTED_FORMAT_VERSION}. Versions below 4 record no board-frame "
+            "convention, so their transform may be wrong by a silent 45-degree "
+            "in-plane rotation (the 2x2 ArUco grid is symmetric, so the reprojection "
+            "error stays low) plus a ~707 mm origin shift. Re-capture, or convert a "
+            "file you still trust with: ros2 run lidar_to_camera_solver "
+            "migrate_detections --help"
+        )
+
+    convention = data.get("board_frame_convention")
+    if convention is None or convention.strip() != SUPPORTED_FRAME_CONVENTION:
+        raise ExportError(
+            f"{path}: board-frame convention {convention!r}, expected "
+            f"'{SUPPORTED_FRAME_CONVENTION}'. The stored transform means something "
+            "else; exporting it would put a wrong extrinsic on a vehicle."
+        )
+
+
 def load_solver_transform(path):
     """Read rvec/tvec from a dump_detections JSON file."""
     data = json.loads(Path(path).read_text())
+    check_format_version(path, data)
     transform = data.get("transform")
     if not transform or "rvec" not in transform or "tvec" not in transform:
         raise ExportError(
             f"{path}: no solved transform found. Produce the file with the "
-            "advanced solver's dump_detections service after a successful solve."
+            "lidar_to_camera_solver's dump_detections service after a successful solve."
         )
     rvec = np.asarray(transform["rvec"], dtype=np.float64).reshape(3)
     tvec = np.asarray(transform["tvec"], dtype=np.float64).reshape(3)
@@ -93,7 +131,7 @@ def main(argv=None):
     parser.add_argument(
         "--detections",
         required=True,
-        help="dump_detections JSON from the advanced solver (source of rvec/tvec)",
+        help="dump_detections JSON from lidar_to_camera_solver (source of rvec/tvec)",
     )
     parser.add_argument(
         "--target", required=True, help="sensor_kit_calibration.yaml to patch"
