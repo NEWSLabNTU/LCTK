@@ -1,9 +1,37 @@
-use anyhow::{anyhow, Result};
-use geometry_msgs::msg::{Point, Pose, Quaternion};
 use nalgebra as na;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
 
+/// Crop box used to isolate the calibration board from the raw cloud.
+///
+/// # On-disk format (`config/board/bbox*.json5`)
+///
+/// The file is parsed straight into this struct by `serde`; there is no
+/// hand-written parser. That means the `rotation` array is deserialized by
+/// nalgebra's `UnitQuaternion` impl, which is transparent down to
+/// `Quaternion`'s backing `Vector4` — whose component order is
+/// **`[x, y, z, w]` (i, j, k, w), scalar LAST**:
+///
+/// ```json5
+/// {
+///     "pose": {
+///         "translation": [x, y, z],       // meters
+///         "rotation": [x, y, z, w],       // scalar-LAST, and must already be unit norm
+///     },
+///     "size_xyz": [sx, sy, sz],           // meters, full extents (box is centered on the pose)
+/// }
+/// ```
+///
+/// Two traps live here, and both have bitten this file before:
+///
+/// 1. `na::Quaternion::new(w, i, j, k)` and every other nalgebra *constructor*
+///    take the scalar **first**, the opposite of the storage/serde order above.
+///    A config written scalar-first parses successfully and silently means a
+///    different rotation. The live ROS-parameter path in `main.rs`
+///    (`bbox_rotation_w/_x/_y/_z` fed to `Quaternion::new`) is scalar-first
+///    because it goes through the constructor; this file's array is not.
+/// 2. `Unit`'s `Deserialize` does **not** normalize — it wraps the value as-is.
+///    A non-unit array yields a `UnitQuaternion` that is not a unit quaternion,
+///    which turns `pose.inverse()` in [`BBox::contains_point`] into a scaling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BBox {
     pub pose: na::Isometry3<f64>,
@@ -22,189 +50,115 @@ impl BBox {
 
         in_range(sx, pt.x) && in_range(sy, pt.y) && in_range(sz, pt.z)
     }
+}
 
-    /// Convert BBox to ROS geometry_msgs::Pose
-    pub fn to_ros_pose(&self) -> Pose {
-        let translation = &self.pose.translation;
-        let rotation = &self.pose.rotation;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        Pose {
-            position: Point {
-                x: translation.x,
-                y: translation.y,
-                z: translation.z,
-            },
-            orientation: Quaternion {
-                x: rotation.i,
-                y: rotation.j,
-                z: rotation.k,
-                w: rotation.w,
-            },
-        }
+    /// Local stand-in for `approx`, which is not a dependency of this package.
+    fn assert_close(actual: f64, expected: f64, eps: f64, what: &str) {
+        assert!(
+            (actual - expected).abs() < eps,
+            "{what}: expected {expected} +/- {eps}, got {actual}"
+        );
     }
 
-    /// Create BBox from ROS geometry_msgs::Pose and size
-    pub fn from_ros_pose(pose: &Pose, size_xyz: [f64; 3]) -> Result<Self> {
-        // Validate size parameters
-        for (i, &size) in size_xyz.iter().enumerate() {
-            if size <= 0.0 {
-                return Err(anyhow!(
-                    "Size parameter {} must be positive, got {}",
-                    ['x', 'y', 'z'][i],
-                    size
-                ));
-            }
-        }
+    fn parse(json5_str: &str) -> BBox {
+        json5::from_str(json5_str).expect("shipped-format bbox config must parse")
+    }
 
-        // Validate and normalize quaternion
-        let quat = &pose.orientation;
-        let quat_norm =
-            (quat.x * quat.x + quat.y * quat.y + quat.z * quat.z + quat.w * quat.w).sqrt();
-
-        if quat_norm < 1e-6 {
-            return Err(anyhow!("Invalid quaternion with near-zero norm"));
-        }
-
-        // Normalize quaternion
-        let normalized_quat = na::UnitQuaternion::new_normalize(na::Quaternion::new(
-            quat.w / quat_norm,
-            quat.x / quat_norm,
-            quat.y / quat_norm,
-            quat.z / quat_norm,
+    /// Pins the scalar-LAST order of the `rotation` array against the
+    /// scalar-first constructor order. A 90° yaw is deliberately asymmetric:
+    /// under the wrong reading the array below is a 90° *roll* instead, and a
+    /// rotation-invariant assertion (norms, the box being a box) would not
+    /// notice.
+    #[test]
+    fn rotation_array_is_scalar_last() {
+        let h = std::f64::consts::FRAC_1_SQRT_2; // sin(45°) == cos(45°)
+        let bbox = parse(&format!(
+            r#"{{ "pose": {{ "translation": [0, 0, 0], "rotation": [0, 0, {h}, {h}] }},
+                  "size_xyz": [1, 1, 1] }}"#
         ));
 
-        let translation = na::Translation3::new(pose.position.x, pose.position.y, pose.position.z);
-
-        let isometry = na::Isometry3::from_parts(translation, normalized_quat);
-
-        Ok(BBox {
-            pose: isometry,
-            size_xyz,
-        })
+        // +90° about Z sends +X to +Y. Under a scalar-first reading the same
+        // array would be +90° about Y, which sends +X to -Z.
+        let mapped = bbox.pose.rotation * na::Vector3::x();
+        assert_close(mapped.x, 0.0, 1e-12, "x");
+        assert_close(mapped.y, 1.0, 1e-12, "y");
+        assert_close(mapped.z, 0.0, 1e-12, "z");
     }
 
-    /// Convert BBox to pretty-printed JSON5 string
-    pub fn to_json5_string(&self) -> Result<String> {
-        // Create a serializable representation with separate translation and rotation
-        let translation = &self.pose.translation;
-        let quaternion = self.pose.rotation.quaternion();
+    /// `Unit`'s `Deserialize` does not normalize, so a shipped file that is not
+    /// unit norm silently corrupts `contains_point`.
+    #[test]
+    fn shipped_configs_parse_as_unit_quaternions() {
+        const SHIPPED: [(&str, &str); 6] = [
+            (
+                "bbox.json5",
+                include_str!("../../lctk_launch/config/board/bbox.json5"),
+            ),
+            (
+                "bbox_v1.json5",
+                include_str!("../../lctk_launch/config/board/bbox_v1.json5"),
+            ),
+            (
+                "bbox-seyond.json5",
+                include_str!("../../lctk_launch/config/board/bbox-seyond.json5"),
+            ),
+            (
+                "bbox-vlp.json5",
+                include_str!("../../lctk_launch/config/board/bbox-vlp.json5"),
+            ),
+            (
+                "bbox_2_lidar_seyond.json5",
+                include_str!("../../lctk_launch/config/board/bbox_2_lidar_seyond.json5"),
+            ),
+            (
+                "bbox_2_lidar_vlp32.json5",
+                include_str!("../../lctk_launch/config/board/bbox_2_lidar_vlp32.json5"),
+            ),
+        ];
 
-        let json_repr = serde_json::json!({
-            "pose": {
-                "translation": [translation.x, translation.y, translation.z],
-                "rotation": [quaternion.w, quaternion.i, quaternion.j, quaternion.k]
-            },
-            "size_xyz": self.size_xyz
-        });
+        for (name, text) in SHIPPED {
+            let bbox = parse(text);
+            let norm = bbox.pose.rotation.quaternion().norm();
+            // 1e-6, not float epsilon: the shipped quaternions are hand-rounded
+            // to seven decimals, so exact unit norm is not achievable. This
+            // catches a genuinely unnormalized array, which `Unit` would accept.
+            assert_close(norm, 1.0, 1e-6, name);
+            assert!(
+                bbox.size_xyz.iter().all(|&s| s > 0.0),
+                "{name}: sizes must be positive"
+            );
+        }
+    }
 
-        // Convert to pretty-printed JSON first, then format as JSON5 with comments
-        let _json_str = serde_json::to_string_pretty(&json_repr)?;
+    /// The two-LiDAR presets mean "no rotation". Written scalar-first as
+    /// `[1, 0, 0, 0]` they parsed as a 180° roll instead — harmless only
+    /// because that maps a centered box onto itself. Pin the intent.
+    #[test]
+    fn two_lidar_presets_are_unrotated() {
+        for text in [
+            include_str!("../../lctk_launch/config/board/bbox_2_lidar_seyond.json5"),
+            include_str!("../../lctk_launch/config/board/bbox_2_lidar_vlp32.json5"),
+        ] {
+            let rotation = parse(text).pose.rotation;
+            assert_close(rotation.angle(), 0.0, 1e-12, "rotation angle");
+        }
+    }
 
-        // Add JSON5 formatting and comments
-        let json5_str = format!(
-            r#"{{
-    // Bounding box configuration for filtering point cloud data
-    // The pose defines the position and orientation of the box center
-    "pose": {{
-        // Translation from origin (x, y, z in meters)
-        "translation": [{:.1}, {:.1}, {:.1}],
-        // Rotation as quaternion (w, x, y, z)
-        "rotation": [{:.6}, {:.6}, {:.6}, {:.6}]
-    }},
-    // Size of the bounding box in meters (x, y, z)
-    "size_xyz": [{:.1}, {:.1}, {:.1}]
-}}"#,
-            translation.x,
-            translation.y,
-            translation.z,
-            quaternion.w,
-            quaternion.i,
-            quaternion.j,
-            quaternion.k,
-            self.size_xyz[0],
-            self.size_xyz[1],
-            self.size_xyz[2]
+    #[test]
+    fn contains_point_respects_pose_and_extents() {
+        let bbox = parse(
+            r#"{ "pose": { "translation": [10, 0, 0], "rotation": [0, 0, 0, 1] },
+                 "size_xyz": [2, 4, 6] }"#,
         );
 
-        Ok(json5_str)
-    }
-
-    /// Load BBox from JSON5 string
-    pub fn from_json5_string(json5_str: &str) -> Result<Self> {
-        #[derive(Deserialize)]
-        struct BBoxJson {
-            pose: PoseJson,
-            size_xyz: [f64; 3],
-        }
-
-        #[derive(Deserialize)]
-        struct PoseJson {
-            translation: [f64; 3],
-            rotation: [f64; 4], // [w, x, y, z]
-        }
-
-        let bbox_json: BBoxJson = json5::from_str(json5_str)?;
-
-        // Validate size parameters
-        for (i, &size) in bbox_json.size_xyz.iter().enumerate() {
-            if size <= 0.0 {
-                return Err(anyhow!(
-                    "Size parameter {} must be positive, got {}",
-                    ['x', 'y', 'z'][i],
-                    size
-                ));
-            }
-        }
-
-        // Create translation
-        let translation = na::Translation3::new(
-            bbox_json.pose.translation[0],
-            bbox_json.pose.translation[1],
-            bbox_json.pose.translation[2],
-        );
-
-        // Create and validate quaternion
-        let [w, x, y, z] = bbox_json.pose.rotation;
-        let quat_norm = (x * x + y * y + z * z + w * w).sqrt();
-
-        if quat_norm < 1e-6 {
-            return Err(anyhow!("Invalid quaternion with near-zero norm"));
-        }
-
-        let normalized_quat = na::UnitQuaternion::new_normalize(na::Quaternion::new(w, x, y, z));
-        let isometry = na::Isometry3::from_parts(translation, normalized_quat);
-
-        Ok(BBox {
-            pose: isometry,
-            size_xyz: bbox_json.size_xyz,
-        })
-    }
-
-    /// Save BBox to JSON5 file with atomic write
-    pub fn save_to_file<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        let path = file_path.as_ref();
-        let json5_content = self.to_json5_string()?;
-
-        // Atomic write: write to temporary file, then rename
-        let temp_path = path.with_extension("tmp");
-
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Write to temporary file
-        fs::write(&temp_path, json5_content)?;
-
-        // Atomic rename
-        fs::rename(&temp_path, path)?;
-
-        Ok(())
-    }
-
-    /// Load BBox from JSON5 file
-    pub fn load_from_file<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        let content = fs::read_to_string(file_path)?;
-        Self::from_json5_string(&content)
+        assert!(bbox.contains_point(&na::Point3::new(10.0, 0.0, 0.0)));
+        // Half-extents are measured from the center, so ±1 in x is the edge.
+        assert!(bbox.contains_point(&na::Point3::new(11.0, 2.0, 3.0)));
+        assert!(!bbox.contains_point(&na::Point3::new(11.1, 0.0, 0.0)));
+        assert!(!bbox.contains_point(&na::Point3::new(0.0, 0.0, 0.0)));
     }
 }
