@@ -17,10 +17,56 @@ Hence two rules for this module:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+#: The board-frame convention this module's coordinates are expressed in, and the one
+#: `lidar_board_detector` publishes (see its `BOARD_FRAME_CONVENTION`). It lives beside
+#: the geometry deliberately: the tag and the coordinates it describes must not be
+#: changeable independently of each other.
+BOARD_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
+
+#: Absolute topic carrying the tag. Absolute rather than node-relative because the
+#: launch system generates one detector node per sensor-marker pair, so a relative name
+#: would couple every consumer to a generated node name.
+BOARD_FRAME_CONVENTION_TOPIC = "/lctk/board_frame_convention"
+
+
+def frame_convention_error(received: Optional[str]) -> Optional[str]:
+    """Decide whether a received frame-convention tag is acceptable.
+
+    Returns ``None`` when it is, or an operator-facing failure message when it is not.
+    Pure over the received string, so the whole decision table — match, mismatch,
+    absent — is testable without a ROS graph.
+
+    **Absence is failure, not consent.** The tag is published latched
+    (transient-local), but a latched sample only reaches a late joiner while a
+    publisher is alive: a solver started before any detector, or after the bag ended
+    and the detector exited, receives nothing at all.
+    """
+    if received is None:
+        return (
+            f"No board-frame convention announced on {BOARD_FRAME_CONVENTION_TOPIC}. "
+            f"Expected '{BOARD_FRAME_CONVENTION}'. Nothing published there means no "
+            f"detector agreed with this solver about what a board pose means -- which "
+            f"is a failure, not consent. Start lidar_board_detector first, and check "
+            f"with: ros2 topic echo {BOARD_FRAME_CONVENTION_TOPIC} --once"
+        )
+
+    tag = received.strip()
+    if tag == BOARD_FRAME_CONVENTION:
+        return None
+
+    return (
+        f"Board-frame convention mismatch on {BOARD_FRAME_CONVENTION_TOPIC}: "
+        f"received '{tag}', expected '{BOARD_FRAME_CONVENTION}'. The detector and this "
+        f"solver disagree about what a published board pose means. Half of that "
+        f"disagreement is silent -- a 45-degree in-plane rotation still solves with a "
+        f"low reprojection error, because the 2x2 marker grid is symmetric. Rebuild "
+        f"both sides from the same checkout."
+    )
 
 
 @dataclass
@@ -176,8 +222,11 @@ def marker_geometry_summary(config: dict) -> str:
 
 __all__ = [
     "ArUcoMarker",
+    "BOARD_FRAME_CONVENTION",
+    "BOARD_FRAME_CONVENTION_TOPIC",
     "compute_multi_marker_corners",
     "detection2d_to_aruco_markers",
+    "frame_convention_error",
     "load_aruco_pattern_config",
     "marker_geometry_summary",
     "parse_dimension",

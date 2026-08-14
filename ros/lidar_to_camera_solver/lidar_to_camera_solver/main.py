@@ -28,6 +28,7 @@ License: MIT
 import json
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -36,9 +37,12 @@ import numpy as np
 import rclpy
 from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from lidar_to_camera_solver.board_geometry import (
+    BOARD_FRAME_CONVENTION,
+    BOARD_FRAME_CONVENTION_TOPIC,
     ArUcoMarker,
     compute_multi_marker_corners,
     detection2d_to_aruco_markers,
+    frame_convention_error,
     load_aruco_pattern_config,
     marker_geometry_summary,
     parse_dimension,
@@ -60,10 +64,10 @@ from lctk_interfaces.srv import (
     ResetTransform,
 )
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import ColorRGBA, Header
+from std_msgs.msg import ColorRGBA, Header, String
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -213,6 +217,15 @@ class LidarToCameraSolver(Node):
             DropPolicy.DROP_OLDEST
             if sync_drop_policy_str == "drop_oldest"
             else DropPolicy.REJECT_NEW
+        )
+
+        # H-11: refuse to run against a detector that disagrees about the board frame,
+        # BEFORE any geometry is loaded or any transform can be published.
+        self.declare_parameter("frame_convention_timeout_s", 10.0)
+        self._await_board_frame_convention(
+            self.get_parameter("frame_convention_timeout_s")
+            .get_parameter_value()
+            .double_value
         )
 
         # Load ArUco pattern configuration
@@ -1594,6 +1607,68 @@ class LidarToCameraSolver(Node):
             covariance=covariance,
         )
 
+    def _await_board_frame_convention(self, timeout_s: float) -> None:
+        """H-11: block until `lidar_board_detector` announces a convention we agree with.
+
+        The published board pose is ``T_sensor<-board`` and this node feeds board-local
+        marker coordinates into it, so the convention sits on BOTH sides of one
+        product. A mismatch is therefore undetectable from the reprojection error an
+        operator would check: the symmetric 2x2 marker grid absorbs a 45-degree
+        in-plane rotation without complaint.
+
+        Failure raises out of ``__init__``, which is not wrapped in a ``try`` in
+        ``main()`` — so the process exits non-zero and the launch system can see it.
+        """
+        received: List[str] = []
+
+        # QoS must match the publisher EXACTLY: RELIABLE + TRANSIENT_LOCAL +
+        # KEEP_LAST(1). The detector publishes the tag once and holds the publisher so
+        # the latched sample survives for late joiners.
+        #
+        # L-07 is the repository's one recorded lesson here, and it points the wrong
+        # way for this topic: tf_tree_broadcaster.py carries a comment explaining why
+        # NOT to use TRANSIENT_LOCAL. Following it blindly would give this guard a
+        # VOLATILE subscriber, which never receives the latched sample, concludes
+        # "absent", and refuses to start — turning a guard into an outage.
+        qos = QoSProfile(
+            depth=1,
+            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        def on_tag(msg: String) -> None:
+            received.append(msg.data)
+            # Every subsequent message is validated too: a detector restarting on an
+            # older build must be caught, not trusted because the first check passed.
+            error = frame_convention_error(msg.data)
+            if error is not None and self._frame_convention_ok:
+                self.get_logger().fatal(error)
+                raise SystemExit(1)
+
+        self._frame_convention_ok = False
+        self._frame_convention_subscription = self.create_subscription(
+            String, BOARD_FRAME_CONVENTION_TOPIC, on_tag, qos
+        )
+
+        self.get_logger().info(
+            f"Waiting up to {timeout_s:.1f}s for the board-frame convention on "
+            f"{BOARD_FRAME_CONVENTION_TOPIC}"
+        )
+        deadline = time.monotonic() + timeout_s
+        while not received and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.1)
+
+        error = frame_convention_error(received[-1] if received else None)
+        if error is not None:
+            self.get_logger().fatal(error)
+            raise RuntimeError(error)
+
+        self._frame_convention_ok = True
+        self.get_logger().info(
+            f"Board-frame convention confirmed: '{BOARD_FRAME_CONVENTION}'"
+        )
+
     def _load_aruco_pattern_config(self, config_file_path: str) -> dict:
         """Load ArUco pattern configuration from JSON5 file."""
         self.get_logger().info(f"Loading ArUco pattern config from: {config_file_path}")
@@ -1957,8 +2032,6 @@ class LidarToCameraSolver(Node):
 
 def main(args=None):
     """Main function to run the lidar_to_camera_solver node."""
-    import time
-
     rclpy.init(args=args)
 
     node = LidarToCameraSolver()
