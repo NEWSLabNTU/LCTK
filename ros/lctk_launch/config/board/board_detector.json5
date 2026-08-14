@@ -109,7 +109,13 @@
     // ========================================
     // -- sensor convention (drives initial in-plane pose + lowest-corner fixup) --
     "sensor_up_axis": "z",          // "x"|"y"|"z". Z-up sensors (Velodyne) -> "z"; Seyond X-up -> "x"
-    "initial_inplane_rotation_deg": 0.0, // extra in-plane rotation of the initial pose (deg)
+    // Board roll within its own plane, relative to corner-up (diamond) mounting.
+    // 0.0 is CORRECT for every supported rig — not a tuning dial, do not sweep it.
+    // The board model's in-plane axes run corner to corner, so a diamond-hung
+    // board needs no correction. All three configs (this template, velodyne,
+    // seyond) now agree on 0.0. Only a board NOT hung corner-up justifies a
+    // non-zero value; set it to that board's roll in degrees.
+    "initial_inplane_rotation_deg": 0.0,
     // -- ICP --
     "max_icp_iterations": 50,
     "icp_pose_weight_threshold": 1e-4,     // pose-change convergence threshold

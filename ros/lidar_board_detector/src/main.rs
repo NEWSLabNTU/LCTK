@@ -8,12 +8,13 @@ use aruco_config::MultiArucoPattern;
 use geometry_msgs::msg::{
     Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Vector3 as GeomVector3,
 };
-use hollow_board_config::{BoardModel, BoardShape};
+use hollow_board_config::{BoardModel, BoardShape, MarkerPaperPlacement};
 use hollow_board_detector::{
     algo::{fit_plane_ransac, voxel_downsample, BoardIcpIterator},
+    config::SensorUpAxis,
     detection::{BoardIcpState, BoardModelParams, IcpStatistics, PlaneRansacData},
-    config::SensorUpAxis, init_logging, Config as BoardDetectorConfig,
-    Detection as BoardDetection, Detector as BoardDetector,
+    init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
+    Detector as BoardDetector,
 };
 use nalgebra as na;
 use plane_estimator::PlaneModel;
@@ -296,6 +297,31 @@ impl BBoxParameters {
     }
 }
 
+/// Identifier for the board-frame convention this node publishes poses in.
+///
+/// The published board pose is the transform from board coordinates to sensor
+/// coordinates, and a camera solver supplies board-local marker coordinates to it — so
+/// the convention appears on BOTH sides of that product. A consumer still using the old
+/// edge-aligned convention produces an in-plane 45-degree error that is undetectable:
+/// the symmetric 2x2 marker grid still solves cleanly with a low reprojection error.
+/// Half of that failure is silent, which is why this is a runtime tag and not a note in
+/// the documentation.
+///
+/// Bump this string only when the meaning of a published board pose changes. The same
+/// identifier is the tag in the saved-detection file format.
+const BOARD_FRAME_CONVENTION: &str = "corner_aligned_plate_center_v1";
+
+/// Topic carrying [`BOARD_FRAME_CONVENTION`].
+///
+/// Deliberately a fixed, absolute topic rather than a node-relative one: the launch
+/// system generates one detector node per sensor-marker pair, so a node-relative name
+/// would couple every consumer to a generated node name. It is published once, latched
+/// (transient-local), so a solver that starts later still receives it.
+///
+/// ABSENCE OF THIS TOPIC MUST BE TREATED AS FAILURE, NOT CONSENT. A solver that starts
+/// before any detector must not read silence as agreement.
+const BOARD_FRAME_CONVENTION_TOPIC: &str = "/lctk/board_frame_convention";
+
 pub struct CalibrationBoardLocatorNode {
     _node: Node,
     _detection_publisher: Publisher<Detection3DArray>,
@@ -315,6 +341,10 @@ pub struct CalibrationBoardLocatorNode {
     // Only created (Some) when the bbox_free background-subtraction path is active;
     // `None` in default bbox mode so the service isn't registered unnecessarily.
     _reset_service: Option<rclrs::Service<std_srvs::srv::Empty>>,
+    // Latched board-frame convention tag. Held so the publisher outlives `new()` —
+    // dropping it would drop the transient-local sample with it, and a late-joining
+    // solver would see nothing.
+    _frame_convention_publisher: Publisher<StringMsg>,
 }
 
 impl CalibrationBoardLocatorNode {
@@ -452,10 +482,7 @@ impl CalibrationBoardLocatorNode {
             Some(node.create_service::<std_srvs::srv::Empty, _>(
                 "~/reset_background",
                 move |_request: std_srvs::srv::Empty_Request| {
-                    if let Some(state) = reset_bg
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .as_mut()
+                    if let Some(state) = reset_bg.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
                     {
                         state.reset();
                         log_info!(LOGGER_NAME, "background reset — re-entering warmup");
@@ -497,6 +524,24 @@ impl CalibrationBoardLocatorNode {
         };
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
+
+        // Announce which board-frame convention these detections are expressed in.
+        // Latched and published once: the value never changes for a running node.
+        let mut frame_convention_opts = PublisherOptions::new(BOARD_FRAME_CONVENTION_TOPIC);
+        frame_convention_opts.qos = QoSProfile {
+            history: QoSHistoryPolicy::KeepLast { depth: 1 },
+            ..QoSProfile::default().transient_local()
+        };
+        let frame_convention_publisher: Publisher<StringMsg> =
+            node.create_publisher(frame_convention_opts)?;
+        frame_convention_publisher.publish(StringMsg {
+            data: BOARD_FRAME_CONVENTION.to_string(),
+        })?;
+        log_info!(
+            LOGGER_NAME,
+            "Publishing board poses in frame convention '{BOARD_FRAME_CONVENTION}' \
+             (latched on {BOARD_FRAME_CONVENTION_TOPIC})"
+        );
 
         // Create board debug publishers if debug mode is enabled
         let board_debug_publishers = if enable_debug {
@@ -747,6 +792,7 @@ impl CalibrationBoardLocatorNode {
             _processing_thread: processing_thread,
             _background_state: background_state,
             _reset_service: reset_service,
+            _frame_convention_publisher: frame_convention_publisher,
         })
     }
 
@@ -900,7 +946,12 @@ impl CalibrationBoardLocatorNode {
         let active_points = match bbox_free_cfg {
             None => {
                 // Existing bounding-box path, unchanged.
-                Self::filter_points_by_bbox(&points, bbox_params, &msg.header, board_debug_publishers)?
+                Self::filter_points_by_bbox(
+                    &points,
+                    bbox_params,
+                    &msg.header,
+                    board_debug_publishers,
+                )?
             }
             Some(bf) => {
                 match Self::select_board_cluster(
@@ -1085,6 +1136,7 @@ impl CalibrationBoardLocatorNode {
                     pose: det.initial_pose,
                     board_shape: det.board_model.board_shape.clone(),
                     marker_paper_size: det.board_model.marker_paper_size,
+                    marker_paper_placement: det.board_model.marker_paper_placement,
                 };
                 if let Ok(initial_markers) =
                     Self::create_board_markers_from_model(&initial_board_model, &msg.header)
@@ -1181,11 +1233,11 @@ impl CalibrationBoardLocatorNode {
 
         // Method E: run the warmup lifecycle to obtain a finalized background.
         let outcome = if method == ForegroundMethod::BackgroundSubtraction {
-            let mut guard = background_state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut guard = background_state.lock().unwrap_or_else(|e| e.into_inner());
             let state = guard.as_mut().ok_or_else(|| {
-                anyhow!("bbox_free background_subtraction selected but no BackgroundState initialized")
+                anyhow!(
+                    "bbox_free background_subtraction selected but no BackgroundState initialized"
+                )
             })?;
             match state.observe_frame(points) {
                 bbox_free::WarmupOutcome::Warming { seen, needed } => {
@@ -1446,13 +1498,18 @@ impl CalibrationBoardLocatorNode {
                 hole_center_shift,
             },
             marker_paper_size,
+            // The paper's placement is a measurement of the physical board, so it comes
+            // from the ArUco pattern config. Configs that predate the field fall back to
+            // the placement this code has always implied.
+            marker_paper_placement: aruco_pattern.paper_placement.unwrap_or_else(|| {
+                MarkerPaperPlacement::flush_with_bottom_corner(board_width, marker_paper_size)
+            }),
         };
 
         // Step 3: Create initial pose using plane normal-based alignment
         let initial_pose = Self::compute_initial_pose_from_plane(
             plane_model,
             plane_inlier_points,
-            board_width.as_meters(),
             &config.sensor_up_axis,
             config.initial_inplane_rotation_deg,
             header,
@@ -1465,6 +1522,7 @@ impl CalibrationBoardLocatorNode {
                 pose: initial_pose,
                 board_shape: board_model_params.board_shape.clone(),
                 marker_paper_size: board_model_params.marker_paper_size,
+                marker_paper_placement: board_model_params.marker_paper_placement,
             };
             if let Ok(initial_markers) =
                 Self::create_board_markers_from_model(&initial_board_model, header)
@@ -1540,6 +1598,7 @@ impl CalibrationBoardLocatorNode {
                     pose: state.board_pose,
                     board_shape: board_model_params.board_shape.clone(),
                     marker_paper_size: board_model_params.marker_paper_size,
+                    marker_paper_placement: board_model_params.marker_paper_placement,
                 };
                 if let Ok(arr) = Self::create_board_markers_from_model(&board_model, header) {
                     let _ = debug_pubs.board_marker_icp.publish(arr);
@@ -1568,13 +1627,21 @@ impl CalibrationBoardLocatorNode {
                 state.inlier_points.len()
             );
 
-            // Apply post-fixup to ensure pose origin is at the lowest corner
+            // Post-ICP fixup: relabel which physical corner the model calls "bottom".
+            //
+            // ICP recovers the plate's position and its plane, but the plate is a square
+            // and so is symmetric under four 90-degree turns about its normal. This picks
+            // the labelling that agrees with gravity. It is a pure rotation about the
+            // plate centre: the pose's origin is already the plate centre and the plate
+            // centre does not move under an in-plane rotation, so no physical point is
+            // displaced by this step. Only the labelling changes.
             let corrected_pose = {
                 // Create temporary board model to evaluate corners
                 let temp_board_model = BoardModel {
                     pose: state.board_pose,
                     board_shape: board_model_params.board_shape.clone(),
                     marker_paper_size: board_model_params.marker_paper_size,
+                    marker_paper_placement: board_model_params.marker_paper_placement,
                 };
 
                 let board_normal = temp_board_model.board_z_axis();
@@ -1598,13 +1665,21 @@ impl CalibrationBoardLocatorNode {
                     .min_by(|a, b| height(a.1).total_cmp(&height(b.1)))
                     .unwrap();
 
-                // M-14: the board origin corner is disambiguated purely by "lowest
-                // height along the sensor up axis" -- an unstated assumption that exactly
-                // one corner is clearly lowest. Near a 45deg roll or a diamond-mounted
-                // board, the two lowest corners are nearly tied and the wrong one can win,
-                // rotating the board frame 90deg and silently biasing the extrinsic for
-                // this pose. Warn when the disambiguation is marginal instead of failing
-                // silently.
+                // M-14: the corner labelling is disambiguated purely by "lowest height
+                // along the sensor up axis", which assumes exactly one corner is clearly
+                // lowest. When the two lowest corners are nearly tied the wrong one can
+                // win, turning the board frame 90 degrees and silently biasing the
+                // extrinsic for this pose.
+                //
+                // The marginal case is an EDGE-ALIGNED board — one hung square-on, whose
+                // bottom two corners sit at the same height. A diamond-mounted board, the
+                // way every board in this repository is actually hung, is the WELL-
+                // conditioned case: its corners are at -R, 0, 0 and +R along the up axis,
+                // so the lowest is clear by half the height spread. (An earlier comment
+                // here claimed the opposite and named the diamond as the risky case; it
+                // was wrong, which is why this warning has never fired in practice.) The
+                // stance gate upstream already rejects edge-aligned boards, so this
+                // warning is a backstop for a board that slips past it.
                 {
                     let mut hs: Vec<f64> = corners.iter().map(|c| height(c)).collect();
                     hs.sort_by(|a, b| a.total_cmp(b));
@@ -1636,16 +1711,16 @@ impl CalibrationBoardLocatorNode {
                     na::UnitQuaternion::from_axis_angle(&board_normal, angle)
                 };
 
-                // Move the pose origin to the lowest corner
-                let fixup_translation =
-                    { na::Translation3::new(lowest_corner.x, lowest_corner.y, lowest_corner.z) };
-
-                // Compose the corrected pose: translation * rotation * original_rotation
-                let corrected = fixup_translation * fixup_rotation * state.board_pose.rotation;
+                // Keep the origin where it is — it is the plate centre, and the plate
+                // centre is the fixed point of an in-plane rotation.
+                let corrected = na::Isometry3::from_parts(
+                    state.board_pose.translation,
+                    fixup_rotation * state.board_pose.rotation,
+                );
 
                 log_info!(
                     LOGGER_NAME,
-                    "Post-fixup applied: rotation_angle={:.1}°, new_origin=({:.3}, {:.3}, {:.3})",
+                    "Post-fixup applied: rotation_angle={:.1}°, plate centre unmoved at ({:.3}, {:.3}, {:.3})",
                     (FRAC_PI_2 * lowest_index as f64).to_degrees(),
                     corrected.translation.x,
                     corrected.translation.y,
@@ -1660,6 +1735,7 @@ impl CalibrationBoardLocatorNode {
                 pose: corrected_pose,
                 board_shape: board_model_params.board_shape,
                 marker_paper_size: board_model_params.marker_paper_size,
+                marker_paper_placement: board_model_params.marker_paper_placement,
             };
 
             // Create Detection with all required fields
@@ -1713,7 +1789,6 @@ impl CalibrationBoardLocatorNode {
     fn compute_initial_pose_from_plane(
         plane_model: &PlaneModel,
         plane_inlier_points: &[na::Point3<f64>],
-        board_width_meters: f64,
         sensor_up_axis: &SensorUpAxis,
         initial_inplane_rotation_deg: f64,
         _header: &Header,
@@ -1815,24 +1890,15 @@ impl CalibrationBoardLocatorNode {
             }
         };
 
-        // Step 4: Create initial pose with board center at inlier centroid
-        // We want: board_center_world = inlier_centroid
-        // The board center in board coordinates is at (board_width/2, board_width/2, 0)
-        // board_center_world = pose.translation + rotation * board_center_board
-        // Therefore: pose.translation = inlier_centroid - rotation * board_center_board
-        let board_center_board =
-            na::Vector3::new(board_width_meters / 2.0, board_width_meters / 2.0, 0.0);
-        let board_center_offset = rotation * board_center_board;
-        let corner_position = inlier_centroid - board_center_offset;
-
-        let pose = na::Isometry3::from_parts(na::Translation3::from(corner_position), rotation);
+        // Step 4: The board frame's origin IS the plate centre, so the initial pose's
+        // translation is the inlier centroid directly — no corner offset to subtract.
+        // This is what removed the board width from this function's arguments: nothing
+        // here needs the plate's size any more.
+        let pose = na::Isometry3::from_parts(na::Translation3::from(inlier_centroid), rotation);
 
         log_debug!(
             LOGGER_NAME,
-            "Initial pose from plane: centroid=({:.3}, {:.3}, {:.3}), corner=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
-            inlier_centroid.x,
-            inlier_centroid.y,
-            inlier_centroid.z,
+            "Initial pose from plane: plate centre=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
             pose.translation.x,
             pose.translation.y,
             pose.translation.z,
@@ -2318,51 +2384,6 @@ impl CalibrationBoardLocatorNode {
         Ok(marker)
     }
 
-    #[allow(dead_code)]
-    fn create_board_marker(board_detection: &BoardDetection, header: &Header) -> Result<Marker> {
-        // Use the pose returned by algo.rs (embedded in board_detection.board_model.pose)
-        let board_model = &board_detection.board_model;
-
-        let mut marker = Marker {
-            header: header.clone(),
-            ns: "board".to_string(),
-            id: 0,
-            type_: 1,  // CUBE to approximate board plane
-            action: 0, // ADD
-            ..Default::default()
-        };
-
-        // Position from pose
-        marker.pose.position.x = board_model.pose.translation.x;
-        marker.pose.position.y = board_model.pose.translation.y;
-        marker.pose.position.z = board_model.pose.translation.z;
-
-        // Orientation from pose
-        let q = board_model.pose.rotation.quaternion();
-        marker.pose.orientation.x = q.i;
-        marker.pose.orientation.y = q.j;
-        marker.pose.orientation.z = q.k;
-        marker.pose.orientation.w = q.w;
-
-        // Scale from board shape (width x height, with small thickness)
-        // Assuming board is square with width; set small thickness along z
-        marker.scale.x = board_model.board_shape.board_width.as_meters();
-        marker.scale.y = board_model.board_shape.board_width.as_meters();
-        marker.scale.z = 0.02; // 2cm thickness for visualization
-
-        // Color (blue, semi-transparent)
-        marker.color.r = 0.0;
-        marker.color.g = 0.2;
-        marker.color.b = 1.0;
-        marker.color.a = 0.4;
-
-        // Lifetime
-        marker.lifetime.sec = 0;
-        marker.lifetime.nanosec = 0;
-
-        Ok(marker)
-    }
-
     /// Create board visualization markers with customizable colors and namespaces
     #[allow(clippy::too_many_arguments)]
     fn create_board_visualization(
@@ -2378,42 +2399,57 @@ impl CalibrationBoardLocatorNode {
         let base_translation = &board_model.pose.translation;
         let base_rotation = &board_model.pose.rotation;
 
-        // Board cube marker
-        // NOTE: The cube is centered at board_center(), not pose.translation
-        // because BoardModel expects pose.translation to be at the bottom-left corner (0,0)
-        let board_cube = {
-            let board_center = board_model.board_center();
-            let q = base_rotation.quaternion();
+        // Board outline: a closed line strip through the four corner accessors.
+        //
+        // This used to be a CUBE primitive sized from board_width and posed from the
+        // model's rotation, which drew an edge-aligned square. The plate is hung as a
+        // diamond, so that picture disagreed with the maths by 45 degrees and there was
+        // no way to see it. Tracing the accessors instead means the outline cannot drift
+        // from the model: if a corner accessor is ever wrong, RViz shows it immediately.
+        let board_outline = {
+            let corner = |p: na::Point3<f64>| Point {
+                x: p.x,
+                y: p.y,
+                z: p.z,
+            };
             Marker {
                 header: header.clone(),
-                ns: format!("board{}", namespace_suffix),
+                ns: format!("board{namespace_suffix}"),
                 id: id_offset,
-                type_: 1,  // CUBE
+                type_: 4,  // LINE_STRIP
                 action: 0, // ADD
-                pose: geometry_msgs::msg::Pose {
-                    position: Point {
-                        x: board_center.x,
-                        y: board_center.y,
-                        z: board_center.z,
-                    },
-                    orientation: Quaternion {
-                        x: q.i,
-                        y: q.j,
-                        z: q.k,
-                        w: q.w,
-                    },
-                },
+                // Closed loop: the first corner repeats at the end.
+                points: vec![
+                    corner(board_model.top_corner()),
+                    corner(board_model.left_corner()),
+                    corner(board_model.bottom_corner()),
+                    corner(board_model.right_corner()),
+                    corner(board_model.top_corner()),
+                ],
                 scale: GeomVector3 {
-                    x: board_model.board_shape.board_width.as_meters(),
-                    y: board_model.board_shape.board_width.as_meters(),
-                    z: 0.02,
+                    x: 0.01, // Line width; LINE_STRIP uses x only.
+                    y: 0.0,
+                    z: 0.0,
                 },
-                color: board_color,
+                color: ColorRGBA {
+                    a: 1.0, // Opaque: an outline has nothing to see through.
+                    ..board_color
+                },
+                // The points are already in the header's frame, so the marker's own pose
+                // must be identity. Anything else would apply the board rotation twice.
                 ..Default::default()
             }
         };
 
-        // Helper to build axis arrow markers
+        // Helper to build axis arrow markers.
+        //
+        // These are drawn from `pose.translation`, which IS the plate centre in the
+        // board frame — so the arrows sit where the pose actually is, and the green +Y
+        // arrow points at the physically up-most corner of the diamond. That is the
+        // two-second visual check that the frame convention is right; if +Y points at
+        // the bottom corner instead, the in-plane rotation is off by 180 degrees. Do not
+        // "correct" this to board_center(): the two are the same point, and going via
+        // the accessor only invites someone to add an offset back in.
         let make_axis_arrow =
             |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
                 let rot = base_rotation * rot_after_x;
@@ -2578,7 +2614,7 @@ impl CalibrationBoardLocatorNode {
 
         Ok(MarkerArray {
             markers: vec![
-                board_cube,
+                board_outline,
                 x_arrow,
                 y_arrow,
                 z_arrow,
@@ -2774,6 +2810,7 @@ impl CalibrationBoardLocatorNode {
             pose: state.board_pose,
             board_shape: board_model_params.board_shape.clone(),
             marker_paper_size: board_model_params.marker_paper_size,
+            marker_paper_placement: board_model_params.marker_paper_placement,
         };
 
         // Generate board model points (corners and hole centers for visualization)

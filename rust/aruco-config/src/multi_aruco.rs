@@ -14,6 +14,14 @@ pub struct MultiArucoPattern {
     pub marker_square_size_ratio: R64,
     pub num_squares_per_side: u32,
     pub border_bits: u32,
+    /// Where this paper is glued on the calibration plate. See [`MarkerPaperPlacement`].
+    ///
+    /// Optional so existing configs keep loading: when absent, callers fall back to
+    /// [`MarkerPaperPlacement::flush_with_bottom_corner`], which is the measured
+    /// placement of the board this repository calibrates against. State it explicitly
+    /// whenever your board differs.
+    #[serde(default)]
+    pub paper_placement: Option<MarkerPaperPlacement>,
 }
 
 impl MultiArucoPattern {
@@ -106,6 +114,44 @@ mod with_opencv {
                     marker_image.copy_to(&mut roi_image)?;
                     Ok(board_image)
                 })
+        }
+    }
+}
+
+/// Where the printed ArUco paper sits on the plate of the calibration board.
+///
+/// This is a **measurement of the physical board**, not something to be derived from the
+/// plate's width. It is stated along the plate's two diagonals — the same directions the
+/// board model's corner accessors are named for — so it means the same thing regardless
+/// of how the board model's local axes happen to be defined, and it is the single value
+/// the Rust detector and the Python solvers must agree on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkerPaperPlacement {
+    /// Offset of the paper's centre from the plate's centre, toward the *left* corner.
+    #[serde(with = "newslab_serde_measurements::length")]
+    pub toward_left_corner: Length,
+    /// Offset of the paper's centre from the plate's centre, toward the *top* corner.
+    #[serde(with = "newslab_serde_measurements::length")]
+    pub toward_top_corner: Length,
+}
+
+impl MarkerPaperPlacement {
+    /// The measured placement of the board this repository calibrates against: the
+    /// paper's origin corner sits exactly on the plate's *bottom* corner, so the sheet
+    /// occupies the plate's bottom quadrant and its top corner is coincident with the
+    /// plate centre.
+    ///
+    /// This is not a fallback or a guess — the team that physically placed the sheet
+    /// confirmed it sits in the plate's lower quarter with its top corner at the plate
+    /// centre. Do not "correct" it toward a centred sheet: that would move every marker
+    /// corner and break the camera solve.
+    ///
+    /// It is board-specific. A differently-built board must be measured and its
+    /// placement stated explicitly in the pattern config rather than taken from here.
+    pub fn flush_with_bottom_corner(board_width: Length, marker_paper_size: Length) -> Self {
+        Self {
+            toward_left_corner: Length::from_meters(0.0),
+            toward_top_corner: (marker_paper_size - board_width) / 2f64.sqrt(),
         }
     }
 }

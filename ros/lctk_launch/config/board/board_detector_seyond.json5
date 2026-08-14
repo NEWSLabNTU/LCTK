@@ -63,7 +63,7 @@
 
     // ===== STAGE 3b — ICP + initial pose =====
     "sensor_up_axis": "x",          // Falcon X-up
-    "initial_inplane_rotation_deg": 45.0,
+    "initial_inplane_rotation_deg": 0.0,   // diamond-mounted board; see board_detector.json5
     "max_icp_iterations": 50,
     "icp_pose_weight_threshold": 1e-4,
     "icp_rejection_threshold": 0.008,
