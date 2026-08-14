@@ -4,8 +4,9 @@
 - **Area:** `ros/extrinsic_solver_node`, `ros/advanced_extrinsic_solver` / board frame convention
 - **Status:** Open — this is **Phase 2** of the corner-aligned board-frame work; Phase 1 has landed and was field-validated on the two-LiDAR rig 2026-08-14, which makes the error below a **confirmed live defect** rather than a predicted one
 - **Verified:** 2026-08-13 — `extrinsic_solver_node/main.py:475-575`, `advanced_extrinsic_solver/main.py:1589-1656`, read against the landed `rust/hollow-board-config/src/lib.rs`
-- **Spec:** [`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md) — "Out of Scope" and "Why the phase gap needs a guard rather than a note"
-- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./M-14-corner-order-brittle.md) (the duplicated corner layout), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps)
+- **Spec (the fix):** [`2026-08-14-lidar-to-camera-solver-diamond-frame.md`](../superpowers/specs/2026-08-14-lidar-to-camera-solver-diamond-frame.md) — **this is the target.** Closing H-11 means implementing that spec's three stages. It fixes the names, the staging and the validation gate; the description below is the diagnosis it was written from.
+- **Spec (the cause):** [`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md) — Phase 1, see "Out of Scope" and "Why the phase gap needs a guard rather than a note"
+- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./M-14-corner-order-brittle.md) (the duplicated corner layout — closed by the Phase 2 geometry extraction), [M-12](./M-12-no-robust-estimation-or-refinement.md) (the estimator asymmetry — its default-vs-advanced half closes at Phase 2 Stage 2), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps to version 4), [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) and [L-23](./L-23-debug-mode-parameter-never-read.md) (found while scoping the fix)
 
 ## Problem
 
@@ -61,7 +62,28 @@ runtime guard is required.
   (see CLAUDE.md, "Detection File Format"), which records no frame convention at all, so a v3 file
   cannot be told apart from a post-change one.
 
-## Fix (the Phase 2 scope)
+## Fix
+
+**The fix is the spec:
+[`2026-08-14-lidar-to-camera-solver-diamond-frame.md`](../superpowers/specs/2026-08-14-lidar-to-camera-solver-diamond-frame.md).**
+It supersedes the sketch below, which was written from the diagnosis before the design existed. Where
+the two disagree, the spec wins. Two differences are load-bearing:
+
+- The sketch says port *both* solvers. The spec ports **only** `advanced_extrinsic_solver`, migrated
+  to `lidar_to_camera_solver`. `extrinsic_solver_node` is never ported — it becomes unreachable from
+  the config-driven launch path when `use_advanced_solver` is removed, and is deleted at Stage 3.
+  Investigation established the two do not share a backend (`SOLVEPNP_ITERATIVE` vs `SOLVEPNP_SQPNP`
+  plus refinement, float32 vs float64, covariance discarded vs propagated), so porting both would have
+  meant porting the weaker estimator forward.
+- The sketch says v3 files load with a loud warning. The spec **rejects** them, with an explicit
+  one-shot conversion command. Auto-migration would make a file's meaning depend on which build opened
+  it — the same silent-difference problem this phase exists to remove.
+
+Closing H-11 means implementing that spec's three stages, and Stage 1 is the stage that ends the
+silent 45° error.
+
+<details>
+<summary>Original sketch, superseded — kept for the reasoning, not the plan</summary>
 
 1. **Port both `_compute_multi_marker_corners` to the corner-aligned frame.** Corners must come out
    where `BoardModel::marker_paper_point` puts them: paper coordinates run along the paper's edges,
@@ -86,6 +108,8 @@ runtime guard is required.
    file solved under one convention cannot be silently reloaded under another. v3 files must load
    with a loud warning, in the manner [H-10](./archive/H-10-dump-load-regresses-c01.md) established.
 
+</details>
+
 ## Notes
 
 Deliberately deferred from Phase 1, not overlooked: the recordings available here
@@ -104,3 +128,17 @@ side of the product against unchanged Python on the other. Nothing camera-side w
 `paper_placement`'s shipped values are now confirmed to be the board's **measured** sheet placement
 (lower quarter, top corner at the plate centre), so fix step 1 must read them rather than assume a
 centred sheet.
+
+**Update (2026-08-14, second).** The closing condition above — "requires a recording with both a
+LiDAR and a camera observing the board" — is **already satisfied**, and was when this issue was
+filed. All five `ros/lctk_sample_data/data/` datasets pair a VLP-32C pcap with a synchronised avi;
+dataset 3 carries 270 frames at 1920×1080 with the board filling the image. Frame inspection confirms
+it is the **same physical board** Phase 1 validated: diamond-hung square plate, three holes with none
+at the bottom, ArUco sheet in the lower quarter with its top corner at the plate centre — matching
+`paper_placement`. Only the `TWO_LIDAR_*` bags lack a camera; the pcap/avi sample data never did.
+
+So Phase 2 is validatable today with data already in the repository, and the spec makes dataset 3 the
+gate. One caveat carried forward: the gate is **visual**, not numerical. A 45° in-plane error leaves
+reprojection RMS low because the 2×2 marker grid is symmetric, so a low residual must never be
+accepted as evidence that this issue is fixed. The observable signatures are the ~707 mm origin shift
+and the overlay picture.
