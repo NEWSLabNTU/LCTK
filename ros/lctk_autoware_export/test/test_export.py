@@ -42,7 +42,15 @@ def target(tmp_path):
 def detections(tmp_path):
     rvec, tvec = solve_for_forward_camera()
     p = tmp_path / "detections.json"
-    p.write_text(json.dumps({"version": 2, "transform": {"rvec": rvec, "tvec": tvec}}))
+    p.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "board_frame_convention": "corner_aligned_plate_center_v1",
+                "transform": {"rvec": rvec, "tvec": tvec},
+            }
+        )
+    )
     return p
 
 
@@ -53,8 +61,44 @@ def test_load_solver_transform(detections):
 
 def test_load_solver_transform_missing_transform(tmp_path):
     p = tmp_path / "detections.json"
-    p.write_text(json.dumps({"version": 2, "detections": []}))
+    p.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "board_frame_convention": "corner_aligned_plate_center_v1",
+                "detections": [],
+            }
+        )
+    )
     with pytest.raises(ExportError, match="dump_detections"):
+        load_solver_transform(p)
+
+
+def test_load_solver_transform_refuses_an_older_format(tmp_path):
+    """H-11: this exporter writes into a file that reaches a vehicle, so it is the
+    single most important place for a version check. It had none: its own fixtures
+    declared "version": 2 and passed. A version-3 file predates the corner-aligned
+    board frame, so its transform may be wrong by a silent 45 degrees."""
+    rvec, tvec = solve_for_forward_camera()
+    p = tmp_path / "detections.json"
+    p.write_text(json.dumps({"version": 3, "transform": {"rvec": rvec, "tvec": tvec}}))
+    with pytest.raises(ExportError, match="version"):
+        load_solver_transform(p)
+
+
+def test_load_solver_transform_refuses_a_stale_frame_convention(tmp_path):
+    rvec, tvec = solve_for_forward_camera()
+    p = tmp_path / "detections.json"
+    p.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "board_frame_convention": "edge_aligned_corner_origin_v0",
+                "transform": {"rvec": rvec, "tvec": tvec},
+            }
+        )
+    )
+    with pytest.raises(ExportError, match="edge_aligned_corner_origin_v0"):
         load_solver_transform(p)
 
 
