@@ -11,6 +11,8 @@ fn main() {
         marker_square_size_ratio: r64(0.8),
         num_squares_per_side: 2,
         border_bits: 1,
+        // Printing-only: this never places the paper on a plate.
+        paper_placement: None,
     };
 
     let _image = pattern.to_opencv_mat(300.0).unwrap();

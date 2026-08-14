@@ -155,6 +155,9 @@ impl ArucoGenerator {
             board_size: Length::from_millimeters(board_size_mm),
             board_border_size: Length::from_millimeters(board_border_size_mm),
             marker_square_size_ratio: r64(marker_square_size_ratio),
+            // Irrelevant when printing the paper: this describes where the printed sheet
+            // is later glued on the plate, not what goes on the sheet.
+            paper_placement: None,
             num_squares_per_side,
             border_bits,
         };

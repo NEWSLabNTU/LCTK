@@ -1,4 +1,4 @@
-use hollow_board_config::{BoardModel, BoardShape};
+use hollow_board_config::{BoardModel, BoardShape, MarkerPaperPlacement};
 use measurements::Length;
 use nalgebra::{self as na, Isometry3, Point3};
 use plane_estimator::PlaneModel;
@@ -79,4 +79,7 @@ pub struct BoardIcpState {
 pub struct BoardModelParams {
     pub board_shape: BoardShape,
     pub marker_paper_size: Length,
+    /// Where the marker paper sits on the plate. Carried alongside the paper's size so
+    /// every `BoardModel` this crate builds states it rather than re-deriving it.
+    pub marker_paper_placement: MarkerPaperPlacement,
 }

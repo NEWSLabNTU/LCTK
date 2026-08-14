@@ -1562,8 +1562,10 @@ dependencies = [
  "nalgebra",
  "newslab-serde-measurements",
  "newslab-serde-nalgebra",
+ "noisy_float",
  "rayon",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

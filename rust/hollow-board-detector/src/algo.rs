@@ -272,6 +272,7 @@ impl<'a> BoardIcpIterator<'a> {
             pose: current_state.board_pose,
             board_shape: self.board_model_params.board_shape.clone(),
             marker_paper_size: self.board_model_params.marker_paper_size,
+            marker_paper_placement: self.board_model_params.marker_paper_placement,
         };
 
         if let Some(cb) = self.progress_callback.as_mut() {

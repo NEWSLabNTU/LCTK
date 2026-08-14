@@ -16,4 +16,23 @@
     // while square size is determined by num_squares_per_side
     "marker_square_size_ratio": 0.8,
     "border_bits": 1,
+
+    // Where this printed sheet is glued on the calibration plate: the offset of the
+    // paper's centre from the PLATE's centre, resolved along the plate's two diagonals.
+    // Stating it here means the Rust detector and the Python solvers read one number
+    // instead of each deriving the paper's placement from the board width.
+    //
+    // These ARE the measured placement of this board, confirmed against the physical
+    // hardware by the team that glued the sheet on: the paper sits in the plate's LOWER
+    // quarter, with its top corner exactly at the plate centre. They happen to equal
+    // (paper_size - board_width) / sqrt(2) along the up-diagonal precisely because of
+    // that coincidence - it is a measurement that the arithmetic reproduces, not an
+    // arithmetic default standing in for one. Do not "fix" this toward a centred sheet:
+    // that would move every marker corner and break the camera solve.
+    //
+    // A DIFFERENT physical board needs its own measurement here.
+    "paper_placement": {
+        "toward_left_corner": "0mm",
+        "toward_top_corner": "-353.5533905932738mm",  // (500mm - 1000mm) / sqrt(2)
+    },
 }

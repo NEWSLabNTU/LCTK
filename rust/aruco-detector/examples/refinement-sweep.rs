@@ -38,6 +38,8 @@ fn pattern() -> MultiArucoPattern {
         marker_square_size_ratio: r64(0.8),
         num_squares_per_side: 2,
         border_bits: 1,
+        // Detection-only: this example never places the paper on a plate.
+        paper_placement: None,
     }
 }
 
