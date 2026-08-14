@@ -163,6 +163,11 @@ actually wired in.
    ```bash
    mv .cargo/config.toml .cargo/config.toml.bak
    ```
+   Since M-18 the root `.cargo/config.toml` is **generated** by
+   `setup/scripts/sync-root-cargo-config.sh`, which `just build` and `just test` run every time.
+   It is synthesised from a per-package `ros/*/.cargo/config.toml` with the patch paths rewritten
+   root-relative, and it is what lets cargo (`nextest`, `clippy`, `audit`) work from the repo root
+   instead of dying on the yanked `sensor_msgs`. Never hand-edit it; deleting it is always safe.
 
 2. **Colcon-cargo conflicts**: Remove old packages before installing colcon-cargo-ros2:
    ```bash

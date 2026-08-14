@@ -26,12 +26,20 @@ build: build-conflux
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
+    # M-18: colcon-cargo-ros2 writes its [patch.crates-io] block only into per-package
+    # .cargo/config.toml files, so at the workspace root cargo has no patches and dies
+    # on the yanked sensor_msgs. Synthesise a root config from a per-package one before
+    # the L-16 guard below, which reads it. On a never-yet-built tree there is no
+    # per-package config to copy either; that is fine, colcon is about to create them
+    # and the post-build sync will pick them up.
+    ./setup/scripts/sync-root-cargo-config.sh || \
+        echo "no per-package cargo config yet; root config will be synthesised after colcon"
     # L-16 guard: colcon-cargo-ros2 generates Rust bindings once, then marks itself done
     # with build/.colcon/bindgen.lock and never re-checks its outputs. After a partial
     # clean (rm -rf build/<pkg>) the lock survives, generation is skipped, and every
     # Rust package fails with "failed to read .../rosidl_cargo/.../Cargo.toml".
     # Drop the lock whenever any binding path pinned in .cargo/config.toml is missing.
-    if [[ -f build/.colcon/bindgen.lock ]]; then
+    if [[ -f build/.colcon/bindgen.lock && -f .cargo/config.toml ]]; then
         while read -r path; do
             if [[ ! -f "$path/Cargo.toml" ]]; then
                 echo "bindgen output missing ($path); removing stale bindgen.lock"
@@ -64,6 +72,10 @@ build: build-conflux
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         --cargo-args --profile=test-release
+    # Refresh from what colcon just wrote. Never hand-maintain this file: a *stale*
+    # root config fails the build with "Unable to update .../install/.../rust"
+    # (CLAUDE.md Known Issue 1).
+    ./setup/scripts/sync-root-cargo-config.sh
 
 # Build the conflux packages LCTK needs at runtime.
 # conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
@@ -159,15 +171,70 @@ audit:
     source install/setup.bash
     cargo audit
 
-# Run all tests (Rust + Python)
-test:
+# Guard (M-18): prove the Rust suite can be COLLECTED before running it.
+#
+# The failure this exists to catch is silent. When the workspace root has no
+# .cargo/config.toml, cargo re-resolves the wildcard ROS message crates against
+# crates.io and aborts on the yanked sensor_msgs 4.2.3 -- it never compiles a
+# single test. That is easy to mistake for an environment hiccup and work around
+# by cd'ing into a package dir, which is exactly how the lidar_board_detector
+# tests stayed broken and unnoticed from commit 2a4fd49 until 2026-08-11.
+# `cargo nextest list` compiles every test target without running any, so a
+# non-zero test count is proof the suite is real before `just test` reports on it.
+_check-rust-tests-collectable:
     #!/usr/bin/env bash
     set -eo pipefail
-    cargo nextest run --cargo-profile test-release --no-fail-fast
+
+    if ! ./setup/scripts/sync-root-cargo-config.sh; then
+        echo "" >&2
+        echo "=====================================================================" >&2
+        echo " RUST TESTS COULD NOT BE COLLECTED: no root .cargo/config.toml" >&2
+        echo "=====================================================================" >&2
+        echo " The root config could not be synthesised (see the error above)." >&2
+        echo " Nothing was tested. Run 'just build' first." >&2
+        exit 1
+    fi
+
+    # Keep stderr OUT of $listing: cargo writes "Compiling ..."/"Finished" there, and
+    # counting those would make an empty suite look populated.
+    errlog=$(mktemp)
+    trap 'rm -f "$errlog"' EXIT
+    if ! listing=$(cargo nextest list --workspace --cargo-profile test-release 2>"$errlog"); then
+        cat "$errlog" >&2
+        echo "" >&2
+        echo "=====================================================================" >&2
+        echo " RUST TESTS COULD NOT BE COLLECTED: 'cargo nextest list' failed" >&2
+        echo "=====================================================================" >&2
+        echo " The test targets did not compile, so NO Rust test ran and none can." >&2
+        echo " This is NOT a passing suite -- see the compiler/cargo error above." >&2
+        echo "" >&2
+        echo " If it is 'sensor_msgs = \"*\" ... is yanked', the root" >&2
+        echo " .cargo/config.toml is missing or stale (M-18). Fix with: just build" >&2
+        exit 1
+    fi
+
+    count=$(grep -c '[^[:space:]]' <<<"$listing" || true)
+    if [[ "${count:-0}" -eq 0 ]]; then
+        echo "" >&2
+        echo "=====================================================================" >&2
+        echo " RUST TESTS COULD NOT BE COLLECTED: zero tests found" >&2
+        echo "=====================================================================" >&2
+        echo " 'cargo nextest list --workspace' succeeded but listed no tests." >&2
+        echo " An empty suite passes vacuously; refusing to report that as green." >&2
+        exit 1
+    fi
+    echo "rust test collection OK: $count tests"
+
+# Run all tests (Rust + Python)
+test: _check-rust-tests-collectable
+    #!/usr/bin/env bash
+    set -eo pipefail
+    cargo nextest run --workspace --cargo-profile test-release --no-fail-fast
     source install/setup.bash
-    # L-28: invoke pytest as a module. apt's python3-pytest installs the package but no
-    # `pytest` executable, so the bare form exits 127 and the Python half of the suite
-    # never ran.
+    # `python3 -m pytest`, not `pytest`: apt's python3-pytest installs the module and a
+    # `pytest-3` script but no bare `pytest` on PATH, so the plain name exits 127 and the
+    # Python half never runs. Same failure class as M-18 -- a suite that silently is not
+    # reached. Must be the system python3 (see _check-python-env).
     python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)

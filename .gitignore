@@ -27,6 +27,9 @@ __main__/
 
 # Cargo and Rust workspace artifacts
 /.cargo/
+# Per-package cargo configs written by colcon-cargo-ros2. They pin [patch.crates-io]
+# at paths inside build/, so they are generated per build tree, never authored.
+ros/*/.cargo/
 /ros2_rust_ws/build/
 /ros2_rust_ws/install/
 /ros2_rust_ws/log/
