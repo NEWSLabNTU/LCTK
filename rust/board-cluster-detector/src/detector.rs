@@ -7,13 +7,15 @@
 
 use nalgebra::Point3;
 
-use crate::background::BackgroundModel;
-use crate::candidates::{foreground_and_candidates, Candidate};
-use crate::config::{BoardConfig, ForegroundMethod};
-use crate::geometry::{self, project_to_plane, PlaneModel};
-use crate::pose::{board_pose, isolation_density, stance_3d, BoardDetection};
-use crate::scorer::seed_center;
-use crate::square_fit::fit_fixed_square;
+use crate::{
+    background::BackgroundModel,
+    candidates::{foreground_and_candidates, Candidate},
+    config::{BoardConfig, ForegroundMethod},
+    geometry::{self, project_to_plane, PlaneModel},
+    pose::{board_pose, isolation_density, stance_3d, BoardDetection},
+    scorer::seed_center,
+    square_fit::fit_fixed_square,
+};
 
 /// Why no board was detected. The first three (`Flatness`, `Extent`,
 /// `SizeGate`) are raised inside candidate generation
@@ -120,8 +122,7 @@ pub fn detect(
     // `foreground_points` is the RAW per-method foreground (Method E:
     // background-subtracted points; Method B: non-big-plane remainder), captured
     // BEFORE clustering/merge/gate — the true foreground, not surviving clusters.
-    let (foreground_points, cands) =
-        foreground_and_candidates(&dn, board, method, background);
+    let (foreground_points, cands) = foreground_and_candidates(&dn, board, method, background);
     let n_candidates = cands.len();
 
     let mut best_residual = f64::INFINITY;
@@ -147,8 +148,7 @@ pub fn detect(
                 if reason.rank() > f.reason.rank() {
                     true
                 } else if reason.rank() == f.reason.rank() {
-                    (measured - threshold).abs()
-                        < (f.detail.measured - f.detail.threshold).abs()
+                    (measured - threshold).abs() < (f.detail.measured - f.detail.threshold).abs()
                 } else {
                     false
                 }
@@ -157,7 +157,10 @@ pub fn detect(
         if take {
             furthest = Some(Furthest {
                 reason,
-                detail: RejectDetail { measured, threshold },
+                detail: RejectDetail {
+                    measured,
+                    threshold,
+                },
                 points: cand.points.clone(),
             });
         }

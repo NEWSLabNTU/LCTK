@@ -77,7 +77,11 @@ fn board_pose_rotation_is_orthonormal_right_handed_on_a_tilted_plane() {
         (should_be_identity - nalgebra::Matrix3::<f64>::identity()).norm() < 1e-9,
         "R^T R = {should_be_identity:?}"
     );
-    assert!((r.determinant() - 1.0).abs() < 1e-9, "det = {}", r.determinant());
+    assert!(
+        (r.determinant() - 1.0).abs() < 1e-9,
+        "det = {}",
+        r.determinant()
+    );
 
     // X points AWAY from the sensor at the origin: the board center is on the
     // +X side of the board plane.
@@ -224,7 +228,16 @@ fn isolation_density_free_standing_quad_is_zero() {
         }
         u += 0.1;
     }
-    let density = isolation_density(&dn, &plane, &corners_2d, &IsolationBand { coplanar_tol: 0.03, lo: 0.05, hi: 0.30 });
+    let density = isolation_density(
+        &dn,
+        &plane,
+        &corners_2d,
+        &IsolationBand {
+            coplanar_tol: 0.03,
+            lo: 0.05,
+            hi: 0.30,
+        },
+    );
     assert_eq!(density, 0.0);
 }
 
@@ -249,6 +262,15 @@ fn isolation_density_coplanar_wall_past_edge_is_positive() {
         }
         u += 0.05;
     }
-    let density = isolation_density(&dn, &plane, &corners_2d, &IsolationBand { coplanar_tol: 0.03, lo: 0.05, hi: 0.30 });
+    let density = isolation_density(
+        &dn,
+        &plane,
+        &corners_2d,
+        &IsolationBand {
+            coplanar_tol: 0.03,
+            lo: 0.05,
+            hi: 0.30,
+        },
+    );
     assert!(density > 0.0, "density = {density}");
 }
