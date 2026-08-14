@@ -89,8 +89,8 @@ class DisplayState:
 class InteractiveSolverController(Node):
     """Interactive TUI controller using Rich."""
 
-    # Service path layout: <namespace>/advanced_extrinsic_solver/<service>
-    NODE_NAME = "advanced_extrinsic_solver"
+    # Service path layout: <namespace>/lidar_to_camera_solver/<service>
+    NODE_NAME = "lidar_to_camera_solver"
     DISCOVERY_SUFFIX = "/get_pose_info"  # unique service used to locate a solver
 
     def __init__(self):
@@ -100,10 +100,10 @@ class InteractiveSolverController(Node):
         self.SERVICE_BASE = None
 
     def discover_service_bases(self, timeout: float = 5.0):
-        """Scan the ROS graph for advanced_extrinsic_solver service bases.
+        """Scan the ROS graph for lidar_to_camera_solver service bases.
 
         Returns a sorted list of service-base prefixes (one per running solver),
-        e.g. "/calibration/seyond_lidar_left_camera/advanced_extrinsic_solver".
+        e.g. "/calibration/seyond_lidar_left_camera/lidar_to_camera_solver".
         """
         match_suffix = f"/{self.NODE_NAME}{self.DISCOVERY_SUFFIX}"
         deadline = time.time() + timeout
@@ -495,7 +495,7 @@ def _resolve_service_base(node, console, override):
     if not bases:
         console.print("[red]none found[/]")
         console.print(
-            "[red]No advanced_extrinsic_solver services on the ROS graph.[/]\n"
+            "[red]No lidar_to_camera_solver services on the ROS graph.[/]\n"
             "[dim]Is the solver running with use_advanced_solver=true?[/]"
         )
         return None
