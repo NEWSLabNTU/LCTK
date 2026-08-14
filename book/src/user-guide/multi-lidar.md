@@ -31,7 +31,9 @@ graph LR
 ## Calibration Target
 
 You need the same **1m x 1m hollow board**:
-- 4 circular holes (150mm radius) in corners
+- **3** circular holes (150mm radius) — see
+  [the board model](../developer-guide/architecture.md#the-board-model-and-its-frame)
+- Hung as a **diamond**, standing on one corner
 - Board must be visible to **both LiDARs simultaneously**
 
 ## Step-by-Step Process

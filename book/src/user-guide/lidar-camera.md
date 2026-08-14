@@ -29,10 +29,25 @@ graph LR
 ## Calibration Target
 
 You need a **1m x 1m board** with:
-- 4 circular holes (150mm radius) arranged in corners
+- **3** circular holes (150mm radius), one omitted so the board's orientation
+  is resolvable — see [the board model](../developer-guide/architecture.md#the-board-model-and-its-frame)
 - ArUco markers (5x5 dictionary, IDs: 696, 64, 306, 195) printed on the board face
 
+**Hang the board as a diamond**, standing on one corner. Every rig in this
+repository does, the shipped detector configs assume it, and a board hung
+square-on will not be detected without setting
+`initial_inplane_rotation_deg` to its actual roll.
+
 The board must be visible to both sensors simultaneously.
+
+> **Known issue — this pipeline is currently untrustworthy.** The board
+> detector publishes poses in the corner-aligned board frame, while the
+> Python extrinsic solvers still build their marker geometry in the
+> previous edge-aligned one. The resulting extrinsic is wrong by a 45°
+> in-plane rotation, and that half of the error is *silent* — the
+> reprojection error stays low. See
+> `docs/issues/H-11-camera-solvers-stale-board-frame.md`. LiDAR-to-LiDAR
+> calibration is unaffected.
 
 ## Step-by-Step Process
 

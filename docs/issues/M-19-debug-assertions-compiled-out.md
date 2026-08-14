@@ -2,9 +2,9 @@
 
 - **Severity:** Medium
 - **Area:** build profiles / test coverage
-- **Status:** Open
+- **Status:** Open — the `hollow-board-config` half is resolved (see [Update](#update-2026-08-13--the-51-assertions-are-gone)); the build-profile half stands
 - **Verified:** 2026-08-13 — read from `Cargo.toml:90-92`, `justfile:48`, `justfile:150`
-- **Related:** [L-14](./archive/L-14-lint-red-on-main.md), [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md)
+- **Related:** [L-14](./archive/L-14-lint-red-on-main.md), [M-18](./archive/M-18-root-cargo-config-missing-rust-tests-unrunnable.md), [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md)
 
 ## Problem
 
@@ -65,3 +65,32 @@ most of these would tolerate a badly wrong model.
 
 Found while planning the board-frame change; the plan's step for this is deliberately isolated so a
 newly-surfaced violation is attributable.
+
+## Update (2026-08-13) — the 51 assertions are gone
+
+Suggested fixes 1 and 2 landed with Phase 1 of the corner-aligned board-frame work
+([M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md), spec
+[`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md)).
+
+All 51 `debug_assert!`s in `rust/hollow-board-config/src/lib.rs` are deleted. In their place are real
+integration tests that are **convention-sensitive** — they dot each accessor against the model's own
+`board_x_axis()`/`board_y_axis()` and assert the expected local coordinates, under randomised poses,
+so an in-plane relabelling can no longer pass:
+
+- `tests/board_frame.rs` — the frame contract: accessor coordinates in the board's own frame, the
+  pose translation being the plate centre, round-tripping through the board's axes,
+  right-handedness, and the three-hole asymmetry.
+- `tests/boundary_projection.rs` — the L¹-ball projection against a brute-force nearest-point
+  reference over many random points, plus corner/edge/hole-rim cases and a property test asserting
+  the new frame's projection is an exact re-parameterisation of the old frame's.
+- `tests/marker_layout_golden.rs` + `tests/fixtures/` — marker corners in world coordinates, keyed by
+  ArUco marker id, with an independent Python generator.
+
+That is the "strictly better" outcome suggested fix 3 anticipated, but only for this crate.
+
+**Still open:** every other `debug_assert!` in the workspace remains compiled out of both `just build`
+and `just test`, because `[profile.test-release]` still inherits `release`. Deciding whether to set
+`debug-assertions = true` there — and absorbing whatever that surfaces — is the remaining work, and
+was gated on [M-18](./archive/M-18-root-cargo-config-missing-rust-tests-unrunnable.md), since the Rust
+suite must be runnable before turning assertions on is meaningful. M-18 was fixed on 2026-08-14 —
+`just test` now runs the whole suite from the workspace root — so this work is unblocked.
