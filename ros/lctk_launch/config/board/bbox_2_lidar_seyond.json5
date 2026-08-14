@@ -4,8 +4,8 @@
     "pose": {
         // Translation from origin (x, y, z in meters)
         "translation": [-0.7, -0.7, 7.6],
-        // Rotation as quaternion (w, x, y, z)
-        "rotation": [1.0, 0.0, 0.0, 0.0]
+        // Rotation as quaternion (x, y, z, w) -- scalar LAST, see BBox docs
+        "rotation": [0.0, 0.0, 0.0, 1.0]
     },
     // Size of the bounding box in meters (x, y, z)
     "size_xyz": [1.8, 2.0, 1.0]
