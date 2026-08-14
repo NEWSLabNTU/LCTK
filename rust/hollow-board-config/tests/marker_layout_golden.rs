@@ -5,7 +5,7 @@
 //! `BoardModel::multi_marker_corners` is a **cross-language contract**: the Rust
 //! detector and the two Python solvers each reimplement it, and all three must agree
 //! on where every marker corner sits **in the world**. The fixture
-//! `fixtures/marker_corners_world.golden.json` is that contract, and it is keyed by
+//! `fixtures/board/marker_corners_world.golden.json` is that contract, and it is keyed by
 //! ArUco marker *id* — the binding whose corruption produces a silent quarter-turn
 //! of the solved extrinsic.
 //!
@@ -29,7 +29,7 @@
 //!
 //! # Where the fixture's numbers come from
 //!
-//! `fixtures/generate_marker_corners_world.py` — an independent Python derivation from
+//! `fixtures/board/generate_marker_corners_world.py` — an independent Python derivation from
 //! the printed pattern's dimensions and the stated mounting. It does not call the Rust
 //! code. Regenerate it only when the *printed board* changes.
 
@@ -40,7 +40,11 @@ use nalgebra as na;
 use noisy_float::prelude::*;
 use serde::Deserialize;
 
-const GOLDEN: &str = include_str!("fixtures/marker_corners_world.golden.json");
+/// The fixture lives outside this crate on purpose: it is a contract between the Rust
+/// detector and the Python camera solver, and a contract should not be a guest in one
+/// side's test tree. Both languages read `fixtures/board/` at the repository root.
+const GOLDEN: &str =
+    include_str!("../../../fixtures/board/marker_corners_world.golden.json");
 
 /// Positional tolerance, in metres. The fixture carries exact decimal geometry, so the
 /// only error in play is f64 round-off through a rotation and a translation.
