@@ -5,9 +5,11 @@
 //! thread; the ROS wiring stays thin.
 
 use anyhow::Result;
-use board_cluster_detector::background::BackgroundModel;
-use board_cluster_detector::config::{BoardConfig, ForegroundMethod};
-use board_cluster_detector::detector::RejectReason;
+use board_cluster_detector::{
+    background::BackgroundModel,
+    config::{BoardConfig, ForegroundMethod},
+    detector::RejectReason,
+};
 use nalgebra::Point3;
 use serde::Deserialize;
 
@@ -176,24 +178,35 @@ impl BackgroundState {
                 // nothing to the model — don't let an empty/invalid frame advance the warmup
                 // counter either, or warmup can "complete" on frames that taught it nothing.
                 if points.is_empty() {
-                    return WarmupOutcome::Warming { seen: *seen, needed: self.warmup_frames };
+                    return WarmupOutcome::Warming {
+                        seen: *seen,
+                        needed: self.warmup_frames,
+                    };
                 }
                 model.observe(points, "live");
                 *seen += 1;
                 if *seen >= self.warmup_frames {
                     // Move the model out of Warming into Ready, finalized.
-                    let Phase::Warming { mut model, .. } =
-                        std::mem::replace(&mut self.phase, Phase::Ready {
-                            model: BackgroundModel::new(self.voxel, self.dilation_radius, MIN_SOURCES),
-                        })
-                    else {
+                    let Phase::Warming { mut model, .. } = std::mem::replace(
+                        &mut self.phase,
+                        Phase::Ready {
+                            model: BackgroundModel::new(
+                                self.voxel,
+                                self.dilation_radius,
+                                MIN_SOURCES,
+                            ),
+                        },
+                    ) else {
                         unreachable!("just matched Warming");
                     };
                     model.finalize();
                     self.phase = Phase::Ready { model };
                     WarmupOutcome::Ready
                 } else {
-                    WarmupOutcome::Warming { seen: *seen, needed: self.warmup_frames }
+                    WarmupOutcome::Warming {
+                        seen: *seen,
+                        needed: self.warmup_frames,
+                    }
                 }
             }
         }
@@ -221,12 +234,17 @@ mod tests {
     use nalgebra::Point3;
 
     fn cloud(n: usize, offset: f64) -> Vec<Point3<f64>> {
-        (0..n).map(|i| Point3::new(offset + i as f64 * 0.001, 0.0, 0.0)).collect()
+        (0..n)
+            .map(|i| Point3::new(offset + i as f64 * 0.001, 0.0, 0.0))
+            .collect()
     }
 
     #[test]
     fn warmup_observes_then_becomes_ready() {
-        let params = BackgroundParams { dilation_radius: 1, warmup_frames: 3 };
+        let params = BackgroundParams {
+            dilation_radius: 1,
+            warmup_frames: 3,
+        };
         let mut state = BackgroundState::new(0.05, &params);
         assert!(state.model().is_none());
 
@@ -243,16 +261,25 @@ mod tests {
         }
 
         // Frame 3: reaches the count, finalizes, becomes Ready.
-        assert!(matches!(state.observe_frame(&cloud(50, 999.0)), WarmupOutcome::Ready));
+        assert!(matches!(
+            state.observe_frame(&cloud(50, 999.0)),
+            WarmupOutcome::Ready
+        ));
         assert!(state.model().is_some());
 
         // Subsequent frames stay Ready and do NOT observe.
-        assert!(matches!(state.observe_frame(&cloud(50, 0.0)), WarmupOutcome::Ready));
+        assert!(matches!(
+            state.observe_frame(&cloud(50, 0.0)),
+            WarmupOutcome::Ready
+        ));
     }
 
     #[test]
     fn empty_frame_during_warming_does_not_advance_seen() {
-        let params = BackgroundParams { dilation_radius: 1, warmup_frames: 3 };
+        let params = BackgroundParams {
+            dilation_radius: 1,
+            warmup_frames: 3,
+        };
         let mut state = BackgroundState::new(0.05, &params);
 
         // One real frame: seen advances to 1.
@@ -283,19 +310,26 @@ mod tests {
 
     #[test]
     fn reset_reenters_warming() {
-        let params = BackgroundParams { dilation_radius: 1, warmup_frames: 1 };
+        let params = BackgroundParams {
+            dilation_radius: 1,
+            warmup_frames: 1,
+        };
         let mut state = BackgroundState::new(0.05, &params);
-        assert!(matches!(state.observe_frame(&cloud(50, 999.0)), WarmupOutcome::Ready));
+        assert!(matches!(
+            state.observe_frame(&cloud(50, 999.0)),
+            WarmupOutcome::Ready
+        ));
         assert!(state.model().is_some());
 
         state.reset();
         assert!(state.model().is_none());
-        assert!(matches!(state.observe_frame(&cloud(50, 999.0)), WarmupOutcome::Ready));
+        assert!(matches!(
+            state.observe_frame(&cloud(50, 999.0)),
+            WarmupOutcome::Ready
+        ));
     }
 
-    const SHIPPED: &str = include_str!(
-        "../../lctk_launch/config/board/board_detector.json5"
-    );
+    const SHIPPED: &str = include_str!("../../lctk_launch/config/board/board_detector.json5");
 
     #[test]
     fn shipped_config_defaults_to_bbox() {
