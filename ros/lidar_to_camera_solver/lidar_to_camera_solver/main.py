@@ -48,6 +48,14 @@ from lidar_to_camera_solver.board_geometry import (
     parse_dimension,
     rotation_matrix_to_quaternion,
 )
+from lidar_to_camera_solver.detection_format import (
+    FORMAT_VERSION,
+    deserialize_detection2d_array,
+    deserialize_detection3d_array,
+    format_version_error,
+    serialize_detection2d_array,
+    serialize_detection3d_array,
+)
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
 from lctk_quality import build_report, distinct_placements
 from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
@@ -791,10 +799,13 @@ class LidarToCameraSolver(Node):
 
         try:
             save_data = {
-                # v3 (H-10): 2D detections now persist the real ArUco corners in
+                # v3 (H-10): 2D detections persist the real ArUco corners in
                 # `results`, not just the axis-aligned bbox. v1/v2 files carry no
                 # corners and reload into a biased (C-01) solve.
-                "version": 3,
+                # v4 (H-11): the file records the board-frame convention that produced
+                # it, and keeps the board pose's 6x6 covariance.
+                "version": FORMAT_VERSION,
+                "board_frame_convention": BOARD_FRAME_CONVENTION,
                 "num_detections": buffer_size,
                 "detections": detections_data,
             }
@@ -860,25 +871,17 @@ class LidarToCameraSolver(Node):
             with open(file_path, "r") as f:
                 data = json.load(f)
 
-            version = data.get("version", 0)
-            if version not in [1, 2, 3]:
+            # H-11: a stale-convention file must be rejected, not silently
+            # reinterpreted. Migrating on load would make a file's meaning depend on
+            # which build opened it.
+            version_error = format_version_error(data)
+            if version_error is not None:
                 response.success = False
-                response.message = "Invalid or unsupported file format"
+                response.message = version_error
                 response.num_detections = 0
                 response.buffer_size = len(self.detection_buffer)
+                self.get_logger().error(version_error)
                 return response
-
-            # H-10: files written before v3 carry no real ArUco corners, so the
-            # solver falls back to the axis-aligned bbox and reintroduces C-01 --
-            # a systematically biased extrinsic for any angled board view. Warn
-            # loudly rather than degrading silently.
-            if version < 3:
-                self.get_logger().warn(
-                    f"Loaded a version {version} detection file: it contains no real "
-                    "ArUco corners (only the axis-aligned bounding box), so any solve "
-                    "from it will be biased for non-fronto-parallel board views (C-01). "
-                    "Re-capture and re-save to get a version 3 file with corners."
-                )
 
             loaded_detections = []
             for detection_pair in data.get("detections", []):
@@ -1067,153 +1070,16 @@ class LidarToCameraSolver(Node):
         return response
 
     def _serialize_detection2d_array(self, msg: Detection2DArray) -> dict:
-        """Serialize Detection2DArray to JSON-compatible dict."""
-        return {
-            "header": {
-                "stamp": {
-                    "sec": msg.header.stamp.sec,
-                    "nanosec": msg.header.stamp.nanosec,
-                },
-                "frame_id": msg.header.frame_id,
-            },
-            "detections": [
-                {
-                    "id": d.id if hasattr(d, "id") else "",
-                    "bbox": {
-                        "center": {
-                            "x": d.bbox.center.position.x,
-                            "y": d.bbox.center.position.y,
-                        },
-                        "size_x": d.bbox.size_x,
-                        "size_y": d.bbox.size_y,
-                    },
-                    # H-10: persist the real ArUco corners carried in `results`
-                    # (one per corner, C-01). Without this a reloaded capture falls
-                    # back to the axis-aligned bbox and re-introduces C-01.
-                    "results": [
-                        {
-                            "class_id": r.hypothesis.class_id,
-                            "score": r.hypothesis.score,
-                            "position": {
-                                "x": r.pose.pose.position.x,
-                                "y": r.pose.pose.position.y,
-                                "z": r.pose.pose.position.z,
-                            },
-                        }
-                        for r in d.results
-                    ],
-                }
-                for d in msg.detections
-            ],
-        }
+        return serialize_detection2d_array(msg)
 
     def _serialize_detection3d_array(self, msg: Detection3DArray) -> dict:
-        """Serialize Detection3DArray to JSON-compatible dict."""
-        return {
-            "header": {
-                "stamp": {
-                    "sec": msg.header.stamp.sec,
-                    "nanosec": msg.header.stamp.nanosec,
-                },
-                "frame_id": msg.header.frame_id,
-            },
-            "detections": [
-                {
-                    "results": [
-                        {
-                            "pose": {
-                                "position": {
-                                    "x": r.pose.pose.position.x,
-                                    "y": r.pose.pose.position.y,
-                                    "z": r.pose.pose.position.z,
-                                },
-                                "orientation": {
-                                    "x": r.pose.pose.orientation.x,
-                                    "y": r.pose.pose.orientation.y,
-                                    "z": r.pose.pose.orientation.z,
-                                    "w": r.pose.pose.orientation.w,
-                                },
-                            }
-                        }
-                        for r in d.results
-                    ]
-                }
-                for d in msg.detections
-            ],
-        }
+        return serialize_detection3d_array(msg)
 
     def _deserialize_detection2d_array(self, data: dict) -> Detection2DArray:
-        """Deserialize Detection2DArray from JSON-compatible dict."""
-        from vision_msgs.msg import (
-            Detection2D,
-            BoundingBox2D,
-            ObjectHypothesisWithPose,
-        )
-        from geometry_msgs.msg import PoseWithCovariance, Pose
-
-        msg = Detection2DArray()
-        msg.header.stamp.sec = data["header"]["stamp"]["sec"]
-        msg.header.stamp.nanosec = data["header"]["stamp"]["nanosec"]
-        msg.header.frame_id = data["header"]["frame_id"]
-
-        for d_data in data["detections"]:
-            detection = Detection2D()
-            if "id" in d_data:
-                detection.id = d_data["id"]
-            detection.bbox = BoundingBox2D()
-            detection.bbox.center.position.x = d_data["bbox"]["center"]["x"]
-            detection.bbox.center.position.y = d_data["bbox"]["center"]["y"]
-            detection.bbox.size_x = d_data["bbox"]["size_x"]
-            detection.bbox.size_y = d_data["bbox"]["size_y"]
-
-            # H-10: restore the real ArUco corners (results) so the solver uses
-            # them rather than reconstructing an axis-aligned box (C-01). Files
-            # written before version 3 carry no results and are handled/warned in
-            # load_detections_callback.
-            for r_data in d_data.get("results", []):
-                result = ObjectHypothesisWithPose()
-                result.hypothesis.class_id = r_data.get("class_id", "")
-                result.hypothesis.score = r_data.get("score", 1.0)
-                result.pose = PoseWithCovariance()
-                result.pose.pose = Pose()
-                pos = r_data["position"]
-                result.pose.pose.position.x = pos["x"]
-                result.pose.pose.position.y = pos["y"]
-                result.pose.pose.position.z = pos.get("z", 0.0)
-                result.pose.pose.orientation.w = 1.0
-                detection.results.append(result)
-
-            msg.detections.append(detection)
-
-        return msg
+        return deserialize_detection2d_array(data)
 
     def _deserialize_detection3d_array(self, data: dict) -> Detection3DArray:
-        """Deserialize Detection3DArray from JSON-compatible dict."""
-        from vision_msgs.msg import Detection3D, ObjectHypothesisWithPose
-        from geometry_msgs.msg import PoseWithCovariance, Pose
-
-        msg = Detection3DArray()
-        msg.header.stamp.sec = data["header"]["stamp"]["sec"]
-        msg.header.stamp.nanosec = data["header"]["stamp"]["nanosec"]
-        msg.header.frame_id = data["header"]["frame_id"]
-
-        for d_data in data["detections"]:
-            detection = Detection3D()
-            for r_data in d_data["results"]:
-                result = ObjectHypothesisWithPose()
-                result.pose = PoseWithCovariance()
-                result.pose.pose = Pose()
-                result.pose.pose.position.x = r_data["pose"]["position"]["x"]
-                result.pose.pose.position.y = r_data["pose"]["position"]["y"]
-                result.pose.pose.position.z = r_data["pose"]["position"]["z"]
-                result.pose.pose.orientation.x = r_data["pose"]["orientation"]["x"]
-                result.pose.pose.orientation.y = r_data["pose"]["orientation"]["y"]
-                result.pose.pose.orientation.z = r_data["pose"]["orientation"]["z"]
-                result.pose.pose.orientation.w = r_data["pose"]["orientation"]["w"]
-                detection.results.append(result)
-            msg.detections.append(detection)
-
-        return msg
+        return deserialize_detection3d_array(data)
 
     def _count_placements(self, exclude_last: bool = False) -> int:
         """How many DISTINCT board placements are in the buffer.
