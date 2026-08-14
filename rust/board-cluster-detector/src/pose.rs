@@ -13,8 +13,10 @@
 
 use nalgebra::{Matrix3, Point3, Vector3};
 
-use crate::config::IsolationBand;
-use crate::geometry::{project_to_plane, unproject, PlaneModel};
+use crate::{
+    config::IsolationBand,
+    geometry::{project_to_plane, unproject, PlaneModel},
+};
 
 /// A solved board pose: center + orthonormal, right-handed rotation in the
 /// REP-103 / Autoware body convention (**X forward, Y left, Z up**) + the 3D

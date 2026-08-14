@@ -3,14 +3,15 @@
 //! Port of `experiments/board-detection-2d/src/boarddet/candidates/__init__.py`,
 //! `cluster_after_ground.py` and `background_diff.py`.
 
-use crate::background::BackgroundModel;
-use crate::config::{BoardConfig, ForegroundMethod};
-use crate::dbscan::{anisotropic_scaled, cluster_anisotropic, dbscan};
-use crate::geometry::{extent_2d, fit_plane, plane_rms, project_to_plane, PlaneModel};
+use crate::{
+    background::BackgroundModel,
+    config::{BoardConfig, ForegroundMethod},
+    dbscan::{anisotropic_scaled, cluster_anisotropic, dbscan},
+    geometry::{extent_2d, fit_plane, plane_rms, project_to_plane, PlaneModel},
+};
 use nalgebra::{Point3, Vector3};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::collections::{BTreeMap, HashMap, HashSet};
-
 
 /// A plausible board-plane patch: its member points and fitted plane.
 #[derive(Debug, Clone)]
