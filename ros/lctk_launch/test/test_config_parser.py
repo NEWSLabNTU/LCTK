@@ -191,8 +191,14 @@ def test_two_lidar_node_parity():
     assert len(pipeline.lidar_lidar_solvers) == 1
     solver = pipeline.lidar_lidar_solvers[0]
     assert {solver.lidar1_name, solver.lidar2_name} == {"top_lidar", "front_lidar"}
-    assert solver.lidar1_frame == "velodyne_top"
-    assert solver.lidar2_frame == "velodyne_front"
+    # Frame ids come from two_lidar.yaml, which describes the real two-LiDAR rig
+    # (VLP-32C + Seyond Falcon). The recorded bags publish exactly these frames.
+    frames = {
+        solver.lidar1_name: solver.lidar1_frame,
+        solver.lidar2_name: solver.lidar2_frame,
+    }
+    assert frames["top_lidar"] == "velodyne"
+    assert frames["front_lidar"] == "seyond"
 
     # Correct topic wiring: solver subscribes to detector output topics
     detector_by_lidar = {d.lidar_name: d for d in pipeline.lidar_board_detectors}
