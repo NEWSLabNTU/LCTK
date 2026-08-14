@@ -45,7 +45,7 @@ Run the pipeline with the advanced solver and dump the result (via the
 [interactive controller](./lidar-camera.md)'s `p` key, or the service directly):
 
 ```bash
-ros2 service call /calibration/<pair>/advanced_extrinsic_solver/advanced_extrinsic_solver/dump_detections \
+ros2 service call /calibration/<pair>/lidar_to_camera_solver/dump_detections \
     lctk_interfaces/srv/DumpDetections "{file_path: '$HOME/detections.json'}"
 ```
 

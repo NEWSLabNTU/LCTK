@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>advanced_extrinsic_solver</name>
+  <name>lidar_to_camera_solver</name>
   <version>0.1.0</version>
   <description>Python ROS 2 node for demonstrating solvePnP with ArUco and board detections</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
@@ -13,6 +13,9 @@
   <depend>geometry_msgs</depend>
   <depend>vision_msgs</depend>
   <depend>conflux_py</depend>
+  <!-- L-22: the node imports ten service types from lctk_interfaces.srv; the package it
+       was migrated from never declared it. -->
+  <depend>lctk_interfaces</depend>
   <depend>lctk_quality</depend>
   <depend>python3-opencv</depend>
   <depend>python3-numpy</depend>

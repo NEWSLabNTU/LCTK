@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Advanced Extrinsic Calibration Node
+LiDAR-to-Camera Extrinsic Calibration Node
 
 This ROS2 node performs high-quality LiDAR-camera extrinsic calibration
 using buffered multi-pose calibration with the Perspective-n-Point (PnP) algorithm.
@@ -102,9 +102,9 @@ class BoardDetection:
         return np.degrees(np.sqrt(np.abs(np.diag(self.covariance)[3:])))
 
 
-class AdvancedExtrinsicSolver(Node):
+class LidarToCameraSolver(Node):
     """
-    Advanced ROS2 node for multi-pose LiDAR-camera extrinsic calibration.
+    ROS 2 node for multi-pose LiDAR-camera extrinsic calibration.
 
     This node uses a buffer-based approach for collecting detection data from
     multiple calibration board poses, then solves a single optimized PnP problem
@@ -125,7 +125,7 @@ class AdvancedExtrinsicSolver(Node):
     """
 
     def __init__(self):
-        super().__init__("advanced_extrinsic_solver")
+        super().__init__("lidar_to_camera_solver")
 
         # Essential parameter declarations
         self.declare_parameter("parent_frame", "lidar")
@@ -388,7 +388,7 @@ class AdvancedExtrinsicSolver(Node):
         )
 
         self.get_logger().info(
-            f"Advanced Extrinsic Solver initialized\n"
+            f"LiDAR-to-camera solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
             f"Using conflux_py for time-synchronized detection pairs\n"
             f"Minimum frames before solving: {self.min_frames_required}\n"
@@ -1899,12 +1899,12 @@ class AdvancedExtrinsicSolver(Node):
 
 
 def main(args=None):
-    """Main function to run the advanced extrinsic solver node."""
+    """Main function to run the lidar_to_camera_solver node."""
     import time
 
     rclpy.init(args=args)
 
-    node = AdvancedExtrinsicSolver()
+    node = LidarToCameraSolver()
 
     # Brief delay to allow DDS discovery to complete before spinning
     # This helps avoid race conditions with entity creation
@@ -1920,7 +1920,7 @@ def main(args=None):
         finally:
             executor.shutdown()
     except KeyboardInterrupt:
-        node.get_logger().info("Shutting down advanced extrinsic solver")
+        node.get_logger().info("Shutting down lidar_to_camera_solver")
     except Exception as e:
         # Handle RCLError and other exceptions gracefully
         node.get_logger().error(f"Error during spin: {e}")

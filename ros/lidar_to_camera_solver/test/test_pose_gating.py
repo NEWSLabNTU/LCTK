@@ -13,7 +13,7 @@ misplacement seen 16 times.
 import cv2
 import numpy as np
 
-from advanced_extrinsic_solver.main import AdvancedExtrinsicSolver as S
+from lidar_to_camera_solver.main import LidarToCameraSolver as S
 
 K = np.array([[1164.6, 0, 950.1], [0, 1161.1, 538.6], [0, 0, 1]], dtype=np.float64)
 R_TRUE = np.array([[0.0, -1, 0], [0, 0, -1], [1, 0, 0]], dtype=np.float64)

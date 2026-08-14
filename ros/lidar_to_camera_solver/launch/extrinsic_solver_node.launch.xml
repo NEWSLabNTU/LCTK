@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!--
-    Launch file for advanced extrinsic solver node.
+    Launch file for the lidar_to_camera_solver node.
 
     This node performs multi-pose LiDAR-camera extrinsic calibration using
     buffered detection data and the Perspective-n-Point (PnP) algorithm.
@@ -60,9 +60,9 @@
          description="Transform publishing rate in Hz (when calibration is active)"/>
 
     <!-- Extrinsic Solver Node -->
-    <node pkg="advanced_extrinsic_solver"
-          exec="advanced_extrinsic_solver"
-          name="advanced_extrinsic_solver"
+    <node pkg="lidar_to_camera_solver"
+          exec="lidar_to_camera_solver"
+          name="lidar_to_camera_solver"
           output="screen"
           args="--ros-args --log-level $(var log_level)">
         <!-- Essential parameters -->

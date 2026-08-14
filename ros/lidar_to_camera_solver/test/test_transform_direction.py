@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 from geometry_msgs.msg import TransformStamped
 
-from advanced_extrinsic_solver.main import AdvancedExtrinsicSolver as S
+from lidar_to_camera_solver.main import LidarToCameraSolver as S
 from pointcloud_image_overlay.overlay_node import transform_to_rvec_tvec
 
 # A representative solve: camera looking along the LiDAR's +x, REP-103 style.
