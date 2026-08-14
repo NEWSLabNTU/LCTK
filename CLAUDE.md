@@ -116,7 +116,7 @@ just serve-public   # Serve on 0.0.0.0
    pip3 uninstall colcon-cargo colcon-ros-cargo
    ```
 
-3. **pip packages shadowing apt ones** (this has bitten three times — `just build` now guards all three):
+3. **pip packages shadowing apt ones** (this has bitten four times — `just build` guards the first three):
 
    A pip `--user` install lands in `~/.local/lib/python3.10/site-packages`, which **precedes**
    `/usr/lib/python3/dist-packages` on `sys.path` and silently shadows the apt package that ROS 2
@@ -127,12 +127,20 @@ just serve-public   # Serve on 0.0.0.0
    | `error: option --editable not recognized` (kills `conflux_py` and every ament_python package) | **build** time | `pip3 uninstall -y setuptools` |
    | `ImportError: numpy.core.multiarray failed to import` (kills every solver node at startup, after a clean build) | **run** time | `pip3 uninstall -y numpy` |
    | `TypeError: 'numpy._DTypeMeta' object is not subscriptable` inside scipy (kills any test/node importing `scipy.optimize`) | **test/run** time | `pip3 uninstall -y scipy` |
+   | `ModuleNotFoundError: No module named '_pytest.scope'` raised from `anyio/pytest_plugin.py` during pytest **startup** (kills every pytest run in the workspace before a single test is collected) | **test** time | `pip3 uninstall -y anyio` |
 
    setuptools >= 80 removed the `setup.py develop --editable` step colcon uses for
    `--symlink-install`; numpy >= 2 breaks the ABI apt's `cv2` was compiled against;
-   scipy >= 1.15 requires numpy >= 1.23 while apt ships 1.21.
-   **Never `pip3 install --user` setuptools, numpy, or scipy on this machine** — and note that
-   installing *anything else* with pip can drag them in as dependencies.
+   scipy >= 1.15 requires numpy >= 1.23 while apt ships 1.21;
+   anyio >= 4.3 ships a pytest plugin that imports `_pytest.scope`, added in pytest 7 — apt ships
+   pytest 6.2.5, and plugin autoload pulls it in on *every* pytest invocation.
+   **Never `pip3 install --user` setuptools, numpy, scipy, or anyio on this machine** — and note
+   that installing *anything else* with pip can drag them in as dependencies.
+
+   **anyio was uninstalled on 2026-08-15 to unblock the conflux test suite.** It was a dependency
+   of the pip `--user` `starlette`, which is now broken. If you need starlette/fastapi back,
+   reinstall into a venv rather than `--user`; a bare `pip3 install --user anyio` re-breaks pytest
+   workspace-wide. Escape hatch without uninstalling: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest ...`.
 
 4. **ROS2 daemon issues**: Kill unresponsive daemon:
    ```bash
