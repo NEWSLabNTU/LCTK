@@ -1,6 +1,6 @@
 # LCTK Issue Tracker
 
-Findings from the 2026-07-09 workflow + correctness audit (sensor → config → build → runtime → solver → Autoware export), plus the 2026-07-12 extrinsic-stability audit (C-03, H-07…H-09, M-11…M-14, L-10…L-12). One file per finding, ranked by severity.
+Findings from the 2026-07-09 workflow + correctness audit (sensor → config → build → runtime → solver → Autoware export), plus the 2026-07-12 extrinsic-stability audit (C-03, H-07…H-09, M-11…M-14, L-10…L-12) and the 2026-08-15 conflux-core algorithm + API audit (C-05, H-11…H-13, M-17…M-25, L-17…L-26). One file per finding, ranked by severity.
 
 Status legend: 🔴 open · 🟡 in progress · 🟢 fixed · ⚪ won't fix / by-design
 
@@ -12,6 +12,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [C-02](./archive/C-02-conflux-realtime-memory-leak.md) | Critical | Conflux realtime mode leaks a message object per dropped message | 🟢 |
 | [C-03](./archive/C-03-double-undistortion.md) | Critical | Image undistorted twice before ArUco detection → every corner biased | 🟢 |
 | [C-04](./archive/C-04-board-detector-gate-unreachable.md) | Critical | ICP accept gate set below the sensor noise floor → detector silently accepts nothing | 🟢 |
+| [C-05](./C-05-conflux-ffi-sync-wedges.md) | Critical | Conflux FFI synchronizer wedges permanently after a stream divergence | 🔴 |
 | [H-01](./archive/H-01-conflux-not-built.md) | High | `conflux_py` never built → solvers ImportError at startup | 🟢 |
 | [H-02](./archive/H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🟢 |
 | [H-03](./archive/H-03-pointcloud-datatype-endian.md) | High | Point cloud XYZ decoded as LE float32 without checking datatype/endianness | 🟢 |
@@ -22,6 +23,9 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-08](./archive/H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./archive/H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
 | [H-10](./archive/H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🟢 |
+| [H-11](./H-11-conflux-staleness-anchored-to-construction.md) | High | Conflux staleness expiry anchored to construction time, not message arrival | 🔴 |
+| [H-12](./H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; tests cover the one production does not use | 🔴 |
+| [H-13](./archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Conflux tokio tests had not compiled; `just test` reported green | 🟢 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -38,6 +42,15 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
 | [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
+| [M-17](./M-17-conflux-timer-wheel-loses-messages.md) | Medium | Staleness timer wheel skips slots and misplaces messages | 🔴 |
+| [M-18](./M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing | 🔴 |
+| [M-19](./M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Staleness tracks rejected messages → ghosts can evict valid ones | 🔴 |
+| [M-20](./M-20-conflux-expiration-only-removes-front.md) | Medium | Expired messages removed only if at the buffer front | 🔴 |
+| [M-21](./M-21-conflux-two-time-bases-for-expiry.md) | Medium | Expiry defined in two incompatible time bases (wall clock vs stamp) | 🔴 |
+| [M-22](./M-22-conflux-last-ts-never-resets.md) | Medium | A stream whose clock goes backwards is permanently dead (`last_ts` never resets) | 🔴 |
+| [M-23](./M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable; statistics look perfect | 🔴 |
+| [M-24](./archive/M-24-conflux-py-buffer-size-validation.md) | Medium | Invalid `buffer_size` raised a generic RuntimeError; `__del__` on partial init | 🟢 |
+| [M-25](./archive/M-25-conflux-py-tests-never-ran.md) | Medium | `just test-python` collected zero tests and reported success | 🟢 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -54,6 +67,16 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-14](./archive/L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🟢 |
 | [L-15](./archive/L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🟢 |
 | [L-16](./archive/L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🟢 |
+| [L-17](./L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` returns true when *any* buffer is empty | 🔴 |
+| [L-18](./L-18-conflux-result-not-exported.md) | Low | `last_push_result` returns an opaque int; `ConfluxResult` unexported | 🔴 |
+| [L-19](./L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors | 🔴 |
+| [L-20](./L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window | 🔴 |
+| [L-21](./L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation | 🔴 |
+| [L-22](./L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success while `conflux_cpp` has zero tests | 🔴 |
+| [L-23](./L-23-conflux-core-dead-code.md) | Low | Half-built feedback path, dead assert, large commented-out blocks | 🔴 |
+| [L-24](./L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` holds a matched pair until every stream has two messages | 🔴 |
+| [L-25](./L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have | 🔴 |
+| [L-26](./archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` breaks pytest workspace-wide before collection | 🟢 |
 
 ## Three headline gaps
 
@@ -98,8 +121,54 @@ about the extrinsic: **this system has no way to tell you it is not working.** A
 pass, a detector that publishes empty results, and a solver that reports `"Calibration successful"`
 are all the same failure — silence where a number should be.
 
+## The conflux cluster (2026-08-15)
+
+C-05, H-11–H-13, M-17–M-25 and L-17–L-26 are one story about the message synchronizer every
+solver node depends on, and it rhymes with the two above: **silence where a number should be.**
+
+The structural cause is H-12. conflux ships *two* implementations of the pipeline over one
+shared `State` — the pure-Rust `sync()` stream and the C ABI the bindings actually use. They
+have different escape hatches, different emission gates, and different staleness support. All
+LCTK nodes take the FFI path; conflux-core's 156 tests almost all exercise `sync()`.
+
+That gap is what lets C-05 exist. `sync()` cannot wedge, because its poll loop calls
+`drop_min()` when the buffers fill with unmatchable data. The FFI has no such call, so once
+every buffer holds two messages and the spread stays under the window, it never emits again —
+permanently, for the life of the process. Reproduced against the shipped realtime preset
+(50 ms window, buffer 2): under `RejectNew` every subsequent push is refused; under
+`DropOldest` every push is *accepted*, statistics report zero rejections and zero overflows,
+and still nothing comes out.
+
+Which is M-23's point. The observability surface describes inputs only — received, rejected,
+buffer length. Nothing answers "why is the matcher not matching?", so the `DropOldest` wedge
+presents as a perfectly healthy synchronizer that has silently stopped calibrating. Same
+failure shape as [C-04](./archive/C-04-board-detector-gate-unreachable.md)'s unreachable gate
+and [H-09](./archive/H-09-no-extrinsic-quality-metric.md)'s missing metric.
+
+The staleness subsystem (H-11, M-17–M-21) is a separate matter: it is closer to a prototype
+than a feature. Expiry is anchored to construction time rather than message arrival, so
+messages are born stale (H-11); the `enable_immediate_expiration` background task is an
+acknowledged placeholder that expires nothing (M-18); the timer wheel drains one slot per call
+and inserts at the wrong offset (M-17); expired messages are only removed if they happen to
+sit at a buffer front (M-20). It is unreachable today only because the FFI hardcodes
+`staleness_detector: None`. The phase doc treats "repair or remove" as an open decision rather
+than assuming repair.
+
+**Why none of this was caught.** H-13 and M-25: both test suites were reporting green while
+running nothing. `just test-rust` omitted `--features tokio`, so 20 staleness tests compiled
+to nothing after the `Config` API changed under them; `just test-python` ran the tests through
+colcon's unittest path, which collected 0 of 19 pytest-style tests and exited 0. Repairing the
+Python suite immediately exposed M-24. `conflux_cpp` still has no tests at all (L-22).
+
+- The remediation plan: [phase-7](../roadmap/phase-7-conflux-sync-correctness.md),
+  [phase-8](../roadmap/phase-8-conflux-staleness-subsystem.md),
+  [phase-9](../roadmap/phase-9-conflux-api-and-tooling.md)
+
 ## Verified against live source
 C-01, H-01, H-02 were confirmed by reading the current code during the audit; the rest of the
 2026-07-09 findings are from static review and marked with their file:line anchors.
 Every 2026-07-12 finding (C-03, H-07–H-09, M-11–M-14, L-10–L-12) was confirmed by reading the
 current source.
+The 2026-08-15 conflux findings (C-05, H-11–H-13, M-17–M-25, L-17–L-26) were confirmed by
+reading the current source; C-05, H-11 and M-24 were additionally reproduced at runtime
+against the built `libconflux_ffi.so`.
