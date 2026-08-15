@@ -12,7 +12,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [C-02](./archive/C-02-conflux-realtime-memory-leak.md) | Critical | Conflux realtime mode leaks a message object per dropped message | 🟢 |
 | [C-03](./archive/C-03-double-undistortion.md) | Critical | Image undistorted twice before ArUco detection → every corner biased | 🟢 |
 | [C-04](./archive/C-04-board-detector-gate-unreachable.md) | Critical | ICP accept gate set below the sensor noise floor → detector silently accepts nothing | 🟢 |
-| [C-05](./C-05-conflux-ffi-sync-wedges.md) | Critical | Conflux FFI synchronizer wedges permanently after a stream divergence | 🔴 |
+| [C-05](./archive/C-05-conflux-ffi-sync-wedges.md) | Critical | Conflux FFI synchronizer wedges permanently after a stream divergence | 🟢 |
 | [H-01](./archive/H-01-conflux-not-built.md) | High | `conflux_py` never built → solvers ImportError at startup | 🟢 |
 | [H-02](./archive/H-02-conflux-drops-first-message.md) | High | Conflux Python binding drops the first message (msg_id 0 → NULL) | 🟢 |
 | [H-03](./archive/H-03-pointcloud-datatype-endian.md) | High | Point cloud XYZ decoded as LE float32 without checking datatype/endianness | 🟢 |
@@ -23,8 +23,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-08](./archive/H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./archive/H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
 | [H-10](./archive/H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🟢 |
-| [H-11](./H-11-conflux-staleness-anchored-to-construction.md) | High | Conflux staleness expiry anchored to construction time, not message arrival | 🔴 |
-| [H-12](./H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; tests cover the one production does not use | 🔴 |
+| [H-11](./archive/H-11-conflux-staleness-anchored-to-construction.md) | High | Conflux staleness expiry anchored to construction time, not message arrival | 🟢 |
+| [H-12](./archive/H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; tests cover the one production does not use | 🟢 |
 | [H-13](./archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Conflux tokio tests had not compiled; `just test` reported green | 🟢 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
@@ -122,6 +122,16 @@ pass, a detector that publishes empty results, and a solver that reports `"Calib
 are all the same failure — silence where a number should be.
 
 ## The conflux cluster (2026-08-15)
+
+**Status (2026-08-15):** C-05, H-11 and H-12 are **fixed** in
+`jerry73204/conflux`@bb490d9. The matching policy now lives in one place
+(`State::advance`) that both drivers call, which closes the wedge and makes the
+two pipelines agree; staleness deadlines are measured from message arrival. The
+staleness subsystem's remaining defects (M-17–M-21) and the observability and
+ergonomics work (M-22, M-23, L-17–L-25) are still open. The narrative below is
+kept in the past tense it was written in, because it explains how the cluster
+arose.
+
 
 C-05, H-11–H-13, M-17–M-25 and L-17–L-26 are one story about the message synchronizer every
 solver node depends on, and it rhymes with the two above: **silence where a number should be.**

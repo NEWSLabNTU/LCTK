@@ -15,13 +15,25 @@ before any code is written.
 Prerequisite: [Phase 7](./phase-7-conflux-sync-correctness.md) Stage 2, which determines where
 staleness ticking would live in a unified pipeline.
 
+## Status
+
+**H-11 is fixed** (`jerry73204/conflux`@bb490d9): expiry is anchored to message
+arrival, with regression coverage in `staleness_anchor_tests.rs`. It was taken
+ahead of the Stage 0 decision because it is a small, self-contained correctness
+fix that is worth having under either path — and because leaving a known-wrong
+expiry rule in place while the decision is pending is the worse option.
+
+**Stage 0 is still open.** M-17 through M-21 remain, and the repair-vs-remove
+question is unchanged: the subsystem is still unreachable from LCTK, still built
+on the wrong clock for offline playback, and B1 is now the only step already done.
+
 ## Problem Statement
 
 ### The defects
 
 | Issue | Sev | Summary |
 |-------|-----|---------|
-| [H-11](../issues/H-11-conflux-staleness-anchored-to-construction.md) | High | Expiry anchored to construction time, not message arrival |
+| [H-11](../issues/archive/H-11-conflux-staleness-anchored-to-construction.md) | High | Expiry anchored to construction time, not message arrival |
 | [M-17](../issues/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Timer wheel drains one slot per call; insertion double-counts elapsed time |
 | [M-18](../issues/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing |
 | [M-19](../issues/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Messages are tracked before the ordering check → ghost entries |

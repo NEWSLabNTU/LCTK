@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** conflux-core (staleness subsystem)
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Reproduced with a probe test against `ConstrainedHeap` (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/staleness.rs:115`, `:127`, `:139`
 
@@ -62,3 +62,29 @@ Add a test that pushes messages well after construction and asserts they survive
 timeout.
 
 Related: M-17, M-18, M-19, M-20, M-21 — the rest of the staleness subsystem.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@bb490d9; LCTK pins it). Deadlines are now measured from
+`Instant::now()` at the moment the message is tracked, and the `reference_time` field — which had
+no other purpose — is gone. The horizon check now compares `staleness_timeout` against
+`heap_time_horizon` directly, instead of a `saturating_duration_since` that silently returned zero
+for already-past instants and therefore always passed.
+
+Regression coverage: `crates/conflux-core/tests/staleness_anchor_tests.rs` — a message pushed long
+after construction keeps its full timeout, a message still expires once its own timeout elapses,
+and expiry order follows arrival rather than construction.
+
+**Two existing tests were rewritten, not relaxed**, because they asserted outcomes that only held
+while the bug was present:
+
+- `test_staleness_with_actual_delays` placed its long delay *between* two complete pairs, so no
+  message ever waited alone past its timeout. It now strands one message, which is what the test
+  always meant to exercise.
+- `test_message_popped_before_matching` asserted which partner survived. `b1` is only microseconds
+  old when it arrives, so it is not stale, and the 50 ms window legitimately admits
+  `(a2=1250, b1=1200)`. The test now asserts what staleness actually owes: the stale `a1` is gone.
+
+The subsystem remains unreachable from LCTK — the FFI still hardcodes `staleness_detector: None`.
+M-17 through M-21 remain open; see [Phase 8](../../roadmap/phase-8-conflux-staleness-subsystem.md)
+for the repair-vs-remove decision.

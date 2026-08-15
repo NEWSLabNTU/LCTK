@@ -13,6 +13,18 @@ test tooling are in [Phase 9](./phase-9-conflux-api-and-tooling.md).
 
 Work lands in the `jerry73204/conflux` submodule, then LCTK bumps the pin.
 
+## Status
+
+| Stage | State |
+|-------|-------|
+| 1 — Reproduce and pin | **Done** — FFI-level tests `test_recovers_from_divergence_{reject_new,drop_oldest}`; `pipeline_parity_tests.rs` in conflux-core |
+| 2 — Unify the pipeline | **Done** — `State::advance` owns the rules; `sync()`'s poll loop reduced to a feeder (~90 lines removed). L-24's `is_ready` gate is gone as a side effect and L-24 should be re-checked |
+| 3 — Recovery | **Partial** — C-05 closed by construction. `Buffer::reset()` / clock-jump detection (M-22) **not started** |
+| 4 — Observability (M-23) | Not started |
+| 5 — Cleanup (L-23) | Not started |
+
+Landed in `jerry73204/conflux`@bb490d9.
+
 ## Problem Statement
 
 conflux ships two implementations of the pipeline over one shared `State`:
@@ -54,8 +66,8 @@ message, keeping `all_one()` true. Any transient divergence latches the fault.
 
 | Issue | Sev | Summary |
 |-------|-----|---------|
-| [C-05](../issues/C-05-conflux-ffi-sync-wedges.md) | Critical | FFI synchronizer wedges permanently after a stream divergence |
-| [H-12](../issues/H-12-conflux-two-divergent-pipelines.md) | High | Two divergent pipelines; tests cover the unshipped one |
+| [C-05](../issues/archive/C-05-conflux-ffi-sync-wedges.md) | Critical | FFI synchronizer wedges permanently after a stream divergence |
+| [H-12](../issues/archive/H-12-conflux-two-divergent-pipelines.md) | High | Two divergent pipelines; tests cover the unshipped one |
 | [M-22](../issues/M-22-conflux-last-ts-never-resets.md) | Medium | Clock reset kills a stream permanently (`last_ts` never resets) |
 | [M-23](../issues/M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable |
 | [L-17](../issues/L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` means "any buffer empty" |

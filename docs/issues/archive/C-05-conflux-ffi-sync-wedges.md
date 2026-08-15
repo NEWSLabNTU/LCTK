@@ -2,7 +2,7 @@
 
 - **Severity:** Critical
 - **Area:** conflux-core / conflux FFI (all LCTK solver nodes)
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Reproduced against the built `libconflux_ffi.so` via `conflux_py` (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/state.rs:130-186` (`try_match`),
   `ros/conflux/conflux_cpp/rust/src/lib.rs:293-330` (`conflux_poll`),
@@ -66,3 +66,30 @@ patching the FFI separately:
 
 Related: H-12 (the two pipelines diverge in the first place), M-23 (the wedge is invisible
 from the outside).
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@bb490d9; LCTK pins it). The forced-progress rule moved
+into the shared core as `State::advance`, which both `conflux_poll` and `sync()`'s poll loop now
+call (H-12), so the FFI can no longer lack an escape the Rust pipeline has.
+
+Two conditions in `advance` are load-bearing and took iteration:
+
+- The trigger is `any_full`, not `is_full`. A buffer at capacity cannot accept another message,
+  so waiting on that stream is futile even while other buffers still have room. Using `is_full`
+  (every buffer full) left the wedge intact, since the wedge state has one buffer full and one not.
+- It must **not** fire while any buffer is empty. Forcing progress there lets `drop_min` take a
+  slow stream's only message along with the fast stream's oldest, which silently destroyed
+  matches for mixed-frequency inputs (caught by `realistic_timing_tests`).
+
+Before dropping anything, `advance` retries through a new `try_match_relaxed`, which skips the
+wait-for-spread rule while keeping the window validity check — emitting the earliest genuinely
+valid group instead of holding out for a better one that can no longer form.
+
+Regression coverage: `test_recovers_from_divergence_reject_new` and
+`test_recovers_from_divergence_drop_oldest` in the `conflux-ffi` crate, plus
+`pipeline_parity_tests.rs` in conflux-core.
+
+Verified end-to-end through the built `libconflux_ffi.so`: the original reproduction now yields
+19 groups (RejectNew) and 20 groups (DropOldest) where it previously yielded 0, with buffers
+draining to empty. Clean aligned input is unchanged at 12/12 groups.

@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** conflux-core / conflux FFI
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review + test-path inspection (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/sync.rs:104-289` vs
   `ros/conflux/conflux_cpp/rust/src/lib.rs:124-190`, `:293-330`
@@ -49,3 +49,21 @@ Collapse the duplication rather than testing both:
    so the shipped ABI has coverage independent of the Rust stream API.
 
 Related: C-05, H-11, L-24.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@bb490d9; LCTK pins it). The matching policy now lives in
+one place — `State::advance` — and both drivers call it. `sync()`'s poll loop was reduced from a
+three-branch state machine carrying its own copy of the rules to a feeder that pushes input and
+drains at end of stream (`sync.rs` shrank by ~90 lines).
+
+The divergence was not theoretical. On identical input — 12 aligned pairs, 50 ms window,
+buffer 8 — `sync()` emitted **11** groups where the FFI emitted **12**, silently dropping the pair
+at t=1330 when its buffers filled. After unification both emit 12.
+
+Regression coverage: `crates/conflux-core/tests/pipeline_parity_tests.rs` pins `sync()`'s side of
+the contract (divergence recovery under both drop policies, and one group per aligned pair); the
+FFI side is covered by `test_recovers_from_divergence_*` in the `conflux-ffi` crate.
+
+Still outstanding from this issue's suggested fix: the FFI integration suite is still thin
+(L-22), and the `is_ready()` emission-gate difference is tracked separately as L-24.
