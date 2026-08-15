@@ -33,7 +33,17 @@ detection pair:
    sends the stamps backward. Measured on a looping 19.8 s bag: groups froze at 32 while `dropped`
    climbed 1:1 with `received` on both streams for the next four minutes.
 
-Both were fixed in `lidar_to_camera_solver` alone, because there was nowhere else for the fix to live.
+A third failure surfaced after this module shipped, and it is the sharpest of the three.
+`State::try_match` runs its readiness check (`inf_ts + window > sup_ts`) **before** the pruning step
+that drops stale messages. When one stream's buffer holds only a previous recording's stamps — the
+operator plays a background bag with no camera in it, then a calibration bag — the new recording's
+stamps never overlap the old ones, the check always returns early, the prune never runs, and under
+`reject_new` the buffer never drains. Measured: `groups=0`, permanently, with no group having ever
+been emitted. That state is unrecoverable from inside conflux and deserves an upstream fix; the
+reset below is a workaround from outside.
+
+The first two were fixed in `lidar_to_camera_solver` alone, because there was nowhere else for the fix
+to live.
 At the moment of the review `lidar_to_lidar_solver` still had the hardcoded `0.0` at
 `calibrate.launch.py:285` and still had no epoch reset. That is the cost of the missing module, stated
 as a bug rather than as a principle — and adopting this decision is what closed it: that node now
@@ -54,9 +64,11 @@ refusal diagnosis.
 measured drift. No launch file, node, or future caller can request the setting that caused defect 1.
 
 **Conflux's own rule is not changed.** Strict time ordering is correct for a live sensor; what is
-wrong is asking it to serve a workflow that replays recordings. The module recognises the restart —
-groups have stopped *and* every stream is being dropped — and starts a fresh matching engine. One
-quiet stream is a detector fault and no drops at all is a dead stream; neither resets.
+wrong is asking it to serve a workflow that replays recordings. The module recognises that the source
+has changed underneath it — nothing has paired for a couple of seconds *while every stream is still
+delivering* — and starts a fresh matching engine. A stream that has gone quiet is a detector fault, or
+simply a background bag with no camera in it, and must not reset anything: clearing the buffers would
+hide it.
 
 `lctk_sync` is a new ament_python package rather than an upstream change to
 `jerry73204/conflux`, because the epoch policy encodes LCTK's workflow (replaying many bags to collect
