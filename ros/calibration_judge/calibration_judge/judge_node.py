@@ -6,13 +6,14 @@ This node subscribes to the extrinsic transform topic and compares it against
 a ground truth transform matrix to evaluate calibration quality.
 """
 
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import TransformStamped
+from typing import Any
+
 import numpy as np
+import rclpy
 import yaml
-from typing import Optional, Dict, Any
+from geometry_msgs.msg import TransformStamped
+from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from scipy.spatial.transform import Rotation
 
 
@@ -90,7 +91,7 @@ class CalibrationJudgeNode(Node):
         self.get_logger().info("Calibration judge node started")
         self.get_logger().info(f"Subscribing to: {transform_topic}")
 
-    def _load_config(self, filepath: str) -> Optional[Dict[str, Any]]:
+    def _load_config(self, filepath: str) -> dict[str, Any] | None:
         """
         Load ground truth configuration from YAML file.
 

@@ -21,7 +21,6 @@ Compatible with: OpenCV 4.5.4, NumPy 1.21.5 (Ubuntu 22.04)
 
 import math
 import struct
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -179,19 +178,17 @@ class EducationalOverlayNode(Node):
         # These demonstrate what data we need for sensor fusion
 
         # Camera intrinsic parameters (from camera_info topic)
-        self.camera_matrix: Optional[np.ndarray] = None  # 3x3 K matrix
-        self.distortion: Optional[np.ndarray] = None  # Distortion coefficients
+        self.camera_matrix: np.ndarray | None = None  # 3x3 K matrix
+        self.distortion: np.ndarray | None = None  # Distortion coefficients
 
         # Extrinsic calibration (from live calibration solver)
-        self.extrinsic_rvec: Optional[np.ndarray] = None  # Rotation vector (3x1)
-        self.extrinsic_tvec: Optional[np.ndarray] = None  # Translation vector (3x1)
+        self.extrinsic_rvec: np.ndarray | None = None  # Rotation vector (3x1)
+        self.extrinsic_tvec: np.ndarray | None = None  # Translation vector (3x1)
 
         # Latest sensor data (for overlay generation)
-        self.latest_image: Optional[Image] = None
-        self.latest_pointcloud: Optional[PointCloud2] = None
-        self.latest_inlier_pointcloud: Optional[PointCloud2] = (
-            None  # Debug inlier points
-        )
+        self.latest_image: Image | None = None
+        self.latest_pointcloud: PointCloud2 | None = None
+        self.latest_inlier_pointcloud: PointCloud2 | None = None  # Debug inlier points
 
         # === PARAMETER DECLARATIONS ===
         # Depth range for color-coding (meters)
@@ -304,7 +301,6 @@ class EducationalOverlayNode(Node):
         self.extrinsic_rvec, self.extrinsic_tvec = transform_to_rvec_tvec(msg)
         # self.extrinsic_rvec = np.array([-0.506223279, -0.50280546, -1.6])
         # self.extrinsic_tvec = np.array([1.93833247, -1.33525032,  0.77690338])
-        
 
         # Educational logging (every 10th message to avoid spam)
         if self.message_counts["extrinsics"] % 10 == 0:
@@ -488,7 +484,7 @@ class EducationalOverlayNode(Node):
             points_camera = (R @ lidar_points.T).T + self.extrinsic_tvec.flatten()
 
             # The Z-component is the true depth (shape N, 1)
-            depth_z = points_camera[:, 2:3] 
+            depth_z = points_camera[:, 2:3]
 
             # === STEP 5: PROJECT LIDAR POINTS TO 2D IMAGE COORDINATES ===
             # Educational note: Let cv2.projectPoints handle the full transformation
@@ -595,15 +591,15 @@ class EducationalOverlayNode(Node):
                 )
 
         except Exception as e:
-            self.get_logger().error(f"Overlay generation failed: {str(e)}")
-            self._draw_status_message(f"Processing error: {str(e)}")
+            self.get_logger().error(f"Overlay generation failed: {e!s}")
+            self._draw_status_message(f"Processing error: {e!s}")
 
     def _create_visual_overlay(
         self,
         cv_image: np.ndarray,
         image_points: np.ndarray,
-        inlier_image_points: Optional[np.ndarray] = None,
-        depth: Optional[np.ndarray] = None,
+        inlier_image_points: np.ndarray | None = None,
+        depth: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         Educational Helper: Create visual overlay of LiDAR points on camera image
@@ -626,7 +622,9 @@ class EducationalOverlayNode(Node):
 
         # Calculate colors for all points at once
         normalized_depth = np.clip((depth - min_depth) / depth_range, 0, 1)
-        colors = (1 - normalized_depth) * np.array([200, 0, 0]) + normalized_depth * np.array([25, 100, 255])
+        colors = (1 - normalized_depth) * np.array(
+            [200, 0, 0]
+        ) + normalized_depth * np.array([25, 100, 255])
         colors = colors.astype(np.uint8)
 
         # Calculate radii: inversely proportional to depth
@@ -636,7 +634,9 @@ class EducationalOverlayNode(Node):
         # Draw full pointcloud with depth-based colors and radii
         lidar_points_drawn = 0
         for (u, v), color, radius in zip(image_points, colors, radii):
-            cv2.circle(cv_image, (int(u), int(v)), int(radius), tuple(color.tolist()), -1)
+            cv2.circle(
+                cv_image, (int(u), int(v)), int(radius), tuple(color.tolist()), -1
+            )
             lidar_points_drawn += 1
 
         # Draw inlier points with bright colors on top
@@ -720,7 +720,7 @@ class EducationalOverlayNode(Node):
             self.overlay_publisher.publish(ros_image)
 
         except Exception as e:
-            self.get_logger().error(f"Failed to publish overlay: {str(e)}")
+            self.get_logger().error(f"Failed to publish overlay: {e!s}")
 
 
 def main():

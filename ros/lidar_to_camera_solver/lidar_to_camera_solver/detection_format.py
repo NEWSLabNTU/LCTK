@@ -23,8 +23,6 @@ Like `board_geometry`, this module imports nothing from ``rclpy``: the whole for
 functions over plain values.
 """
 
-from typing import Optional
-
 from lidar_to_camera_solver.board_geometry import BOARD_FRAME_CONVENTION
 
 #: Bumped from 3 in the same change that altered what a stored pose means, so version
@@ -35,7 +33,7 @@ FORMAT_VERSION = 4
 MIGRATION_COMMAND = "ros2 run lidar_to_camera_solver migrate_detections"
 
 
-def format_version_error(data: dict) -> Optional[str]:
+def format_version_error(data: dict) -> str | None:
     """Decide whether a loaded dump file may be used by this build.
 
     Returns ``None`` when it may, or an operator-facing failure message when it may

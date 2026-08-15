@@ -20,8 +20,8 @@ and a *large* value is genuinely informative. It is only the small values that l
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence
 
 import cv2
 import numpy as np
@@ -33,7 +33,7 @@ NO_DISTORTION = np.zeros(5)
 class Residuals:
     rms_px: float
     max_px: float
-    per_pose_rms_px: List[float]
+    per_pose_rms_px: list[float]
 
     #: The PnP Jacobian, 2N x 6, d(projection)/d(rvec, tvec). Kept because `conditioning` needs it
     #: and `cv2.projectPoints` hands it to us for free.
@@ -61,7 +61,7 @@ def compute_residuals(
     err = projected.reshape(-1, 2) - image_points
     dist = np.linalg.norm(err, axis=1)
 
-    per_pose: List[float] = []
+    per_pose: list[float] = []
     start = 0
     for pose_obj in object_points_per_pose:
         stop = start + len(pose_obj)

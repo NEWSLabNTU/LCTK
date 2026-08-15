@@ -15,7 +15,6 @@ Two failures motivated these tests, both seen on a real seyond_left bag:
 """
 
 import pytest
-
 from lctk_sync import (
     SyncGroupSummary,
     format_sync_stats,
@@ -163,7 +162,9 @@ def test_a_pipeline_that_has_not_started_is_not_a_stall():
     from lctk_sync import sync_health_warning
 
     assert (
-        sync_health_warning(previous={}, current={"a": 0, "b": 0}, last_group_age_s=None)
+        sync_health_warning(
+            previous={}, current={"a": 0, "b": 0}, last_group_age_s=None
+        )
         is None
     )
 
@@ -173,7 +174,10 @@ def test_the_stats_line_reports_the_pair_skew():
     anything. With conflux's infinite window it grew without bound (11s on this rig)
     while every other counter looked healthy, so it must be visible at a glance."""
     line = format_sync_stats(
-        received={"a": 10}, dropped={"a": 0}, rejected={"a": 0}, groups=10,
+        received={"a": 10},
+        dropped={"a": 0},
+        rejected={"a": 0},
+        groups=10,
         skew_ms=(12.5, 47.0),
     )
 

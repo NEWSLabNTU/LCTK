@@ -17,14 +17,14 @@ respectively.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Transform, TransformStamped, Quaternion, Vector3
+from geometry_msgs.msg import Quaternion, Transform, TransformStamped, Vector3
 from lctk_sync import DetectionPairSource, PairSourceConfig
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
 from tf2_ros import TransformBroadcaster
 from vision_msgs.msg import Detection3DArray
@@ -37,8 +37,8 @@ class SyncStatistics:
     synced_pairs: int = 0
     dropped_stale: int = 0
     last_timestamp_diff_ms: float = 0.0
-    last_translation: Optional[Tuple[float, float, float]] = None
-    last_rotation_rpy_deg: Optional[Tuple[float, float, float]] = None
+    last_translation: tuple[float, float, float] | None = None
+    last_rotation_rpy_deg: tuple[float, float, float] | None = None
 
 
 class LidarToLidarSolver(Node):
@@ -92,7 +92,7 @@ class LidarToLidarSolver(Node):
         use_best_effort_qos = self.get_parameter("use_best_effort_qos").value
 
         # State
-        self.current_transform: Optional[TransformStamped] = None
+        self.current_transform: TransformStamped | None = None
         self.stats = SyncStatistics()
 
         # QoS profile configuration based on mode:
@@ -152,7 +152,7 @@ class LidarToLidarSolver(Node):
         self.get_logger().info(f"Same face mode: {self.same_face_mode}")
         self.get_logger().info("LidarToLidarSolver initialized")
 
-    def _handle_sync_group(self, messages: Tuple[Any, ...]):
+    def _handle_sync_group(self, messages: tuple[Any, ...]):
         """Called for every usable pair, in `topics` order (lidar1, lidar2).
 
         Empty detection arrays never reach here: `require_non_empty` drops those groups
@@ -232,7 +232,7 @@ class LidarToLidarSolver(Node):
             f"(dt={self.stats.last_timestamp_diff_ms:.1f}ms)"
         )
 
-    def compute_transform(self, pose1, pose2) -> Optional[Transform]:
+    def compute_transform(self, pose1, pose2) -> Transform | None:
         """
         Compute transform from LiDAR 2 frame to LiDAR 1 frame.
 
@@ -273,7 +273,7 @@ class LidarToLidarSolver(Node):
         # Convert back to Transform message
         return self.matrix_to_transform(T_rel)
 
-    def pose_to_matrix(self, pose) -> Optional[np.ndarray]:
+    def pose_to_matrix(self, pose) -> np.ndarray | None:
         """Convert geometry_msgs/Pose to 4x4 transformation matrix."""
         try:
             # Extract translation

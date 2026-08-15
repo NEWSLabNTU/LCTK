@@ -25,7 +25,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from lidar_to_camera_solver.board_geometry import compute_multi_marker_corners
 
 # Positional tolerance, metres. The fixture carries exact decimal geometry, so the only
@@ -95,7 +94,9 @@ def world_corners(golden, config):
     rotation, translation = board_to_world(golden)
     local = compute_multi_marker_corners(config)
     return {
-        marker_id: [rotation @ np.asarray(c, dtype=np.float64) + translation for c in corners]
+        marker_id: [
+            rotation @ np.asarray(c, dtype=np.float64) + translation for c in corners
+        ]
         for marker_id, corners in local.items()
     }
 
@@ -104,9 +105,9 @@ def test_marker_corners_match_the_world_golden_keyed_by_marker_id(golden):
     config = pattern_config(golden)
     computed = world_corners(golden, config)
 
-    assert sorted(computed) == sorted(
-        int(k) for k in golden["markers"]
-    ), "one corner set per marker id"
+    assert sorted(computed) == sorted(int(k) for k in golden["markers"]), (
+        "one corner set per marker id"
+    )
 
     for marker_id, expected_corners in golden["markers"].items():
         actual_corners = computed[int(marker_id)]

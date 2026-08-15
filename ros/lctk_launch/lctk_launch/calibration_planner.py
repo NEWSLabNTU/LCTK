@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-
 # Edge weights: lower = preferred (higher accuracy)
 EDGE_WEIGHTS = {
     "lidar_camera": 1,

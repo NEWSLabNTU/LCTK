@@ -8,9 +8,8 @@ an unhelpful "No synchronized detection pair available".
 
 import pytest
 import rclpy
-from vision_msgs.msg import Detection2DArray, Detection3DArray
-
 from lctk_sync import DetectionPairSource, PairSourceConfig
+from vision_msgs.msg import Detection2DArray, Detection3DArray
 
 
 @pytest.fixture(scope="module")

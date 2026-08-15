@@ -22,7 +22,6 @@ exact signature of a rewound source, and it needs no access to the raw stamps.
 """
 
 import pytest
-
 from lctk_sync import should_reset_for_new_epoch
 
 

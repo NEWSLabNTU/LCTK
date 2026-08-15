@@ -18,7 +18,6 @@ Hence two rules for this module:
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -35,7 +34,7 @@ BOARD_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
 BOARD_FRAME_CONVENTION_TOPIC = "/lctk/board_frame_convention"
 
 
-def frame_convention_error(received: Optional[str]) -> Optional[str]:
+def frame_convention_error(received: str | None) -> str | None:
     """Decide whether a received frame-convention tag is acceptable.
 
     Returns ``None`` when it is, or an operator-facing failure message when it is not.
@@ -75,8 +74,8 @@ class ArUcoMarker:
     """Represents an ArUco marker detection in image coordinates."""
 
     id: int
-    corners: List[Tuple[float, float]]  # 4 corners in pixel coordinates
-    center: Tuple[float, float]  # Center point in pixels
+    corners: list[tuple[float, float]]  # 4 corners in pixel coordinates
+    center: tuple[float, float]  # Center point in pixels
 
 
 def parse_dimension(dim_str: str) -> float:
@@ -100,7 +99,7 @@ def load_aruco_pattern_config(config_file_path: str) -> dict:
         return json5.load(f)
 
 
-def marker_paper_placement(config: dict) -> Tuple[float, float]:
+def marker_paper_placement(config: dict) -> tuple[float, float]:
     """Where the printed sheet is glued on the plate, in metres.
 
     Returns ``(toward_left_corner, toward_top_corner)``: the offset of the paper's
@@ -123,7 +122,7 @@ def marker_paper_placement(config: dict) -> Tuple[float, float]:
     )
 
 
-def marker_paper_point(config: dict, u: float, v: float) -> Tuple[float, float, float]:
+def marker_paper_point(config: dict, u: float, v: float) -> tuple[float, float, float]:
     """Map a point in the marker paper's own coordinates into the board frame.
 
     Paper coordinates run along the paper's edges, which are parallel to the plate's
@@ -150,24 +149,14 @@ def marker_paper_point(config: dict, u: float, v: float) -> Tuple[float, float, 
     v_dir = (-inv_sqrt2, inv_sqrt2)  # toward the plate's right corner
 
     half_paper = paper_size / 2.0
-    x = (
-        toward_left
-        - (u_dir[0] + v_dir[0]) * half_paper
-        + u_dir[0] * u
-        + v_dir[0] * v
-    )
-    y = (
-        toward_top
-        - (u_dir[1] + v_dir[1]) * half_paper
-        + u_dir[1] * u
-        + v_dir[1] * v
-    )
+    x = toward_left - (u_dir[0] + v_dir[0]) * half_paper + u_dir[0] * u + v_dir[0] * v
+    y = toward_top - (u_dir[1] + v_dir[1]) * half_paper + u_dir[1] * u + v_dir[1] * v
     return (x, y, 0.0)
 
 
 def compute_multi_marker_corners(
     config: dict,
-) -> Dict[int, List[Tuple[float, float, float]]]:
+) -> dict[int, list[tuple[float, float, float]]]:
     """Compute 3D corner positions for all ArUco markers in the board frame.
 
     Returns a mapping from ArUco marker id to its four corners in the order
@@ -191,7 +180,7 @@ def compute_multi_marker_corners(
     marker_size = square_size * marker_square_size_ratio
     marker_border = (square_size - marker_size) / 2.0
 
-    def make_corners(base_u: float, base_v: float) -> List[Tuple[float, float, float]]:
+    def make_corners(base_u: float, base_v: float) -> list[tuple[float, float, float]]:
         """The 4 corners of one marker, in the board frame.
 
         ``(base_u, base_v)`` is the marker's origin corner in the PAPER's coordinates;
@@ -218,7 +207,7 @@ def compute_multi_marker_corners(
     return marker_corners
 
 
-def detection2d_to_aruco_markers(detection_msg) -> List[ArUcoMarker]:
+def detection2d_to_aruco_markers(detection_msg) -> list[ArUcoMarker]:
     """Convert a ROS ``Detection2DArray`` to ``ArUcoMarker`` objects.
 
     The real detected marker corners are carried in ``detection.results``
@@ -292,16 +281,16 @@ def marker_geometry_summary(config: dict) -> str:
 
 
 __all__ = [
-    "ArUcoMarker",
     "BOARD_FRAME_CONVENTION",
     "BOARD_FRAME_CONVENTION_TOPIC",
+    "ArUcoMarker",
     "compute_multi_marker_corners",
     "detection2d_to_aruco_markers",
     "frame_convention_error",
     "load_aruco_pattern_config",
+    "marker_geometry_summary",
     "marker_paper_placement",
     "marker_paper_point",
-    "marker_geometry_summary",
     "parse_dimension",
     "rotation_matrix_to_quaternion",
 ]

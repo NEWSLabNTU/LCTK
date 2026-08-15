@@ -15,7 +15,6 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -70,8 +69,10 @@ class LidarDevice:
     name: str
     pointcloud_topic: str
     frame_id: str
-    board_config_override: Optional[str] = None  # Per-lidar board_config, overrides marker's
-    bbox_config_override: Optional[str] = None   # Per-lidar bbox_config, overrides marker's
+    board_config_override: str | None = (
+        None  # Per-lidar board_config, overrides marker's
+    )
+    bbox_config_override: str | None = None  # Per-lidar bbox_config, overrides marker's
 
 
 @dataclass
@@ -90,11 +91,11 @@ class Marker:
     name: str
     marker_type: MarkerType
     board_config: str  # Path to board configuration file
-    aruco_config: Optional[str] = None  # Path to ArUco pattern config (optional)
-    bbox_config: Optional[str] = None  # Path to bounding box filter config (optional)
+    aruco_config: str | None = None  # Path to ArUco pattern config (optional)
+    bbox_config: str | None = None  # Path to bounding box filter config (optional)
     # Path to ArUco *detector* tuning (corner refinement, adaptive threshold). Optional:
     # falls back to DEFAULT_ARUCO_DETECTOR_CONFIG, so existing configs keep working.
-    aruco_detector_config: Optional[str] = None
+    aruco_detector_config: str | None = None
 
 
 @dataclass
@@ -116,8 +117,8 @@ class LidarBoardDetectorNode:
     marker_name: str
     pointcloud_topic: str
     board_config: str
-    aruco_config: Optional[str]
-    bbox_config: Optional[str]
+    aruco_config: str | None
+    bbox_config: str | None
     output_topic: str  # Detection output topic
 
 
@@ -173,14 +174,14 @@ class LidarLidarSolverNode:
 class PipelineConfig:
     """Complete pipeline configuration derived from user config."""
 
-    lidar_board_detectors: List[LidarBoardDetectorNode] = field(default_factory=list)
-    aruco_locators: List[ArucoLocatorNode] = field(default_factory=list)
-    lidar_camera_solvers: List[LidarCameraSolverNode] = field(default_factory=list)
-    lidar_lidar_solvers: List[LidarLidarSolverNode] = field(default_factory=list)
-    lidars: Dict[str, LidarDevice] = field(default_factory=dict)
-    cameras: Dict[str, CameraDevice] = field(default_factory=dict)
-    calibration_plan: Optional[CalibrationPlan] = None  # Set by planner
-    calibration_plan_text: Optional[str] = None  # Formatted ASCII plan for display
+    lidar_board_detectors: list[LidarBoardDetectorNode] = field(default_factory=list)
+    aruco_locators: list[ArucoLocatorNode] = field(default_factory=list)
+    lidar_camera_solvers: list[LidarCameraSolverNode] = field(default_factory=list)
+    lidar_lidar_solvers: list[LidarLidarSolverNode] = field(default_factory=list)
+    lidars: dict[str, LidarDevice] = field(default_factory=dict)
+    cameras: dict[str, CameraDevice] = field(default_factory=dict)
+    calibration_plan: CalibrationPlan | None = None  # Set by planner
+    calibration_plan_text: str | None = None  # Formatted ASCII plan for display
 
 
 class CalibrationConfigParser:
@@ -193,11 +194,11 @@ class CalibrationConfigParser:
 
     def __init__(self, config_path: str):
         self.config_path = Path(config_path)
-        self.lidars: Dict[str, LidarDevice] = {}
-        self.cameras: Dict[str, CameraDevice] = {}
-        self.markers: Dict[str, Marker] = {}
-        self.calibration_pairs: List[CalibrationPair] = []
-        self._reference_frame: Optional[str] = None
+        self.lidars: dict[str, LidarDevice] = {}
+        self.cameras: dict[str, CameraDevice] = {}
+        self.markers: dict[str, Marker] = {}
+        self.calibration_pairs: list[CalibrationPair] = []
+        self._reference_frame: str | None = None
 
     def parse(self) -> PipelineConfig:
         """Parse configuration file and derive pipeline configuration."""
@@ -265,7 +266,7 @@ class CalibrationConfigParser:
         )
 
         # Build device → frame_id map for display
-        device_frame_ids: Dict[str, str] = {}
+        device_frame_ids: dict[str, str] = {}
         for name, lidar in self.lidars.items():
             device_frame_ids[name] = lidar.frame_id
         for name, camera in self.cameras.items():
@@ -375,7 +376,7 @@ class CalibrationConfigParser:
         )
 
         # Collect unique (lidar, marker) pairs for board detectors
-        lidar_marker_pairs: Set[Tuple[str, str]] = set()
+        lidar_marker_pairs: set[tuple[str, str]] = set()
         for pair in self.calibration_pairs:
             if pair.device1 in self.lidars:
                 lidar_marker_pairs.add((pair.device1, pair.marker))
@@ -426,7 +427,7 @@ class CalibrationConfigParser:
             )
 
         # Collect unique cameras for aruco locators
-        cameras_needed: Set[str] = set()
+        cameras_needed: set[str] = set()
         for pair in self.calibration_pairs:
             if pair.device1 in self.cameras:
                 cameras_needed.add(pair.device1)

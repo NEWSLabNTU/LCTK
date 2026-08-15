@@ -19,7 +19,6 @@ from lctk_launch.calibration_planner import (
     format_plan,
 )
 
-
 # ── Test fixtures ──────────────────────────────────────────────────────
 
 

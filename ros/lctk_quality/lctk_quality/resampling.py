@@ -21,8 +21,8 @@ manufacture confidence from duplication. Hence: dedupe first, and refuse when N 
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Sequence
 
 import cv2
 import numpy as np
@@ -55,7 +55,7 @@ def compute_spread(
     image_points_per_placement: Sequence[np.ndarray],
     camera_matrix: np.ndarray,
     subset_size: int = SUBSET_SIZE,
-) -> Optional[Spread]:
+) -> Spread | None:
     """Spread of the extrinsic over all C(N, k) subsets of DISTINCT placements.
 
     Returns `None` -- deliberately, rather than a falsely confident number -- when there are too few

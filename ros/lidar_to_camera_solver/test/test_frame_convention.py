@@ -14,7 +14,6 @@ useless exactly when it is needed.
 """
 
 import pytest
-
 from lidar_to_camera_solver.board_geometry import (
     BOARD_FRAME_CONVENTION,
     BOARD_FRAME_CONVENTION_TOPIC,
