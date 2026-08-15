@@ -69,7 +69,26 @@ def generate_nodes(context, *args, **kwargs) -> list:
         sync_queue_size = 2  # Minimal buffering
         sync_drop_policy = "drop_oldest"  # Always process latest data
     else:
-        sync_tolerance_ms = 0.0  # Infinite window for offline (no time-based dropping)
+        # 100ms window, NOT the infinite window this used to use.
+        #
+        # Conflux only matches by time when a finite window is set: with an infinite
+        # window it skips the pruning step in `State::try_match` and pairs whatever is
+        # at the FRONT of each buffer -- i.e. by arrival order. Two streams at
+        # different rates then drift apart without bound. Measured on this repository's
+        # own conflux build: camera 10Hz + LiDAR 1Hz reaches a 53s gap INSIDE one
+        # "synchronized" group; 30Hz + 10Hz saturates at 10s; the seyond rig's 5.4Hz +
+        # 4.4Hz passes 11s and keeps climbing. The same runs with a 50ms window stay
+        # within 33ms.
+        #
+        # That failure is silent and ruinous here: the solver pairs ArUco corners with
+        # a board pose on the assumption both saw the board at the same instant. Pair a
+        # camera frame with a LiDAR sweep 11s apart and the board has MOVED, so the
+        # solve is wrong while the reprojection error still looks fine.
+        #
+        # 100ms is a little over one frame interval at these rates -- wide enough to
+        # absorb the offset between a camera frame and the LiDAR sweep that overlaps
+        # it, narrow enough that a moving board cannot travel far within it.
+        sync_tolerance_ms = 100.0
         sync_queue_size = 100  # Large queue for rosbag playback
         sync_drop_policy = "reject_new"  # Preserve all data
 
