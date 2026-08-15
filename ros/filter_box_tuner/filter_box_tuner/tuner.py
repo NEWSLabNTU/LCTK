@@ -632,7 +632,7 @@ def run_non_interactive(node):
         except KeyboardInterrupt:
             print("\nInterrupted. Exiting...")
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a bad command must not drop the user out of the TUI
             print(f"Error: {e}")
 
 

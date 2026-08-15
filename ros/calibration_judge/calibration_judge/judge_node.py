@@ -176,7 +176,7 @@ class CalibrationJudgeNode(Node):
         except KeyError as e:
             self.get_logger().error(f"Missing required key in configuration: {e}")
             return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a malformed config must return None, not kill node startup
             self.get_logger().error(f"Error loading configuration file: {e}")
             return None
 
@@ -381,7 +381,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - last resort at the process boundary
         print(f"Error in calibration_judge node: {e}")
     finally:
         if rclpy.ok():

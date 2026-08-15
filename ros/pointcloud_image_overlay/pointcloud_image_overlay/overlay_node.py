@@ -590,7 +590,7 @@ class EducationalOverlayNode(Node):
                     f"{len(image_points)}/{len(lidar_points)} points visible{inlier_str}"
                 )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - one bad frame must not kill the node
             self.get_logger().error(f"Overlay generation failed: {e!s}")
             self._draw_status_message(f"Processing error: {e!s}")
 
@@ -719,7 +719,7 @@ class EducationalOverlayNode(Node):
             # Publish for visualization in RViz, image viewers, etc.
             self.overlay_publisher.publish(ros_image)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failed publish must not kill the node
             self.get_logger().error(f"Failed to publish overlay: {e!s}")
 
 
