@@ -22,8 +22,8 @@ def quaternion_to_euler(q):
     roll = math.atan2(t0, t1)
 
     t2 = +2.0 * (w * y - z * x)
-    t2 = +1.0 if t2 > +1.0 else t2
-    t2 = -1.0 if t2 < -1.0 else t2
+    t2 = min(t2, +1.0)
+    t2 = max(t2, -1.0)
     pitch = math.asin(t2)
 
     t3 = +2.0 * (w * z + x * y)

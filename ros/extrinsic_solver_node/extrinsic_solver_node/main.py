@@ -20,13 +20,13 @@ License: MIT
 
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import cv2  # OpenCV for computer vision tasks
 import numpy as np  # Ubuntu 22.04 default (1.x)
 import rclpy
 from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Quaternion, TransformStamped, Vector3
+from lctk_quality import compute_conditioning, compute_residuals
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation as R  # Quaternion operations
@@ -35,7 +35,6 @@ from sensor_msgs.msg import CameraInfo
 # ROS2 message types
 from std_msgs.msg import Header
 from vision_msgs.msg import Detection2DArray, Detection3D, Detection3DArray
-from lctk_quality import compute_conditioning, compute_residuals
 
 
 @dataclass
@@ -49,8 +48,8 @@ class ArUcoMarker:
     """
 
     id: int
-    corners: List[Tuple[float, float]]  # 4 corners in pixel coordinates
-    center: Tuple[float, float]  # Center point in pixels
+    corners: list[tuple[float, float]]  # 4 corners in pixel coordinates
+    center: tuple[float, float]  # Center point in pixels
 
 
 @dataclass
@@ -63,8 +62,8 @@ class BoardDetection:
     serves as a common reference object visible to both LiDAR and camera.
     """
 
-    position: Tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
-    orientation: Tuple[float, float, float, float]  # quaternion w, x, y, z
+    position: tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
+    orientation: tuple[float, float, float, float]  # quaternion w, x, y, z
 
 
 class EducationalExtrinsicSolver(Node):
@@ -139,7 +138,7 @@ class EducationalExtrinsicSolver(Node):
         self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
 
         # Camera info is cached separately (doesn't need time synchronization)
-        self.camera_info: Optional[CameraInfo] = None
+        self.camera_info: CameraInfo | None = None
         self.camera_info_lock = threading.Lock()
 
         # QoS profile configuration based on mode:
@@ -367,7 +366,7 @@ class EducationalExtrinsicSolver(Node):
 
     def _detection2d_to_aruco_markers(
         self, detection_msg: Detection2DArray
-    ) -> List[ArUcoMarker]:
+    ) -> list[ArUcoMarker]:
         """
         Convert ROS Detection2DArray to ArUcoMarker objects.
 
@@ -474,7 +473,7 @@ class EducationalExtrinsicSolver(Node):
 
     def _compute_multi_marker_corners(
         self,
-    ) -> Dict[int, List[Tuple[float, float, float]]]:
+    ) -> dict[int, list[tuple[float, float, float]]]:
         """
         Compute 3D corner positions for all ArUco markers in board frame.
 
@@ -521,7 +520,7 @@ class EducationalExtrinsicSolver(Node):
         # Helper function to create corners for a marker at given base position
         def make_corners(
             base_x: float, base_y: float
-        ) -> List[Tuple[float, float, float]]:
+        ) -> list[tuple[float, float, float]]:
             """
             Create 4 corner points for a marker in board-local coordinates.
             Corner ordering matches Rust: [right, top, left, bottom]
@@ -575,8 +574,8 @@ class EducationalExtrinsicSolver(Node):
         return marker_corners
 
     def _create_point_correspondences_educational(
-        self, aruco_markers: List[ArUcoMarker], board_detection: BoardDetection
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        self, aruco_markers: list[ArUcoMarker], board_detection: BoardDetection
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Create 3D-2D point correspondences for PnP solving.
 
@@ -671,7 +670,7 @@ class EducationalExtrinsicSolver(Node):
 
     def _solve_pnp_educational(
         self, object_points: np.ndarray, image_points: np.ndarray
-    ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[bool, np.ndarray | None, np.ndarray | None]:
         """
         Solve the Perspective-n-Point problem using OpenCV.
 

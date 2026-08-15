@@ -7,7 +7,6 @@ once rather than per solver node.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 
 @dataclass
@@ -24,7 +23,7 @@ class SyncGroupSummary:
     age_s: float
 
 
-def sync_pair_staleness_error(*, age_s: float, max_age_s: float) -> Optional[str]:
+def sync_pair_staleness_error(*, age_s: float, max_age_s: float) -> str | None:
     """Refuse a cached detection pair that is too old to be what the operator sees.
 
     The cached pair used to live forever, so `add_detection` kept succeeding long after
@@ -47,8 +46,8 @@ def should_reset_for_new_epoch(
     *,
     previous_received: dict,
     current_received: dict,
-    last_group_age_s: Optional[float],
-    age_since_start_s: Optional[float] = None,
+    last_group_age_s: float | None,
+    age_since_start_s: float | None = None,
     quiet_after_s: float = 2.0,
 ) -> bool:
     """Has the message source changed underneath the synchronizer?
@@ -93,7 +92,7 @@ def format_sync_stats(
     dropped: dict,
     rejected: dict,
     groups: int,
-    skew_ms: Optional[Tuple[float, float]] = None,
+    skew_ms: tuple[float, float] | None = None,
 ) -> str:
     """One line saying what each input stream did, from this node's point of view.
 
@@ -126,9 +125,9 @@ def sync_health_warning(
     *,
     previous: dict,
     current: dict,
-    last_group_age_s: Optional[float],
+    last_group_age_s: float | None,
     quiet_after_s: float = 10.0,
-) -> Optional[str]:
+) -> str | None:
     """Warn when synchronized groups have stopped, and say what the evidence points at.
 
     Two failures look identical from the operator's chair — the TUI just says there is
@@ -157,7 +156,9 @@ def sync_health_warning(
             f"node that publishes it, and that the topic is wired to this one."
         )
 
-    arriving = [topic for topic, count in current.items() if count > previous.get(topic, 0)]
+    arriving = [
+        topic for topic, count in current.items() if count > previous.get(topic, 0)
+    ]
     if arriving:
         return (
             f"No synchronized group for {last_group_age_s:.0f}s, yet messages are still "
@@ -168,7 +169,7 @@ def sync_health_warning(
     return None
 
 
-def sync_wait_diagnosis(summary: Optional[SyncGroupSummary]) -> str:
+def sync_wait_diagnosis(summary: SyncGroupSummary | None) -> str:
     """Explain WHY there is no usable detection pair, in terms of what to fix.
 
     A pair needs both arrays non-empty in the same synchronized group. Both detectors

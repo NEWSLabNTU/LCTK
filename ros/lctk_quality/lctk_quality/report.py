@@ -10,8 +10,8 @@ because everything else either inverts or goes flat on real data. See the module
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -19,8 +19,8 @@ import numpy as np
 from .conditioning import Conditioning, compute_conditioning
 from .diversity import Diversity, compute_diversity
 from .placements import Placement, distinct_placements, representative_frames
-from .residuals import Residuals, compute_residuals
 from .resampling import Spread, compute_spread
+from .residuals import Residuals, compute_residuals
 
 #: The project's own accuracy target, from `calibration_judge`'s ground-truth scoring config.
 TARGET_ROT_DEG = 2.0
@@ -31,11 +31,11 @@ NO_DISTORTION = np.zeros(5)
 
 @dataclass(frozen=True)
 class QualityReport:
-    placements: List[Placement]
+    placements: list[Placement]
     diversity: Diversity
     residuals: Residuals
     conditioning: Conditioning
-    spread: Optional[Spread]
+    spread: Spread | None
     n_frames: int
 
     @property
@@ -77,7 +77,7 @@ class QualityReport:
         parts.append(f"rms {self.residuals.rms_px:.2f}px")
         return " | ".join(parts)
 
-    def warnings(self) -> List[str]:
+    def warnings(self) -> list[str]:
         """What is wrong and what to do about it. Empty when the capture is sound."""
         if not self.is_degenerate:
             return []
@@ -111,11 +111,11 @@ class QualityReport:
 def build_report(
     object_points_per_frame: Sequence[np.ndarray],
     image_points_per_frame: Sequence[np.ndarray],
-    board_poses: Sequence[Tuple[Sequence[float], Sequence[float]]],
+    board_poses: Sequence[tuple[Sequence[float], Sequence[float]]],
     camera_matrix: np.ndarray,
     rvec: np.ndarray,
     tvec: np.ndarray,
-) -> Optional[QualityReport]:
+) -> QualityReport | None:
     """Compute the full quality report for a solved extrinsic.
 
     `board_poses` is one `(position, quaternion)` per frame, parallel to the point arrays. It is
@@ -156,7 +156,7 @@ def build_report(
 
 def solve_pnp(
     object_points: np.ndarray, image_points: np.ndarray, camera_matrix: np.ndarray
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """SQPnP with zero distortion -- the corners on the wire are already rectified (C-03, H-08)."""
     ok, rvec, tvec = cv2.solvePnP(
         np.asarray(object_points, np.float64),

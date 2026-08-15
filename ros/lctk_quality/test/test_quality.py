@@ -15,10 +15,9 @@ dedup, these tests fail. That is their job.
 import cv2
 import numpy as np
 import pytest
-from scipy.spatial.transform import Rotation
-
 from lctk_quality import build_report, compute_spread, distinct_placements
 from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
+from scipy.spatial.transform import Rotation
 
 K = np.array([[1164.6, 0, 950.1], [0, 1161.1, 538.6], [0, 0, 1]], dtype=np.float64)
 

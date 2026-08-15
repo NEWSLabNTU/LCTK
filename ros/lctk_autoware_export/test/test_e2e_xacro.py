@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from lctk_autoware_export.export import load_solver_transform, patch_calibration
 from lctk_autoware_export.frames import (
     OPTICAL_IN_CAMERA_LINK,

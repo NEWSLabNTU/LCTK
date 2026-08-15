@@ -32,8 +32,9 @@ stopped dead when a bag was replayed. See
 """
 
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any
 
 from conflux_py import (
     DropPolicy,
@@ -41,6 +42,8 @@ from conflux_py import (
     ROS2Synchronizer,
     SyncConfig,
     SyncGroup,
+)
+from conflux_py import (
     # ... the bare matching engine, which holds the buffers and the commit time. An
     # epoch reset replaces the engine while leaving the subscriptions alive.
     Synchronizer as ConfluxEngine,
@@ -65,8 +68,8 @@ class PairOutcome:
     hand it straight to a service response without composing an explanation of its own.
     """
 
-    messages: Optional[Tuple[Any, ...]] = None
-    reason: Optional[str] = None
+    messages: tuple[Any, ...] | None = None
+    reason: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -87,9 +90,9 @@ class DetectionPairSource:
         topics: Sequence[str],
         msg_types: Sequence[type],
         *,
-        config: Optional[PairSourceConfig] = None,
+        config: PairSourceConfig | None = None,
         qos=None,
-        on_pair: Optional[Callable[[Tuple[Any, ...]], None]] = None,
+        on_pair: Callable[[tuple[Any, ...]], None] | None = None,
     ):
         if len(topics) != len(msg_types):
             raise ValueError("topics and msg_types must be the same length")
@@ -99,18 +102,18 @@ class DetectionPairSource:
         self._config = config or PairSourceConfig()
         self._on_pair = on_pair
 
-        self._latest: Optional[Tuple[Any, ...]] = None
-        self._latest_at: Optional[float] = None
-        self._last_group: Optional[SyncGroupSummary] = None
-        self._last_group_at: Optional[float] = None
-        self._last_skew_ms: Optional[float] = None
+        self._latest: tuple[Any, ...] | None = None
+        self._latest_at: float | None = None
+        self._last_group: SyncGroupSummary | None = None
+        self._last_group_at: float | None = None
+        self._last_skew_ms: float | None = None
         self._max_skew_ms: float = 0.0
         self._epoch_resets = 0
         self._last_epoch_reset_at = 0.0
         self._last_epoch_received: dict = {}
         self._started_at = time.monotonic()
         self._last_received: dict = {}
-        self._last_stats_line: Optional[str] = None
+        self._last_stats_line: str | None = None
 
         self._engine_config = SyncConfig(
             int(self._config.window_ms),
@@ -245,7 +248,7 @@ class DetectionPairSource:
         if self._on_pair is not None:
             self._on_pair(messages)
 
-    def _current_summary(self) -> Optional[SyncGroupSummary]:
+    def _current_summary(self) -> SyncGroupSummary | None:
         if self._last_group is None or self._last_group_at is None:
             return None
         return SyncGroupSummary(
@@ -254,7 +257,7 @@ class DetectionPairSource:
             age_s=time.monotonic() - self._last_group_at,
         )
 
-    def _last_group_age_s(self) -> Optional[float]:
+    def _last_group_age_s(self) -> float | None:
         if self._last_group_at is None:
             return None
         return time.monotonic() - self._last_group_at

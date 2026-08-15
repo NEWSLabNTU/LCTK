@@ -16,10 +16,9 @@ in the moment, whether they just contributed geometry or a duplicate.
 
 import numpy as np
 import pytest
+from lidar_to_camera_solver.main import LidarToCameraSolver as S
 from scipy.spatial.transform import Rotation
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
-
-from lidar_to_camera_solver.main import LidarToCameraSolver as S
 
 
 def board_msg(position, yaw=0.0, pitch=0.0):
