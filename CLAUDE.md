@@ -104,6 +104,58 @@ just serve          # Serve with live reload
 just serve-public   # Serve on 0.0.0.0
 ```
 
+## Testing Practices
+
+**A test recipe that cannot fail is worse than no recipe.** It converts "untested" into
+"believed tested", which is the more expensive state. This has bitten repeatedly, in two
+distinct shapes.
+
+**Shape 1 — the recipe runs but cannot fail.**
+
+- `just test` ended with a bare `pytest ...`. apt's `python3-pytest` installs the package but
+  no `pytest` executable, so the line exited 127 and LCTK's four Python suites — 92 tests
+  covering the config parser, the planner, pose weighting, the quality metric and the whole
+  Autoware export path — never ran through the documented entry point (L-28). Fixed by
+  invoking it as `python3 -m pytest`.
+- In the conflux submodule, `just test-cpp` echoed two lines and exited 0 while `conflux_cpp`
+  had no tests at all, and `just test-python` ran pytest-style tests through `colcon test`'s
+  unittest path, collecting 0 of 19 and exiting 0. See `ros/conflux/CLAUDE.md`.
+
+**Shape 2 — nothing runs the suite.** Harder to notice, because the recipe you *do* run is
+perfectly honest about the packages it covers.
+
+- `crates/conflux-ros2` is excluded from the cargo workspace, so no recipe ran its tests. A
+  duplicate synchronization algorithm lived there for months, covered only by tests that
+  exercised a bare `VecDeque` rather than any of the real code (H-14).
+- `calibration_judge` had no test directory at all until 2026-08-16 (M-17).
+
+### The check
+
+**When adding or changing a test recipe, break an assertion deliberately and confirm a
+non-zero exit before trusting it.** Seconds long, and it caught every instance above:
+
+```bash
+# make one assertion false, then:
+just test > /dev/null 2>&1; echo "exit=$?"   # must be non-zero
+# restore, then confirm it returns to 0
+```
+
+Two traps when checking this by hand:
+
+- **Don't read `$?` through a pipe.** `just test | grep ...; echo $?` reports grep's status, not
+  the recipe's. This produced a false "exit=0" during the L-22 work and nearly let a
+  can't-fail recipe through a second time.
+- **Clear stale results before re-checking colcon suites.** `colcon test-result` reads
+  `build/<pkg>/test_results/`, which survives across runs, so a fixed suite can still report
+  yesterday's failures. `rm -rf build/<pkg>/test_results` first. (Applies to the conflux
+  submodule's `just test-cpp`; LCTK's own suite is cargo + pytest and has no such cache.)
+
+### Adding a new package
+
+New ROS packages are not picked up automatically. Add the test directory to the `pytest`
+invocation in the `test` recipe, then run the break-an-assertion check to confirm it is
+actually wired in.
+
 ## Known Issues
 
 1. **Old .cargo/config.toml conflicts**: If build fails with `Unable to update .../install/.../rust`:
