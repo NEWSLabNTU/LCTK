@@ -185,9 +185,11 @@ def sync_wait_diagnosis(summary: SyncGroupSummary | None) -> str:
         )
 
     parts = [
-        f"No usable synchronized detection pair. The last synchronized group "
-        f"({summary.age_s:.1f}s ago) held {summary.aruco_count} ArUco marker(s) and "
-        f"{summary.board_count} board detection(s); both must be non-empty."
+        (
+            "No usable synchronized detection pair. The last synchronized group "
+            f"({summary.age_s:.1f}s ago) held {summary.aruco_count} ArUco marker(s) and "
+            f"{summary.board_count} board detection(s); both must be non-empty."
+        )
     ]
     if summary.aruco_count == 0:
         parts.append(

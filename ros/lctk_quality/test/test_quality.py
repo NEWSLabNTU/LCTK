@@ -123,7 +123,7 @@ def spread_poses():
 def test_static_board_collapses_to_one_placement():
     """Nine frames of a board that never moves are ONE placement, not nine poses."""
     rng = np.random.default_rng(0)
-    objs, imgs, poses = capture(
+    _objs, _imgs, poses = capture(
         [place(2.6)], frames_each=9, rng=rng, icp_t=0.01, icp_r=0.01
     )
 
@@ -253,7 +253,7 @@ def test_status_line_is_one_line_and_carries_the_verdict():
     line = report_for(objs, imgs, poses).status_line()
 
     assert "\n" not in line
-    assert line.startswith("OK") or line.startswith("DEGENERATE")
+    assert line.startswith(("OK", "DEGENERATE"))
     assert "placements" in line
 
 
