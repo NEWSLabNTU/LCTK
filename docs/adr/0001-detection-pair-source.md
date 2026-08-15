@@ -1,0 +1,82 @@
+# 0001. The synchronized detection pair is one module, and it refuses an infinite window
+
+- **Date:** 2026-08-15
+- **Status:** accepted
+- **Review that produced it:** [2026-08-15 architecture review](./2026-08-15-architecture-review.md), candidate 1
+
+## Context
+
+Three solver nodes — `lidar_to_camera_solver`, `lidar_to_lidar_solver` and the superseded
+`extrinsic_solver_node` — each wired conflux by hand. Each held a large interface to do it: nine
+parameters, two topics, four counters, and the question of what an absent pair means. The
+implementation behind that interface, in each node, was a couple of caches. Shallow, three times over.
+
+Two defects were found on 2026-08-15 while debugging a calibration run that could not add a single
+detection pair:
+
+1. **Pairing by arrival order.** Conflux matches by time only when a finite window is set: with an
+   infinite window, `State::try_match` skips the pruning step that aligns the buffers and pops the
+   front of each one. Two streams at different rates then drift apart without bound. Measured against
+   this repository's conflux build: camera 10 Hz + LiDAR 1 Hz reached a **53 s** gap inside one
+   "synchronized" group; 30 Hz + 10 Hz saturated at 10 s; the seyond rig (5.4 Hz / 4.4 Hz) passed
+   **11 s** and was still climbing. `calibrate.launch.py` shipped `sync_tolerance_ms: 0.0` — the
+   infinite window — for offline playback, the default for every recorded run.
+
+   This is worse than a stall because it succeeds. The solver pairs ArUco corners with a board pose on
+   the assumption both sensors saw the board at one instant. Pair frames 11 s apart and the board has
+   moved, so the extrinsic is wrong while the reprojection error still looks fine.
+
+2. **A replayed recording stops it permanently.** Conflux is strictly time-ordered: `State::push`
+   rejects any message stamped at or before the group it last emitted, and that commit time only moves
+   forward. Both detectors copy the stamp of the message they consumed (`aruco_locator_node` from the
+   image, `lidar_board_detector` from the point cloud), so every new bag — and every `--loop` wrap —
+   sends the stamps backward. Measured on a looping 19.8 s bag: groups froze at 32 while `dropped`
+   climbed 1:1 with `received` on both streams for the next four minutes.
+
+Both were fixed in `lidar_to_camera_solver` alone, because there was nowhere else for the fix to live.
+At the moment of the review `lidar_to_lidar_solver` still had the hardcoded `0.0` at
+`calibrate.launch.py:285` and still had no epoch reset. That is the cost of the missing module, stated
+as a bug rather than as a principle — and adopting this decision is what closed it: that node now
+takes the mode-derived window preset and inherits the epoch reset from the module.
+
+## Decision
+
+**The synchronized detection pair becomes one deep module, `lctk_sync.DetectionPairSource`, and every
+solver node consumes it rather than conflux directly.**
+
+Its interface is: construct it with a node, topics and message types; optionally register `on_pair`
+for consumers that act on every pair; call `take_fresh_pair()` for the newest usable pair or the
+reason there is none; call `status_line()` for what synchronization is doing. Behind it sit the
+synchronizer, the window policy, the epoch reset, the staleness gate, the skew measurement and the
+refusal diagnosis.
+
+**`PairSourceConfig` refuses `window_ms <= 0`**, with a message naming arrival-order pairing and the
+measured drift. No launch file, node, or future caller can request the setting that caused defect 1.
+
+**Conflux's own rule is not changed.** Strict time ordering is correct for a live sensor; what is
+wrong is asking it to serve a workflow that replays recordings. The module recognises the restart —
+groups have stopped *and* every stream is being dropped — and starts a fresh matching engine. One
+quiet stream is a detector fault and no drops at all is a dead stream; neither resets.
+
+`lctk_sync` is a new ament_python package rather than an upstream change to
+`jerry73204/conflux`, because the epoch policy encodes LCTK's workflow (replaying many bags to collect
+board placements), not a general synchronization rule.
+
+## Consequences
+
+**Easier.** A sync defect is fixed once. A solver learns two calls instead of nine parameters plus
+conflux's ordering contract. Stage 2's `continuous` mode gets the fixed behaviour by construction. The
+pure decisions (`should_reset_for_new_epoch`, `sync_wait_diagnosis`, `sync_pair_staleness_error`,
+`sync_health_warning`, `format_sync_stats`) are the module's own test surface, exercised through the
+interface rather than beside it in a 2187-line node.
+
+**Harder.** A caller that genuinely wants order-based pairing — two streams in true 1:1 lockstep —
+must now say so some other way; the escape hatch was removed deliberately. And `lctk_sync` reaches
+into `ROS2Synchronizer._sync` to swap the matching engine, which is a private attribute of a submodule
+we do not own. That reach is confined to one line in `_reset_for_new_epoch`, and the right resolution
+is an upstream `ROS2Synchronizer.reset()`.
+
+**Ruled out.** Restamping detections with wall-clock time to dodge the backward jumps. It makes stamps
+monotonic but destroys what the pairing is for: after restamping, a stamp says when a result finished
+computing, so pairing would reflect processing latency (ArUco ~5.4 Hz behind a backlogged republish,
+ICP 200–600 ms) rather than observation time — reintroducing defect 1 in a form no window can catch.
