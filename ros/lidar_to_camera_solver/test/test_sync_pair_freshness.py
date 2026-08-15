@@ -18,6 +18,7 @@ import pytest
 
 from lidar_to_camera_solver.main import (
     SyncGroupSummary,
+    format_sync_stats,
     sync_pair_staleness_error,
     sync_wait_diagnosis,
 )
@@ -89,3 +90,99 @@ def test_the_diagnosis_reports_how_old_the_last_group_is():
 @pytest.mark.parametrize("age_s", [0.0, 1.999])
 def test_boundary_ages_are_fresh(age_s):
     assert sync_pair_staleness_error(age_s=age_s, max_age_s=2.0) is None
+
+
+def test_the_stats_line_names_each_stream_and_what_happened_to_it():
+    """When groups stop arriving while both detectors are clearly publishing, the
+    question is which stream stopped reaching THIS node, and whether the
+    synchronizer dropped it. Received / dropped / rejected per topic answers it;
+    without them the operator is guessing."""
+    line = format_sync_stats(
+        received={"aruco_detections": 4210, "calibration_board_detections": 0},
+        dropped={"aruco_detections": 0, "calibration_board_detections": 0},
+        rejected={"aruco_detections": 3900, "calibration_board_detections": 0},
+        groups=118,
+    )
+
+    assert "aruco_detections" in line and "calibration_board_detections" in line
+    assert "4210" in line and "3900" in line
+    assert "118" in line
+
+
+def test_the_stats_line_survives_missing_topics():
+    assert format_sync_stats(received={}, dropped={}, rejected={}, groups=0)
+
+
+def test_a_silent_stream_is_named():
+    """Groups stopped while both detectors were visibly publishing. The question is
+    which stream stopped reaching THIS node — so say which one went quiet."""
+    from lidar_to_camera_solver.main import sync_health_warning
+
+    warning = sync_health_warning(
+        previous={"aruco_detections": 100, "calibration_board_detections": 40},
+        current={"aruco_detections": 400, "calibration_board_detections": 40},
+        last_group_age_s=120.0,
+    )
+
+    assert warning is not None
+    assert "calibration_board_detections" in warning
+    assert "aruco_detections" not in warning.split("no new messages")[1]
+
+
+def test_both_streams_alive_but_no_groups_is_its_own_warning():
+    """This is the case that points at the synchronizer rather than a detector."""
+    from lidar_to_camera_solver.main import sync_health_warning
+
+    warning = sync_health_warning(
+        previous={"aruco_detections": 100, "calibration_board_detections": 40},
+        current={"aruco_detections": 400, "calibration_board_detections": 80},
+        last_group_age_s=120.0,
+    )
+
+    assert warning is not None
+    assert "120" in warning
+    assert "both" in warning.lower() or "no group" in warning.lower()
+
+
+def test_a_healthy_pipeline_warns_about_nothing():
+    from lidar_to_camera_solver.main import sync_health_warning
+
+    assert (
+        sync_health_warning(
+            previous={"a": 1, "b": 1},
+            current={"a": 30, "b": 10},
+            last_group_age_s=0.2,
+        )
+        is None
+    )
+
+
+def test_a_pipeline_that_has_not_started_is_not_a_stall():
+    """Before playback begins nothing is arriving and no group ever has; that is
+    waiting, not a fault, and must not cry wolf."""
+    from lidar_to_camera_solver.main import sync_health_warning
+
+    assert (
+        sync_health_warning(previous={}, current={"a": 0, "b": 0}, last_group_age_s=None)
+        is None
+    )
+
+
+def test_the_stats_line_reports_the_pair_skew():
+    """The skew INSIDE a group is the number that says whether "synchronized" means
+    anything. With conflux's infinite window it grew without bound (11s on this rig)
+    while every other counter looked healthy, so it must be visible at a glance."""
+    line = format_sync_stats(
+        received={"a": 10}, dropped={"a": 0}, rejected={"a": 0}, groups=10,
+        skew_ms=(12.5, 47.0),
+    )
+
+    assert "12.5" in line and "47.0" in line
+    assert "skew" in line.lower()
+
+
+def test_the_stats_line_is_fine_before_any_group():
+    line = format_sync_stats(
+        received={"a": 0}, dropped={"a": 0}, rejected={"a": 0}, groups=0, skew_ms=None
+    )
+    assert "skew" not in line.lower()
