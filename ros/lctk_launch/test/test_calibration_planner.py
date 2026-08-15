@@ -608,8 +608,8 @@ def test_format_deep_nesting_indentation():
         assert node in text
     # C1 is deeper than L2
     lines = text.split("\n")
-    c1_line = [l for l in lines if "C1" in l][0]
-    l2_line = [l for l in lines if "L2" in l][0]
+    c1_line = next(l for l in lines if "C1" in l)
+    l2_line = next(l for l in lines if "L2" in l)
     assert len(c1_line) - len(c1_line.lstrip()) > len(l2_line) - len(l2_line.lstrip())
 
 

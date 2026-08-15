@@ -686,7 +686,7 @@ class EducationalOverlayNode(Node):
             cv_image: OpenCV image (BGR8 format) to draw status message on
             message: Status message to display
         """
-        h, w = cv_image.shape[:2]
+        _h, w = cv_image.shape[:2]
 
         # Draw semi-transparent background for text
         overlay = cv_image.copy()
