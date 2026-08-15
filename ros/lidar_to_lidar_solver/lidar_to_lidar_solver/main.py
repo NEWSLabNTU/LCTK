@@ -6,7 +6,8 @@ A lightweight ROS 2 node that computes the transform between two LiDAR frames
 by observing the same calibration board from both sensors.
 
 The node subscribes to Detection3DArray messages from two lidar_board_detector
-nodes, uses Conflux for synchronization, and computes the relative transform.
+nodes, pairs them with `lctk_sync.DetectionPairSource`, and computes the relative
+transform.
 
 Transform computation:
     T_lidar2_to_lidar1 = pose1 * pose2.inverse()
@@ -16,12 +17,12 @@ respectively.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import rclpy
-from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 from geometry_msgs.msg import Transform, TransformStamped, Quaternion, Vector3
+from lctk_sync import DetectionPairSource, PairSourceConfig
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from scipy.spatial.transform import Rotation
@@ -56,6 +57,10 @@ class LidarToLidarSolver(Node):
         self.declare_parameter("lidar2_detections_topic", "lidar2/board_detections")
         self.declare_parameter("lidar1_frame", "lidar1")
         self.declare_parameter("lidar2_frame", "lidar2")
+        # The pairing window, in ms. It must be positive: 0 used to mean "infinite",
+        # which makes conflux pair by arrival order rather than by time, and two streams
+        # at different rates then drift apart without bound. `PairSourceConfig` rejects
+        # it rather than let the drift go unnoticed.
         self.declare_parameter("sync_tolerance_ms", 100.0)
         self.declare_parameter("sync_queue_size", 10)
         self.declare_parameter(
@@ -80,11 +85,6 @@ class LidarToLidarSolver(Node):
         sync_tolerance_ms = self.get_parameter("sync_tolerance_ms").value
         sync_queue_size = self.get_parameter("sync_queue_size").value
         sync_drop_policy_str = self.get_parameter("sync_drop_policy").value
-        sync_drop_policy = (
-            DropPolicy.DROP_OLDEST
-            if sync_drop_policy_str == "drop_oldest"
-            else DropPolicy.REJECT_NEW
-        )
         self.same_face_mode = self.get_parameter("same_face_mode").value
         self.publish_tf = self.get_parameter("publish_tf").value
         publish_rate_hz = self.get_parameter("publish_rate_hz").value
@@ -112,29 +112,22 @@ class LidarToLidarSolver(Node):
             f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
         )
 
-        # Create Conflux synchronizer
-        # window_size_ms=0 means infinite window (no time-based dropping)
-        window_ms = int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None
-        self.get_logger().info(
-            f"Using Conflux synchronization (window={'infinite' if window_ms is None else f'{window_ms}ms'}, "
-            f"buffer={sync_queue_size}, policy={sync_drop_policy_str})"
-        )
-        self.sync = ROS2Synchronizer(
+        # Synchronized detection pairs. `lctk_sync` owns the window (which it refuses to
+        # make infinite -- an infinite window pairs by arrival order, not by time), the
+        # epoch reset that keeps a replayed bag pairing, and the counters.
+        self.pair_source = DetectionPairSource(
             self,
-            window_size_ms=window_ms,
-            buffer_size=sync_queue_size,
-            drop_policy=sync_drop_policy,
+            topics=[self.lidar1_topic, self.lidar2_topic],
+            msg_types=[Detection3DArray, Detection3DArray],
+            config=PairSourceConfig(
+                window_ms=sync_tolerance_ms,
+                queue_size=sync_queue_size,
+                drop_policy=sync_drop_policy_str,
+                require_non_empty=True,
+            ),
             qos=qos,
+            on_pair=self._handle_sync_group,
         )
-
-        # Add subscriptions for both lidar detection topics
-        self.sync.add_subscription(Detection3DArray, self.lidar1_topic)
-        self.sync.add_subscription(Detection3DArray, self.lidar2_topic)
-
-        # Register synchronization callback
-        @self.sync.on_synchronized
-        def sync_callback(group: SyncGroup):
-            self._handle_sync_group(group)
 
         # TF broadcaster
         if self.publish_tf:
@@ -159,16 +152,14 @@ class LidarToLidarSolver(Node):
         self.get_logger().info(f"Same face mode: {self.same_face_mode}")
         self.get_logger().info("LidarToLidarSolver initialized")
 
-    def _handle_sync_group(self, group: SyncGroup):
-        """Called when synchronized detection pairs are received from Conflux."""
-        # Extract messages from synchronized group
-        msg1: Detection3DArray = group[self.lidar1_topic]
-        msg2: Detection3DArray = group[self.lidar2_topic]
+    def _handle_sync_group(self, messages: Tuple[Any, ...]):
+        """Called for every usable pair, in `topics` order (lidar1, lidar2).
 
-        # Check for valid detections
-        if not msg1.detections or not msg2.detections:
-            self.get_logger().debug("Received empty detections, skipping")
-            return
+        Empty detection arrays never reach here: `require_non_empty` drops those groups
+        in `DetectionPairSource`, which reports them.
+        """
+        msg1: Detection3DArray = messages[0]
+        msg2: Detection3DArray = messages[1]
 
         # Check message staleness (wall clock based)
         now = self.get_clock().now()
@@ -353,24 +344,11 @@ def main(args=None):
             )
 
         # Log synchronizer statistics
-        try:
-            sync_stats = node.sync.statistics
+        node.get_logger().info(f"Sync statistics: {node.pair_source.status_line()}")
+        if node.pair_source.epoch_resets:
             node.get_logger().info(
-                f"Sync statistics: "
-                f"received={sync_stats.total_received()}, "
-                f"rejected={sync_stats.total_rejected()}, "
-                f"groups={sync_stats.groups_synchronized}, "
-                f"rejection_rate={sync_stats.rejection_rate():.1%}"
+                f"Recording restarts handled: {node.pair_source.epoch_resets}"
             )
-            for topic in sync_stats.messages_received:
-                topic_rate = sync_stats.rejection_rate(topic)
-                node.get_logger().info(
-                    f"  {topic}: received={sync_stats.messages_received[topic]}, "
-                    f"rejected={sync_stats.messages_rejected[topic]}, "
-                    f"rejection_rate={topic_rate:.1%}"
-                )
-        except Exception as e:
-            node.get_logger().warning(f"Failed to log final sync statistics: {e}")
 
         node.destroy_node()
         rclpy.shutdown()

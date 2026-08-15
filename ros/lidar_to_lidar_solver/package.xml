@@ -12,7 +12,7 @@
   <depend>geometry_msgs</depend>
   <depend>vision_msgs</depend>
   <depend>tf2_ros</depend>
-  <depend>conflux_py</depend>
+  <depend>lctk_sync</depend>
   <depend>python3-numpy</depend>
   <depend>python3-scipy</depend>
 
