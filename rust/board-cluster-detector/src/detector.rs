@@ -49,12 +49,6 @@ impl RejectReason {
     }
 }
 
-/// Result of one `detect` call.
-///
-/// `selected_points` / `selected_plane` are the winning candidate's member
-/// points and fitted plane — the sub-project-2 output fed to RANSAC+ICP.
-/// `detection` (the square-fit pose) is used here only for gating/selection.
-
 /// Measured value vs threshold for the furthest-progressed rejected candidate.
 /// Lets a caller log HOW NARROWLY a frame missed each gate instead of just the
 /// reason. `measured`/`threshold` are in the gate's own units (see `detect`).
@@ -64,6 +58,11 @@ pub struct RejectDetail {
     pub threshold: f64,
 }
 
+/// Result of one `detect` call.
+///
+/// `selected_points` / `selected_plane` are the winning candidate's member
+/// points and fitted plane — the sub-project-2 output fed to RANSAC+ICP.
+/// `detection` (the square-fit pose) is used here only for gating/selection.
 #[derive(Debug, Clone)]
 pub struct DetectOutcome {
     pub detection: Option<BoardDetection>,

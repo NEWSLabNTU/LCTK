@@ -107,7 +107,7 @@ fn board_at(pose: na::Isometry3<f64>, board_width: f64, hole_center_shift: f64) 
 /// The identity case is kept only because it makes a failure easy to read by hand; it
 /// proves nothing on its own, which is the whole reason the other eight are here.
 fn cases() -> Vec<Case> {
-    let mut rng = Lcg::new(0x5EED_B0A2_D_F00_D1E);
+    let mut rng = Lcg::new(0x05EE_DB0A_2DF0_0D1E);
     let mut cases = vec![Case {
         label: "identity pose, W=1.0, s=0.2".to_owned(),
         board: board_at(na::Isometry3::identity(), 1.0, 0.2),
