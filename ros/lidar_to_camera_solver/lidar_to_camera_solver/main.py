@@ -35,17 +35,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import rclpy
-from conflux_py import (
-    DropPolicy,
-    # The ROS wrapper: owns the subscriptions, the statistics, and one of these ...
-    ROS2Synchronizer,
-    SyncConfig,
-    SyncGroup,
-    # ... the bare matching engine, which holds the buffers and the commit time.
-    # Needed by name because an epoch reset replaces the engine while keeping the
-    # wrapper's subscriptions alive.
-    Synchronizer as ConfluxSynchronizer,
-)
+from lctk_sync import DetectionPairSource, PairSourceConfig
 from lidar_to_camera_solver.board_geometry import (
     BOARD_FRAME_CONVENTION,
     BOARD_FRAME_CONVENTION_TOPIC,
@@ -88,184 +78,6 @@ from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import ColorRGBA, Header, String
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
-
-
-@dataclass
-class SyncGroupSummary:
-    """What the last synchronized group actually contained, and how old it is.
-
-    Kept for EVERY group, including the ones that are ignored, because "nothing to add"
-    and "the LiDAR side stopped detecting" are different problems and the operator can
-    only act on the second one.
-    """
-
-    aruco_count: int
-    board_count: int
-    age_s: float
-
-
-def sync_pair_staleness_error(*, age_s: float, max_age_s: float) -> Optional[str]:
-    """Refuse a cached detection pair that is too old to be what the operator sees.
-
-    The cached pair used to live forever, so `add_detection` kept succeeding long after
-    playback stopped — buffering a board pose from an unknown moment while looking like
-    it worked. ``max_age_s <= 0`` disables the gate.
-    """
-    if max_age_s <= 0.0 or age_s < max_age_s:
-        return None
-
-    return (
-        f"The newest synchronized detection pair is {age_s:.1f}s old (limit "
-        f"{max_age_s:.1f}s), so it is not what you are looking at now. Playback has "
-        f"probably stopped, or one of the detectors has. Adding it would buffer a "
-        f"board pose from an unknown moment. Set max_pair_age_s to 0 to disable this "
-        f"check."
-    )
-
-
-def should_reset_for_new_epoch(
-    *,
-    previous_dropped: dict,
-    current_dropped: dict,
-    last_group_age_s: Optional[float],
-    quiet_after_s: float = 2.0,
-) -> bool:
-    """Has the message source restarted (a new bag, or a `--loop` wrap)?
-
-    Conflux is strictly time-ordered: it rejects any message stamped at or before the
-    newest group it emitted, and that commit time only moves forward. Correct for a
-    live sensor; wrong for this workflow, where the operator replays several recorded
-    bags and both detectors copy the stamp of the message they consumed. Every new bag
-    sends the stamps backward, and conflux then rejects everything, forever.
-
-    Rather than weaken conflux's rule, recognise the restart here. Its signature needs
-    no access to the raw stamps: groups have stopped, and EVERY stream is having its
-    messages thrown away. One stream being dropped alone is a detector problem, and no
-    drops at all is a dead stream -- neither should trigger a silent reset.
-    """
-    if last_group_age_s is None or last_group_age_s < quiet_after_s:
-        return False
-    if not current_dropped:
-        return False
-
-    return all(
-        count > previous_dropped.get(topic, 0)
-        for topic, count in current_dropped.items()
-    )
-
-
-def format_sync_stats(
-    *,
-    received: dict,
-    dropped: dict,
-    rejected: dict,
-    groups: int,
-    skew_ms: Optional[Tuple[float, float]] = None,
-) -> str:
-    """One line saying what each input stream did, from this node's point of view.
-
-    When synchronized groups stop arriving while both detectors are visibly
-    publishing, the question is which stream stopped reaching THIS node — and
-    whether the synchronizer threw it away (buffer full, or too late to group).
-    `received` answers the first; `rejected` and `dropped` answer the second.
-    """
-    topics = sorted(set(received) | set(dropped) | set(rejected))
-    if not topics:
-        return f"sync: groups={groups}, no input streams registered"
-
-    # The skew INSIDE a group is what says whether "synchronized" means anything: the
-    # solver pairs ArUco corners with a board pose on the assumption both saw the board
-    # at one instant. Conflux's infinite window let this grow without bound while every
-    # other counter stayed clean, so report it where it cannot be missed.
-    skew = ""
-    if skew_ms is not None:
-        skew = f" pair skew last={skew_ms[0]:.1f}ms max={skew_ms[1]:.1f}ms;"
-
-    parts = [
-        f"{topic}: received={received.get(topic, 0)} "
-        f"rejected={rejected.get(topic, 0)} dropped={dropped.get(topic, 0)}"
-        for topic in topics
-    ]
-    return f"sync: groups={groups};{skew} " + "; ".join(parts)
-
-
-def sync_health_warning(
-    *,
-    previous: dict,
-    current: dict,
-    last_group_age_s: Optional[float],
-    quiet_after_s: float = 10.0,
-) -> Optional[str]:
-    """Warn when synchronized groups have stopped, and say what the evidence points at.
-
-    Two failures look identical from the operator's chair — the TUI just says there is
-    no pair — but have opposite causes:
-
-    - a stream stopped reaching this node (its `received` count froze), which is a
-      detector or a topic-wiring problem;
-    - both streams keep arriving but no group comes out, which is a synchronizer
-      problem.
-
-    Returns ``None`` while groups are flowing, and before the first group ever arrives
-    (that is waiting for playback, not a stall).
-    """
-    if last_group_age_s is None or last_group_age_s < quiet_after_s:
-        return None
-
-    silent = sorted(
-        topic
-        for topic, count in current.items()
-        if count == previous.get(topic, -1) and count > 0
-    )
-    if silent:
-        return (
-            f"No synchronized group for {last_group_age_s:.0f}s: no new messages on "
-            f"{', '.join(silent)}. That stream stopped reaching this node -- check the "
-            f"node that publishes it, and that the topic is wired to this one."
-        )
-
-    arriving = [topic for topic, count in current.items() if count > previous.get(topic, 0)]
-    if arriving:
-        return (
-            f"No synchronized group for {last_group_age_s:.0f}s, yet messages are still "
-            f"arriving on both streams ({', '.join(sorted(arriving))}). The "
-            f"synchronizer is not pairing them -- compare their header stamps."
-        )
-
-    return None
-
-
-def sync_wait_diagnosis(summary: Optional[SyncGroupSummary]) -> str:
-    """Explain WHY there is no usable detection pair, in terms of what to fix.
-
-    A pair needs both arrays non-empty in the same synchronized group. Both detectors
-    publish empty arrays when they fail, so a steady stream of groups can still yield
-    nothing usable — which is what a bag whose ArUco and LiDAR detections never overlap
-    in time looks like from here.
-    """
-    if summary is None:
-        return (
-            "No synchronized detection pair available: no synchronized group has "
-            "arrived at all. Check that both aruco_detections and "
-            "calibration_board_detections are publishing."
-        )
-
-    parts = [
-        f"No usable synchronized detection pair. The last synchronized group "
-        f"({summary.age_s:.1f}s ago) held {summary.aruco_count} ArUco marker(s) and "
-        f"{summary.board_count} board detection(s); both must be non-empty."
-    ]
-    if summary.aruco_count == 0:
-        parts.append(
-            "The camera side is empty: aruco_locator_node is detecting no markers "
-            "(board too far, out of frame, or motion-blurred)."
-        )
-    if summary.board_count == 0:
-        parts.append(
-            "The LiDAR side is empty: lidar_board_detector is not detecting the board "
-            "(check its crop box / bbox_free candidates and its own log)."
-        )
-    return " ".join(parts)
 
 
 @dataclass
@@ -413,13 +225,39 @@ class LidarToCameraSolver(Node):
         sync_drop_policy_str = (
             self.get_parameter("sync_drop_policy").get_parameter_value().string_value
         )
-        self.max_pair_age_s = (
+        max_pair_age_s = (
             self.get_parameter("max_pair_age_s").get_parameter_value().double_value
         )
-        sync_drop_policy = (
-            DropPolicy.DROP_OLDEST
-            if sync_drop_policy_str == "drop_oldest"
-            else DropPolicy.REJECT_NEW
+
+        # Sync heartbeat and epoch watchdog intervals. The heartbeat makes "no groups are
+        # arriving" distinguishable from "groups arrive but hold empty detections"; the
+        # epoch check notices a replayed recording, which conflux would otherwise refuse
+        # to pair with forever. Both are lctk_sync's business -- this node only supplies
+        # the intervals.
+        self.declare_parameter("sync_stats_interval_s", 10.0)
+        sync_stats_interval_s = (
+            self.get_parameter("sync_stats_interval_s")
+            .get_parameter_value()
+            .double_value
+        )
+        self.declare_parameter("epoch_check_interval_s", 1.0)
+        epoch_check_interval_s = (
+            self.get_parameter("epoch_check_interval_s")
+            .get_parameter_value()
+            .double_value
+        )
+
+        # A non-positive window is refused by PairSourceConfig, and the error is allowed
+        # to propagate out of __init__: an infinite window makes conflux pair by arrival
+        # order, which is silent corruption rather than a degraded mode worth coercing.
+        pair_source_config = PairSourceConfig(
+            window_ms=sync_tolerance_ms,
+            queue_size=sync_queue_size,
+            drop_policy=sync_drop_policy_str,
+            require_non_empty=True,
+            max_pair_age_s=max_pair_age_s,
+            stats_interval_s=sync_stats_interval_s,
+            epoch_check_interval_s=epoch_check_interval_s,
         )
 
         # H-11: refuse to run against a detector that disagrees about the board frame,
@@ -437,16 +275,6 @@ class LidarToCameraSolver(Node):
         # Detection buffer for multi-pose calibration
         self.detection_buffer: List[Tuple[Detection2DArray, Detection3DArray]] = []
 
-        # Latest synchronized detection pair (cached for service calls)
-        # Uses conflux_py for time synchronization
-        self.latest_sync_pair: Optional[Tuple[Detection2DArray, Detection3DArray]] = (
-            None
-        )
-        # Monotonic arrival time of that pair, and a summary of the LAST group seen
-        # whether or not it was usable -- the two things `add_detection` needs to say
-        # something more useful than "no pair".
-        self.latest_sync_pair_at: Optional[float] = None
-        self.last_sync_group: Optional[Tuple[int, int, float]] = None
         self.camera_info: Optional[CameraInfo] = None
 
         # Calibration state
@@ -520,65 +348,17 @@ class LidarToCameraSolver(Node):
             1.0 / publishing_rate, self._publishing_timer_callback
         )
 
-        # Sync heartbeat: the synchronizer's own counters, logged periodically. Without
-        # them, "no groups are arriving" is indistinguishable from "groups arrive but
-        # hold empty detections", and neither says which input stream went quiet.
-        self.declare_parameter("sync_stats_interval_s", 10.0)
-        sync_stats_interval_s = (
-            self.get_parameter("sync_stats_interval_s")
-            .get_parameter_value()
-            .double_value
-        )
-        self._last_sync_stats_line: Optional[str] = None
-        self._last_sync_received: dict = {}
-        self._last_epoch_dropped: dict = {}
-        self._last_pair_skew_ms: Optional[float] = None
-        self._max_pair_skew_ms: float = 0.0
-        self._last_epoch_reset_at: float = 0.0
-        self._sync_topics = ["aruco_detections", "calibration_board_detections"]
-        self._sync_config = SyncConfig(
-            int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None,
-            sync_queue_size,
-            sync_drop_policy,
-        )
-        self._epoch_resets = 0
-        if sync_stats_interval_s > 0.0:
-            self.sync_stats_timer = self.create_timer(
-                sync_stats_interval_s, self._log_sync_stats
-            )
-
-        # The epoch check runs far more often than the stats log. A looping bag wraps
-        # every bag-length, and every second spent unpaired after a wrap is a second of
-        # the recording the operator cannot add. Checking at 1Hz costs two dict reads.
-        self.declare_parameter("epoch_check_interval_s", 1.0)
-        epoch_check_interval_s = (
-            self.get_parameter("epoch_check_interval_s")
-            .get_parameter_value()
-            .double_value
-        )
-        if epoch_check_interval_s > 0.0:
-            self.epoch_check_timer = self.create_timer(
-                epoch_check_interval_s, self._check_for_new_epoch
-            )
-
-        # Create synchronizer for ArUco and board detections
-        # This ensures we only cache detection pairs that are time-synchronized
-        self.get_logger().info(
-            f"Using Conflux synchronization (window={int(sync_tolerance_ms)}ms, buffer={sync_queue_size})"
-        )
-        self.sync = ROS2Synchronizer(
+        # The synchronized detection pair, and everything that goes with it: the window,
+        # the buffers, the counters, the epoch reset when a recording restarts, and how
+        # stale a cached pair may be. `add_detection` asks it for a pair; it answers with
+        # one, or with the reason there isn't one.
+        self.pair_source = DetectionPairSource(
             self,
-            window_size_ms=int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None,
-            buffer_size=sync_queue_size,
-            drop_policy=sync_drop_policy,
+            topics=["aruco_detections", "calibration_board_detections"],
+            msg_types=[Detection2DArray, Detection3DArray],
+            config=pair_source_config,
             qos=qos_profile,
         )
-        self.sync.add_subscription(Detection2DArray, "aruco_detections")
-        self.sync.add_subscription(Detection3DArray, "calibration_board_detections")
-
-        @self.sync.on_synchronized
-        def on_sync(group: SyncGroup):
-            self._handle_synchronized_detections(group)
 
         # Derive camera_info topic from camera_topic parameter
         camera_topic = (
@@ -664,7 +444,7 @@ class LidarToCameraSolver(Node):
         self.get_logger().info(
             f"LiDAR-to-camera solver initialized\n"
             f"Mode: Multi-pose buffered calibration\n"
-            f"Using conflux_py for time-synchronized detection pairs\n"
+            f"Using lctk_sync for time-synchronized detection pairs\n"
             f"Minimum frames before solving: {self.min_frames_required}\n"
             f"Subscribing to: aruco_detections, calibration_board_detections, {camera_info_topic}\n"
             f"Publishing to: extrinsic_transform (at {publishing_rate}Hz when enabled), axis_markers\n"
@@ -677,168 +457,6 @@ class LidarToCameraSolver(Node):
         with self.lock:
             self.camera_info = msg
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
-
-    def _handle_synchronized_detections(self, group: SyncGroup):
-        """
-        Handle synchronized ArUco and board detections.
-
-        This callback is invoked by conflux_py when both ArUco and board
-        detections are available within the time window. The synchronized
-        pair is cached for use by the add_detection service.
-        """
-        # Debug: log available keys in the sync group
-        available_keys = group.topics()
-        self.get_logger().debug(f"SyncGroup keys: {available_keys}")
-
-        # Safely get messages with error handling
-        aruco_msg = group.get("aruco_detections")
-        board_msg = group.get("calibration_board_detections")
-
-        if aruco_msg is None or board_msg is None:
-            self.get_logger().warn(
-                f"Incomplete sync group received. Available keys: {available_keys}, "
-                f"aruco={aruco_msg is not None}, board={board_msg is not None}"
-            )
-            return
-
-        self.get_logger().debug(
-            f"Synchronized detection pair at t={group.timestamp:.6f}s: "
-            f"{len(aruco_msg.detections)} ArUco markers, "
-            f"{len(board_msg.detections)} boards"
-        )
-
-        # Record EVERY group, usable or not: "the LiDAR side stopped detecting" and
-        # "nothing is arriving at all" are different problems for the operator.
-        def stamp_s(msg):
-            return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-
-        skew_ms = abs(stamp_s(aruco_msg) - stamp_s(board_msg)) * 1000.0
-
-        now = time.monotonic()
-        with self.lock:
-            self._last_pair_skew_ms = skew_ms
-            self._max_pair_skew_ms = max(self._max_pair_skew_ms, skew_ms)
-            self.last_sync_group = (
-                len(aruco_msg.detections),
-                len(board_msg.detections),
-                now,
-            )
-
-        # Only cache non-empty detection pairs
-        if aruco_msg.detections and board_msg.detections:
-            with self.lock:
-                self.latest_sync_pair = (aruco_msg, board_msg)
-                self.latest_sync_pair_at = now
-        else:
-            # Both sides warn, at the same level and both throttled. These used to be
-            # asymmetric -- the empty-board case warned while the empty-ArUco case only
-            # logged at debug -- so a bag whose ArUco detections and board detections
-            # never overlap in time looked like silence at log_level=info.
-            if not aruco_msg.detections:
-                self.get_logger().warn(
-                    "Ignoring sync group with empty ArUco detection "
-                    f"({len(board_msg.detections)} board detection(s) in the same group)",
-                    throttle_duration_sec=5.0,
-                )
-            if not board_msg.detections:
-                self.get_logger().warn(
-                    "Ignoring sync group with empty board detection "
-                    f"({len(aruco_msg.detections)} ArUco marker(s) in the same group)",
-                    throttle_duration_sec=5.0,
-                )
-
-    def _sync_stats_line(self) -> str:
-        """Current synchronizer counters, formatted for a human."""
-        stats = self.sync.statistics
-        with self.lock:
-            skew = (
-                None
-                if self._last_pair_skew_ms is None
-                else (self._last_pair_skew_ms, self._max_pair_skew_ms)
-            )
-        return format_sync_stats(
-            received=stats.messages_received,
-            dropped=stats.messages_dropped,
-            rejected=stats.messages_rejected,
-            groups=stats.groups_synchronized,
-            skew_ms=skew,
-        )
-
-    def _log_sync_stats(self):
-        """Log the sync counters when they change, so a stall is visible as it happens.
-
-        Also warns when groups have stopped, naming which stream went quiet -- the
-        difference between "a detector stopped reaching me" and "both are arriving and
-        the synchronizer is not pairing them", which the operator cannot see otherwise.
-        """
-        line = self._sync_stats_line()
-        if line != self._last_sync_stats_line:
-            self._last_sync_stats_line = line
-            self.get_logger().info(line)
-
-        with self.lock:
-            last_group = self.last_sync_group
-        last_group_age_s = (
-            None if last_group is None else time.monotonic() - last_group[2]
-        )
-
-        received = dict(self.sync.statistics.messages_received)
-        warning = sync_health_warning(
-            previous=self._last_sync_received,
-            current=received,
-            last_group_age_s=last_group_age_s,
-        )
-        self._last_sync_received = received
-        # A reset in the last few seconds explains the silence and has already been
-        # reported; saying it twice in different words helps nobody.
-        if warning is not None and time.monotonic() - self._last_epoch_reset_at > 10.0:
-            self.get_logger().warn(warning)
-
-    def _check_for_new_epoch(self):
-        """Watch for the message source restarting, and start a fresh synchronizer."""
-        with self.lock:
-            last_group = self.last_sync_group
-        last_group_age_s = (
-            None if last_group is None else time.monotonic() - last_group[2]
-        )
-
-        dropped = dict(self.sync.statistics.messages_dropped)
-        if should_reset_for_new_epoch(
-            previous_dropped=self._last_epoch_dropped,
-            current_dropped=dropped,
-            last_group_age_s=last_group_age_s,
-        ):
-            self._reset_synchronizer_for_new_epoch()
-        self._last_epoch_dropped = dropped
-
-    def _reset_synchronizer_for_new_epoch(self):
-        """Start a fresh synchronizer after the message source restarted.
-
-        Swaps conflux's internal state object for a new one, leaving this node's
-        subscriptions (and the statistics counters, which are the evidence) in place.
-        The buffered messages are all from the previous bag and cannot pair with
-        anything arriving now, so they go with it -- as does any cached pair, which
-        belongs to a recording the operator has moved on from.
-
-        `_sync` is ROS2Synchronizer's private handle. Reaching for it is deliberate and
-        contained: conflux exposes no reset, and rebuilding the wrapper would mean
-        tearing down and recreating the subscriptions mid-callback. Worth an upstream
-        request for `ROS2Synchronizer.reset()`.
-        """
-        self._epoch_resets += 1
-        self._last_epoch_reset_at = time.monotonic()
-        self.sync._sync = ConfluxSynchronizer(self._sync_topics, self._sync_config)
-        with self.lock:
-            self.latest_sync_pair = None
-            self.latest_sync_pair_at = None
-            self._max_pair_skew_ms = 0.0
-        self.get_logger().warn(
-            f"Detection timestamps jumped backward: the recording restarted (a new bag, "
-            f"or a --loop wrap). conflux rejects anything older than the group it last "
-            f"emitted, so it had stopped pairing entirely. Started a fresh synchronizer "
-            f"(reset #{self._epoch_resets}); the buffered detections you already added "
-            f"are untouched."
-        )
 
     def _publishing_timer_callback(self):
         """Continuously publish the last solved transform when enabled."""
@@ -908,13 +526,8 @@ class LidarToCameraSolver(Node):
 
         This triggers a complete re-solve using all buffered detections,
         potentially improving calibration accuracy with more data.
-        Note: Only synchronized detection pairs (from conflux_py) are used.
+        Note: Only synchronized detection pairs (from lctk_sync) are used.
         """
-        with self.lock:
-            sync_pair = self.latest_sync_pair
-            sync_pair_at = self.latest_sync_pair_at
-            last_group = self.last_sync_group
-
         # Validate prerequisites
         if not self.camera_info:
             response.success = False
@@ -923,44 +536,18 @@ class LidarToCameraSolver(Node):
             self.get_logger().error(response.message)
             return response
 
-        if not sync_pair:
-            summary = None
-            if last_group is not None:
-                aruco_count, board_count, seen_at = last_group
-                summary = SyncGroupSummary(
-                    aruco_count=aruco_count,
-                    board_count=board_count,
-                    age_s=time.monotonic() - seen_at,
-                )
+        # One question to the pair source: the freshest genuinely-simultaneous pair, or
+        # the reason there isn't one. Staleness, emptiness and "nothing has arrived yet"
+        # are all answered there, in words meant for the operator.
+        outcome = self.pair_source.take_fresh_pair()
+        if not outcome.ok:
             response.success = False
-            response.message = (
-                f"{sync_wait_diagnosis(summary)} [{self._sync_stats_line()}]"
-            )
+            response.message = outcome.reason
             response.buffer_size = len(self.detection_buffer)
             self.get_logger().error(response.message)
             return response
 
-        # The cached pair must be what the operator is looking at NOW. It used to live
-        # forever, so Add still succeeded minutes after playback stopped.
-        staleness = sync_pair_staleness_error(
-            age_s=time.monotonic() - (sync_pair_at or 0.0),
-            max_age_s=self.max_pair_age_s,
-        )
-        if staleness is not None:
-            response.success = False
-            response.message = staleness
-            response.buffer_size = len(self.detection_buffer)
-            self.get_logger().error(response.message)
-            return response
-
-        aruco_msg, board_msg = sync_pair
-
-        if not aruco_msg.detections or not board_msg.detections:
-            response.success = False
-            response.message = "Empty detection messages in synchronized pair"
-            response.buffer_size = len(self.detection_buffer)
-            self.get_logger().error(response.message)
-            return response
+        aruco_msg, board_msg = outcome.messages
 
         # H-07: accept the frame, but tell the operator NOW whether it is a new board placement or
         # a duplicate of one already buffered. This is the only moment the feedback can change what
@@ -1034,7 +621,6 @@ class LidarToCameraSolver(Node):
         with self.lock:
             buffer_size = len(self.detection_buffer)
             self.detection_buffer.clear()
-            self.latest_sync_pair = None
             self.publishing_enabled = False
             self.last_transform = None
             self.last_solve_status = "Buffer cleared"
@@ -1043,6 +629,11 @@ class LidarToCameraSolver(Node):
             self.solved_tvec = None
             self.current_rvec = None
             self.current_tvec = None
+
+        # "Start over" includes the pair the source is holding: one captured before the
+        # clear must not be addable after it, even while still inside the freshness
+        # window.
+        self.pair_source.discard_cached_pair()
 
         response.success = True
         response.message = f"Cleared {buffer_size} detection pairs from buffer"
@@ -2310,21 +1901,7 @@ def main(args=None):
     finally:
         # Log final synchronization statistics
         try:
-            stats = node.sync.statistics
-            node.get_logger().info(
-                f"Final sync statistics: "
-                f"received={stats.total_received()}, "
-                f"rejected={stats.total_rejected()}, "
-                f"groups={stats.groups_synchronized}, "
-                f"rejection_rate={stats.rejection_rate():.1%}"
-            )
-            for topic in stats.messages_received:
-                topic_rate = stats.rejection_rate(topic)
-                node.get_logger().info(
-                    f"  {topic}: received={stats.messages_received[topic]}, "
-                    f"rejected={stats.messages_rejected[topic]}, "
-                    f"rejection_rate={topic_rate:.1%}"
-                )
+            node.get_logger().info(f"Final {node.pair_source.status_line()}")
         except Exception as e:
             node.get_logger().warning(f"Failed to log final sync statistics: {e}")
 

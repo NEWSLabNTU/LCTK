@@ -23,7 +23,7 @@ exact signature of a rewound source, and it needs no access to the raw stamps.
 
 import pytest
 
-from lidar_to_camera_solver.main import should_reset_for_new_epoch
+from lctk_sync import should_reset_for_new_epoch
 
 
 def test_a_rewound_source_is_detected():
