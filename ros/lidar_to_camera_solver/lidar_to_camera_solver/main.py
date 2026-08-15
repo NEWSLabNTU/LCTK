@@ -81,6 +81,72 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 
 @dataclass
+class SyncGroupSummary:
+    """What the last synchronized group actually contained, and how old it is.
+
+    Kept for EVERY group, including the ones that are ignored, because "nothing to add"
+    and "the LiDAR side stopped detecting" are different problems and the operator can
+    only act on the second one.
+    """
+
+    aruco_count: int
+    board_count: int
+    age_s: float
+
+
+def sync_pair_staleness_error(*, age_s: float, max_age_s: float) -> Optional[str]:
+    """Refuse a cached detection pair that is too old to be what the operator sees.
+
+    The cached pair used to live forever, so `add_detection` kept succeeding long after
+    playback stopped — buffering a board pose from an unknown moment while looking like
+    it worked. ``max_age_s <= 0`` disables the gate.
+    """
+    if max_age_s <= 0.0 or age_s < max_age_s:
+        return None
+
+    return (
+        f"The newest synchronized detection pair is {age_s:.1f}s old (limit "
+        f"{max_age_s:.1f}s), so it is not what you are looking at now. Playback has "
+        f"probably stopped, or one of the detectors has. Adding it would buffer a "
+        f"board pose from an unknown moment. Set max_pair_age_s to 0 to disable this "
+        f"check."
+    )
+
+
+def sync_wait_diagnosis(summary: Optional[SyncGroupSummary]) -> str:
+    """Explain WHY there is no usable detection pair, in terms of what to fix.
+
+    A pair needs both arrays non-empty in the same synchronized group. Both detectors
+    publish empty arrays when they fail, so a steady stream of groups can still yield
+    nothing usable — which is what a bag whose ArUco and LiDAR detections never overlap
+    in time looks like from here.
+    """
+    if summary is None:
+        return (
+            "No synchronized detection pair available: no synchronized group has "
+            "arrived at all. Check that both aruco_detections and "
+            "calibration_board_detections are publishing."
+        )
+
+    parts = [
+        f"No usable synchronized detection pair. The last synchronized group "
+        f"({summary.age_s:.1f}s ago) held {summary.aruco_count} ArUco marker(s) and "
+        f"{summary.board_count} board detection(s); both must be non-empty."
+    ]
+    if summary.aruco_count == 0:
+        parts.append(
+            "The camera side is empty: aruco_locator_node is detecting no markers "
+            "(board too far, out of frame, or motion-blurred)."
+        )
+    if summary.board_count == 0:
+        parts.append(
+            "The LiDAR side is empty: lidar_board_detector is not detecting the board "
+            "(check its crop box / bbox_free candidates and its own log)."
+        )
+    return " ".join(parts)
+
+
+@dataclass
 class BoardDetection:
     """Represents a calibration board detection in 3D LiDAR coordinates."""
 
@@ -171,6 +237,10 @@ class LidarToCameraSolver(Node):
         self.declare_parameter(
             "sync_drop_policy", "reject_new"
         )  # reject_new or drop_oldest
+        # How old the newest synchronized pair may be when `add_detection` is called.
+        # Without this the cached pair lived forever, so Add kept succeeding long after
+        # playback stopped, buffering a board pose from an unknown moment. 0 disables.
+        self.declare_parameter("max_pair_age_s", 2.0)
 
         # Get parameters
         self.parent_frame = (
@@ -221,6 +291,9 @@ class LidarToCameraSolver(Node):
         sync_drop_policy_str = (
             self.get_parameter("sync_drop_policy").get_parameter_value().string_value
         )
+        self.max_pair_age_s = (
+            self.get_parameter("max_pair_age_s").get_parameter_value().double_value
+        )
         sync_drop_policy = (
             DropPolicy.DROP_OLDEST
             if sync_drop_policy_str == "drop_oldest"
@@ -247,6 +320,11 @@ class LidarToCameraSolver(Node):
         self.latest_sync_pair: Optional[Tuple[Detection2DArray, Detection3DArray]] = (
             None
         )
+        # Monotonic arrival time of that pair, and a summary of the LAST group seen
+        # whether or not it was usable -- the two things `add_detection` needs to say
+        # something more useful than "no pair".
+        self.latest_sync_pair_at: Optional[float] = None
+        self.last_sync_group: Optional[Tuple[int, int, float]] = None
         self.camera_info: Optional[CameraInfo] = None
 
         # Calibration state
@@ -466,17 +544,38 @@ class LidarToCameraSolver(Node):
             f"{len(board_msg.detections)} boards"
         )
 
+        # Record EVERY group, usable or not: "the LiDAR side stopped detecting" and
+        # "nothing is arriving at all" are different problems for the operator.
+        now = time.monotonic()
+        with self.lock:
+            self.last_sync_group = (
+                len(aruco_msg.detections),
+                len(board_msg.detections),
+                now,
+            )
+
         # Only cache non-empty detection pairs
         if aruco_msg.detections and board_msg.detections:
             with self.lock:
                 self.latest_sync_pair = (aruco_msg, board_msg)
+                self.latest_sync_pair_at = now
         else:
+            # Both sides warn, at the same level and both throttled. These used to be
+            # asymmetric -- the empty-board case warned while the empty-ArUco case only
+            # logged at debug -- so a bag whose ArUco detections and board detections
+            # never overlap in time looked like silence at log_level=info.
             if not aruco_msg.detections:
-                self.get_logger().debug(
-                    "Ignoring sync group with empty ArUco detection"
+                self.get_logger().warn(
+                    "Ignoring sync group with empty ArUco detection "
+                    f"({len(board_msg.detections)} board detection(s) in the same group)",
+                    throttle_duration_sec=5.0,
                 )
             if not board_msg.detections:
-                self.get_logger().warn("Ignoring sync group with empty board detection")
+                self.get_logger().warn(
+                    "Ignoring sync group with empty board detection "
+                    f"({len(aruco_msg.detections)} ArUco marker(s) in the same group)",
+                    throttle_duration_sec=5.0,
+                )
 
     def _publishing_timer_callback(self):
         """Continuously publish the last solved transform when enabled."""
@@ -550,6 +649,8 @@ class LidarToCameraSolver(Node):
         """
         with self.lock:
             sync_pair = self.latest_sync_pair
+            sync_pair_at = self.latest_sync_pair_at
+            last_group = self.last_sync_group
 
         # Validate prerequisites
         if not self.camera_info:
@@ -560,8 +661,29 @@ class LidarToCameraSolver(Node):
             return response
 
         if not sync_pair:
+            summary = None
+            if last_group is not None:
+                aruco_count, board_count, seen_at = last_group
+                summary = SyncGroupSummary(
+                    aruco_count=aruco_count,
+                    board_count=board_count,
+                    age_s=time.monotonic() - seen_at,
+                )
             response.success = False
-            response.message = "No synchronized detection pair available. Waiting for time-synchronized ArUco and board detections."
+            response.message = sync_wait_diagnosis(summary)
+            response.buffer_size = len(self.detection_buffer)
+            self.get_logger().error(response.message)
+            return response
+
+        # The cached pair must be what the operator is looking at NOW. It used to live
+        # forever, so Add still succeeded minutes after playback stopped.
+        staleness = sync_pair_staleness_error(
+            age_s=time.monotonic() - (sync_pair_at or 0.0),
+            max_age_s=self.max_pair_age_s,
+        )
+        if staleness is not None:
+            response.success = False
+            response.message = staleness
             response.buffer_size = len(self.detection_buffer)
             self.get_logger().error(response.message)
             return response

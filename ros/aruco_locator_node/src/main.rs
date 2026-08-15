@@ -576,8 +576,18 @@ impl ArucoLocatorNode {
                 // Convert detection result to vision_msgs Detection2DArray
                 let detection_msg = convert_detection_result(&detection_result, header);
 
+                // Marker count at the previous frame, so both branches below can see
+                // it. (L-05: atomic, not `static mut`.)
+                static LAST_DETECTION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
                 // Only log summary info, not details
                 if detection_msg.detections.is_empty() {
+                    // Reset the "last count" so that RECOVERING from zero logs again.
+                    // Without this, LAST_DETECTION_COUNT stayed at its pre-blackout
+                    // value, markers coming back was silent, and a log could not say
+                    // whether the camera side ever recovered -- which is exactly the
+                    // question when the solver reports no usable detection pair.
+                    LAST_DETECTION_COUNT.store(0, Ordering::Relaxed);
                     // Only log occasionally for no detections to avoid spam
                     // (L-05: atomic, not `static mut`)
                     static NO_DETECTION_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -590,8 +600,6 @@ impl ArucoLocatorNode {
                     }
                 } else {
                     // Log only a brief summary when markers are detected
-                    // (L-05: atomic, not `static mut`)
-                    static LAST_DETECTION_COUNT: AtomicUsize = AtomicUsize::new(0);
                     let current_count = detection_msg.detections.len();
                     if LAST_DETECTION_COUNT.swap(current_count, Ordering::Relaxed) != current_count
                     {
