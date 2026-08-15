@@ -75,6 +75,21 @@ struct BoardDebugPublishers {
     pca_eigenvectors: Arc<Publisher<MarkerArray>>,
 }
 
+/// Everything `pointcloud_callback` needs besides the cloud itself.
+///
+/// All of it is built once at node start and borrowed for the life of the
+/// processing thread, so this is a plain bundle of shared references.
+#[derive(Clone, Copy)]
+struct CallbackContext<'a> {
+    detector: &'a Arc<BoardDetector>,
+    publisher: &'a Publisher<Detection3DArray>,
+    bbox_params: &'a BBoxParameters,
+    board_debug_publishers: &'a Option<BoardDebugPublishers>,
+    icp_debug_publishers: &'a Option<IcpDebugPublishers>,
+    bbox_free_cfg: &'a Option<Arc<bbox_free::BboxFreeRaw>>,
+    background_state: &'a Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
+}
+
 /// ROS parameters for bounding box filter configuration.
 /// These parameters can be changed at runtime via `ros2 param set`.
 ///
@@ -705,6 +720,15 @@ impl CalibrationBoardLocatorNode {
         // Spawn processing thread that processes the latest message when available
         let processing_thread = std::thread::spawn(move || {
             let mut processed_count: u64 = 0;
+            let ctx = CallbackContext {
+                detector: &detector,
+                publisher: &detection_publisher_shared,
+                bbox_params: &bbox_params_for_callback,
+                board_debug_publishers: &board_debug_shared,
+                icp_debug_publishers: &icp_debug_shared,
+                bbox_free_cfg: &bbox_free_for_thread,
+                background_state: &background_for_thread,
+            };
 
             loop {
                 // Take the latest message (replace with None)
@@ -732,16 +756,7 @@ impl CalibrationBoardLocatorNode {
                     // panic kills only this detached thread, leaving the node alive
                     // but permanently silent. Catch, log, and continue.
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        Self::pointcloud_callback(
-                            msg_clone,
-                            &detector,
-                            &detection_publisher_shared,
-                            &bbox_params_for_callback,
-                            &board_debug_shared,
-                            &icp_debug_shared,
-                            &bbox_free_for_thread,
-                            &background_for_thread,
-                        );
+                        Self::pointcloud_callback(msg_clone, &ctx);
                     }));
                     if result.is_err() {
                         log_error!(
@@ -836,16 +851,17 @@ impl CalibrationBoardLocatorNode {
         Ok(value)
     }
 
-    fn pointcloud_callback(
-        msg: PointCloud2,
-        detector: &Arc<BoardDetector>,
-        publisher: &Publisher<Detection3DArray>,
-        bbox_params: &BBoxParameters,
-        board_debug_publishers: &Option<BoardDebugPublishers>,
-        icp_debug_publishers: &Option<IcpDebugPublishers>,
-        bbox_free_cfg: &Option<Arc<bbox_free::BboxFreeRaw>>,
-        background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
-    ) {
+    fn pointcloud_callback(msg: PointCloud2, ctx: &CallbackContext<'_>) {
+        let CallbackContext {
+            detector,
+            publisher,
+            bbox_params,
+            board_debug_publishers,
+            icp_debug_publishers,
+            bbox_free_cfg,
+            background_state,
+        } = *ctx;
+
         let start_time = Instant::now();
 
         // Log callback invocation with timestamp and data size
@@ -1681,7 +1697,7 @@ impl CalibrationBoardLocatorNode {
                 // stance gate upstream already rejects edge-aligned boards, so this
                 // warning is a backstop for a board that slips past it.
                 {
-                    let mut hs: Vec<f64> = corners.iter().map(|c| height(c)).collect();
+                    let mut hs: Vec<f64> = corners.iter().map(height).collect();
                     hs.sort_by(|a, b| a.total_cmp(b));
                     let h_spread = hs[3] - hs[0];
                     if h_spread > 1e-9 && (hs[1] - hs[0]) < 0.15 * h_spread {
@@ -2948,20 +2964,20 @@ fn main() -> Result<()> {
 mod covariance_tests {
     use super::*;
 
+    /// (model↔measured point pairs, board origin, board normal).
+    type Correspondences = (
+        Vec<(na::Point3<f64>, na::Point3<f64>)>,
+        na::Point3<f64>,
+        na::Vector3<f64>,
+    );
+
     /// Build correspondences for a board lying in the world XY plane (normal = +Z), origin at c.
     ///
     /// `interior` points get a residual purely along the normal — that is what the correspondence
     /// model produces for a point whose plane projection lands inside the square and outside every
     /// hole. `in_plane` points get a residual in the plane, as a border-clamped or hole-rim point
     /// does.
-    fn make_correspondences(
-        n_interior: usize,
-        n_in_plane: usize,
-    ) -> (
-        Vec<(na::Point3<f64>, na::Point3<f64>)>,
-        na::Point3<f64>,
-        na::Vector3<f64>,
-    ) {
+    fn make_correspondences(n_interior: usize, n_in_plane: usize) -> Correspondences {
         let origin = na::Point3::new(0.0, 0.0, 0.0);
         let normal = na::Vector3::new(0.0, 0.0, 1.0);
         let mut corr = Vec::new();
