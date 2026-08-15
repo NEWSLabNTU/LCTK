@@ -49,8 +49,16 @@
          description="Frame ID for LiDAR 2 point cloud messages"/>
 
     <arg name="lidar2_port"
-         default="2369"
-         description="UDP port for LiDAR 2 data"/>
+         default="2368"
+         description="UDP port for LiDAR 2 data.
+
+                      M-16: this defaulted to 2369, the second Velodyne's usual live port. But
+                      these drivers read from PCAP *files*, where the port is only a filter on
+                      the recorded packets -- and both shipped datasets (3 and 4) were captured
+                      on 2368. Filtering dataset 4 for 2369 matched nothing, so the second LiDAR
+                      published no clouds at all, only one detector ever saw the board, and the
+                      lidar-to-lidar solver could never form a synchronized pair. There is no
+                      port conflict between the two drivers because neither binds a socket."/>
 
     <!-- Common Arguments -->
     <arg name="model"
@@ -79,7 +87,7 @@
         <param name="frame_id" value="$(var lidar1_frame_id)"/>
         <param name="port" value="$(var lidar1_port)"/>
         <param name="pcap" value="$(var lidar1_pcap)"/>
-        <param name="read_once" value="$(eval not loop)"/>
+        <param name="read_once" value="$(eval &quot;'$(var loop)'.lower() not in ('true', '1')&quot;)"/>
         <param name="read_fast" value="$(var read_fast)"/>
         <param name="repeat_delay" value="0.0"/>
         <param name="cut_angle" value="-0.01"/>
@@ -112,7 +120,7 @@
         <param name="frame_id" value="$(var lidar2_frame_id)"/>
         <param name="port" value="$(var lidar2_port)"/>
         <param name="pcap" value="$(var lidar2_pcap)"/>
-        <param name="read_once" value="$(eval not loop)"/>
+        <param name="read_once" value="$(eval &quot;'$(var loop)'.lower() not in ('true', '1')&quot;)"/>
         <param name="read_fast" value="$(var read_fast)"/>
         <param name="repeat_delay" value="0.0"/>
         <param name="cut_angle" value="-0.01"/>

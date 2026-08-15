@@ -407,7 +407,23 @@ Buffer overflow warnings are rate-limited and logged automatically:
 
 ### LiDAR-to-LiDAR Calibration
 
-The `lidar_to_lidar_solver` Python node replaces the deprecated `multi_wayside_node` for two-LiDAR calibration. It subscribes to Detection3DArray messages from two `lidar_board_detector` nodes and computes the transform between frames. **Note: This pipeline is not yet tested.**
+The `lidar_to_lidar_solver` Python node replaces the deprecated `multi_wayside_node` for two-LiDAR calibration. It subscribes to Detection3DArray messages from two `lidar_board_detector` nodes and computes the transform between frames.
+
+**Verified end-to-end on 2026-08-15** (M-16) against sample datasets 3 + 4: 81 solves with a
+0.304 m lateral baseline, repeatable to σ ≈ 1–9 mm in translation and ≈0.2° in rotation, which is
+inside the VLP-32C's ±3 cm range noise. Two bugs had to be fixed before it could run at all —
+`two_lidar.launch.xml` used an invalid `$(eval not loop)` substitution, and defaulted the second
+LiDAR to UDP port 2369 while both shipped pcaps are recorded on 2368, so the second sensor
+published nothing and no pair could ever synchronize.
+
+To reproduce:
+
+```bash
+# terminal 1
+ros2 launch lctk_sample_data two_lidar.launch.xml
+# terminal 2
+just two-lidar
+```
 
 ### Standard Extrinsic Solver (Default)
 
