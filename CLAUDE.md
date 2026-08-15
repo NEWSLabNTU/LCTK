@@ -184,6 +184,23 @@ just serve-public   # Serve on 0.0.0.0
    binding path from `.cargo/config.toml` is missing (L-16). The manual clean is still needed
    after changing/removing a `.msg`/`.srv`.
 
+8. **Dangling symlinks after a source file is deleted** (L-29, auto-guarded): `--symlink-install`
+   symlinks package data files into `build/` and `install/` rather than copying them. Delete a
+   launch file — in a rebase, say — and the symlink is left pointing at nothing, so the next build
+   fails:
+   ```
+   error: can't copy '.../build/lctk_launch/launch/<file>.launch.xml': doesn't exist or not a regular file
+   ```
+   The path it names still appears in `ls`, because a dangling symlink is a directory entry with no
+   target, which makes the message read as nonsense until you know to look for that.
+
+   `just build` now prunes broken symlinks from both trees before invoking colcon and says what it
+   removed. A broken symlink is never useful — colcon recreates the ones that should exist. If you
+   hit this on an older checkout, the manual form is:
+   ```bash
+   find build install -xtype l -delete
+   ```
+
 ## Coding Guidelines
 
 - **Temporary files**: Create temporary files and scripts in `$project/tmp/` directory, not `/tmp/`
