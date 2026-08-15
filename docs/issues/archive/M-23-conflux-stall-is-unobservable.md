@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** conflux_py / conflux FFI (diagnosability)
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Reproduced alongside C-05 (2026-08-15)
 - **Location:** `ros/conflux/conflux_py/conflux_py/synchronizer.py` (`SyncStatistics`),
   `ros/conflux/conflux_cpp/rust/src/lib.rs` (C ABI surface)
@@ -47,3 +47,27 @@ but emitted nothing for N seconds — the signature of a wedge. That check alone
 turned C-05 from an investigation into a log line.
 
 Related: C-05, L-17, M-22.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@014a2c9; LCTK pins it). `State::match_status()` returns the
+matcher's own view — `inf_ts`, `sup_ts`, the current spread, the shortfall against the window, and
+a `BlockedReason` of `WaitingForData`, `SpreadTooNarrow` or `BufferFullNoMatch`. It is read-only,
+so it is safe to call on every poll.
+
+The same view is exported as `conflux_get_status` / `ConfluxStatus` across the C ABI (nanoseconds,
+with `-1` for "not applicable"), and reaches Python as `Synchronizer.status`, returning a
+`MatchStatus` dataclass with an `is_stalled` convenience property.
+
+`ROS2Synchronizer` now warns — once per stall, and only after every topic has delivered at least
+one message — when nothing has been emitted for `stall_warn_after` seconds (default 10, 0 to
+disable). The message names the blocked reason, the per-topic buffer occupancy, and how far short
+of the window the spread is, then points at clock sync and `sync_tolerance_ms`.
+
+That check is aimed squarely at the failure this issue was filed for: under C-05's DropOldest
+wedge, every push was accepted and the statistics showed zero rejections while nothing came out.
+`BufferFullNoMatch` is exactly that shape.
+
+Regression coverage: `crates/conflux-core/tests/observability_tests.rs` (including a case asserting
+`match_status` mutates nothing), `test_status_reports_blocked_reason` in the `conflux-ffi` crate,
+and three `TestStatus` cases in `conflux_py`.

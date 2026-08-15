@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** conflux-core (staleness subsystem)
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/staleness.rs:283-296` (`add_message`),
   `:298-322` (`advance_and_collect_expired`)
@@ -60,3 +60,28 @@ Given H-11, M-18, M-19 and M-20, consider whether the wheel is worth repairing a
 the phase doc for the repair-vs-remove decision.
 
 Related: H-11, M-18.
+
+## Resolution (2026-08-15) — removed
+
+Closed by removing the staleness subsystem entirely (`jerry73204/conflux`@014a2c9; LCTK pins it),
+per [Phase 8](../../roadmap/phase-8-conflux-staleness-subsystem.md) Stage 0. `ConstrainedHeap`,
+`TimerWheel`, `StalenessDetector` and the placeholder background task are gone — about 700 lines
+of source and 22 tests of the deleted machinery.
+
+The decision rested on three facts, not on this defect alone:
+
+- **Nothing reached it.** The FFI hardcoded `staleness_detector: None`, so no binding — and
+  therefore no LCTK node — ever executed this code.
+- **Every part of it was defective.** M-17 through M-21 were found in a single reading pass, and
+  H-11 (expiry anchored to construction time) meant the subsystem had never worked correctly at all.
+- **It was built on the wrong clock.** M-21: expiry ran on `Instant` while the rest of the pipeline
+  runs on message time. For recorded playback — LCTK's default mode — wall-clock expiry is
+  meaningless, so repair would have meant a rewrite rather than a patch.
+
+**What remains** is `Buffer::drop_expired` / `State::drop_expired_messages`, driven by
+`WithTimestamp::timeout`: message-time expiry, which is the semantics recorded data needs. Its
+contract was pinned by `timeout_tests.rs` *before* the deletion and is unchanged after it.
+
+The `tokio` feature on `conflux-core` went too, since it gated nothing else; `conflux-ros2` no
+longer requests it. The `staleness:` block was dropped from `conflux_node`'s YAML schema — a
+leftover key in an old config is ignored, and `config/example.yaml` records why.

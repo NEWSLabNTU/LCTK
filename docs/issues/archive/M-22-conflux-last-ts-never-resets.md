@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** conflux-core
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/buffer.rs:80-82`, `:140-153`
 
@@ -49,3 +49,26 @@ replay restart.
 - `ROS2Synchronizer` should reset on a detected time jump when `use_sim_time` is set.
 
 Related: C-05 (the other unrecoverable-state issue), M-23 (invisible from outside).
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@014a2c9; LCTK pins it). `Buffer::reset()` clears the deque
+and the monotonic high-water mark; `State::reset()` calls it for every buffer **and** clears
+`commit_ts`.
+
+Both gates matter. `commit_ts` independently rejects anything at or before the last emitted group,
+so clearing only the buffers' `last_ts` would leave the stream just as dead — a detail worth
+keeping in mind if this is ever refactored.
+
+Plumbed through the whole stack: `conflux_synchronizer_reset` in the C ABI, and
+`Synchronizer.reset()` in `conflux_py` (which also drops the message-reference table, keeping the
+C-02 bookkeeping exact instead of waiting for the periodic reconcile).
+
+Regression coverage: `crates/conflux-core/tests/reset_tests.rs` (high-water mark cleared, stream
+revives after a clock jump, commit timestamp cleared), plus
+`test_reset_revives_stream_after_clock_jump` in the `conflux-ffi` crate and two `TestReset` cases
+in `conflux_py`.
+
+**Not done:** automatic clock-jump detection was considered and deliberately deferred — it needs a
+heuristic threshold and a config knob, and the explicit `reset()` covers the actual complaint. A
+caller that wants it can compare stamps itself and call `reset()`.

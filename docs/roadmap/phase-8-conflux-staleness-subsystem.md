@@ -15,17 +15,23 @@ before any code is written.
 Prerequisite: [Phase 7](./phase-7-conflux-sync-correctness.md) Stage 2, which determines where
 staleness ticking would live in a unified pipeline.
 
-## Status
+## Status — complete (Path A)
 
-**H-11 is fixed** (`jerry73204/conflux`@bb490d9): expiry is anchored to message
-arrival, with regression coverage in `staleness_anchor_tests.rs`. It was taken
-ahead of the Stage 0 decision because it is a small, self-contained correctness
-fix that is worth having under either path — and because leaving a known-wrong
-expiry rule in place while the decision is pending is the worse option.
+**Stage 0 decided: remove.** Executed in `jerry73204/conflux`@014a2c9. H-11, M-17, M-18, M-19,
+M-20 and M-21 are all closed; the subsystem no longer exists.
 
-**Stage 0 is still open.** M-17 through M-21 remain, and the repair-vs-remove
-question is unchanged: the subsystem is still unreachable from LCTK, still built
-on the wrong clock for offline playback, and B1 is now the only step already done.
+`ConstrainedHeap`, `TimerWheel`, `StalenessDetector`, `ExpirationCommand` and the placeholder
+background task are deleted — about 700 lines of source and 22 tests of the deleted machinery.
+The `tokio` feature on `conflux-core` went with them (it gated nothing else), `conflux-ros2` no
+longer requests it, and the `staleness:` block was dropped from `conflux_node`'s YAML schema.
+
+What remains is `Buffer::drop_expired` / `State::drop_expired_messages` driven by
+`WithTimestamp::timeout` — message-time expiry, the only clock meaningful for recorded playback.
+Its contract was pinned by `timeout_tests.rs` **before** the deletion and is unchanged after it.
+
+H-11 (the construction-time anchor) had been fixed separately in @bb490d9, ahead of this decision;
+that fix is now moot, since the code it repaired is gone. Path B below is retained as a record of
+what repair would have entailed.
 
 ## Problem Statement
 
@@ -34,11 +40,11 @@ on the wrong clock for offline playback, and B1 is now the only step already don
 | Issue | Sev | Summary |
 |-------|-----|---------|
 | [H-11](../issues/archive/H-11-conflux-staleness-anchored-to-construction.md) | High | Expiry anchored to construction time, not message arrival |
-| [M-17](../issues/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Timer wheel drains one slot per call; insertion double-counts elapsed time |
-| [M-18](../issues/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing |
-| [M-19](../issues/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Messages are tracked before the ordering check → ghost entries |
-| [M-20](../issues/M-20-conflux-expiration-only-removes-front.md) | Medium | Expired messages removed only if at a buffer front |
-| [M-21](../issues/M-21-conflux-two-time-bases-for-expiry.md) | Medium | Wall clock vs message stamp used interchangeably |
+| [M-17](../issues/archive/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Timer wheel drains one slot per call; insertion double-counts elapsed time |
+| [M-18](../issues/archive/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing |
+| [M-19](../issues/archive/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Messages are tracked before the ordering check → ghost entries |
+| [M-20](../issues/archive/M-20-conflux-expiration-only-removes-front.md) | Medium | Expired messages removed only if at a buffer front |
+| [M-21](../issues/archive/M-21-conflux-two-time-bases-for-expiry.md) | Medium | Wall clock vs message stamp used interchangeably |
 
 ### Why it never surfaced
 

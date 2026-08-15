@@ -30,7 +30,8 @@ A suite that reports green while running nothing is worse than no suite, because
 
 | Issue | Sev | Summary |
 |-------|-----|---------|
-| [H-13](../issues/archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Tokio tests had not compiled; `just test-rust` now passes `--features tokio` |
+| [H-13](../issues/archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Tokio tests had not compiled; `just test-rust` now passes `--features tokio` (the feature itself was later removed with the staleness subsystem — see Phase 8) |
+| [L-18](../issues/archive/L-18-conflux-result-not-exported.md) | Low | `ConfluxResult` is an IntEnum, exported; `last_push_result` returns it (closed alongside M-23) |
 | [M-24](../issues/archive/M-24-conflux-py-buffer-size-validation.md) | Medium | `buffer_size < 2` now raises `ValueError`; `_handle` set before validation |
 | [M-25](../issues/archive/M-25-conflux-py-tests-never-ran.md) | Medium | `test-python` now invokes pytest directly; exit codes propagate |
 | [L-26](../issues/archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` uninstalled; hazard documented in CLAUDE.md |
@@ -40,7 +41,7 @@ A suite that reports green while running nothing is worse than no suite, because
 | Issue | Sev | Summary |
 |-------|-----|---------|
 | [L-22](../issues/L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success with zero tests |
-| [L-18](../issues/L-18-conflux-result-not-exported.md) | Low | `last_push_result` returns an opaque int; `ConfluxResult` unexported |
+
 | [L-19](../issues/L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors |
 | [L-20](../issues/L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window |
 | [L-21](../issues/L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation |
@@ -62,13 +63,13 @@ The largest remaining gap, and the one that would have caught C-05.
 
 **Exit:** `just test` fails if the C++ wrapper or the FFI regresses.
 
-### Stage 2 — Make the Python API honest (L-18, L-19)
+### Stage 2 — Make the Python API honest (L-19)
 
-1. Turn `ConfluxResult` into an `enum.IntEnum` in `_ffi.py` and export it from
-   `conflux_py/__init__.py`. `IntEnum` keeps existing `== 2` comparisons working.
-2. Have `last_push_result` return the enum member, and give `FFISynchronizer` a public
-   `last_result` accessor so `_core` stops reaching into a private attribute.
-3. Narrow the `__init__.py` import guard to the condition actually being probed:
+Steps 1 and 2 are **done** (L-18, closed alongside M-23): `ConfluxResult` is an `IntEnum` exported
+from `conflux_py` next to `BlockedReason` and `MatchStatus`, `FFISynchronizer` has a public
+`last_result`, and `last_push_result` returns the enum member. Remaining:
+
+1. Narrow the `__init__.py` import guard to the condition actually being probed:
 
    ```python
    try:

@@ -18,12 +18,16 @@ Work lands in the `jerry73204/conflux` submodule, then LCTK bumps the pin.
 | Stage | State |
 |-------|-------|
 | 1 — Reproduce and pin | **Done** — FFI-level tests `test_recovers_from_divergence_{reject_new,drop_oldest}`; `pipeline_parity_tests.rs` in conflux-core |
-| 2 — Unify the pipeline | **Done** — `State::advance` owns the rules; `sync()`'s poll loop reduced to a feeder (~90 lines removed). L-24's `is_ready` gate is gone as a side effect and L-24 should be re-checked |
-| 3 — Recovery | **Partial** — C-05 closed by construction. `Buffer::reset()` / clock-jump detection (M-22) **not started** |
-| 4 — Observability (M-23) | Not started |
-| 5 — Cleanup (L-23) | Not started |
+| 2 — Unify the pipeline | **Done** — `State::advance` owns the rules; `sync()`'s poll loop reduced to a feeder (~90 lines removed) |
+| 3 — Recovery | **Done** — C-05 closed by construction; `reset()` across core, C ABI and Python (M-22). Automatic clock-jump detection deliberately deferred |
+| 4 — Observability (M-23) | **Done** — `match_status()` + `BlockedReason`, exported through the C ABI and Python; `ROS2Synchronizer` warns on a detected stall |
+| 5 — Cleanup (L-23) | **Not started** |
 
-Landed in `jerry73204/conflux`@bb490d9.
+Landed in `jerry73204/conflux`@bb490d9 (stages 1–2) and @014a2c9 (stages 3–4).
+
+**Follow-up:** L-24 (`sync()` withholding a matched pair until every stream has two messages) may
+already be closed — the `is_ready()` gate disappeared when the poll loop was rewritten in stage 2.
+It is still filed as open pending a re-read.
 
 ## Problem Statement
 
@@ -68,8 +72,8 @@ message, keeping `all_one()` true. Any transient divergence latches the fault.
 |-------|-----|---------|
 | [C-05](../issues/archive/C-05-conflux-ffi-sync-wedges.md) | Critical | FFI synchronizer wedges permanently after a stream divergence |
 | [H-12](../issues/archive/H-12-conflux-two-divergent-pipelines.md) | High | Two divergent pipelines; tests cover the unshipped one |
-| [M-22](../issues/M-22-conflux-last-ts-never-resets.md) | Medium | Clock reset kills a stream permanently (`last_ts` never resets) |
-| [M-23](../issues/M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable |
+| [M-22](../issues/archive/M-22-conflux-last-ts-never-resets.md) | Medium | Clock reset kills a stream permanently (`last_ts` never resets) |
+| [M-23](../issues/archive/M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable |
 | [L-17](../issues/L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` means "any buffer empty" |
 | [L-24](../issues/L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` withholds a matched pair until every stream has 2 messages |
 | [L-23](../issues/L-23-conflux-core-dead-code.md) | Low | Half-built feedback path, dead assert, commented-out blocks |

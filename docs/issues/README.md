@@ -42,13 +42,13 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
 | [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
-| [M-17](./M-17-conflux-timer-wheel-loses-messages.md) | Medium | Staleness timer wheel skips slots and misplaces messages | 🔴 |
-| [M-18](./M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing | 🔴 |
-| [M-19](./M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Staleness tracks rejected messages → ghosts can evict valid ones | 🔴 |
-| [M-20](./M-20-conflux-expiration-only-removes-front.md) | Medium | Expired messages removed only if at the buffer front | 🔴 |
-| [M-21](./M-21-conflux-two-time-bases-for-expiry.md) | Medium | Expiry defined in two incompatible time bases (wall clock vs stamp) | 🔴 |
-| [M-22](./M-22-conflux-last-ts-never-resets.md) | Medium | A stream whose clock goes backwards is permanently dead (`last_ts` never resets) | 🔴 |
-| [M-23](./M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable; statistics look perfect | 🔴 |
+| [M-17](./archive/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Staleness timer wheel skips slots and misplaces messages | 🟢 |
+| [M-18](./archive/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing | 🟢 |
+| [M-19](./archive/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Staleness tracks rejected messages → ghosts can evict valid ones | 🟢 |
+| [M-20](./archive/M-20-conflux-expiration-only-removes-front.md) | Medium | Expired messages removed only if at the buffer front | 🟢 |
+| [M-21](./archive/M-21-conflux-two-time-bases-for-expiry.md) | Medium | Expiry defined in two incompatible time bases (wall clock vs stamp) | 🟢 |
+| [M-22](./archive/M-22-conflux-last-ts-never-resets.md) | Medium | A stream whose clock goes backwards is permanently dead (`last_ts` never resets) | 🟢 |
+| [M-23](./archive/M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable; statistics look perfect | 🟢 |
 | [M-24](./archive/M-24-conflux-py-buffer-size-validation.md) | Medium | Invalid `buffer_size` raised a generic RuntimeError; `__del__` on partial init | 🟢 |
 | [M-25](./archive/M-25-conflux-py-tests-never-ran.md) | Medium | `just test-python` collected zero tests and reported success | 🟢 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
@@ -68,7 +68,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-15](./archive/L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🟢 |
 | [L-16](./archive/L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🟢 |
 | [L-17](./L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` returns true when *any* buffer is empty | 🔴 |
-| [L-18](./L-18-conflux-result-not-exported.md) | Low | `last_push_result` returns an opaque int; `ConfluxResult` unexported | 🔴 |
+| [L-18](./archive/L-18-conflux-result-not-exported.md) | Low | `last_push_result` returns an opaque int; `ConfluxResult` unexported | 🟢 |
 | [L-19](./L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors | 🔴 |
 | [L-20](./L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window | 🔴 |
 | [L-21](./L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation | 🔴 |
@@ -123,14 +123,24 @@ are all the same failure — silence where a number should be.
 
 ## The conflux cluster (2026-08-15)
 
-**Status (2026-08-15):** C-05, H-11 and H-12 are **fixed** in
-`jerry73204/conflux`@bb490d9. The matching policy now lives in one place
-(`State::advance`) that both drivers call, which closes the wedge and makes the
-two pipelines agree; staleness deadlines are measured from message arrival. The
-staleness subsystem's remaining defects (M-17–M-21) and the observability and
-ergonomics work (M-22, M-23, L-17–L-25) are still open. The narrative below is
-kept in the past tense it was written in, because it explains how the cluster
-arose.
+**Status (2026-08-15):** every Critical, High and Medium finding in this cluster
+is **fixed** (`jerry73204/conflux`@bb490d9 and @014a2c9).
+
+- **C-05, H-12** — the matching policy now lives in one place (`State::advance`)
+  that both drivers call, which closes the wedge and makes the two pipelines
+  agree on identical input.
+- **H-11, M-17–M-21** — the staleness subsystem was **removed**, not repaired
+  (Phase 8 Stage 0). It was unreachable, defective in every part, and built on
+  the wrong clock for recorded playback. Message-time expiry via
+  `WithTimestamp::timeout` remains and is unchanged.
+- **M-22** — `reset()` across core, the C ABI and Python, so a bag loop or
+  sim-time reset no longer kills a stream permanently.
+- **M-23** — `match_status()` reports why the matcher is not emitting, exported
+  through the C ABI and Python, with a stall warning in `ROS2Synchronizer`.
+
+Still open: L-17, L-19–L-25 (ergonomics, C++ test coverage, dead code, docs).
+The narrative below is kept in the past tense it was written in, because it
+explains how the cluster arose.
 
 
 C-05, H-11–H-13, M-17–M-25 and L-17–L-26 are one story about the message synchronizer every

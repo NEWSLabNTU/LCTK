@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** conflux_py (API ergonomics)
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Reproduced in a Python session (2026-08-15)
 - **Location:** `ros/conflux/conflux_py/conflux_py/_core.py:219-226`,
   `ros/conflux/conflux_py/conflux_py/__init__.py:25-27`
@@ -42,3 +42,15 @@ backward-compatible with existing `== 2` comparisons). Give `_ffi.FFISynchronize
 `last_result` accessor so `_core` stops reaching into a private attribute.
 
 Related: L-20.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@014a2c9; LCTK pins it), alongside M-23 — which had to export
+result and status types anyway, making this the natural moment.
+
+- `ConfluxResult` is now an `enum.IntEnum`, so `ConfluxResult(2).name` works while existing `== 2`
+  comparisons keep working.
+- It is exported from `conflux_py`, together with `BlockedReason` and `MatchStatus`.
+- `FFISynchronizer` gained a public `last_result` property, so `_core` no longer reaches into
+  `_ffi_sync._last_result`.
+- `Synchronizer.last_push_result` returns the enum member rather than a bare int.
