@@ -43,6 +43,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-14](./archive/M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟢 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
 | [M-16](./archive/M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🟢 |
+| [M-17](./M-17-judge-ground-truth-wrong-rig.md) | Medium | Judge ground truth does not describe the shipped sample data | 🔴 |
 | [M-17](./archive/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Staleness timer wheel skips slots and misplaces messages | 🟢 |
 | [M-18](./archive/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing | 🟢 |
 | [M-19](./archive/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Staleness tracks rejected messages → ghosts can evict valid ones | 🟢 |
@@ -82,9 +83,10 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-28](./archive/L-28-just-test-pytest-missing.md) | Low | `just test` invoked a bare `pytest`; the Python suites never ran | 🟢 |
 | [L-29](./archive/L-29-symlink-install-stale-launch.md) | Low | Deleting a launch file leaves a dangling symlink that breaks the next build | 🟢 |
 
-## The tracker is empty (2026-08-16)
+## Status (2026-08-16)
 
-**Every issue in this tracker is 🟢.** All of the 2026-07-09, 2026-07-12 and 2026-08-15 audits are
+One open issue: **M-17**, found while correcting the judge's ground-truth convention.
+Everything else is 🟢. All of the 2026-07-09, 2026-07-12 and 2026-08-15 audits are
 closed, including the four that
 had been carried as deferred or partially-fixed for a month: M-01 (transform direction), M-12
 (robust estimation), M-14 (origin-corner disambiguation) and M-16 (the L2L pipeline).

@@ -4,17 +4,53 @@
 # for evaluating calibration quality.
 
 ground_truth:
-  # 4x4 transformation matrix from LiDAR to Camera coordinate frame
+  # 4x4 transform in ROS TF semantics: lidar -> camera, i.e. the CAMERA'S POSE
+  # EXPRESSED IN LIDAR COORDINATES. The translation below is where the camera sits
+  # in the lidar frame: 151 mm forward, 22 mm right, 147 mm down.
+  #
   # Format: [R11, R12, R13, Tx]
   #         [R21, R22, R23, Ty]
   #         [R31, R32, R33, Tz]
   #         [  0,   0,   0,  1]
-  # Where R is the 3x3 rotation matrix and T is the 3x1 translation vector
+  #
+  # M-01 (2026-08-16): this was previously the other direction -- the raw cv2.solvePnP
+  # output T_camera<-lidar, matching what the solver used to publish. The solver now
+  # publishes with correct TF semantics, so this reference was inverted to match:
+  #
+  #     T_new = numpy.linalg.inv(T_old)
+  #
+  # The exact matrix inverse was used rather than the transpose-and-negate shortcut,
+  # because the recorded rotation block is not exactly orthonormal (max deviation
+  # 7.2e-3, det 1.000046 -- roughly 0.4 deg of transcription skew). Inverting exactly
+  # round-trips back to the original numbers; re-orthonormalising would have silently
+  # altered the reference. That skew is pre-existing and unrelated to the direction fix.
   matrix:
-    - [-0.008120, -0.999550, +0.028668, -0.016307]
-    - [-0.007539, -0.028730, -0.999556, -0.146427]
-    - [+0.999939, -0.008541, -0.014490, -0.153410]
-    - [0.0, 0.0, 0.0, 1.0]
+    - [-0.008121, -0.014728, +0.999884, +0.151103]
+    - [-0.999558, -0.028547, -0.008332, -0.021758]
+    - [+0.028791, -0.999513, -0.007302, -0.147006]
+    - [+0.000000, +0.000000, +0.000000, +1.000000]
+
+# WARNING: this reference does not match the shipped sample data (2026-08-16).
+#
+# Measured against a live `just demo` solve on dataset 3, after the M-01 direction fix:
+#
+#     rotation error     5.80 deg     (was 114.13 deg before the fix -- see below)
+#     translation error  0.745 m
+#     |t| here 0.213 m   vs   |t| solved 0.889 m
+#
+# The rotation now agrees to within a few degrees, which is what confirms the direction
+# fix landed: 114 deg is the signature of comparing opposite directions, and no change of
+# convention can produce 5.8 deg from a mismatched one.
+#
+# The translation is a different matter. |t| is invariant under inversion -- both
+# conventions give 0.213 m -- so the 0.68 m gap against the solved 0.889 m cannot be a
+# direction problem and was already there before M-01. This file appears to describe a
+# different rig than `lctk_sample_data` dataset 3, so `just demo enable_judge=true` scores
+# 0/15 on translation no matter what.
+#
+# It has deliberately NOT been "corrected" to match the solve: the true camera-to-LiDAR
+# offset for that recording is not known here, and inventing numbers to make the judge
+# happy would turn a visibly wrong reference into an invisibly wrong one. Tracked as M-17.
 
 scoring:
   # Maximum possible score
