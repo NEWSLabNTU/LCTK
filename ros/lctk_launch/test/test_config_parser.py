@@ -268,7 +268,7 @@ if __name__ == "__main__":
             test()
             print(f"  PASS: {test.__name__}")
             passed += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - hand-rolled runner: reporting per-test failure is the point
             print(f"  FAIL: {test.__name__}: {e}")
             failed += 1
 

@@ -832,7 +832,7 @@ class LidarToCameraSolver(Node):
             response.message = " ".join(msg_parts)
             response.num_detections = buffer_size
             self.get_logger().info(response.message)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - service handler must answer with success=False, not raise
             response.success = False
             response.message = f"Failed to save detections: {str(e)}"
             response.num_detections = 0
@@ -920,7 +920,7 @@ class LidarToCameraSolver(Node):
             response.num_detections = 0
             response.buffer_size = len(self.detection_buffer)
             self.get_logger().error(response.message)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - service handler must answer with success=False, not raise
             response.success = False
             response.message = f"Failed to load detections: {str(e)}"
             response.num_detections = 0
@@ -1895,24 +1895,24 @@ def main(args=None):
             executor.shutdown()
     except KeyboardInterrupt:
         node.get_logger().info("Shutting down lidar_to_camera_solver")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - last resort at the process boundary
         # Handle RCLError and other exceptions gracefully
         node.get_logger().error(f"Error during spin: {e}")
     finally:
         # Log final synchronization statistics
         try:
             node.get_logger().info(f"Final {node.pair_source.status_line()}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the real error
             node.get_logger().warning(f"Failed to log final sync statistics: {e}")
 
         try:
             node.destroy_node()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the real error
             node.get_logger().warning(f"Error while destroying node: {e}")
         try:
             if rclpy.ok():
                 rclpy.shutdown()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the real error
             # Context may already be invalid at this point; log to stderr.
             print(f"Error during rclpy shutdown: {e}", file=sys.stderr)
 
