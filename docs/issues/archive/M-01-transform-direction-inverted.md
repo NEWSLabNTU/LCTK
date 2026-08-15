@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** extrinsic solvers / TF output
-- **Status:** Deferred (needs visual verification)
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review
 - **Location:**
   - `ros/extrinsic_solver_node/extrinsic_solver_node/main.py:753-768`
@@ -40,4 +40,31 @@ Recommended fix, to be done with sample data + the overlay:
    `tf2` lookup gives the Autoware-correct direction.
 
 Until then this is the one blocker between the solver output and a correct
-Autoware `sensor_kit_calibration.yaml` (see [gap-autoware-export.md](./archive/gap-autoware-export.md)).
+Autoware `sensor_kit_calibration.yaml` (see [gap-autoware-export.md](./gap-autoware-export.md)).
+
+## Resolution (2026-08-15)
+
+Fixed. Both solvers invert before building the `TransformStamped`, and `pointcloud_image_overlay`
+inverts back -- it consumes the topic directly as `rvec`/`tvec` for `projectPoints` rather than
+going through tf2, which is why the two had to move together. The pair is a no-op end to end: the
+projected pixels are unchanged, while the published transform now means what its labels say.
+
+**The deferral reason is gone.** This sat open since 2026-07-11 because "the only correctness
+signal is whether point clouds still project onto the image correctly -- a visual result this
+environment can't produce". That signal is now arithmetic, and stricter than a visual one:
+
+- the published matrix equals `inv(T_camera<-lidar)`,
+- it is *not* the raw solve, so a future simplification cannot quietly undo this,
+- the overlay recovers exactly the original `rvec`/`tvec`,
+- projecting real points through both paths gives identical pixels to 1e-6.
+
+Deliberately unchanged: the dump JSON keeps the raw `rvec`/`tvec`, because that is what
+`lctk_autoware_export` consumes and its frame handling is already correct and tested. This closes
+the last blocker between the solver output and a correct Autoware `sensor_kit_calibration.yaml`.
+
+**One consumer needs operator attention.** `calibration_judge` compares the topic against a
+user-supplied `ground_truth_file` whose convention was implicitly "whatever the solver published".
+A file written against the old behaviour now holds the inverse and will score as badly wrong. The
+judge's module docstring states the convention and the one-line fix (`T_new = inv(T_old)`). This is
+documented rather than silently migrated, because only the operator knows which convention their
+file was recorded in.

@@ -100,7 +100,7 @@ pose by the inverse of the resulting positional sigma.
 not `solvePnPRefineVVS`. So M-12's LM polish slot becomes a weighted `scipy.least_squares` when a
 covariance is present, and falls back to OpenCV's unweighted `RefineLM` when it is not (so an older
 detector behaves exactly as before). This also completes item 4 of
-[M-12](../M-12-no-robust-estimation-or-refinement.md).
+[M-12](./M-12-no-robust-estimation-or-refinement.md).
 
 ### Verified
 

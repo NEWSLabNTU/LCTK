@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** lidar_board_detector, hollow-board-config, advanced_extrinsic_solver
-- **Status:** Partially fixed (2026-07-13) — silent case now warns + NaN panics fixed; robust origin disambiguation remains
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/lidar_board_detector/src/main.rs:1341-1397` (post-ICP origin-corner fixup)
@@ -44,7 +44,7 @@ Board is mounted at ~45° roll on a rig whose LiDAR frame is not gravity-aligned
 resolve to the correct origin corner, some to the neighbour. The concatenated correspondence
 set is a mix of correct and quarter-turned object points, and the least-squares solve returns
 something between them. Reprojection error is large but nothing reports it
-([H-09](./archive/H-09-no-extrinsic-quality-metric.md)), so the operator sees only a mysteriously bad
+([H-09](./H-09-no-extrinsic-quality-metric.md)), so the operator sees only a mysteriously bad
 overlay.
 
 ## Suggested fix
@@ -61,7 +61,7 @@ overlay.
 - **Delete the Python re-implementation.** Export the corner layout once (from the Rust
   `hollow-board-config`, or from the JSON5 config), and have the solver read it — or at least
   add a test that asserts the two implementations agree corner-for-corner.
-- Once [H-09](./archive/H-09-no-extrinsic-quality-metric.md) lands, a per-pose reprojection residual
+- Once [H-09](./H-09-no-extrinsic-quality-metric.md) lands, a per-pose reprojection residual
   makes a permuted pose trivially detectable, and [M-12](./M-12-no-robust-estimation-or-refinement.md)
   can reject it.
 
@@ -109,3 +109,34 @@ Still open: the robust origin disambiguation (parts 1a/1b) — scoring the 4 in-
 rotations by ICP loss against the asymmetric holes, or camera cross-validation — which
 require board captures near 45° roll (not reproducible headlessly) and are best paired
 with the H-09 per-pose reprojection residual now that `lctk_quality` has landed.
+
+## Resolution (2026-08-15) — robust origin disambiguation
+
+The remaining part (1a) is done: the origin corner is chosen from the data instead of from
+gravity.
+
+`BoardModel::correspondence_loss` scores a candidate pose against the measured points. The
+detector now scores all four in-plane rotations and takes the best, keeping "lowest world z" only
+as a tie-break. This is the fix this issue argued for -- *break the symmetry in the target, not in
+the code*: the three holes sit at three of the four diagonal positions with the fourth empty, so
+each candidate origin implies a different hole layout and the points can say which one they came
+from.
+
+"Best" requires the runner-up to be at least 5% worse. Below that the holes are not separating the
+candidates for that view -- too few rim returns, a grazing incidence -- and gravity is the better
+guess, logged as such. When the data and gravity disagree and the data is clear, that is logged
+too, since it is precisely the case the old code got silently wrong.
+
+The scorer uses a serial correspondence search rather than the feature-gated parallel one, so a
+rotation candidate cannot be chosen differently depending on a build flag.
+
+**The blocker turned out not to be one.** This was left open as needing "board captures near 45deg
+roll -- not reproducible headlessly". Validating the *premise* does not need them: sample points
+off a board face, skip the holes, and assert every 90deg rotation scores strictly worse than the
+true orientation. That establishes the asymmetry is usable at all, which is what the whole
+approach rests on, and it runs in 0.1s. Confirming the improvement on real 45deg-roll captures is
+still worthwhile operator work, but it is no longer what stands between this and a fix.
+
+Still open as a separate concern: camera cross-validation of the LiDAR-derived in-plane
+orientation against the ArUco IDs (part 1b). The corner-order duplication (part 2) was closed on
+2026-07-14.

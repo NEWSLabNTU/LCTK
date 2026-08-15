@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** advanced_extrinsic_solver, extrinsic_solver_node
-- **Status:** Partially fixed (2026-07-13) — LM refinement landed; residual gating & weighting are H-09/M-13
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1333-1366` (`_solve_pnp`, `SOLVEPNP_SQPNP`)
@@ -19,7 +19,7 @@ over the concatenated correspondence set. There is:
   *zero* nonlinear polish of the reprojection cost,
 - **no weighting** — every one of the `16 × N` corners enters with equal weight,
 - **no residual gating** — nothing looks at per-corner error, because nothing computes it
-  ([H-09](./archive/H-09-no-extrinsic-quality-metric.md)).
+  ([H-09](./H-09-no-extrinsic-quality-metric.md)).
 
 ## Failure scenario
 
@@ -44,7 +44,7 @@ Layered, in increasing order of change:
 3. IRLS with a Huber/Cauchy kernel over pose-grouped residuals, or `solvePnPRansac` with the
    pose as the sampling unit.
 4. Weight each pose by its ICP quality once that is available
-   ([M-13](./archive/M-13-icp-quality-not-propagated.md)).
+   ([M-13](./M-13-icp-quality-not-propagated.md)).
 
 ## Resolution (2026-07-13) — LM refinement (fix item 1)
 
@@ -56,10 +56,34 @@ standard `extrinsic_solver_node` already uses `SOLVEPNP_ITERATIVE`, which runs L
 internally, so it was not touched.
 
 Items 2–4 (per-corner/per-pose residual gating, IRLS/RANSAC, ICP-quality weighting)
-are intentionally left: residuals are the [H-09](./archive/H-09-no-extrinsic-quality-metric.md)
-metric surface and per-pose ICP quality is [M-13](./archive/M-13-icp-quality-not-propagated.md),
+are intentionally left: residuals are the [H-09](./H-09-no-extrinsic-quality-metric.md)
+metric surface and per-pose ICP quality is [M-13](./M-13-icp-quality-not-propagated.md),
 both in progress by other agents. Doing the gating here would collide with the
 residual computation being added under H-09.
 
 Verified: `tmp/test_m12_refine.py` confirms RefineLM never worsens the reprojection
 RMSE on a synthetic noisy scene; `just build` + `just test` green.
+
+## Resolution (2026-08-15) — items 2 and 3
+
+Items 1 (LM refinement) and 4 (ICP-quality weighting) landed earlier. Items 2-3 were blocked on
+H-09's residual surface, which has since shipped as `lctk_quality`, so they are now done.
+
+`_reject_outlier_poses` computes per-pose reprojection RMS against the initial estimate, flags
+outliers, and the solver re-solves without them. Rejection is at **pose** granularity, exactly as
+this issue argued: a pose's 16 corners share one rigid `T_board`, so a bad fit misplaces all of
+them together. Rejecting corners individually would treat one rigid error seen 16 times as 16
+independent draws -- which is the assumption that already fails here.
+
+The threshold is `median + k * 1.4826 * MAD`; a mean-and-sigma rule would be inflated by the very
+outlier it exists to catch. Two guards stop it eating good data: a clean buffer has a near-zero
+MAD so an absolute floor is also required, and it refuses to reject when too few poses would
+survive, since an under-constrained solve is worse than one contaminated pose and pose diversity
+is already scarce (H-07).
+
+Behind `reject_outlier_poses` (default on) and `outlier_pose_mad_k`. Per-pose RMS is logged
+whether or not anything is rejected, since the residuals are the diagnostic.
+
+Regression coverage: `test_pose_gating.py` -- the M-14 quarter-turn is rejected, a clean buffer
+rejects nothing, the re-solve is measurably closer to truth, the min-keep guard holds, and
+residuals are reported regardless.

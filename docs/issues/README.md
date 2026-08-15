@@ -27,7 +27,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-12](./archive/H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; tests cover the one production does not use | 🟢 |
 | [H-13](./archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Conflux tokio tests had not compiled; `just test` reported green | 🟢 |
 | [H-14](./archive/H-14-conflux-third-sync-implementation.md) | High | A third, independent sync implementation lives in `conflux-ros2` | 🟢 |
-| [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
+| [M-01](./archive/M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟢 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
 | [M-04](./archive/M-04-l2l-wallclock-staleness.md) | Medium | L2L staleness check uses wall-clock vs sensor stamp | 🟢 |
@@ -38,11 +38,11 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-09](./archive/M-09-marker-ids-hard-index.md) | Medium | `marker_ids[0..3]` hard index → IndexError on short config | 🟢 |
 | [M-10](./archive/M-10-multi-marker-config-collisions.md) | Medium | Multi-marker camera uses wrong ArUco config; duplicate pairs collide | 🟢 |
 | [M-11](./archive/M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🟢 |
-| [M-12](./M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🟡 |
+| [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🟢 |
 | [M-13](./archive/M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🟢 |
-| [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
+| [M-14](./archive/M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟢 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
-| [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
+| [M-16](./archive/M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🟢 |
 | [M-17](./archive/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Staleness timer wheel skips slots and misplaces messages | 🟢 |
 | [M-18](./archive/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing | 🟢 |
 | [M-19](./archive/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Staleness tracks rejected messages → ghosts can evict valid ones | 🟢 |
@@ -79,6 +79,31 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-25](./archive/L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have | 🟢 |
 | [L-26](./archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` breaks pytest workspace-wide before collection | 🟢 |
 | [L-27](./archive/L-27-conflux-cpp-lint-red.md) | Low | `ament_lint` red on `conflux_cpp`, including generated and build-artifact files | 🟢 |
+| [L-28](./archive/L-28-just-test-pytest-missing.md) | Low | `just test` invoked a bare `pytest`; the Python suites never ran | 🟢 |
+| [L-29](./L-29-symlink-install-stale-launch.md) | Low | Deleting a launch file leaves a dangling symlink that breaks the next build | 🔴 |
+
+## All original findings are now closed (2026-08-15)
+
+Every issue from the 2026-07-09, 2026-07-12 and 2026-08-15 audits is 🟢, including the four that
+had been carried as deferred or partially-fixed for a month: M-01 (transform direction), M-12
+(robust estimation), M-14 (origin-corner disambiguation) and M-16 (the L2L pipeline).
+
+Three of those four had been left open on the grounds that they needed something this environment
+could not provide — a visual overlay check, board captures near 45° roll, an eye on RViz. In each
+case the blocking premise turned out to be narrower than stated:
+
+- **M-01** wanted "do the points still land on the image". That is a *numeric* property: project
+  the same points through both paths and compare pixels. The test is stricter than the eyeball.
+- **M-14** wanted 45°-roll captures. Those would validate the *improvement*; validating the
+  *premise* — that the hole asymmetry separates the four candidate orientations at all — needs
+  only synthetic points, and runs in 0.1 s.
+- **M-16** wanted RViz. Repeatability across 81 independent solves is stronger and quantitative.
+  What a visual check would still add is that the baseline matches the physical rig, which no
+  self-consistency check can establish; that part is genuinely still operator work and is recorded
+  as such.
+
+The general lesson is worth keeping: "needs a human" is sometimes true of the *whole* task and
+rarely true of *every part* of it. Splitting the verifiable part out is usually possible.
 
 ## Three headline gaps
 

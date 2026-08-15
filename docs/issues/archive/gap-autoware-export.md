@@ -4,7 +4,7 @@
 - **Area:** output / integration
 - **Status:** Fixed (2026-07-16, Phase 6: `lctk_autoware_export`)
 - **Verified:** Static review (whole-repo grep for "autoware", "sensor_kit", "static_transform" — zero hits)
-- **Related:** [M-01](../M-01-transform-direction-inverted.md), [M-02](./M-02-radians-degrees-mix.md), [L-09](./L-09-setup-fragility-export-labeling.md)
+- **Related:** [M-01](./M-01-transform-direction-inverted.md), [M-02](./M-02-radians-degrees-mix.md), [L-09](./L-09-setup-fragility-export-labeling.md)
 
 ## Problem
 

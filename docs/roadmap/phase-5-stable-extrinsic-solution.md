@@ -79,7 +79,7 @@ bias every correspondence or actively invert the sign of the Stage 5.5 guidance.
 | ✅ [C-03](../issues/archive/C-03-double-undistortion.md) — image undistorted twice — **fixed 2026-07-12** | Radius-dependent bias on every corner. Border poses carried the *largest* error, so "spread the board across the FoV" (Stage 5.5) would have injected more systematic error than it removed. Stage 5.5 is unblocked. |
 | ✅ [H-08](../issues/archive/H-08-no-subpixel-corner-refinement.md) — no sub-pixel refinement — **fixed 2026-07-13** | `CORNER_REFINE_NONE`, and there is no redundancy to average the error away. Now `SUBPIX`, refined on the **raw** frame (where the gradients still exist) and mapped to the rectified frame with `undistortPoints`. Measured 25–60% lower corner RMSE than `NONE` across the working marker-size range; `CONTOUR` was no better than `NONE`. |
 | ✅ [M-11](../issues/archive/M-11-solvers-ignore-distortion.md) — solvers hardcode `dist_coeffs = 0` — **fixed 2026-07-13** | The rectify-once contract was unstated, violated, and silently breakable. Now correct *by construction*: the corners on the wire are rectified points, so `dist_coeffs = 0` is a definition rather than an assumption. The solvers were not touched. |
-| [M-14](../issues/M-14-corner-order-brittle.md) — gravity-based origin corner; duplicated corner-order logic | Produces silent 90° errors in individual poses. Poisons the buffer with correlated outliers. |
+| [M-14](../issues/archive/M-14-corner-order-brittle.md) — gravity-based origin corner; duplicated corner-order logic | Produces silent 90° errors in individual poses. Poisons the buffer with correlated outliers. |
 | [L-10](../issues/archive/L-10-solver-float32-precision.md) — `float32` solve | Free precision loss; makes a `cond(JᵀJ)` diagnostic unreliable. |
 | ✅ [L-11](../issues/archive/L-11-detector-param-block-bugs.md) — detector param block — **fixed 2026-07-13** | Reduced pose yield. Both copies of the block are gone; `DetectorParameters` is now constructed in exactly one place, from config. |
 
@@ -135,7 +135,7 @@ separation is 190× on conditioning and ~6× on subset spread.
 
 ## Stage 5.2 — Robust estimator
 
-Tracked as [M-12](../issues/M-12-no-robust-estimation-or-refinement.md),
+Tracked as [M-12](../issues/archive/M-12-no-robust-estimation-or-refinement.md),
 [M-13](../issues/archive/M-13-icp-quality-not-propagated.md).
 
 1. **Refine.** `solvePnPRefineLM` (or `RefineVVS`) after the SQPnP initialisation. The advanced
