@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** conflux-core
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/sync.rs:128`,
   `ros/conflux/crates/conflux-core/src/state.rs:241-244`
@@ -47,3 +47,17 @@ Decide the intended semantics and make both pipelines share it (H-12):
 Either way, document the latency characteristic in the performance section.
 
 Related: H-12, C-05.
+
+## Resolution (2026-08-15) — closed by the H-12 rewrite
+
+No separate fix was needed. The `is_ready()` emission gate was removed when `sync()`'s poll loop
+was rewritten to route through `State::advance`
+([H-12](./H-12-conflux-two-divergent-pipelines.md), `jerry73204/conflux`@bb490d9). `sync()` no
+longer withholds a formable group waiting for a second message on every stream, so its latency now
+matches the FFI path's.
+
+Verified by inspecting every `is_ready` call site: it survives only as a public predicate on
+`State`, the C ABI and `conflux_py`, with no caller in the matching path.
+
+This was deliberately left open when H-12 closed, rather than assumed closed, until that check was
+actually run.

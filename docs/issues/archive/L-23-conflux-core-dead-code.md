@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** conflux-core
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review (2026-08-15)
 - **Location:** `ros/conflux/crates/conflux-core/src/state.rs:79-84`, `:99-120`, `:170-173`;
   `ros/conflux/crates/conflux-core/src/sync.rs:127-135`, `:179-187`, `:246-253`;
@@ -43,3 +43,19 @@ read as the active implementation.
 - Delete the commented-out blocks. Git history preserves them.
 
 Related: H-12.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@0a9c901; LCTK pins it).
+
+- **The dead assert is gone.** `assert!(item.timestamp() <= inf_ts + window)` in `try_match` could
+  not fire — `inf_ts` is the maximum of all buffer fronts, so every popped front is within bounds by
+  construction. A comment records why, since the invariant is worth knowing even without the assert.
+  Removing it also removes a latent hazard: a panic on that path would abort the whole ROS node,
+  because it is reached through `extern "C"`.
+- **The half-built feedback path is resolved by deletion.** `Feedback::accepted_max_timestamp` was
+  hardcoded `None` with its computation commented out above, and no consumer ever read it — the FFI
+  passes `feedback_tx: None` entirely. The field is gone.
+- **`utils.rs` is deleted.** The entire module was commented out and referenced by nothing.
+- Remaining commented-out blocks in `state.rs`, `sync.rs` and `buffer.rs` removed. Most of
+  `sync.rs`'s had already gone with the H-12 poll-loop rewrite.

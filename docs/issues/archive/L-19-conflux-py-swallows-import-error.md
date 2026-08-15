@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** conflux_py
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review (2026-08-15)
 - **Location:** `ros/conflux/conflux_py/conflux_py/__init__.py:29-35`
 
@@ -47,3 +47,22 @@ else:
 Any failure inside `synchronizer.py` then propagates with its real traceback.
 
 Related: L-06 (archived, same pattern).
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@0a9c901; LCTK pins it). The guard now probes for the
+condition it actually means:
+
+```python
+try:
+    import rclpy  # noqa: F401
+except ImportError:
+    pass
+else:
+    from .synchronizer import ROS2Synchronizer, SyncStatistics  # noqa: F401
+    __all__.extend(["ROS2Synchronizer", "SyncStatistics"])
+```
+
+Any `ImportError` raised inside `synchronizer.py` now propagates with its own traceback, instead
+of making `ROS2Synchronizer` silently vanish and surfacing later as an ImportError naming
+`conflux_py`.

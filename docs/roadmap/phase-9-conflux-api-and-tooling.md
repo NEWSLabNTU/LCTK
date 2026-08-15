@@ -10,6 +10,22 @@ nothing. None of it corrupts a calibration. All of it costs time — and two of 
 Three findings here are already **fixed** (2026-08-15) and are recorded for continuity. The
 rest are open.
 
+## Status — complete
+
+All stages landed in `jerry73204/conflux`@0a9c901 (building on the earlier fixes recorded below).
+
+| Stage | State |
+|-------|-------|
+| 1 — C++ coverage (L-22) | **Done** — five gtest cases driving the wrapper through a live rclcpp node; `just test-cpp` verified to exit 1 on a deliberate break |
+| 2 — Python API (L-18, L-19) | **Done** — `ConfluxResult` exported as an IntEnum; the import guard now probes rclpy specifically |
+| 3 — Config encodings (L-20, L-21) | **Done** — `window_size_ms = 0` rejected with a pointer to `None`; the `buf_size >= 2` floor explained wherever enforced |
+| 4 — Docs (L-25) | **Done** — hardcoded test count removed, recipes refreshed, Known Issues section added |
+
+**Follow-up filed:** wiring the gtest target exposed that `ament_lint` is red on `conflux_cpp`,
+partly because it scans generated headers and Rust build artifacts. Tracked as
+[L-27](../issues/L-27-conflux-cpp-lint-red.md); `just test-cpp` is scoped to the gtest target so
+L-22's coverage is not held hostage to it.
+
 ## Problem Statement
 
 A suite that reports green while running nothing is worse than no suite, because it converts
@@ -40,12 +56,12 @@ A suite that reports green while running nothing is worse than no suite, because
 
 | Issue | Sev | Summary |
 |-------|-----|---------|
-| [L-22](../issues/L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success with zero tests |
+| [L-22](../issues/archive/L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success with zero tests |
 
-| [L-19](../issues/L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors |
-| [L-20](../issues/L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window |
-| [L-21](../issues/L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation |
-| [L-25](../issues/L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have |
+| [L-19](../issues/archive/L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors |
+| [L-20](../issues/archive/L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window |
+| [L-21](../issues/archive/L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation |
+| [L-25](../issues/archive/L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have |
 
 ## Stages
 

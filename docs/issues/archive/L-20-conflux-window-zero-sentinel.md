@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** conflux_py / conflux FFI (API ergonomics)
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Static review (2026-08-15)
 - **Location:** `ros/conflux/conflux_cpp/rust/src/lib.rs:164-169`,
   `ros/conflux/conflux_py/conflux_py/_ffi.py:199-204`
@@ -40,3 +40,25 @@ is no validation or warning that distinguishes intent.
 - Log the resolved mode at construction: "sync window: infinite" vs "sync window: 50 ms".
 
 Related: L-18, L-21.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@0a9c901; LCTK pins it).
+
+- `SyncConfig.__post_init__` rejects any non-positive `window_size_ms` with a message pointing at
+  `None`, stating explicitly that 0 is not a synonym for infinite.
+- `sync()` rejects a zero `Duration` with the same guidance instead of a bare `ensure!`.
+- `SyncConfig.window_description` gives callers a resolved string (`"infinite (no time-based
+  dropping)"` vs `"50 ms"`) for startup logging.
+
+The C ABI keeps `0` as its internal encoding for infinite, since a C struct cannot carry an
+`Option` — but that is now an implementation detail that no longer surfaces in any user-facing
+API.
+
+**LCTK is unaffected.** Its solver nodes already convert at the Python boundary
+(`window_size_ms=int(sync_tolerance_ms) if sync_tolerance_ms > 0 else None`), so they pass `None`
+and never the sentinel. The ROS parameter `sync_tolerance_ms: 0.0` keeps its documented meaning as
+LCTK's own convention.
+
+Regression coverage: `test_zero_window_rejected_with_a_pointer_to_none` and
+`test_none_window_means_infinite` in `conflux_py`.

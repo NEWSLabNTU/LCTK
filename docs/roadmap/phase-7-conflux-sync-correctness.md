@@ -21,13 +21,16 @@ Work lands in the `jerry73204/conflux` submodule, then LCTK bumps the pin.
 | 2 — Unify the pipeline | **Done** — `State::advance` owns the rules; `sync()`'s poll loop reduced to a feeder (~90 lines removed) |
 | 3 — Recovery | **Done** — C-05 closed by construction; `reset()` across core, C ABI and Python (M-22). Automatic clock-jump detection deliberately deferred |
 | 4 — Observability (M-23) | **Done** — `match_status()` + `BlockedReason`, exported through the C ABI and Python; `ROS2Synchronizer` warns on a detected stall |
-| 5 — Cleanup (L-23) | **Not started** |
+| 5 — Cleanup (L-23) | **Done** — dead assert, half-built feedback field, `utils.rs` and remaining commented-out blocks removed |
 
-Landed in `jerry73204/conflux`@bb490d9 (stages 1–2) and @014a2c9 (stages 3–4).
+Landed in `jerry73204/conflux`@bb490d9 (stages 1–2), @014a2c9 (stages 3–4) and @0a9c901 (stage 5).
 
-**Follow-up:** L-24 (`sync()` withholding a matched pair until every stream has two messages) may
-already be closed — the `is_ready()` gate disappeared when the poll loop was rewritten in stage 2.
-It is still filed as open pending a re-read.
+**L-24 confirmed closed** by the stage-2 rewrite: the `is_ready()` emission gate is gone, verified
+by inspecting every call site. It survives only as a public predicate with no caller in the
+matching path.
+
+**Phase 7 is complete.** All five stages landed across `jerry73204/conflux`@bb490d9, @014a2c9 and
+@0a9c901.
 
 ## Problem Statement
 
@@ -74,9 +77,9 @@ message, keeping `all_one()` true. Any transient divergence latches the fault.
 | [H-12](../issues/archive/H-12-conflux-two-divergent-pipelines.md) | High | Two divergent pipelines; tests cover the unshipped one |
 | [M-22](../issues/archive/M-22-conflux-last-ts-never-resets.md) | Medium | Clock reset kills a stream permanently (`last_ts` never resets) |
 | [M-23](../issues/archive/M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable |
-| [L-17](../issues/L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` means "any buffer empty" |
-| [L-24](../issues/L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` withholds a matched pair until every stream has 2 messages |
-| [L-23](../issues/L-23-conflux-core-dead-code.md) | Low | Half-built feedback path, dead assert, commented-out blocks |
+| [L-17](../issues/archive/L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` means "any buffer empty" |
+| [L-24](../issues/archive/L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` withholds a matched pair until every stream has 2 messages |
+| [L-23](../issues/archive/L-23-conflux-core-dead-code.md) | Low | Half-built feedback path, dead assert, commented-out blocks |
 
 ## Stages
 

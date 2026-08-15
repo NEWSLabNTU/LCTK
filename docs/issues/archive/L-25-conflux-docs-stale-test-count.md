@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** conflux docs
-- **Status:** Open
+- **Status:** Fixed (2026-08-15)
 - **Verified:** Measured 2026-08-15
 - **Location:** `ros/conflux/CLAUDE.md` (Testing section)
 
@@ -36,3 +36,18 @@ during exactly the period when a fifth of the core tests were not compiling.
   re-measured since the 2026-01-18 run.
 
 Related: H-13, M-25.
+
+## Resolution (2026-08-15)
+
+Fixed in conflux (`jerry73204/conflux`@0a9c901; LCTK pins it). The hardcoded `# 166 tests` is gone
+rather than corrected — a fixed number in prose is a check nobody runs, and it was wrong during
+exactly the period when a fifth of the core tests were not compiling.
+
+Also refreshed: the source-tree diagram (staleness removed, `config.rs` added, `state.rs` noted as
+carrying `advance`/`match_status`/`reset`), and the recipe descriptions (`test-python` no longer
+goes through colcon, `test-cpp` now exists).
+
+Added a **Known Issues** section recording that three test recipes once could not fail — H-13,
+M-25 and L-22 — with the standing instruction to break an assertion deliberately and confirm a
+non-zero exit before trusting a new recipe. That is the reusable lesson; the individual counts were
+not.

@@ -26,6 +26,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-11](./archive/H-11-conflux-staleness-anchored-to-construction.md) | High | Conflux staleness expiry anchored to construction time, not message arrival | 🟢 |
 | [H-12](./archive/H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; tests cover the one production does not use | 🟢 |
 | [H-13](./archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Conflux tokio tests had not compiled; `just test` reported green | 🟢 |
+| [H-14](./H-14-conflux-third-sync-implementation.md) | High | A third, independent sync implementation lives in `conflux-ros2` | 🔴 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -67,16 +68,17 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-14](./archive/L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🟢 |
 | [L-15](./archive/L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🟢 |
 | [L-16](./archive/L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🟢 |
-| [L-17](./L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` returns true when *any* buffer is empty | 🔴 |
+| [L-17](./archive/L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` returns true when *any* buffer is empty | 🟢 |
 | [L-18](./archive/L-18-conflux-result-not-exported.md) | Low | `last_push_result` returns an opaque int; `ConfluxResult` unexported | 🟢 |
-| [L-19](./L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors | 🔴 |
-| [L-20](./L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window | 🔴 |
-| [L-21](./L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation | 🔴 |
-| [L-22](./L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success while `conflux_cpp` has zero tests | 🔴 |
-| [L-23](./L-23-conflux-core-dead-code.md) | Low | Half-built feedback path, dead assert, large commented-out blocks | 🔴 |
-| [L-24](./L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` holds a matched pair until every stream has two messages | 🔴 |
-| [L-25](./L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have | 🔴 |
+| [L-19](./archive/L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors | 🟢 |
+| [L-20](./archive/L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for infinite window | 🟢 |
+| [L-21](./archive/L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` enforced without explanation | 🟢 |
+| [L-22](./archive/L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success while `conflux_cpp` has zero tests | 🟢 |
+| [L-23](./archive/L-23-conflux-core-dead-code.md) | Low | Half-built feedback path, dead assert, large commented-out blocks | 🟢 |
+| [L-24](./archive/L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` holds a matched pair until every stream has two messages | 🟢 |
+| [L-25](./archive/L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have | 🟢 |
 | [L-26](./archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` breaks pytest workspace-wide before collection | 🟢 |
+| [L-27](./L-27-conflux-cpp-lint-red.md) | Low | `ament_lint` red on `conflux_cpp`, including generated and build-artifact files | 🔴 |
 
 ## Three headline gaps
 
@@ -123,8 +125,13 @@ are all the same failure — silence where a number should be.
 
 ## The conflux cluster (2026-08-15)
 
-**Status (2026-08-15):** every Critical, High and Medium finding in this cluster
-is **fixed** (`jerry73204/conflux`@bb490d9 and @014a2c9).
+**Status (2026-08-15):** every finding in this cluster is **fixed**
+(`jerry73204/conflux`@bb490d9, @014a2c9 and @0a9c901) — Critical through Low.
+
+Two new findings surfaced while closing it, and are open: **H-14** (a *third*
+independent sync implementation in `conflux-ros2`, which H-12's "two pipelines"
+framing missed) and **L-27** (`ament_lint` red on `conflux_cpp`, partly because
+it scans generated headers and Rust build artifacts).
 
 - **C-05, H-12** — the matching policy now lives in one place (`State::advance`)
   that both drivers call, which closes the wedge and makes the two pipelines
@@ -138,7 +145,12 @@ is **fixed** (`jerry73204/conflux`@bb490d9 and @014a2c9).
 - **M-23** — `match_status()` reports why the matcher is not emitting, exported
   through the C ABI and Python, with a stall warning in `ROS2Synchronizer`.
 
-Still open: L-17, L-19–L-25 (ergonomics, C++ test coverage, dead code, docs).
+- **L-17, L-19–L-25** — ergonomics and tooling: `is_empty` split into
+  `has_empty_buffer`/`all_buffers_empty`, the swallowed ImportError narrowed, the
+  `window_size_ms = 0` sentinel rejected, the `buf_size >= 2` floor explained,
+  dead code removed, and `conflux_cpp` given its first tests behind a recipe that
+  can actually fail.
+
 The narrative below is kept in the past tense it was written in, because it
 explains how the cluster arose.
 
