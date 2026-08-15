@@ -554,7 +554,10 @@ impl ArucoLocatorNode {
                     // L-05: atomic counter (no `static mut`, which is a data race
                     // under a multithreaded executor and a hard error in edition 2024).
                     static NO_DETECTOR_COUNT: AtomicU32 = AtomicU32::new(0);
-                    if NO_DETECTOR_COUNT.fetch_add(1, Ordering::Relaxed) % 60 == 0 {
+                    if NO_DETECTOR_COUNT
+                        .fetch_add(1, Ordering::Relaxed)
+                        .is_multiple_of(60)
+                    {
                         log_warn!(
                             LOGGER_NAME,
                             "Received image but detector not initialized yet - waiting for camera_info"
@@ -591,7 +594,10 @@ impl ArucoLocatorNode {
                     // Only log occasionally for no detections to avoid spam
                     // (L-05: atomic, not `static mut`)
                     static NO_DETECTION_COUNT: AtomicU32 = AtomicU32::new(0);
-                    if NO_DETECTION_COUNT.fetch_add(1, Ordering::Relaxed) % 30 == 0 {
+                    if NO_DETECTION_COUNT
+                        .fetch_add(1, Ordering::Relaxed)
+                        .is_multiple_of(30)
+                    {
                         // Log every 30th frame (approximately once per second at 30fps)
                         log_warn!(
                             LOGGER_NAME,
