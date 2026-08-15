@@ -26,7 +26,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-11](./archive/H-11-conflux-staleness-anchored-to-construction.md) | High | Conflux staleness expiry anchored to construction time, not message arrival | 🟢 |
 | [H-12](./archive/H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; tests cover the one production does not use | 🟢 |
 | [H-13](./archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Conflux tokio tests had not compiled; `just test` reported green | 🟢 |
-| [H-14](./H-14-conflux-third-sync-implementation.md) | High | A third, independent sync implementation lives in `conflux-ros2` | 🔴 |
+| [H-14](./archive/H-14-conflux-third-sync-implementation.md) | High | A third, independent sync implementation lives in `conflux-ros2` | 🟢 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -128,10 +128,12 @@ are all the same failure — silence where a number should be.
 **Status (2026-08-15):** every finding in this cluster is **fixed**
 (`jerry73204/conflux`@bb490d9, @014a2c9 and @0a9c901) — Critical through Low.
 
-Two new findings surfaced while closing it, and are open: **H-14** (a *third*
-independent sync implementation in `conflux-ros2`, which H-12's "two pipelines"
-framing missed) and **L-27** (`ament_lint` red on `conflux_cpp`, partly because
-it scans generated headers and Rust build artifacts).
+Two further findings surfaced while closing it. **H-14** — a *third* independent
+sync implementation in `conflux-ros2`, which H-12's "two pipelines" framing
+missed — is now **fixed**: it is an adapter over the core, which became possible
+only once the staleness removal retired the `T: Clone` bound that had forced the
+duplication. **L-27** (`ament_lint` red on `conflux_cpp`, partly because it scans
+generated headers and Rust build artifacts) remains open.
 
 - **C-05, H-12** — the matching policy now lives in one place (`State::advance`)
   that both drivers call, which closes the wedge and makes the two pipelines
