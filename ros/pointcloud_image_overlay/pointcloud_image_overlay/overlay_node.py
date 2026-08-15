@@ -101,7 +101,13 @@ def transform_to_rvec_tvec(
         - projectPoints will apply both extrinsic and intrinsic transformations
         - This approach lets OpenCV handle the full transformation pipeline
     """
-    # Extract translation vector (3x1) for OpenCV
+    # M-01: the message follows ROS TF semantics -- `frame_id=lidar, child=camera` is the
+    # camera's pose expressed in lidar coordinates. `projectPoints` needs the other direction,
+    # T_camera<-lidar, so invert it here. Before M-01 the solver published the un-inverted solve
+    # and this function consumed it directly; the pair was self-consistent but stated the wrong
+    # thing to every tf2 consumer.
+    #
+    # Inverting here and there is a no-op end to end: the projected pixels are unchanged.
     t = transform.transform.translation
     tvec = np.array([t.x, t.y, t.z], dtype=np.float64)
 
@@ -131,6 +137,10 @@ def transform_to_rvec_tvec(
         ],
         dtype=np.float64,
     )
+
+    # M-01: invert T_lidar<-camera into the T_camera<-lidar that projectPoints applies.
+    rotation_matrix = rotation_matrix.T
+    tvec = -rotation_matrix @ tvec
 
     # Convert rotation matrix to Rodrigues rotation vector for OpenCV
     # cv2.Rodrigues converts between 3x3 rotation matrix and 3x1 rotation vector

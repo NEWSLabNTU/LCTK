@@ -4,6 +4,18 @@ Calibration Judge Node
 
 This node subscribes to the extrinsic transform topic and compares it against
 a ground truth transform matrix to evaluate calibration quality.
+
+Ground-truth convention (M-01, changed 2026-08-15)
+--------------------------------------------------
+The `ground_truth_file` matrix must follow ROS TF semantics, matching the topic it is compared
+against: for `frame_id=lidar, child_frame_id=camera` it is the **camera's pose expressed in
+lidar coordinates**.
+
+Before M-01 the solver published the raw `cv2.solvePnP` output (`T_camera<-lidar`) under those
+labels, so a ground-truth file written against the old behaviour holds the *inverse* of what is
+now expected and will score as badly wrong. Invert such a file once:
+
+    T_new = numpy.linalg.inv(T_old)
 """
 
 import rclpy

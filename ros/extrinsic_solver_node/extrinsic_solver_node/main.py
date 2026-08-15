@@ -797,6 +797,15 @@ class EducationalExtrinsicSolver(Node):
         # Convert rotation vector to rotation matrix using OpenCV
         rotation_matrix, _ = cv2.Rodrigues(rvec)
 
+        # M-01: publish with ROS TF semantics.
+        #
+        # solvePnP returns (R, t) with p_cam = R @ p_lidar + t -- that is T_camera<-lidar. A
+        # transform labelled `frame_id=lidar, child_frame_id=camera` means the opposite in TF:
+        # the camera's pose expressed in lidar coordinates. Publishing the raw solve under those
+        # labels pointed every tf2 consumer the wrong way.
+        rotation_matrix = rotation_matrix.T
+        translation = -rotation_matrix @ tvec.reshape(3, 1)
+
         # Convert rotation matrix to quaternion
         quaternion = self._rotation_matrix_to_quaternion_educational(rotation_matrix)
 
@@ -807,8 +816,8 @@ class EducationalExtrinsicSolver(Node):
         transform_msg.header.frame_id = self.parent_frame
         transform_msg.child_frame_id = self.child_frame
 
-        # Set translation (direct copy from PnP solution)
-        t = tvec.flatten()
+        # Set translation (the inverted solve, per M-01)
+        t = translation.flatten()
         transform_msg.transform.translation = Vector3(
             x=float(t[0]), y=float(t[1]), z=float(t[2])
         )
