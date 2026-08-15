@@ -18,8 +18,6 @@ buffer it was saved from.
 import numpy as np
 import pytest
 from geometry_msgs.msg import Pose, PoseWithCovariance
-from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
-
 from lidar_to_camera_solver.board_geometry import BOARD_FRAME_CONVENTION
 from lidar_to_camera_solver.detection_format import (
     FORMAT_VERSION,
@@ -28,6 +26,7 @@ from lidar_to_camera_solver.detection_format import (
     migrate_v3_to_v4,
     serialize_detection3d_array,
 )
+from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
 
 def board_msg(covariance):
@@ -96,7 +95,9 @@ def test_the_board_pose_covariance_survives_a_round_trip():
     covariance = np.diag([1e-4, 2e-4, 3e-4, 4e-6, 5e-6, 6e-6])
     covariance[0, 1] = covariance[1, 0] = 7e-5
 
-    restored = deserialize_detection3d_array(serialize_detection3d_array(board_msg(covariance)))
+    restored = deserialize_detection3d_array(
+        serialize_detection3d_array(board_msg(covariance))
+    )
 
     round_tripped = np.asarray(
         restored.detections[0].results[0].pose.covariance

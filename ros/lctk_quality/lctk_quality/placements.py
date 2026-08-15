@@ -19,8 +19,8 @@ confident exactly when the calibration is worst.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple
 
 import numpy as np
 
@@ -35,9 +35,9 @@ DEFAULT_ORIENTATION_TOL_DEG = 5.0
 class Placement:
     """One distinct board placement, and the frames that observed it."""
 
-    position: Tuple[float, float, float]
-    normal: Tuple[float, float, float]
-    frame_indices: Tuple[int, ...]
+    position: tuple[float, float, float]
+    normal: tuple[float, float, float]
+    frame_indices: tuple[int, ...]
 
     @property
     def n_frames(self) -> int:
@@ -72,16 +72,16 @@ def _same_placement(
 
 
 def distinct_placements(
-    board_poses: Sequence[Tuple[Sequence[float], Sequence[float]]],
+    board_poses: Sequence[tuple[Sequence[float], Sequence[float]]],
     position_tol_m: float = DEFAULT_POSITION_TOL_M,
     orientation_tol_deg: float = DEFAULT_ORIENTATION_TOL_DEG,
-) -> List[Placement]:
+) -> list[Placement]:
     """Group `(position, quaternion)` board poses into distinct placements, in first-seen order.
 
     Greedy single-pass clustering against placement representatives. The clusters are tiny (a
     handful of placements) so nothing cleverer is warranted.
     """
-    reps: List[Tuple[np.ndarray, np.ndarray, List[int]]] = []
+    reps: list[tuple[np.ndarray, np.ndarray, list[int]]] = []
 
     for i, (position, quaternion) in enumerate(board_poses):
         pos = np.asarray(position, dtype=float)
@@ -106,7 +106,7 @@ def distinct_placements(
     ]
 
 
-def representative_frames(placements: Sequence[Placement]) -> List[int]:
+def representative_frames(placements: Sequence[Placement]) -> list[int]:
     """One frame index per distinct placement — the first observed.
 
     Deliberately *not* an average over the placement's frames: averaging would suppress the

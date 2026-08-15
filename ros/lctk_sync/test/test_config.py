@@ -17,7 +17,6 @@ made. Refusing it here means no launch file, node, or future caller can make it 
 """
 
 import pytest
-
 from lctk_sync import PairSourceConfig
 
 

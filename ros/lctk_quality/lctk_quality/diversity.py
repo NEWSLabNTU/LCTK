@@ -18,8 +18,8 @@ actionable. "Your board normals span 3 degrees; tilt the board" is.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
 
 import numpy as np
 
@@ -50,9 +50,9 @@ class Diversity:
             or self.depth_range_m < MIN_DEPTH_RANGE_M
         )
 
-    def shortfalls(self) -> List[str]:
+    def shortfalls(self) -> list[str]:
         """Actionable guidance: what is missing, and what to do about it."""
-        out: List[str] = []
+        out: list[str] = []
         if self.n_placements < 2:
             out.append(
                 f"only {self.n_placements} distinct board placement(s); a single placement cannot "
@@ -96,7 +96,7 @@ def _max_pairwise_normal_angle(normals: np.ndarray) -> float:
     return worst
 
 
-def compute_diversity(placements: Sequence[Placement]) -> Optional[Diversity]:
+def compute_diversity(placements: Sequence[Placement]) -> Diversity | None:
     if not placements:
         return None
 

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from lctk_autoware_export.export import (
     ExportError,
     load_solver_transform,

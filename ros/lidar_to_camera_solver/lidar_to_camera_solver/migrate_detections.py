@@ -23,7 +23,10 @@ import sys
 from pathlib import Path
 
 from lidar_to_camera_solver.board_geometry import BOARD_FRAME_CONVENTION
-from lidar_to_camera_solver.detection_format import format_version_error, migrate_v3_to_v4
+from lidar_to_camera_solver.detection_format import (
+    format_version_error,
+    migrate_v3_to_v4,
+)
 
 
 def main(argv=None):
@@ -56,8 +59,10 @@ def main(argv=None):
 
     remaining = format_version_error(migrated)
     if remaining is not None:
-        print(f"Wrote {args.output}, but it is still not loadable: {remaining}",
-              file=sys.stderr)
+        print(
+            f"Wrote {args.output}, but it is still not loadable: {remaining}",
+            file=sys.stderr,
+        )
         return 1
 
     print(

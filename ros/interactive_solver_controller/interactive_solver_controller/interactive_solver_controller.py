@@ -110,7 +110,9 @@ class InteractiveSolverController(Node):
         found = set()
         while time.time() < deadline:
             for name, types in self.get_service_names_and_types():
-                if name.endswith(match_suffix) and any("GetPoseInfo" in t for t in types):
+                if name.endswith(match_suffix) and any(
+                    "GetPoseInfo" in t for t in types
+                ):
                     found.add(name[: -len(self.DISCOVERY_SUFFIX)])
             if found:
                 break

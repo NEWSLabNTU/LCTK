@@ -1,2 +1,12 @@
+# `ros/conflux` is a git submodule of another project (jerry73204/conflux). Its
+# style is upstream's call, not ours, and .gitmodules marks it `ignore = dirty`
+# so edits there would not even show up in `git status`. Lint what we own.
+exclude = ["ros/conflux"]
+
+# Pin the language level instead of letting ruff infer it. The PEP 604 (`X | None`)
+# and PEP 585 (`dict[...]`) forms below are only valid from 3.10, which is what
+# Ubuntu 22.04 / ROS 2 Humble ships; an inferred-lower target would rewrite them back.
+target-version = "py310"
+
 [lint]
 ignore = ["E741"]  # Ambiguous variable name (l, O, I) — too strict for our test code

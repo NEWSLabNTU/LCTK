@@ -349,7 +349,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
                     remappings=[
                         ("image", solver.camera_topic),
                         ("pointcloud", lidar.pointcloud_topic),
-                        ("plane_inliers", f"/calibration/{solver.lidar_name}_{solver.marker_name}/debug/plane_inliers"),
+                        (
+                            "plane_inliers",
+                            f"/calibration/{solver.lidar_name}_{solver.marker_name}/debug/plane_inliers",
+                        ),
                         ("extrinsic_transform", solver.output_topic),
                     ],
                 )
@@ -415,7 +418,12 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("lctk_launch"), "config", "rviz", "calibration.rviz"]
+                    [
+                        FindPackageShare("lctk_launch"),
+                        "config",
+                        "rviz",
+                        "calibration.rviz",
+                    ]
                 ),
                 description="Path to RViz config file. Override for different setups, e.g. two_lidar_calibration.rviz",
             ),
@@ -443,7 +451,9 @@ def generate_launch_description() -> LaunchDescription:
                         [FindPackageShare("lctk_launch"), "launch", "rviz.launch.xml"]
                     )
                 ),
-                launch_arguments={"rviz_config": LaunchConfiguration("rviz_config")}.items(),
+                launch_arguments={
+                    "rviz_config": LaunchConfiguration("rviz_config")
+                }.items(),
                 condition=IfCondition(LaunchConfiguration("enable_rviz")),
             ),
         ]

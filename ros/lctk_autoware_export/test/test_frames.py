@@ -4,7 +4,6 @@ import math
 
 import numpy as np
 import pytest
-
 from lctk_autoware_export.frames import (
     OPTICAL_IN_CAMERA_LINK,
     entry_to_transform,

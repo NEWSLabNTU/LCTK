@@ -30,12 +30,34 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 import rclpy
+from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
+from lctk_interfaces.srv import (
+    AddDetectionToBuffer,
+    AdjustTransform,
+    ClearDetectionBuffer,
+    DumpDetections,
+    GetBufferStatus,
+    GetPoseInfo,
+    ListDetectionBuffer,
+    LoadDetections,
+    RemoveDetectionFromBuffer,
+    ResetTransform,
+)
+from lctk_quality import build_report, distinct_placements
+from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
 from lctk_sync import DetectionPairSource, PairSourceConfig
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from scipy.spatial.transform import Rotation as R
+from sensor_msgs.msg import CameraInfo
+from std_msgs.msg import ColorRGBA, Header, String
+from vision_msgs.msg import Detection2DArray, Detection3DArray
+from visualization_msgs.msg import Marker, MarkerArray
+
 from lidar_to_camera_solver.board_geometry import (
     BOARD_FRAME_CONVENTION,
     BOARD_FRAME_CONVENTION_TOPIC,
@@ -56,36 +78,14 @@ from lidar_to_camera_solver.detection_format import (
     serialize_detection2d_array,
     serialize_detection3d_array,
 )
-from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
-from lctk_quality import build_report, distinct_placements
-from lctk_quality.resampling import MIN_PLACEMENTS_FOR_SPREAD
-from lctk_interfaces.srv import (
-    AddDetectionToBuffer,
-    AdjustTransform,
-    ClearDetectionBuffer,
-    DumpDetections,
-    GetBufferStatus,
-    GetPoseInfo,
-    ListDetectionBuffer,
-    LoadDetections,
-    RemoveDetectionFromBuffer,
-    ResetTransform,
-)
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from scipy.spatial.transform import Rotation as R
-from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import ColorRGBA, Header, String
-from vision_msgs.msg import Detection2DArray, Detection3DArray
-from visualization_msgs.msg import Marker, MarkerArray
 
 
 @dataclass
 class BoardDetection:
     """Represents a calibration board detection in 3D LiDAR coordinates."""
 
-    position: Tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
-    orientation: Tuple[float, float, float, float]  # quaternion x, y, z, w
+    position: tuple[float, float, float]  # x, y, z in meters (LiDAR frame)
+    orientation: tuple[float, float, float, float]  # quaternion x, y, z, w
 
     # M-13: the board-pose covariance from the detector's ICP fit, 6x6 row-major in the ROS
     # PoseWithCovariance order [x, y, z, rx, ry, rz]. It is strongly ANISOTROPIC: interior LiDAR
@@ -95,19 +95,19 @@ class BoardDetection:
     # This used to be discarded, and the solver treated every board pose as exact -- which is the
     # errors-in-variables bias: solvePnP assumes the 3D points are noiseless, while they are model
     # corners pushed through this very pose.
-    covariance: Optional[np.ndarray] = (
+    covariance: np.ndarray | None = (
         None  # 6x6, or None for a detector that does not publish it
     )
 
     @property
-    def position_sigma_m(self) -> Optional[np.ndarray]:
+    def position_sigma_m(self) -> np.ndarray | None:
         """Per-axis translation standard deviation, metres. None if no covariance was published."""
         if self.covariance is None:
             return None
         return np.sqrt(np.abs(np.diag(self.covariance)[:3]))
 
     @property
-    def rotation_sigma_deg(self) -> Optional[np.ndarray]:
+    def rotation_sigma_deg(self) -> np.ndarray | None:
         """Per-axis rotation standard deviation, degrees."""
         if self.covariance is None:
             return None
@@ -273,12 +273,12 @@ class LidarToCameraSolver(Node):
         self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
 
         # Detection buffer for multi-pose calibration
-        self.detection_buffer: List[Tuple[Detection2DArray, Detection3DArray]] = []
+        self.detection_buffer: list[tuple[Detection2DArray, Detection3DArray]] = []
 
-        self.camera_info: Optional[CameraInfo] = None
+        self.camera_info: CameraInfo | None = None
 
         # Calibration state
-        self.last_transform: Optional[TransformStamped] = None
+        self.last_transform: TransformStamped | None = None
         self.publishing_enabled = False
         self.last_solve_status = "No calibration performed yet"
 
@@ -296,10 +296,10 @@ class LidarToCameraSolver(Node):
         self.total_correspondences = 0
 
         # Pose state: solved (from PnP) and current (with manual adjustments)
-        self.solved_rvec: Optional[np.ndarray] = None
-        self.solved_tvec: Optional[np.ndarray] = None
-        self.current_rvec: Optional[np.ndarray] = None
-        self.current_tvec: Optional[np.ndarray] = None
+        self.solved_rvec: np.ndarray | None = None
+        self.solved_tvec: np.ndarray | None = None
+        self.current_rvec: np.ndarray | None = None
+        self.current_tvec: np.ndarray | None = None
 
         # Thread safety
         self.lock = threading.Lock()
@@ -822,7 +822,7 @@ class LidarToCameraSolver(Node):
             self.get_logger().info(response.message)
         except Exception as e:
             response.success = False
-            response.message = f"Failed to save detections: {str(e)}"
+            response.message = f"Failed to save detections: {e!s}"
             response.num_detections = 0
             self.get_logger().error(response.message)
 
@@ -910,7 +910,7 @@ class LidarToCameraSolver(Node):
             self.get_logger().error(response.message)
         except Exception as e:
             response.success = False
-            response.message = f"Failed to load detections: {str(e)}"
+            response.message = f"Failed to load detections: {e!s}"
             response.num_detections = 0
             response.buffer_size = len(self.detection_buffer)
             self.get_logger().error(response.message)
@@ -1314,13 +1314,13 @@ class LidarToCameraSolver(Node):
 
     def _detection2d_to_aruco_markers(
         self, detection_msg: Detection2DArray
-    ) -> List[ArUcoMarker]:
+    ) -> list[ArUcoMarker]:
         """Convert ROS Detection2DArray to ArUcoMarker objects."""
         return detection2d_to_aruco_markers(detection_msg)
 
     def _compute_pose_diversity(
-        self, board_detections: List[BoardDetection]
-    ) -> Tuple[float, float]:
+        self, board_detections: list[BoardDetection]
+    ) -> tuple[float, float]:
         """H-07: geometric diversity of the accumulated board poses.
 
         Returns ``(max_board_normal_spread_deg, depth_range_m)``:
@@ -1392,7 +1392,7 @@ class LidarToCameraSolver(Node):
         Failure raises out of ``__init__``, which is not wrapped in a ``try`` in
         ``main()`` — so the process exits non-zero and the launch system can see it.
         """
-        received: List[str] = []
+        received: list[str] = []
 
         # QoS must match the publisher EXACTLY: RELIABLE + TRANSIENT_LOCAL +
         # KEEP_LAST(1). The detector publishes the tag once and holds the publisher so
@@ -1462,7 +1462,7 @@ class LidarToCameraSolver(Node):
 
     def _compute_multi_marker_corners(
         self,
-    ) -> Dict[int, List[Tuple[float, float, float]]]:
+    ) -> dict[int, list[tuple[float, float, float]]]:
         """Compute 3D corner positions for all ArUco markers in board frame."""
         marker_corners = compute_multi_marker_corners(self.aruco_pattern_config)
 
@@ -1476,8 +1476,8 @@ class LidarToCameraSolver(Node):
         return marker_corners
 
     def _create_point_correspondences(
-        self, aruco_markers: List[ArUcoMarker], board_detection: BoardDetection
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        self, aruco_markers: list[ArUcoMarker], board_detection: BoardDetection
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Create 3D-2D point correspondences for PnP solving."""
         object_points = []
         image_points = []
@@ -1569,7 +1569,7 @@ class LidarToCameraSolver(Node):
         weight = 1.0 / (1.0 + sigma / 0.01)
         return float(np.clip(weight, 1e-3, 1.0))
 
-    def _expand_weights_to_correspondences(self) -> Optional[np.ndarray]:
+    def _expand_weights_to_correspondences(self) -> np.ndarray | None:
         """One weight per correspondence, from the per-frame board-pose weights.
 
         Returns None when every pose is equally trusted (no covariance anywhere), so the solve
@@ -1593,7 +1593,7 @@ class LidarToCameraSolver(Node):
         rvec: np.ndarray,
         tvec: np.ndarray,
         weights: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Weighted Levenberg-Marquardt polish of the reprojection cost.
 
         M-12 added `cv2.solvePnPRefineLM`, but **no OpenCV PnP entry point accepts per-point
@@ -1622,8 +1622,8 @@ class LidarToCameraSolver(Node):
         self,
         object_points: np.ndarray,
         image_points: np.ndarray,
-        weights: Optional[np.ndarray] = None,
-    ) -> Tuple[bool, Optional[np.ndarray], Optional[np.ndarray]]:
+        weights: np.ndarray | None = None,
+    ) -> tuple[bool, np.ndarray | None, np.ndarray | None]:
         """Solve the Perspective-n-Point problem using OpenCV."""
         if len(object_points) < 4:
             self.get_logger().error("PnP requires at least 4 point correspondences")
