@@ -80,11 +80,12 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-26](./archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` breaks pytest workspace-wide before collection | 🟢 |
 | [L-27](./archive/L-27-conflux-cpp-lint-red.md) | Low | `ament_lint` red on `conflux_cpp`, including generated and build-artifact files | 🟢 |
 | [L-28](./archive/L-28-just-test-pytest-missing.md) | Low | `just test` invoked a bare `pytest`; the Python suites never ran | 🟢 |
-| [L-29](./L-29-symlink-install-stale-launch.md) | Low | Deleting a launch file leaves a dangling symlink that breaks the next build | 🔴 |
+| [L-29](./archive/L-29-symlink-install-stale-launch.md) | Low | Deleting a launch file leaves a dangling symlink that breaks the next build | 🟢 |
 
-## All original findings are now closed (2026-08-15)
+## The tracker is empty (2026-08-16)
 
-Every issue from the 2026-07-09, 2026-07-12 and 2026-08-15 audits is 🟢, including the four that
+**Every issue in this tracker is 🟢.** All of the 2026-07-09, 2026-07-12 and 2026-08-15 audits are
+closed, including the four that
 had been carried as deferred or partially-fixed for a month: M-01 (transform direction), M-12
 (robust estimation), M-14 (origin-corner disambiguation) and M-16 (the L2L pipeline).
 

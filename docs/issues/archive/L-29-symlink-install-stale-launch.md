@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** build tooling
-- **Status:** Open
+- **Status:** Fixed (2026-08-16)
 - **Verified:** Hit on a clean `main` checkout while building for M-12 (2026-08-15)
 - **Location:** `build/lctk_launch/launch/` (artifact), `just build`
 
@@ -32,8 +32,8 @@ Six such stale entries were present — `extrinsic_calibration`, `image_processi
 A `git pull` that removes a launch file breaks the next build with an error naming a file the
 developer never touched. It is recoverable in seconds once understood, but the message does not
 suggest the cause, and this is the same family as the archived
-[L-16](./archive/L-16-bindgen-lock-stale-skip.md) (stale `bindgen.lock` skipping regeneration) and
-[L-15](./archive/L-15-build-dirties-worktree.md).
+[L-16](./L-16-bindgen-lock-stale-skip.md) (stale `bindgen.lock` skipping regeneration) and
+[L-15](./L-15-build-dirties-worktree.md).
 
 Workaround, and what was done here:
 
@@ -47,3 +47,28 @@ rm -rf build/lctk_launch install/lctk_launch && just build
   it addresses the whole class rather than this one package.
 - Or document it in CLAUDE.md's Known Issues alongside the other stale-artifact traps, so the
   error message is one search away from its cause.
+
+## Resolution (2026-08-16)
+
+`just build` now prunes broken symlinks from **both** `build/` and `install/` before invoking
+colcon, and reports what it removed:
+
+```
+removed 1 dangling symlink(s) under build/ (L-29)
+removed 3 dangling symlink(s) under install/ (L-29)
+```
+
+Pruning both trees was not over-caution: the first run found 1 stale link in `build/` and 3 in
+`install/`, so `install/` had drifted as well.
+
+There is nothing to weigh in this fix — a broken symlink is never useful, and colcon recreates the
+ones that should exist. The guard sits next to the existing L-16 `bindgen.lock` check, which is
+the same shape of problem: build state that survives a source change and then lies about it.
+
+**Verified by reproducing the failure, not by reasoning about it.** Add a launch file, build
+(symlink appears), delete the source, build again. Before the guard that second build fails with
+the reported error; after it, the build prunes one link from each tree and succeeds.
+
+CLAUDE.md gained a Known Issues entry (item 8) explaining why the error names a path that `ls`
+still shows, plus the manual `find build install -xtype l -delete` for checkouts predating the
+guard.
