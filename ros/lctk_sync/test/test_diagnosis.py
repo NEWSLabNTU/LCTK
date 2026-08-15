@@ -16,7 +16,7 @@ Two failures motivated these tests, both seen on a real seyond_left bag:
 
 import pytest
 
-from lidar_to_camera_solver.main import (
+from lctk_sync import (
     SyncGroupSummary,
     format_sync_stats,
     sync_pair_staleness_error,
@@ -116,7 +116,7 @@ def test_the_stats_line_survives_missing_topics():
 def test_a_silent_stream_is_named():
     """Groups stopped while both detectors were visibly publishing. The question is
     which stream stopped reaching THIS node — so say which one went quiet."""
-    from lidar_to_camera_solver.main import sync_health_warning
+    from lctk_sync import sync_health_warning
 
     warning = sync_health_warning(
         previous={"aruco_detections": 100, "calibration_board_detections": 40},
@@ -131,7 +131,7 @@ def test_a_silent_stream_is_named():
 
 def test_both_streams_alive_but_no_groups_is_its_own_warning():
     """This is the case that points at the synchronizer rather than a detector."""
-    from lidar_to_camera_solver.main import sync_health_warning
+    from lctk_sync import sync_health_warning
 
     warning = sync_health_warning(
         previous={"aruco_detections": 100, "calibration_board_detections": 40},
@@ -145,7 +145,7 @@ def test_both_streams_alive_but_no_groups_is_its_own_warning():
 
 
 def test_a_healthy_pipeline_warns_about_nothing():
-    from lidar_to_camera_solver.main import sync_health_warning
+    from lctk_sync import sync_health_warning
 
     assert (
         sync_health_warning(
@@ -160,7 +160,7 @@ def test_a_healthy_pipeline_warns_about_nothing():
 def test_a_pipeline_that_has_not_started_is_not_a_stall():
     """Before playback begins nothing is arriving and no group ever has; that is
     waiting, not a fault, and must not cry wolf."""
-    from lidar_to_camera_solver.main import sync_health_warning
+    from lctk_sync import sync_health_warning
 
     assert (
         sync_health_warning(previous={}, current={"a": 0, "b": 0}, last_group_age_s=None)
