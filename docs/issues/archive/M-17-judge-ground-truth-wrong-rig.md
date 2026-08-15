@@ -2,7 +2,7 @@
 
 - **Severity:** Medium
 - **Area:** calibration_judge / lctk_launch config
-- **Status:** Partially fixed (2026-08-16) — the silence is fixed; the reference still needs rig geometry
+- **Status:** Won't fix (2026-08-16) — diagnostic shipped; the reference itself is not recoverable here
 - **Verified:** Measured against a live `just demo` solve on dataset 3 (2026-08-16)
 - **Location:** `ros/lctk_launch/config/judge/ground_truth_config.yaml`
 
@@ -13,7 +13,7 @@
 recorded `lctk_sample_data` dataset 3.
 
 Measured against the transform the solver actually publishes on that data, after the
-[M-01](./archive/M-01-transform-direction-inverted.md) direction fix:
+[M-01](./M-01-transform-direction-inverted.md) direction fix:
 
 | quantity | value |
 |----------|-------|
@@ -35,13 +35,13 @@ not.
 
 `just demo enable_judge=true` reports **0.0/15.0** on sample data and always will, regardless of
 how good the calibration is. A scoring gate that cannot be passed is the same defect class as
-[C-04](./archive/C-04-board-detector-gate-unreachable.md) (an ICP threshold below the sensor noise
+[C-04](./C-04-board-detector-gate-unreachable.md) (an ICP threshold below the sensor noise
 floor, so nothing could ever pass) — it reads as "the calibration is bad" when it means "the
 reference is wrong".
 
 It also burns the judge's credibility: an operator who sees 0/15 on the shipped demo learns to
 ignore the judge, which is precisely the instrument
-[H-09](./archive/H-09-no-extrinsic-quality-metric.md) added to make quality visible.
+[H-09](./H-09-no-extrinsic-quality-metric.md) added to make quality visible.
 
 ## Why it was not simply corrected
 
@@ -81,7 +81,7 @@ Logged once on the first estimate, not per message: it cannot change, and repeat
 the scores it exists to explain.
 
 The check keys on `||t||` deliberately, because that quantity is **invariant under inversion**. A
-direction mistake — the [M-01](./archive/M-01-transform-direction-inverted.md) class of error —
+direction mistake — the [M-01](./M-01-transform-direction-inverted.md) class of error —
 leaves the baseline untouched, so a large gap is positive evidence of different *geometry* rather
 than a convention mix-up. That is what makes it safe to state the diagnosis rather than hedge, and
 a test pins it: feeding the check an inverted-but-correct reference must produce **no** complaint,
@@ -95,12 +95,35 @@ Regression coverage: `ros/calibration_judge/test/test_reference_plausibility.py`
 including the real 0.21-vs-0.89 case and the inverted-reference case that must stay quiet. The
 package had no tests at all before this; the suite is now wired into `just test`.
 
-## Still open
+## Closed as won't fix (2026-08-16)
 
-**A ground truth actually recorded for `lctk_sample_data` dataset 3.** The matrix was added in
-October 2025 (`e8dd049`) with no provenance, and the repo holds no rig drawing, dimensions, or
-trusted prior calibration — only the pcap, the avi, and a topic README. Establishing the real
-camera-to-LiDAR offset needs someone with access to the rig or to the records from that capture.
+Closed at the maintainer's direction. The diagnostic above ships; the reference itself stays as it
+is.
 
-It is deliberately not being replaced with the solver's own output: that would make the judge
-score itself, reporting a perfect 15/15 by construction while measuring nothing.
+**What that means in practice.** `ground_truth_config.yaml` still describes a rig that is not the
+one in `lctk_sample_data` dataset 3, so `just demo enable_judge=true` still scores ~0/15 on sample
+data. That is now a *reported* condition rather than a silent one: the judge logs, on the first
+estimate, that the reference's 0.21 m baseline cannot be reconciled with the solved 0.89 m and
+that scores will stay near zero until it is replaced. An operator sees the reason, not a bare
+zero.
+
+**Why it is not worth carrying as open.** The missing piece is a physical measurement, not code.
+The matrix was added in October 2025 (`e8dd049`) with no provenance, and the repo holds no rig
+drawing, no dimensions, and no trusted prior calibration — only the pcap, the avi, and a topic
+README. Nobody working from this repository can produce the number, so the issue would sit open
+indefinitely as a reminder of something already written down in two places.
+
+**If you ever need the judge to work on sample data**, the fix is small and the constraints are
+recorded here:
+
+1. Obtain the true camera-to-LiDAR extrinsic for the dataset-3 capture — rig drawing, tape
+   measure, or a calibration the team trusts.
+2. Write it into `ground_truth_config.yaml` in **ROS TF semantics** (lidar → camera is the
+   camera's pose in lidar coordinates — see [M-01](./M-01-transform-direction-inverted.md)), and
+   record where the number came from, which the original never did.
+3. The plausibility check will fall silent on its own once the baselines agree.
+
+**Do not** copy the solver's own output into the reference to make the score green. The judge
+would then be scoring itself: a guaranteed 15/15 that measures nothing, and a visibly wrong
+reference replaced by an invisibly wrong one. That is strictly worse than the current state, in
+which the file is wrong and says so.
