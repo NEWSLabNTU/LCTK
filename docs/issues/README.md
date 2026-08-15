@@ -78,7 +78,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-24](./archive/L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` holds a matched pair until every stream has two messages | 🟢 |
 | [L-25](./archive/L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have | 🟢 |
 | [L-26](./archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` breaks pytest workspace-wide before collection | 🟢 |
-| [L-27](./L-27-conflux-cpp-lint-red.md) | Low | `ament_lint` red on `conflux_cpp`, including generated and build-artifact files | 🔴 |
+| [L-27](./archive/L-27-conflux-cpp-lint-red.md) | Low | `ament_lint` red on `conflux_cpp`, including generated and build-artifact files | 🟢 |
 
 ## Three headline gaps
 
@@ -132,8 +132,11 @@ Two further findings surfaced while closing it. **H-14** — a *third* independe
 sync implementation in `conflux-ros2`, which H-12's "two pipelines" framing
 missed — is now **fixed**: it is an adapter over the core, which became possible
 only once the staleness removal retired the `T: Clone` bound that had forced the
-duplication. **L-27** (`ament_lint` red on `conflux_cpp`, partly because it scans
-generated headers and Rust build artifacts) remains open.
+duplication. **L-27** is fixed too: the C++ linters are green, the generated
+header no longer oscillates between formatter and build, and `ament_uncrustify`
+was dropped rather than allowed to fight clang-format forever.
+
+**The conflux cluster is now closed end to end.** No conflux issue remains open.
 
 - **C-05, H-12** — the matching policy now lives in one place (`State::advance`)
   that both drivers call, which closes the wedge and makes the two pipelines

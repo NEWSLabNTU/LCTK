@@ -21,10 +21,14 @@ All stages landed in `jerry73204/conflux`@0a9c901 (building on the earlier fixes
 | 3 — Config encodings (L-20, L-21) | **Done** — `window_size_ms = 0` rejected with a pointer to `None`; the `buf_size >= 2` floor explained wherever enforced |
 | 4 — Docs (L-25) | **Done** — hardcoded test count removed, recipes refreshed, Known Issues section added |
 
-**Follow-up filed:** wiring the gtest target exposed that `ament_lint` is red on `conflux_cpp`,
-partly because it scans generated headers and Rust build artifacts. Tracked as
-[L-27](../issues/L-27-conflux-cpp-lint-red.md); `just test-cpp` is scoped to the gtest target so
-L-22's coverage is not held hostage to it.
+**Follow-up, now also closed:** wiring the gtest target exposed that `ament_lint` was red on
+`conflux_cpp`, partly because it scanned generated headers and Rust build artifacts, and partly
+because `ament_uncrustify` and clang-format were both trying to own C++ style.
+[L-27](../issues/archive/L-27-conflux-cpp-lint-red.md) fixed both: the generated files are excluded
+(and the generated header no longer tracked, so it stops oscillating between formatter and build),
+and uncrustify was dropped in favour of the formatter the project had already chosen. `just
+test-cpp` is no longer scoped -- it gates on gtest plus copyright, cppcheck, cpplint, lint_cmake
+and xmllint, 44 tests with 0 failures.
 
 ## Problem Statement
 
