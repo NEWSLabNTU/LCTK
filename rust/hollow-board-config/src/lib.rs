@@ -166,6 +166,70 @@ impl BoardModel {
         na::Isometry3::from_parts(translation, self.pose.rotation)
     }
 
+    /// Mean point-to-model distance for `points` against this board pose.
+    ///
+    /// M-14: the square plate has a 4-fold in-plane symmetry that ICP cannot resolve, so the
+    /// detector used to pick the origin corner by "lowest world z". That is an unstated
+    /// assumption about mounting and about the LiDAR frame being gravity-aligned; near a 45 deg
+    /// roll, or on a diamond-mounted board, the wrong corner wins and the board frame ends up
+    /// rotated 90 deg -- which the solve then absorbs silently as a quarter-turn error.
+    ///
+    /// The three holes sit at three of the four diagonal positions with the fourth empty, so the
+    /// pattern *is* asymmetric under 90 deg rotation. Scoring each candidate orientation against
+    /// the data breaks the tie from the measurement rather than from an assumption about gravity.
+    ///
+    /// Returns `None` when there are no points to score.
+    pub fn correspondence_loss<InputPoint, DataIter>(&self, points: DataIter) -> Option<f64>
+    where
+        DataIter: IntoIterator<Item = InputPoint>,
+        InputPoint: Borrow<na::Point3<f64>>,
+    {
+        let points: Vec<_> = points.into_iter().collect();
+        if points.is_empty() {
+            return None;
+        }
+        let n = points.len();
+
+        let correspondences = self.find_correspondences_serial(points)?;
+        if correspondences.is_empty() {
+            return None;
+        }
+
+        let total: f64 = correspondences
+            .iter()
+            .map(|(input, model)| (input.borrow() - model).norm())
+            .sum();
+        Some(total / n as f64)
+    }
+
+    /// Serial correspondence search, used by [`Self::correspondence_loss`].
+    ///
+    /// Kept separate from the feature-gated `find_correspondences` so the scorer behaves
+    /// identically whether or not the `parallel` feature is on -- a rotation candidate must not
+    /// be chosen differently depending on a build flag.
+    fn find_correspondences_serial<InputPoint>(
+        &self,
+        points: Vec<InputPoint>,
+    ) -> Option<Vec<(InputPoint, na::Point3<f64>)>>
+    where
+        InputPoint: Borrow<na::Point3<f64>>,
+    {
+        #[cfg(feature = "parallel")]
+        {
+            let refs: Vec<na::Point3<f64>> = points.iter().map(|p| *p.borrow()).collect();
+            let model: Vec<na::Point3<f64>> = self
+                .find_correspondences(refs)?
+                .into_iter()
+                .map(|(_, m)| m)
+                .collect();
+            Some(points.into_iter().zip(model).collect())
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.find_correspondences(points)
+        }
+    }
+
     #[cfg(feature = "parallel")]
     pub fn find_correspondences<InputPoint, DataIter>(
         &self,
@@ -760,6 +824,86 @@ mod tests {
             (origin_x, origin_y, 0.0),
             "Bottom corner should be at origin"
         );
+    }
+
+    /// M-14: sample points on the board face, skipping the three holes.
+    ///
+    /// The hole pattern is the asymmetry that breaks the plate's 4-fold symmetry: holes sit at
+    /// three of the four diagonal positions and the fourth is empty.
+    fn sample_board_points(board: &BoardModel, step: f64) -> Vec<na::Point3<f64>> {
+        let width = board.board_shape.board_width.as_meters();
+        let r = board.board_shape.hole_radius.as_meters();
+        let centres = [
+            board.left_circle_center(),
+            board.right_circle_center(),
+            board.top_circle_center(),
+        ];
+
+        let mut pts = Vec::new();
+        let n = (width / step) as usize;
+        for i in 0..=n {
+            for j in 0..=n {
+                let u = Length::from_meters(i as f64 * step);
+                let v = Length::from_meters(j as f64 * step);
+                let p = board.board_plane_point(u, v);
+                if centres.iter().any(|c| (p - c).norm() < r) {
+                    continue; // inside a hole -- no return from there
+                }
+                pts.push(p);
+            }
+        }
+        pts
+    }
+
+    #[test]
+    fn quarter_turns_are_distinguishable_by_correspondence_loss() {
+        // M-14: the board origin corner was disambiguated purely by "lowest world z", which
+        // fails near a 45 deg roll or on a LiDAR whose frame is not gravity-aligned. The three
+        // holes are asymmetric under 90 deg rotation, so the data itself can pick the right one
+        // -- but only if the loss actually separates the four candidates.
+        let board = create_test_board_model();
+        let points = sample_board_points(&board, 0.02);
+        assert!(points.len() > 100, "need a dense enough sample");
+
+        let normal = board.board_z_axis();
+        let centre = board.board_center();
+
+        let loss_at = |k: u32| {
+            let angle = std::f64::consts::FRAC_PI_2 * k as f64;
+            let rot = na::UnitQuaternion::from_axis_angle(&normal, angle);
+            let about_centre = na::Isometry3::from_parts(
+                na::Translation3::from(centre - na::Point3::origin()),
+                rot,
+            ) * na::Isometry3::from_parts(
+                na::Translation3::from(na::Point3::origin() - centre),
+                na::UnitQuaternion::identity(),
+            );
+            let rotated = BoardModel {
+                pose: about_centre * board.pose,
+                marker_paper_size: board.marker_paper_size,
+                board_shape: board.board_shape.clone(),
+            };
+            rotated.correspondence_loss(points.iter().copied())
+        };
+
+        let l0 = loss_at(0).expect("the true orientation must score");
+        for k in 1..4 {
+            let lk = loss_at(k).expect("candidate orientation must score");
+            assert!(
+                lk > l0,
+                "rotation by {}x90deg scored {lk:.6}, not worse than the true {l0:.6}: \
+                 the hole asymmetry is not separating the candidates",
+                k
+            );
+        }
+    }
+
+    #[test]
+    fn correspondence_loss_is_none_without_points() {
+        let board = create_test_board_model();
+        assert!(board
+            .correspondence_loss(Vec::<na::Point3<f64>>::new())
+            .is_none());
     }
 
     /// Helper function to create a simple board model for testing
