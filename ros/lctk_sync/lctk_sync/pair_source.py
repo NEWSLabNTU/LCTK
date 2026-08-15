@@ -107,7 +107,8 @@ class DetectionPairSource:
         self._max_skew_ms: float = 0.0
         self._epoch_resets = 0
         self._last_epoch_reset_at = 0.0
-        self._last_epoch_dropped: dict = {}
+        self._last_epoch_received: dict = {}
+        self._started_at = time.monotonic()
         self._last_received: dict = {}
         self._last_stats_line: Optional[str] = None
 
@@ -259,14 +260,15 @@ class DetectionPairSource:
         return time.monotonic() - self._last_group_at
 
     def _check_for_new_epoch(self):
-        dropped = dict(self._sync.statistics.messages_dropped)
+        received = dict(self._sync.statistics.messages_received)
         if should_reset_for_new_epoch(
-            previous_dropped=self._last_epoch_dropped,
-            current_dropped=dropped,
+            previous_received=self._last_epoch_received,
+            current_received=received,
             last_group_age_s=self._last_group_age_s(),
+            age_since_start_s=time.monotonic() - self._started_at,
         ):
             self._reset_for_new_epoch()
-        self._last_epoch_dropped = dropped
+        self._last_epoch_received = received
 
     def _reset_for_new_epoch(self):
         """Start a fresh synchronizer after the recording restarted.
@@ -288,11 +290,13 @@ class DetectionPairSource:
         self._latest_at = None
         self._max_skew_ms = 0.0
         self._node.get_logger().warn(
-            f"Detection timestamps jumped backward: the recording restarted (a new bag, "
-            f"or a --loop wrap). conflux rejects anything older than the group it last "
-            f"emitted, so it had stopped pairing entirely. Started a fresh synchronizer "
-            f"(reset #{self._epoch_resets}); detections already buffered by the solver "
-            f"are untouched."
+            f"Nothing has paired while both streams keep arriving: the recording "
+            f"changed under the synchronizer (a new bag, a --loop wrap, or a stream "
+            f"that started late holding a previous recording's timestamps). conflux is "
+            f"strictly time-ordered and cannot recover from either on its own, so it "
+            f"had stopped pairing. Started a fresh synchronizer (reset "
+            f"#{self._epoch_resets}); detections already buffered by the solver are "
+            f"untouched."
         )
 
     def _log_stats(self):

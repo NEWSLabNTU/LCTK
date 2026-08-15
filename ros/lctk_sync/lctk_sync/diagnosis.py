@@ -45,32 +45,45 @@ def sync_pair_staleness_error(*, age_s: float, max_age_s: float) -> Optional[str
 
 def should_reset_for_new_epoch(
     *,
-    previous_dropped: dict,
-    current_dropped: dict,
+    previous_received: dict,
+    current_received: dict,
     last_group_age_s: Optional[float],
+    age_since_start_s: Optional[float] = None,
     quiet_after_s: float = 2.0,
 ) -> bool:
-    """Has the message source restarted (a new bag, or a `--loop` wrap)?
+    """Has the message source changed underneath the synchronizer?
 
-    Conflux is strictly time-ordered: it rejects any message stamped at or before the
-    newest group it emitted, and that commit time only moves forward. Correct for a
-    live sensor; wrong for this workflow, where the operator replays several recorded
-    bags and both detectors copy the stamp of the message they consumed. Every new bag
-    sends the stamps backward, and conflux then rejects everything, forever.
+    Conflux is strictly time-ordered, which is right for a live sensor and wrong for
+    this workflow: the operator replays recording after recording, and both detectors
+    copy the stamp of the message they consumed. Two things then go wrong, and both look
+    the same from outside -- messages keep arriving and no group ever comes out:
 
-    Rather than weaken conflux's rule, recognise the restart here. Its signature needs
-    no access to the raw stamps: groups have stopped, and EVERY stream is having its
-    messages thrown away. One stream being dropped alone is a detector problem, and no
-    drops at all is a dead stream -- neither should trigger a silent reset.
+    - **A rewound source.** Conflux rejects anything stamped at or before the group it
+      last emitted, and that commit time only moves forward, so every message after a
+      `--loop` wrap is refused.
+    - **Buffers holding disjoint time ranges.** After a background bag, one stream's
+      buffer holds only that recording's stamps. The next recording's stamps fall
+      outside them, so `inf_ts > sup_ts` and `State::try_match` returns at its
+      readiness check -- BEFORE the pruning that would drop the stale messages. Under
+      `reject_new` the buffer never drains. Measured: groups=0, permanently.
+
+    The second case usually strikes before any group has EVER been emitted, so the
+    trigger cannot be "time since the last group" alone; `age_since_start_s` stands in.
+
+    The signal is therefore: nothing has paired for `quiet_after_s`, yet EVERY stream is
+    still delivering. A stream that has gone quiet is a detector fault (or simply a
+    background bag with no camera in it) and must not trigger a reset, because clearing
+    the buffers would hide it.
     """
-    if last_group_age_s is None or last_group_age_s < quiet_after_s:
+    age_s = last_group_age_s if last_group_age_s is not None else age_since_start_s
+    if age_s is None or age_s < quiet_after_s:
         return False
-    if not current_dropped:
+    if not current_received:
         return False
 
     return all(
-        count > previous_dropped.get(topic, 0)
-        for topic, count in current_dropped.items()
+        count > previous_received.get(topic, 0)
+        for topic, count in current_received.items()
     )
 
 
