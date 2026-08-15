@@ -341,7 +341,7 @@ class TunerApp:
 
     def draw_ui(self, stdscr):
         stdscr.clear()
-        height, width = stdscr.getmaxyx()
+        _height, _width = stdscr.getmaxyx()
 
         roll_deg = math.degrees(self.bbox_state.roll)
         pitch_deg = math.degrees(self.bbox_state.pitch)

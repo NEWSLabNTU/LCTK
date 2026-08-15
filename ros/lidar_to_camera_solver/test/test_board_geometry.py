@@ -32,7 +32,7 @@ def test_module_imports_without_rclpy():
         "print('rclpy' in sys.modules)"
     )
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "False", "importing board_geometry pulled in rclpy"
