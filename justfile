@@ -168,7 +168,7 @@ test:
     # L-28: invoke pytest as a module. apt's python3-pytest installs the package but no
     # `pytest` executable, so the bare form exits 127 and the Python half of the suite
     # never ran.
-    python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ -v --no-header
+    python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
 lidar-camera:

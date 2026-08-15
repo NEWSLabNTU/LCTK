@@ -51,6 +51,9 @@ class CalibrationJudgeNode(Node):
         self.best_score = None
         self.best_matrix = None
 
+        # M-17: one-shot guard so the wrong-rig complaint is logged once, not per message.
+        self._reference_checked = False
+
         # Validate that ground truth file is provided
         if not ground_truth_file or ground_truth_file == "":
             self.get_logger().error(
@@ -190,6 +193,46 @@ class CalibrationJudgeNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error loading configuration file: {e}")
             return None
+
+    @staticmethod
+    def check_reference_plausibility(
+        ground_truth: np.ndarray,
+        estimate: np.ndarray,
+        max_error_m: float,
+    ) -> Optional[str]:
+        """Warn when the ground truth looks like it describes a different rig (M-17).
+
+        A reference recorded for the wrong setup scores 0/15 forever, no matter how good the
+        calibration is. That is indistinguishable, from the log, from "your calibration is bad" --
+        and it teaches operators to ignore the one instrument that reports quality.
+
+        The check keys on the **baseline magnitude**, ``||t||``, because that quantity is
+        invariant under inversion. A direction mistake -- the M-01 class of error, where a
+        reference is recorded in the opposite convention -- leaves ``||t||`` untouched. So a large
+        gap here is positive evidence of different *geometry* rather than of a convention mix-up,
+        which is what makes it safe to say so out loud instead of hedging.
+
+        Returns the message to log, or None when the reference is plausible.
+        """
+        gt_baseline = float(np.linalg.norm(ground_truth[:3, 3]))
+        est_baseline = float(np.linalg.norm(estimate[:3, 3]))
+        gap = abs(gt_baseline - est_baseline)
+
+        # 3x the "zero points" threshold. Inside that, a bad calibration explains the gap and
+        # accusing the reference would send the reader hunting for a hardware discrepancy that
+        # does not exist -- a false accusation here is worse than staying quiet.
+        if gap <= 3.0 * max_error_m:
+            return None
+
+        return (
+            f"Ground truth may describe a DIFFERENT RIG than the data being judged: its "
+            f"sensor baseline is {gt_baseline:.2f} m but the calibration solves to "
+            f"{est_baseline:.2f} m, a gap of {gap:.2f} m. Note that ||t|| is unchanged by "
+            f"inverting a transform, so this is NOT a frame-direction mistake -- the two "
+            f"describe different geometry. Scores will stay near zero regardless of "
+            f"calibration quality until the reference is replaced with one recorded for this "
+            f"rig. See docs/issues/M-17."
+        )
 
     def _transform_to_matrix(self, transform: TransformStamped) -> np.ndarray:
         """
@@ -368,6 +411,19 @@ class CalibrationJudgeNode(Node):
         """
         # Convert transform message to matrix
         estimated_matrix = self._transform_to_matrix(msg)
+
+        # M-17: check once, on the first real estimate, whether the reference plausibly
+        # describes this rig at all. Reported once rather than per message -- it cannot change,
+        # and repeating it would bury the scores it is meant to explain.
+        if not self._reference_checked:
+            self._reference_checked = True
+            complaint = self.check_reference_plausibility(
+                self.ground_truth_matrix,
+                estimated_matrix,
+                self.scoring_params["translation"]["max_error_m"],
+            )
+            if complaint:
+                self.get_logger().error(complaint)
 
         # Compute score (ground_truth_matrix is guaranteed to be loaded)
         score = self._compute_score(estimated_matrix, self.ground_truth_matrix)
