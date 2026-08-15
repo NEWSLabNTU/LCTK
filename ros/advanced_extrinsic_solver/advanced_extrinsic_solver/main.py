@@ -238,6 +238,18 @@ class AdvancedExtrinsicSolver(Node):
         # board placements -- buffering one placement a hundred times is duplication, not
         # information.
         self.last_quality = None
+        # M-12: pose-granularity outlier rejection. On by default -- one bad pose silently
+        # corrupting the extrinsic is the failure this exists to prevent -- but switchable,
+        # because with very few poses the honest answer is to capture more, not to drop any.
+        self.declare_parameter("reject_outlier_poses", True)
+        self.reject_outlier_poses = (
+            self.get_parameter("reject_outlier_poses").get_parameter_value().bool_value
+        )
+        self.declare_parameter("outlier_pose_mad_k", 4.0)
+        self.outlier_pose_mad_k = (
+            self.get_parameter("outlier_pose_mad_k").get_parameter_value().double_value
+        )
+
         self._per_frame_object_points = []
         self._per_frame_image_points = []
         self._per_frame_board_poses = []
@@ -1401,6 +1413,65 @@ class AdvancedExtrinsicSolver(Node):
             self.get_logger().error(self.last_solve_status)
             return False
 
+        # M-12: one bad pose corrupts the whole solve, and every corner of that pose is an
+        # outlier together. Now that there is an estimate to measure against, look at the
+        # per-pose reprojection error and re-solve without any pose that stands out.
+        if self.reject_outlier_poses:
+            K = np.array(self.camera_info.k, dtype=np.float64).reshape(3, 3)
+            rejected, per_pose_rms = self._reject_outlier_poses(
+                self._per_frame_object_points,
+                self._per_frame_image_points,
+                K,
+                rvec,
+                tvec,
+                k=self.outlier_pose_mad_k,
+            )
+            self.get_logger().info(
+                f"Per-pose reprojection RMS (px): {[round(r, 2) for r in per_pose_rms]}"
+            )
+
+            if rejected:
+                keep = [
+                    i
+                    for i in range(len(self._per_frame_object_points))
+                    if i not in rejected
+                ]
+                kept_object = np.vstack(
+                    [self._per_frame_object_points[i] for i in keep]
+                )
+                kept_image = np.vstack([self._per_frame_image_points[i] for i in keep])
+                kept_weights = None
+                if weights is not None:
+                    kept_weights = np.concatenate(
+                        [
+                            np.full(
+                                len(self._per_frame_object_points[i]),
+                                self._per_frame_weights[i],
+                                dtype=np.float64,
+                            )
+                            for i in keep
+                        ]
+                    )
+
+                ok_retry, rvec_retry, tvec_retry = self._solve_pnp(
+                    kept_object, kept_image, weights=kept_weights
+                )
+                if ok_retry:
+                    self.get_logger().warning(
+                        f"Rejected {len(rejected)} outlier pose(s) {rejected} with "
+                        f"reprojection RMS "
+                        f"{[round(per_pose_rms[i], 2) for i in rejected]} px against a "
+                        f"median of {round(float(np.median(per_pose_rms)), 2)} px, and "
+                        f"re-solved on the remaining {len(keep)}. A pose this far out is "
+                        f"usually a bad board fit or a quarter-turned origin corner (M-14)."
+                    )
+                    rvec, tvec = rvec_retry, tvec_retry
+                else:
+                    self.get_logger().warning(
+                        "Re-solve without the outlier poses failed; keeping the original "
+                        "estimate."
+                    )
+
         # H-09: assess the solve. This does not change the estimate and does not block publishing;
         # it says how much the estimate is worth, which the pipeline previously could not.
         self._assess_quality(rvec, tvec)
@@ -1735,6 +1806,78 @@ class AdvancedExtrinsicSolver(Node):
         # falls off smoothly rather than being cliff-edged out.
         weight = 1.0 / (1.0 + sigma / 0.01)
         return float(np.clip(weight, 1e-3, 1.0))
+
+    @staticmethod
+    def _pose_reprojection_rms(
+        object_points: np.ndarray,
+        image_points: np.ndarray,
+        K: np.ndarray,
+        rvec: np.ndarray,
+        tvec: np.ndarray,
+    ) -> float:
+        """RMS reprojection error, in pixels, for one pose's corners."""
+        projected, _ = cv2.projectPoints(
+            object_points, rvec, tvec, K, np.zeros(5, dtype=np.float64)
+        )
+        err = projected.reshape(-1, 2) - image_points.reshape(-1, 2)
+        return float(np.sqrt(np.mean(np.sum(err**2, axis=1))))
+
+    @staticmethod
+    def _reject_outlier_poses(
+        per_frame_object_points: List[np.ndarray],
+        per_frame_image_points: List[np.ndarray],
+        K: np.ndarray,
+        rvec: np.ndarray,
+        tvec: np.ndarray,
+        k: float = 4.0,
+        min_keep: int = 3,
+        floor_px: float = 2.0,
+    ) -> Tuple[List[int], List[float]]:
+        """Identify poses whose reprojection error marks them as outliers (M-12).
+
+        Rejection is at **pose** granularity, never per corner. A pose's corners share one rigid
+        `T_board`, so when the pose is wrong all of its corners are wrong *together* -- one rigid
+        misplacement observed 16 times, not 16 independent draws. Rejecting individual corners
+        would treat correlated error as if it were independent, which is what least squares
+        already assumes and already gets wrong here.
+
+        The threshold is robust by construction: `median + k * 1.4826 * MAD` over the per-pose RMS.
+        A mean-and-sigma rule would be inflated by the very outlier it is meant to catch.
+
+        Two guards keep this from eating good data:
+
+        - `floor_px` -- with a tight, clean buffer the MAD is nearly zero, so any spread at all
+          would look significant. Nothing is rejected unless it also exceeds this absolute floor.
+        - `min_keep` -- refuse to reject if too few poses would survive. An under-constrained
+          solve is worse than one contaminated pose, and pose diversity is already the scarce
+          resource (H-07).
+
+        Returns the indices to reject and the per-pose RMS for every pose, so callers can log the
+        residuals whether or not anything was rejected.
+        """
+        rms = [
+            AdvancedExtrinsicSolver._pose_reprojection_rms(obj, img, K, rvec, tvec)
+            for obj, img in zip(per_frame_object_points, per_frame_image_points)
+        ]
+        if len(rms) < min_keep + 1:
+            # Rejecting anything here would drop the buffer below what a solve needs.
+            return [], rms
+
+        arr = np.asarray(rms, dtype=np.float64)
+        median = float(np.median(arr))
+        mad = float(np.median(np.abs(arr - median)))
+        threshold = max(median + k * 1.4826 * mad, median + floor_px)
+
+        candidates = [i for i, r in enumerate(rms) if r > threshold]
+
+        # Never fall below min_keep: drop the worst offenders first and stop.
+        max_rejects = max(len(rms) - min_keep, 0)
+        if len(candidates) > max_rejects:
+            candidates = sorted(candidates, key=lambda i: rms[i], reverse=True)[
+                :max_rejects
+            ]
+
+        return sorted(candidates), rms
 
     def _expand_weights_to_correspondences(self) -> Optional[np.ndarray]:
         """One weight per correspondence, from the per-frame board-pose weights.
