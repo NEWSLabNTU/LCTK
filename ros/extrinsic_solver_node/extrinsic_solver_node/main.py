@@ -18,6 +18,7 @@ Author: LCTK Educational Team
 License: MIT
 """
 
+import sys
 import threading
 from dataclasses import dataclass
 
@@ -274,7 +275,7 @@ class EducationalExtrinsicSolver(Node):
 
         try:
             self._solve_extrinsic_calibration(aruco_msg, board_msg)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - one bad detection pair must not kill the node
             self.get_logger().error(f"Calibration failed: {e}")
 
     def _solve_extrinsic_calibration(
@@ -360,7 +361,7 @@ class EducationalExtrinsicSolver(Node):
                 f"t=({tvec.flatten()[0]:.3f}, {tvec.flatten()[1]:.3f}, {tvec.flatten()[2]:.3f})"
             )
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failed publish must not kill the node
             self.get_logger().error(f"Failed to publish transform: {e}")
             return False
 
@@ -901,7 +902,7 @@ def main(args=None):
             executor.shutdown()
     except KeyboardInterrupt:
         node.get_logger().info("Shutting down educational extrinsic solver")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - last resort at the process boundary
         # Handle RCLError and other exceptions gracefully
         node.get_logger().error(f"Error during spin: {e}")
     finally:
@@ -922,18 +923,19 @@ def main(args=None):
                     f"rejected={stats.messages_rejected[topic]}, "
                     f"rejection_rate={topic_rate:.1%}"
                 )
-        except Exception:
-            pass  # Ignore errors during statistics logging
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the real error
+            node.get_logger().warning(f"Failed to log final sync statistics: {e}")
 
         try:
             node.destroy_node()
-        except Exception:
-            pass  # Ignore errors during cleanup
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the real error
+            node.get_logger().warning(f"Error while destroying node: {e}")
         try:
             if rclpy.ok():
                 rclpy.shutdown()
-        except Exception:
-            pass  # Ignore errors if context is already invalid
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the real error
+            # Context may already be invalid at this point; log to stderr.
+            print(f"Error during rclpy shutdown: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

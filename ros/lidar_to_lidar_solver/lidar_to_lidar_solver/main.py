@@ -290,7 +290,7 @@ class LidarToLidarSolver(Node):
             T[:3, 3] = t
 
             return T
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a bad pose must return None, not kill the node
             self.get_logger().error(f"Failed to convert pose to matrix: {e}")
             return None
 

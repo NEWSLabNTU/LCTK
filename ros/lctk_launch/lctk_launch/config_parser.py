@@ -44,11 +44,16 @@ def resolve_package_path(path: str) -> str:
     def replace_func(match):
         package_name = match.group(1).strip()
         try:
-            from ament_index_python.packages import get_package_share_directory
+            from ament_index_python.packages import (
+                PackageNotFoundError,
+                get_package_share_directory,
+            )
 
             return get_package_share_directory(package_name)
-        except Exception as e:
-            raise ValueError(f"Failed to find package '{package_name}': {e}")
+        except (PackageNotFoundError, ValueError) as e:
+            # PackageNotFoundError: not on AMENT_PREFIX_PATH. ValueError: the
+            # package is registered but its share directory does not exist.
+            raise ValueError(f"Failed to find package '{package_name}': {e}") from e
 
     return re.sub(pattern, replace_func, path)
 
