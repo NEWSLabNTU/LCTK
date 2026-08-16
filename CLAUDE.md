@@ -263,6 +263,11 @@ actually wired in.
 - Don't use Pokemon exception handling (`try: except Exception: pass`)
 - Prefer functional struct initialization in Rust
 - When running sudo commands, show command to user instead of executing
+- **Never commit `Cargo.lock` churn from a build.** Building in the sourced ROS environment
+  rewrites the workspace lockfiles with this machine's generated message-crate versions and
+  `[[patch.unused]]` entries. That is local build state, not a change: `git checkout --` them
+  before committing. Real dependency updates are a separate, deliberate procedure — see
+  `docs/roadmap/phase-4-dependency-updates-and-vulns.md`
 
 ## Docs & Issue Tracking Practices
 
@@ -276,6 +281,10 @@ actually wired in.
 - Fixes land on a `fix/...` or `feat/...` branch, then `git checkout main && git merge --ff-only`
 - Multiple agents may work this repo concurrently: before starting an issue, check the tracker
   for 🟡 (in-progress) markers, and always `git fetch` + rebase before pushing
+- **Tracker state as of 2026-08-16: 71 🟢 fixed, 3 ⚪ won't-fix, 0 open.** Every finding from the
+  2026-07-09, 2026-07-12 and 2026-08-15 audits is closed. Read the archived issue before
+  re-opening one — several record *why* a fix took the shape it did, which is the part that is
+  expensive to rediscover
 
 ## ROS 2 Conventions
 
@@ -531,7 +540,17 @@ The `advanced_extrinsic_solver` node provides multi-pose calibration with manual
 Version 3 (H-10) persists the real ArUco corner pixels inside each 2D detection's `results`;
 v1/v2 files reload but fall back to the axis-aligned bbox — a biased (C-01) solve — and the
 loader warns loudly. `transform` is the raw solver output (`T_optical←lidar`), the input the
-Autoware exporter consumes. A saved calibration also carries its own quality record (H-09).
+Autoware exporter consumes.
+
+**Two directions coexist deliberately, and mixing them is the M-01 bug:**
+
+| surface | direction | why |
+|---------|-----------|-----|
+| `extrinsic_transform` topic and `/tf_static` | `T_lidar←camera` (TF semantics) | what every tf2 consumer expects |
+| dump JSON `rvec`/`tvec` | `T_optical←lidar` (raw solvePnP) | what the exporter and any `projectPoints` call need |
+
+`pointcloud_image_overlay` consumes the *topic* and inverts it back internally. If you add a
+consumer, decide which of the two it needs — do not assume the topic is the PnP output. A saved calibration also carries its own quality record (H-09).
 
 ### Interactive Solver Controller
 
@@ -572,8 +591,12 @@ ros2 run lctk_autoware_export export \
 ```
 
 **Frame pitfalls the exporter owns — do not "fix" these ad hoc elsewhere:**
-- Input is the dump JSON's raw `rvec`/`tvec` (`T_optical←lidar`), **never** the TF topic —
-  the published frame labels are inverted (issue M-01)
+- Input is the dump JSON's raw `rvec`/`tvec` (`T_optical←lidar`). This is still the right
+  input — but no longer because the topic is broken. M-01 is **fixed**: since 2026-08-15 the
+  `extrinsic_transform` topic follows ROS TF semantics, so `frame_id=lidar, child=camera` is
+  genuinely the camera's pose in lidar coordinates. Use the dump JSON because the exporter's
+  arithmetic is written against the raw solve and is tested that way; if you ever switch it to
+  the topic, invert first
 - Autoware's `camera*/camera_link` is the REP-103 body frame (x forward); PnP solves the
   optical frame (z forward). Fixed rotation `T(camera_link→optical)` = RPY `(-π/2, 0, -π/2)`
 - The exported entry is `T(kit→camera_link) = T(kit→lidar) · inv(solve) · inv(optical-in-link)`,
