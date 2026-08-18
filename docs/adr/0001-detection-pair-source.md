@@ -107,6 +107,10 @@ gate and refusal diagnosis; the push-based LiDAR-to-LiDAR solver receives each p
 `on_pair`. The only direct Conflux caller left is the legacy `extrinsic_solver_node`, which is
 scheduled for deletion rather than migration.
 
-The production migration and public reset seam are complete. The remaining work under this ADR is
-real-ROS contract coverage through the module interface: in-window delivery, outside-window refusal,
-empty-group diagnosis, stale-pair refusal and autonomous recovery after a timestamp rewind.
+The production migration, public reset seam and real-ROS contract coverage are complete. The normal
+Python gate exercises in-window delivery, outside-window refusal after both messages arrive,
+empty-group diagnosis, stale-pair refusal and autonomous recovery after a timestamp rewind. These
+tests use the same module interface as callers rather than injecting private cache or timer state.
+
+No executable work remains under this ADR. Deleting `extrinsic_solver_node` belongs to Stage 3 of the
+diamond-frame plan, not to this decision.
