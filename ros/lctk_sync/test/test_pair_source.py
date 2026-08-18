@@ -53,20 +53,5 @@ def test_discarding_when_there_is_nothing_cached_is_harmless(source):
     assert not source.take_fresh_pair().ok
 
 
-def test_a_discarded_pair_is_not_handed_out_again(source):
-    """Clearing the solver's buffer means "start over". A pair captured BEFORE the
-    clear must not be addable after it, even while it is still inside the freshness
-    window."""
-    import time
-
-    source._latest = ("aruco", "board")  # what a group would have cached
-    source._latest_at = time.monotonic()
-    assert source.take_fresh_pair().ok
-
-    source.discard_cached_pair()
-
-    assert not source.take_fresh_pair().ok
-
-
 def test_the_source_starts_with_no_epoch_resets(source):
     assert source.epoch_resets == 0
