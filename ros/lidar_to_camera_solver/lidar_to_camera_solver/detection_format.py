@@ -23,6 +23,12 @@ Like `board_geometry`, this module imports nothing from ``rclpy``: the whole for
 functions over plain values.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
 from lidar_to_camera_solver.board_geometry import BOARD_FRAME_CONVENTION
 
 #: Bumped from 3 in the same change that altered what a stored pose means, so version
@@ -31,6 +37,42 @@ FORMAT_VERSION = 4
 
 #: The one-shot conversion command named in the rejection message.
 MIGRATION_COMMAND = "ros2 run lidar_to_camera_solver migrate_detections"
+
+
+@dataclass(frozen=True)
+class ArchivedQuality:
+    """Operator-facing quality verdict stored beside a calibration."""
+
+    status: str
+    is_degenerate: bool
+    n_frames: int
+    n_distinct_placements: int
+    reprojection_rms_px: float
+    reprojection_max_px: float
+    per_pose_rms_px: tuple[float, ...]
+    cond_jtj: float
+    normal_span_deg: float
+    depth_range_m: float
+    lateral_span_m: float
+    uncertainty_rot_deg: float | None
+    uncertainty_trans_mm: float | None
+    uncertainty_n_subsets: int | None
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AdjustedTransform:
+    """Node-owned adjusted transform restored only against a current solve."""
+
+    rvec: np.ndarray
+    tvec: np.ndarray
+
+
+@dataclass(frozen=True)
+class DetectionArchive:
+    pairs: tuple[object, ...]
+    quality: ArchivedQuality | None
+    adjusted_transform: AdjustedTransform | None
 
 
 def format_version_error(data: dict) -> str | None:
@@ -263,13 +305,215 @@ def deserialize_detection3d_array(data: dict):
     return msg
 
 
+def encode_detection_archive(
+    snapshot,
+    *,
+    adjusted_rvec: np.ndarray | None,
+    adjusted_tvec: np.ndarray | None,
+) -> dict:
+    """Encode one complete version-4 archive from a detached buffer snapshot."""
+    data = {
+        "version": FORMAT_VERSION,
+        "board_frame_convention": BOARD_FRAME_CONVENTION,
+        "num_detections": snapshot.frame_count,
+        "detections": [
+            {
+                "aruco": serialize_detection2d_array(pair.aruco),
+                "board": serialize_detection3d_array(pair.board),
+            }
+            for pair in snapshot.pairs
+        ],
+    }
+
+    if (adjusted_rvec is None) != (adjusted_tvec is None):
+        raise ValueError("adjusted rvec and tvec must be present together")
+    if adjusted_rvec is not None:
+        rvec = np.asarray(adjusted_rvec, dtype=np.float64)
+        tvec = np.asarray(adjusted_tvec, dtype=np.float64)
+        if (
+            rvec.size != 3
+            or tvec.size != 3
+            or not (np.all(np.isfinite(rvec)) and np.all(np.isfinite(tvec)))
+        ):
+            raise ValueError("adjusted transform must contain finite 3-vectors")
+        data["transform"] = {
+            "rvec": rvec.reshape(3).tolist(),
+            "tvec": tvec.reshape(3).tolist(),
+        }
+
+    estimate = snapshot.estimate
+    if estimate is not None:
+        quality = estimate.quality
+        data["quality"] = {
+            "status": quality.status_line(),
+            "is_degenerate": quality.is_degenerate,
+            "n_frames": quality.n_frames,
+            "n_distinct_placements": quality.n_placements,
+            "reprojection_rms_px": quality.residuals.rms_px,
+            "reprojection_max_px": quality.residuals.max_px,
+            "per_pose_rms_px": quality.residuals.per_pose_rms_px,
+            "cond_JtJ": quality.conditioning.cond,
+            "diversity": {
+                "normal_span_deg": quality.diversity.normal_span_deg,
+                "depth_range_m": quality.diversity.depth_range_m,
+                "lateral_span_m": quality.diversity.lateral_span_m,
+            },
+            "uncertainty": (
+                {
+                    "rot_deg": quality.spread.rot_deg,
+                    "trans_mm": quality.spread.trans_mm,
+                    "n_subsets": quality.spread.n_subsets,
+                }
+                if quality.spread is not None
+                else None
+            ),
+            "warnings": quality.warnings(),
+        }
+    return data
+
+
+def decode_detection_archive(data: dict) -> DetectionArchive:
+    """Validate and decode a complete archive without touching live state."""
+    error = format_version_error(data)
+    if error is not None:
+        raise ValueError(error)
+
+    detections = data.get("detections")
+    if not isinstance(detections, list):
+        raise TypeError("Detection archive 'detections' must be a list")
+    declared_count = data.get("num_detections")
+    if declared_count != len(detections):
+        raise ValueError(
+            "Detection archive count mismatch: "
+            f"declares {declared_count}, contains {len(detections)}"
+        )
+
+    from lidar_to_camera_solver.detection_buffer import DetectionPair
+
+    pairs = []
+    for index, item in enumerate(detections):
+        if not isinstance(item, dict) or "aruco" not in item or "board" not in item:
+            raise ValueError(f"Detection archive pair {index} is malformed")
+        try:
+            pairs.append(
+                DetectionPair(
+                    aruco=deserialize_detection2d_array(item["aruco"]),
+                    board=deserialize_detection3d_array(item["board"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"Detection archive pair {index} is malformed: {error}"
+            ) from error
+
+    quality = _decode_quality(data.get("quality"))
+    transform = _decode_transform(data.get("transform"))
+    return DetectionArchive(tuple(pairs), quality, transform)
+
+
+def select_loaded_adjustment(
+    archive: DetectionArchive, snapshot, *, append: bool
+) -> AdjustedTransform | None:
+    """Apply version-4 adjustment anchoring rules after a successful restore."""
+    estimate = snapshot.estimate
+    if estimate is None:
+        return None
+    if not append and archive.adjusted_transform is not None:
+        return archive.adjusted_transform
+
+    rvec = np.array(estimate.rvec, dtype=np.float64, copy=True)
+    tvec = np.array(estimate.tvec, dtype=np.float64, copy=True)
+    rvec.setflags(write=False)
+    tvec.setflags(write=False)
+    return AdjustedTransform(rvec, tvec)
+
+
+def _decode_transform(data: object) -> AdjustedTransform | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise TypeError("Detection archive transform must be an object")
+    try:
+        rvec = np.asarray(data["rvec"], dtype=np.float64).reshape(3, 1)
+        tvec = np.asarray(data["tvec"], dtype=np.float64).reshape(3, 1)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            f"Detection archive transform is malformed: {error}"
+        ) from error
+    if not (np.all(np.isfinite(rvec)) and np.all(np.isfinite(tvec))):
+        raise ValueError("Detection archive transform must be finite")
+    rvec.setflags(write=False)
+    tvec.setflags(write=False)
+    return AdjustedTransform(rvec, tvec)
+
+
+def _decode_quality(data: object) -> ArchivedQuality | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise TypeError("Detection archive quality must be an object")
+    try:
+        diversity = data["diversity"]
+        uncertainty = data.get("uncertainty")
+        quality = ArchivedQuality(
+            status=str(data["status"]),
+            is_degenerate=bool(data["is_degenerate"]),
+            n_frames=int(data["n_frames"]),
+            n_distinct_placements=int(data["n_distinct_placements"]),
+            reprojection_rms_px=float(data["reprojection_rms_px"]),
+            reprojection_max_px=float(data["reprojection_max_px"]),
+            per_pose_rms_px=tuple(float(value) for value in data["per_pose_rms_px"]),
+            cond_jtj=float(data["cond_JtJ"]),
+            normal_span_deg=float(diversity["normal_span_deg"]),
+            depth_range_m=float(diversity["depth_range_m"]),
+            lateral_span_m=float(diversity["lateral_span_m"]),
+            uncertainty_rot_deg=(
+                float(uncertainty["rot_deg"]) if uncertainty is not None else None
+            ),
+            uncertainty_trans_mm=(
+                float(uncertainty["trans_mm"]) if uncertainty is not None else None
+            ),
+            uncertainty_n_subsets=(
+                int(uncertainty["n_subsets"]) if uncertainty is not None else None
+            ),
+            warnings=tuple(str(value) for value in data.get("warnings", ())),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"Detection archive quality is malformed: {error}") from error
+
+    numeric = (
+        quality.reprojection_rms_px,
+        quality.reprojection_max_px,
+        *quality.per_pose_rms_px,
+        quality.cond_jtj,
+        quality.normal_span_deg,
+        quality.depth_range_m,
+        quality.lateral_span_m,
+    )
+    optional_numeric = (
+        quality.uncertainty_rot_deg,
+        quality.uncertainty_trans_mm,
+    )
+    if not all(np.isfinite(value) for value in numeric) or not all(
+        value is None or np.isfinite(value) for value in optional_numeric
+    ):
+        raise ValueError("Detection archive quality must be finite")
+    return quality
+
+
 __all__ = [
     "FORMAT_VERSION",
     "MIGRATION_COMMAND",
+    "AdjustedTransform",
+    "ArchivedQuality",
+    "DetectionArchive",
+    "decode_detection_archive",
     "deserialize_detection2d_array",
     "deserialize_detection3d_array",
+    "encode_detection_archive",
     "format_version_error",
     "migrate_v3_to_v4",
+    "select_loaded_adjustment",
     "serialize_detection2d_array",
     "serialize_detection3d_array",
 ]
