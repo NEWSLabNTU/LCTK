@@ -374,11 +374,14 @@ hand `detect_markers` a rectified image.
 
 **Synchronizer Parameters (Conflux):**
 
-All solver nodes use the Conflux synchronizer with these parameters:
+The maintained `lidar_to_camera_solver` and `lidar_to_lidar_solver` use
+`lctk_sync.DetectionPairSource`, which owns Conflux, finite-window validation, replay recovery,
+freshness/skew checks and operator diagnosis. The legacy `extrinsic_solver_node` still calls Conflux
+directly and is scheduled for deletion by the diamond-frame plan.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sync_tolerance_ms` | float | mode-dependent | Time window in ms. 0 = infinite window (no time-based dropping) |
+| `sync_tolerance_ms` | float | mode-dependent | Time window in ms. Must be positive on maintained solver paths; 0 enables unsafe arrival-order pairing and is refused. |
 | `sync_queue_size` | int | mode-dependent | Buffer size per stream |
 | `sync_drop_policy` | string | "reject_new" | Buffer overflow policy: "reject_new" or "drop_oldest" |
 
@@ -388,11 +391,9 @@ All solver nodes use the Conflux synchronizer with these parameters:
 
 **Statistics Logging:**
 
-All solver nodes log synchronization statistics on shutdown:
+`DetectionPairSource` periodically logs synchronization status:
 ```
-[INFO] Final sync statistics: received=1200, rejected=0, groups=580, rejection_rate=0.0%
-[INFO]   aruco_detections: received=800, rejected=0, rejection_rate=0.0%
-[INFO]   calibration_board_detections: received=400, rejected=0, rejection_rate=0.0%
+[INFO] sync: groups=580; pair skew last=12.4ms max=31.8ms; aruco_detections: received=800 rejected=0 dropped=0; calibration_board_detections: received=400 rejected=0 dropped=0
 ```
 
 Buffer overflow warnings are rate-limited and logged automatically:

@@ -36,18 +36,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from conflux_py import (
-    DropPolicy,
-    # The ROS wrapper: owns the subscriptions and the statistics ...
-    ROS2Synchronizer,
-    SyncConfig,
-    SyncGroup,
-)
-from conflux_py import (
-    # ... the bare matching engine, which holds the buffers and the commit time. An
-    # epoch reset replaces the engine while leaving the subscriptions alive.
-    Synchronizer as ConfluxEngine,
-)
+from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 
 from lctk_sync.config import PairSourceConfig
 from lctk_sync.diagnosis import (
@@ -115,19 +104,17 @@ class DetectionPairSource:
         self._last_received: dict = {}
         self._last_stats_line: str | None = None
 
-        self._engine_config = SyncConfig(
-            int(self._config.window_ms),
-            self._config.queue_size,
+        drop_policy = (
             DropPolicy.DROP_OLDEST
             if self._config.drop_policy == "drop_oldest"
-            else DropPolicy.REJECT_NEW,
+            else DropPolicy.REJECT_NEW
         )
 
         self._sync = ROS2Synchronizer(
             node,
             window_size_ms=int(self._config.window_ms),
             buffer_size=self._config.queue_size,
-            drop_policy=self._engine_config.drop_policy,
+            drop_policy=drop_policy,
             qos=qos,
         )
         for msg_type, topic in zip(msg_types, self._topics):
@@ -281,14 +268,12 @@ class DetectionPairSource:
         belong to the previous recording and cannot pair with anything arriving now, so
         they go with it -- as does any cached pair.
 
-        `_sync` is ROS2Synchronizer's private handle. Reaching for it is deliberate and
-        contained to this line: conflux exposes no reset, and rebuilding the wrapper
-        would mean tearing down subscriptions mid-callback. Worth an upstream request
-        for `ROS2Synchronizer.reset()`.
+        `ROS2Synchronizer.reset()` keeps the ROS subscriptions, callback and cumulative
+        statistics while replacing the matching engine.
         """
         self._epoch_resets += 1
         self._last_epoch_reset_at = time.monotonic()
-        self._sync._sync = ConfluxEngine(self._topics, self._engine_config)
+        self._sync.reset()
         self._latest = None
         self._latest_at = None
         self._max_skew_ms = 0.0
