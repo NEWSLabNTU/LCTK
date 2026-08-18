@@ -52,7 +52,10 @@ takes the mode-derived window preset and inherits the epoch reset from the modul
 ## Decision
 
 **The synchronized detection pair becomes one deep module, `lctk_sync.DetectionPairSource`, and every
-solver node consumes it rather than conflux directly.**
+maintained solver node consumes it rather than conflux directly.** The superseded
+`extrinsic_solver_node` is excluded because Stage 3 of the
+[diamond-frame plan](../superpowers/specs/2026-08-14-lidar-to-camera-solver-diamond-frame.md)
+deletes it.
 
 Its interface is: construct it with a node, topics and message types; optionally register `on_pair`
 for consumers that act on every pair; call `take_fresh_pair()` for the newest usable pair or the
@@ -83,12 +86,27 @@ pure decisions (`should_reset_for_new_epoch`, `sync_wait_diagnosis`, `sync_pair_
 interface rather than beside it in a 2187-line node.
 
 **Harder.** A caller that genuinely wants order-based pairing — two streams in true 1:1 lockstep —
-must now say so some other way; the escape hatch was removed deliberately. And `lctk_sync` reaches
-into `ROS2Synchronizer._sync` to swap the matching engine, which is a private attribute of a submodule
-we do not own. That reach is confined to one line in `_reset_for_new_epoch`, and the right resolution
-is an upstream `ROS2Synchronizer.reset()`.
+must now say so some other way; the escape hatch was removed deliberately.
+
+`ROS2Synchronizer.reset()` now provides the epoch seam directly. It replaces only the matching
+engine, preserving ROS subscriptions, the synchronized callback and cumulative statistics.
+`DetectionPairSource` therefore no longer imports the bare Conflux engine or mutates the wrapper's
+private `_sync` handle.
 
 **Ruled out.** Restamping detections with wall-clock time to dodge the backward jumps. It makes stamps
 monotonic but destroys what the pairing is for: after restamping, a stamp says when a result finished
 computing, so pairing would reflect processing latency (ArUco ~5.4 Hz behind a backlogged republish,
 ICP 200–600 ms) rather than observation time — reintroducing defect 1 in a form no window can catch.
+
+## Implementation status — 2026-08-18
+
+`lidar_to_camera_solver` and `lidar_to_lidar_solver` both consume
+`lctk_sync.DetectionPairSource`. They inherit its finite-window rule, replay recovery, skew/status
+reporting and empty-group policy. The pull-based LiDAR-camera solver additionally uses its freshness
+gate and refusal diagnosis; the push-based LiDAR-to-LiDAR solver receives each pair through
+`on_pair`. The only direct Conflux caller left is the legacy `extrinsic_solver_node`, which is
+scheduled for deletion rather than migration.
+
+The production migration and public reset seam are complete. The remaining work under this ADR is
+real-ROS contract coverage through the module interface: in-window delivery, outside-window refusal,
+empty-group diagnosis, stale-pair refusal and autonomous recovery after a timestamp rewind.
