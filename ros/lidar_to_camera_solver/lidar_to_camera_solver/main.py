@@ -58,6 +58,12 @@ from lidar_to_camera_solver.detection_format import (
 )
 
 
+def rotation_vector_to_euler(rvec: np.ndarray, *, degrees: bool = False) -> np.ndarray:
+    """Render one solved rotation vector for ROS response fields."""
+    owned_rvec = np.array(rvec, dtype=np.float64, copy=True).reshape(3)
+    return Rotation.from_rotvec(owned_rvec).as_euler("xyz", degrees=degrees)
+
+
 class LidarToCameraSolver(Node):
     """ROS services and publication around :class:`DetectionBuffer`."""
 
@@ -592,9 +598,7 @@ class LidarToCameraSolver(Node):
             self.last_transform = self._create_transform_message(
                 self.current_rvec, self.current_tvec
             )
-            euler = Rotation.from_rotvec(self.current_rvec.ravel()).as_euler(
-                "xyz", degrees=True
-            )
+            euler = rotation_vector_to_euler(self.current_rvec, degrees=True)
             response.success = True
             response.message = (
                 "Transform adjusted: "
@@ -634,8 +638,8 @@ class LidarToCameraSolver(Node):
             solved_tvec = np.asarray(snapshot.estimate.tvec)
             current_rvec = self.current_rvec.copy()
             current_tvec = self.current_tvec.copy()
-        solved_euler = Rotation.from_rotvec(solved_rvec.ravel()).as_euler("xyz")
-        current_euler = Rotation.from_rotvec(current_rvec.ravel()).as_euler("xyz")
+        solved_euler = rotation_vector_to_euler(solved_rvec)
+        current_euler = rotation_vector_to_euler(current_rvec)
         response.has_pose = True
         response.solved_x, response.solved_y, response.solved_z = map(
             float, solved_tvec.ravel()

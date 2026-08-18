@@ -18,6 +18,7 @@ from lidar_to_camera_solver.detection_format import (
     encode_detection_archive,
     select_loaded_adjustment,
 )
+from lidar_to_camera_solver.main import rotation_vector_to_euler
 from scipy.spatial.transform import Rotation
 from vision_msgs.msg import (
     Detection2D,
@@ -178,6 +179,17 @@ def test_enough_valid_captures_solve_and_keep_quality_verdict():
     assert isinstance(update.snapshot.outcome, Solved)
     assert update.snapshot.estimate.quality.n_frames == 2
     assert update.snapshot.estimate.quality.status_line()
+
+
+def test_solved_estimate_can_be_rendered_as_pose_info():
+    """Node must be able to pass snapshot rotation into system SciPy."""
+    buffer = make_buffer(minimum=2)
+    buffer.capture(make_pair())
+    snapshot = buffer.capture(
+        make_pair(position=(0.7, -0.4, 4.2), rotation=(0.4, -0.25, 0.0))
+    ).snapshot
+
+    rotation_vector_to_euler(snapshot.estimate.rvec)
 
 
 def test_degenerate_solve_is_solved_unless_policy_refuses_it():
