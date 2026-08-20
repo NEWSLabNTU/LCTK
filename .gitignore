@@ -80,3 +80,7 @@ setup/.markers/
 
 # Play log
 /play_log
+
+# Generated local launch records and scratch plans
+/record.json
+/tmp/
