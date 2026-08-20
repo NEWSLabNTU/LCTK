@@ -18,7 +18,7 @@ from lidar_to_camera_solver.detection_format import (
     encode_detection_archive,
     select_loaded_adjustment,
 )
-from lidar_to_camera_solver.main import rotation_vector_to_euler
+from lidar_to_camera_solver.main import parse_solver_mode, rotation_vector_to_euler
 from scipy.spatial.transform import Rotation
 from vision_msgs.msg import (
     Detection2D,
@@ -110,6 +110,51 @@ def make_pair(
     detection.results.append(result)
     board.detections.append(detection)
     return DetectionPair(aruco=aruco, board=board)
+
+
+@pytest.mark.parametrize("mode", ["continuous", "manual"])
+def test_solver_mode_accepts_only_named_behaviours(mode):
+    assert parse_solver_mode(mode) == mode
+
+
+@pytest.mark.parametrize("mode", ["", "standard", "advanced", "true"])
+def test_solver_mode_rejects_removed_or_unknown_values(mode):
+    with pytest.raises(ValueError, match="expected 'continuous', 'manual'"):
+        parse_solver_mode(mode)
+
+
+def test_continuous_policy_replaces_latest_pair_and_uses_sqpnp_plus_lm(monkeypatch):
+    buffer = make_buffer(minimum=1)
+    solve_flags = []
+    refinement_calls = 0
+    real_solve_pnp = cv2.solvePnP
+    real_refine_lm = cv2.solvePnPRefineLM
+
+    def record_solve(*args, **kwargs):
+        solve_flags.append(kwargs["flags"])
+        return real_solve_pnp(*args, **kwargs)
+
+    def record_refinement(*args, **kwargs):
+        nonlocal refinement_calls
+        refinement_calls += 1
+        return real_refine_lm(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "solvePnP", record_solve)
+    monkeypatch.setattr(cv2, "solvePnPRefineLM", record_refinement)
+
+    first = buffer.restore([make_pair()], append=False)
+    second_pair = make_pair(position=(0.7, -0.4, 4.2), rotation=(0.4, -0.25, 0.0))
+    second = buffer.restore([second_pair], append=False)
+
+    assert isinstance(first.snapshot.outcome, Solved)
+    assert isinstance(second.snapshot.outcome, Solved)
+    assert second.snapshot.frame_count == 1
+    assert second.snapshot.estimate.quality.n_frames == 1
+    assert second.snapshot.pairs[0].board.detections[0].results[
+        0
+    ].pose.pose.position.x == pytest.approx(0.7)
+    assert solve_flags == [cv2.SOLVEPNP_SQPNP, cv2.SOLVEPNP_SQPNP]
+    assert refinement_calls == 2
 
 
 def test_twenty_noisy_static_captures_are_one_placement():

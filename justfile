@@ -10,7 +10,7 @@ log_level := "info"
 rviz_enabled := "true"
 # Processing mode: "offline" (RELIABLE QoS, perfect sync) or "realtime" (BEST_EFFORT QoS, no buffering)
 mode := "offline"
-use_advanced_solver := "false"
+solver_mode := "continuous"
 enable_overlay := "true"
 enable_judge := "true"
 
@@ -183,7 +183,7 @@ lidar-camera CONFIG='seyond_left.yaml':
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        use_advanced_solver:={{ use_advanced_solver }} \
+        solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}
 
@@ -202,7 +202,7 @@ two-lidar:
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        use_advanced_solver:={{ use_advanced_solver }}
+        solver_mode:={{ solver_mode }}
 
 # Launch sample data playback only
 sample-data:
@@ -224,7 +224,7 @@ demo:
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        use_advanced_solver:={{ use_advanced_solver }} \
+        solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}
 
@@ -250,12 +250,12 @@ calibrate config_file:
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        use_advanced_solver:={{ use_advanced_solver }} \
+        solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}
 
-# Launch interactive advanced solver controller
-advanced-solver-controller:
+# Launch interactive manual solver controller
+manual-solver-controller:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash

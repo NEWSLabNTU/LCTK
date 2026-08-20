@@ -47,10 +47,10 @@ def generate_launch_description():
         description="Launch RViz for calibration visualization",
     )
 
-    use_advanced_solver_arg = DeclareLaunchArgument(
-        "use_advanced_solver",
-        default_value="false",
-        description="Use advanced multi-pose solver vs standard solver",
+    solver_mode_arg = DeclareLaunchArgument(
+        "solver_mode",
+        default_value="continuous",
+        description="LiDAR-camera solver behaviour: 'continuous' or 'manual'",
     )
 
     enable_overlay_arg = DeclareLaunchArgument(
@@ -79,6 +79,8 @@ def generate_launch_description():
                     "' == 'realtime' else 'false'",
                 ]
             ),
+            ", solver_mode=",
+            LaunchConfiguration("solver_mode"),
         ]
     )
 
@@ -127,7 +129,7 @@ def generate_launch_description():
             "log_level": LaunchConfiguration("log_level"),
             "mode": LaunchConfiguration("mode"),
             "enable_rviz": LaunchConfiguration("enable_rviz"),
-            "use_advanced_solver": LaunchConfiguration("use_advanced_solver"),
+            "solver_mode": LaunchConfiguration("solver_mode"),
             # L-09: forward overlay/judge so `just demo` matches `just lidar-camera`
             # instead of silently falling back to calibrate.launch.py's defaults.
             "enable_overlay": LaunchConfiguration("enable_overlay"),
@@ -141,7 +143,7 @@ def generate_launch_description():
             log_level_arg,
             mode_arg,
             enable_rviz_arg,
-            use_advanced_solver_arg,
+            solver_mode_arg,
             enable_overlay_arg,
             enable_judge_arg,
             mode_log,  # Debug logging of mode and QoS settings

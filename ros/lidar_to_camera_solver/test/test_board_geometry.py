@@ -29,13 +29,20 @@ def test_module_imports_without_rclpy():
     probe = (
         "import sys;"
         "import lidar_to_camera_solver.board_geometry as g;"
-        "print('rclpy' in sys.modules)"
+        "print(f'LCTK_BOARD_GEOMETRY_RCLPY={\"rclpy\" in sys.modules}')"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "False", "importing board_geometry pulled in rclpy"
+    sentinel_lines = [
+        line
+        for line in result.stdout.splitlines()
+        if line.startswith("LCTK_BOARD_GEOMETRY_RCLPY=")
+    ]
+    assert sentinel_lines == ["LCTK_BOARD_GEOMETRY_RCLPY=False"], (
+        "importing board_geometry pulled in rclpy"
+    )
 
 
 @pytest.mark.parametrize(

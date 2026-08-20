@@ -1,8 +1,8 @@
 # M-12 · No outlier rejection and no LM refinement in the extrinsic solve
 
 - **Severity:** Medium
-- **Area:** advanced_extrinsic_solver, extrinsic_solver_node
-- **Status:** Fixed (2026-08-15)
+- **Area:** lidar_to_camera_solver
+- **Status:** Fixed (2026-08-18) — maintained continuous and manual paths share SQPnP, LM refinement, float64, quality reporting, and covariance weighting
 - **Verified:** Yes (confirmed against live source, 2026-07-12)
 - **Location:**
   - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1333-1366` (`_solve_pnp`, `SOLVEPNP_SQPNP`)
@@ -26,7 +26,7 @@ over the concatenated correspondence set. There is:
 One bad pose in the buffer corrupts the whole calibration and there is no way to notice or
 exclude it. Bad poses are easy to produce: a partially occluded board, a grazing-incidence view
 where ICP settles into a poor local minimum, a frame where the LiDAR board pose snapped to the
-wrong origin corner ([M-14](./M-14-corner-order-brittle.md)). All 16 of that pose's corners are
+wrong origin corner ([M-14](../M-14-corner-order-brittle.md)). All 16 of that pose's corners are
 outliers *together* (they share one rigid `T_board`), which is exactly the correlated-outlier
 regime least-squares handles worst.
 
@@ -64,26 +64,18 @@ residual computation being added under H-09.
 Verified: `tmp/test_m12_refine.py` confirms RefineLM never worsens the reprojection
 RMSE on a synthetic noisy scene; `just build` + `just test` green.
 
-## Resolution (2026-08-15) — items 2 and 3
+## Final resolution (2026-08-18) — estimator asymmetry removed
 
-Items 1 (LM refinement) and 4 (ICP-quality weighting) landed earlier. Items 2-3 were blocked on
-H-09's residual surface, which has since shipped as `lctk_quality`, so they are now done.
+Diamond-frame Phase 2 Stage 2 made `lidar_to_camera_solver` the only config-driven camera solver
+and added `solver_mode=continuous` on its maintained backend. Both `continuous` and `manual` now use
+the same float64 correspondence path, SQPnP initialization, LM refinement, quality report, and
+board-pose covariance weighting. The weaker `extrinsic_solver_node` remains in-tree only until
+Stage 3 deletes it; no launch or justfile path can select it.
 
-`_reject_outlier_poses` computes per-pose reprojection RMS against the initial estimate, flags
-outliers, and the solver re-solves without them. Rejection is at **pose** granularity, exactly as
-this issue argued: a pose's 16 corners share one rigid `T_board`, so a bad fit misplaces all of
-them together. Rejecting corners individually would treat one rigid error seen 16 times as 16
-independent draws -- which is the assumption that already fails here.
+Focused coverage proves the continuous policy replaces rather than accumulates its latest pair and
+calls `SOLVEPNP_SQPNP` plus `solvePnPRefineLM`. Full verification passed: `just build`, 240 Rust
+tests, and 181 Python tests.
 
-The threshold is `median + k * 1.4826 * MAD`; a mean-and-sigma rule would be inflated by the very
-outlier it exists to catch. Two guards stop it eating good data: a clean buffer has a near-zero
-MAD so an absolute floor is also required, and it refuses to reject when too few poses would
-survive, since an under-constrained solve is worse than one contaminated pose and pose diversity
-is already scarce (H-07).
-
-Behind `reject_outlier_poses` (default on) and `outlier_pose_mad_k`. Per-pose RMS is logged
-whether or not anything is rejected, since the residuals are the diagnostic.
-
-Regression coverage: `test_pose_gating.py` -- the M-14 quarter-turn is rejected, a clean buffer
-rejects nothing, the re-solve is measurably closer to truth, the min-keep guard holds, and
-residuals are reported regardless.
+Pose-grouped RANSAC/IRLS remains a possible estimator enhancement, explicitly out of scope for the
+diamond-frame spec. It is no longer evidence of different or unrefined maintained solver paths, so
+this issue is closed.

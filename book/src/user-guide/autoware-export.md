@@ -41,7 +41,7 @@ The exporter doesn't care which era you're on — point it at the right file.
 
 ## Step 1: Save the calibration
 
-Run the pipeline with the advanced solver and dump the result (via the
+Run the pipeline with `solver_mode=manual` and dump the result (via the
 [interactive controller](./lidar-camera.md)'s `p` key, or the service directly):
 
 ```bash

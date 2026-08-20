@@ -776,7 +776,7 @@ class EducationalExtrinsicSolver(Node):
             "  placement cannot determine the transform, and a degenerate capture typically\n"
             "  scores a BETTER reprojection error than a good one.\n"
             "  For a calibration you can trust, use the buffered solver over several distinct\n"
-            "  board placements: `just demo use_advanced_solver=true` (see docs/issues/H-07)."
+            "  board placements: `just demo solver_mode=manual` (see docs/issues/H-07)."
         )
 
     def _create_transform_message_educational(
