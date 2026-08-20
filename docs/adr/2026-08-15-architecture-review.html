@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LCTK Architecture Review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', themeVariables: { fontSize: '13px' } });
+</script>
+<style>
+  body { background:#0b0f17; }
+  .card { background:#121826; border:1px solid #1f2937; }
+  .mass { border-radius:6px; }
+  .iface { background:#38bdf8; }
+  .impl  { background:#1e3a5f; }
+  .hatch { background:repeating-linear-gradient(45deg,#7f1d1d,#7f1d1d 6px,#991b1b 6px,#991b1b 12px); }
+</style>
+</head>
+<body class="text-slate-200 font-sans">
+
+<header class="max-w-6xl mx-auto px-6 pt-12 pb-8">
+  <p class="text-sky-400 text-sm font-mono tracking-widest uppercase">Architecture review</p>
+  <h1 class="text-4xl font-bold mt-2">LCTK — deepening opportunities</h1>
+  <p class="text-slate-400 mt-4 max-w-3xl">
+    Scoped to the codebase's hot spots from the last 60 commits:
+    <code class="text-sky-300">lidar_board_detector</code>,
+    <code class="text-sky-300">lidar_to_camera_solver</code>, and
+    <code class="text-sky-300">board-cluster-detector</code>.
+    No <code>CONTEXT.md</code> and no ADRs exist, so the domain vocabulary below is taken from
+    <code>CLAUDE.md</code> and the code itself.
+  </p>
+  <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+    <div class="card rounded-lg p-4"><div class="text-3xl font-bold text-sky-300">3094</div><div class="text-slate-400">lines in <code>lidar_board_detector/src/main.rs</code></div></div>
+    <div class="card rounded-lg p-4"><div class="text-3xl font-bold text-sky-300">2187</div><div class="text-slate-400">lines in <code>lidar_to_camera_solver/main.py</code></div></div>
+    <div class="card rounded-lg p-4"><div class="text-3xl font-bold text-amber-300">3</div><div class="text-slate-400">nodes wiring conflux by hand</div></div>
+    <div class="card rounded-lg p-4"><div class="text-3xl font-bold text-rose-400">1 of 3</div><div class="text-slate-400">carries today's sync fixes</div></div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-6 pb-20 space-y-8">
+
+<!-- ============ C1 ============ -->
+<section class="card rounded-xl p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-2xl font-semibold">1 · The synchronized detection pair, as a module</h2>
+    <span class="shrink-0 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-600 text-xs font-semibold uppercase tracking-wide">Strong</span>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Files</h3>
+  <ul class="mt-2 text-sm font-mono text-slate-300 space-y-1">
+    <li>ros/lidar_to_camera_solver/lidar_to_camera_solver/main.py</li>
+    <li>ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py</li>
+    <li>ros/extrinsic_solver_node/extrinsic_solver_node/main.py <span class="text-slate-500">(deleted at Stage 3)</span></li>
+    <li>ros/lctk_launch/launch/calibrate.launch.py</li>
+  </ul>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Problem</h3>
+  <p class="mt-2 text-slate-300">
+    Every solver node wires conflux by hand: build a <code>ROS2Synchronizer</code>, register two subscriptions,
+    register a callback, cache the newest pair, and interpret what an absent pair means. The interface each
+    node presents to itself is large — synchronizer, statistics, drop policy, window, cached pair, cached
+    timestamps — and the behaviour behind it is real: epoch detection, staleness, skew, and diagnosis.
+  </p>
+  <p class="mt-3 text-slate-300">
+    Today's two defects were fixed in <em>one</em> of the three. <code>lidar_to_lidar_solver</code> is launched
+    with <code class="text-rose-300">sync_tolerance_ms: 0.0</code> hardcoded at
+    <code>calibrate.launch.py:285</code> — the infinite window that pairs by arrival order — and it has no
+    epoch reset, so a replayed bag still stops it dead. The knowledge exists; it just has nowhere to live.
+  </p>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Before / After</h3>
+  <div class="grid md:grid-cols-2 gap-4 mt-3">
+    <div class="bg-black/30 rounded-lg p-4">
+      <p class="text-xs uppercase text-rose-300 mb-2">Before — knowledge per caller</p>
+      <pre class="mermaid">
+graph TD
+  L[calibrate.launch.py] -->|sync params| A[lidar_to_camera_solver]
+  L -->|sync params| B[lidar_to_lidar_solver]
+  L -->|sync params| C[extrinsic_solver_node]
+  A --> A1["epoch reset ✓<br/>staleness ✓<br/>skew ✓<br/>diagnosis ✓"]
+  B --> B1["epoch reset ✗<br/>staleness ✗<br/>skew ✗<br/>window = ∞ ✗"]
+  C --> C1["none of it ✗"]
+  A --> X[conflux]
+  B --> X
+  C --> X
+  style B1 fill:#7f1d1d,stroke:#ef4444
+  style C1 fill:#7f1d1d,stroke:#ef4444
+  style A1 fill:#064e3b,stroke:#10b981
+      </pre>
+    </div>
+    <div class="bg-black/30 rounded-lg p-4">
+      <p class="text-xs uppercase text-emerald-300 mb-2">After — one module, one place to fix</p>
+      <pre class="mermaid">
+graph TD
+  L[calibrate.launch.py] --> A[lidar_to_camera_solver]
+  L --> B[lidar_to_lidar_solver]
+  A --> P["DetectionPairSource<br/><i>latest_pair() · stats_line()</i>"]
+  B --> P
+  P --> P1["epoch reset<br/>staleness<br/>skew<br/>diagnosis<br/>window policy"]
+  P --> X[conflux]
+  style P fill:#0c4a6e,stroke:#38bdf8
+  style P1 fill:#064e3b,stroke:#10b981
+      </pre>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4 mt-4">
+    <div class="bg-black/20 rounded-lg p-4">
+      <p class="text-xs uppercase text-slate-400 mb-3">Shallow today: interface ≈ implementation</p>
+      <div class="space-y-1">
+        <div class="iface mass h-10 flex items-center justify-center text-xs text-slate-900 font-semibold">interface the node must know: 9 params, 2 topics, 4 counters, private <code>_sync</code></div>
+        <div class="impl mass h-8 flex items-center justify-center text-xs">implementation: a few caches</div>
+      </div>
+    </div>
+    <div class="bg-black/20 rounded-lg p-4">
+      <p class="text-xs uppercase text-slate-400 mb-3">Deep: small interface, real behaviour</p>
+      <div class="space-y-1">
+        <div class="iface mass h-6 flex items-center justify-center text-xs text-slate-900 font-semibold">latest_pair(now) · stats_line()</div>
+        <div class="impl mass h-24 flex items-center justify-center text-xs text-center px-3">conflux ownership · window policy · epoch reset · staleness gate · skew measurement · refusal diagnosis</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Solution</h3>
+  <p class="mt-2 text-slate-300">
+    One module that owns "give me the freshest pair of detections that were genuinely simultaneous."
+    It takes a node and two topics, and answers either a pair or the reason there isn't one. The
+    synchronizer, the window, the epoch reset, and the private <code>_sync</code> handle all move behind it.
+  </p>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Benefits</h3>
+  <ul class="mt-2 text-slate-300 list-disc pl-5 space-y-1">
+    <li><strong>Locality</strong> — the next sync defect is fixed once. Today it was fixed once and left broken twice.</li>
+    <li><strong>Leverage</strong> — a solver node learns two calls instead of nine parameters plus conflux's ordering contract.</li>
+    <li><strong>Tests</strong> — the pure decision functions I added (<code>should_reset_for_new_epoch</code>, <code>sync_wait_diagnosis</code>, <code>sync_pair_staleness_error</code>) stop being loose functions in a 2187-line node and become the module's own test surface, exercised through the interface rather than beside it.</li>
+    <li>The reach into <code>sync._sync</code> becomes an internal seam instead of a private attribute touched from a node.</li>
+  </ul>
+</section>
+
+<!-- ============ C2 ============ -->
+<section class="card rounded-xl p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-2xl font-semibold">2 · The detection buffer, as a module</h2>
+    <span class="shrink-0 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-600 text-xs font-semibold uppercase tracking-wide">Strong</span>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Files</h3>
+  <ul class="mt-2 text-sm font-mono text-slate-300 space-y-1">
+    <li>ros/lidar_to_camera_solver/lidar_to_camera_solver/main.py <span class="text-slate-500">(10 service callbacks, ~900 lines)</span></li>
+    <li>ros/lidar_to_camera_solver/test/test_placement_counting.py</li>
+    <li>ros/lidar_to_camera_solver/test/test_pose_weighting.py</li>
+  </ul>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Problem</h3>
+  <p class="mt-2 text-slate-300">
+    The buffer of board placements is the node's central domain concept — it decides whether a capture
+    constrains the extrinsic at all — but it has no interface. It is a bare list plus a lock plus ten
+    service callbacks that each mutate it and format a response. The rules that matter (a frame is a
+    duplicate placement; a solve needs N distinct placements; the covariance weights the fit) are spread
+    across those callbacks.
+  </p>
+  <p class="mt-3 text-slate-300">
+    The tests admit it. They cannot construct the module, so they reach past it:
+  </p>
+  <pre class="mt-3 bg-black/40 rounded-lg p-4 text-sm overflow-x-auto text-slate-300"><code>_count_placements = S._count_placements          # unbound method, fake self
+w_tight = S._pose_weight(tight, corners)         # static reach-through
+solver = S.__new__(S)                            # construct without __init__
+rvec_w, tvec_w = S._refine_pnp_weighted(...)</code></pre>
+  <p class="mt-3 text-slate-300">
+    <em>The interface is the test surface.</em> When tests need <code>__new__</code> to dodge the
+    constructor, the module is the wrong shape — not the tests.
+  </p>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Before / After</h3>
+  <div class="grid md:grid-cols-2 gap-4 mt-3">
+    <div class="bg-black/30 rounded-lg p-4">
+      <p class="text-xs uppercase text-rose-300 mb-2">Before</p>
+      <pre class="mermaid">
+graph LR
+  S1[add_detection] --> D[(list + lock)]
+  S2[remove_detection] --> D
+  S3[clear_buffer] --> D
+  S4[list_buffer] --> D
+  S5[get_status] --> D
+  S6[dump/load] --> D
+  T[tests] -.->|__new__, unbound methods| D
+  style T stroke-dasharray: 4 4,stroke:#ef4444,fill:#450a0a
+      </pre>
+    </div>
+    <div class="bg-black/30 rounded-lg p-4">
+      <p class="text-xs uppercase text-emerald-300 mb-2">After</p>
+      <pre class="mermaid">
+graph LR
+  S1[add_detection] --> B
+  S2[remove_detection] --> B
+  S3[clear_buffer] --> B
+  S4[list_buffer] --> B
+  S5[get_status] --> B
+  S6[dump/load] --> B
+  B["PlacementBuffer<br/><i>add · remove · clear<br/>status · solve</i>"] --> I[(placements + solve + quality)]
+  T[tests] --> B
+  style B fill:#0c4a6e,stroke:#38bdf8
+  style T fill:#064e3b,stroke:#10b981
+      </pre>
+    </div>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Solution</h3>
+  <p class="mt-2 text-slate-300">
+    A module holding the placements and the solve, with no <code>rclpy</code> import — the same rule that
+    already makes <code>board_geometry.py</code> and <code>detection_format.py</code> testable. Adding a pair
+    returns a result the caller can render (accepted / duplicate placement / solved with this quality);
+    the service callbacks become the thin adapters they should have been.
+  </p>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Benefits</h3>
+  <ul class="mt-2 text-slate-300 list-disc pl-5 space-y-1">
+    <li><strong>Locality</strong> — the "is this a new placement?" rule lives once, not in every callback that reports it.</li>
+    <li><strong>Leverage</strong> — Stage 2's <code>continuous</code> mode needs exactly this module and nothing else from the node.</li>
+    <li><strong>Tests</strong> — the existing reach-through tests become ordinary calls, and the deletion test passes: delete it and the placement rules scatter back across ten callbacks.</li>
+  </ul>
+</section>
+
+<!-- ============ C3 ============ -->
+<section class="card rounded-xl p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-2xl font-semibold">3 · Board visualisation out of the detector node</h2>
+    <span class="shrink-0 px-3 py-1 rounded-full bg-sky-500/15 text-sky-300 border border-sky-600 text-xs font-semibold uppercase tracking-wide">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Files</h3>
+  <p class="mt-2 text-sm font-mono text-slate-300">ros/lidar_board_detector/src/main.rs — lines 2348–2931</p>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Problem</h3>
+  <p class="mt-2 text-slate-300">
+    584 of the node's 3094 lines build RViz markers: bbox markers, board markers, plane markers, ICP
+    correspondence markers, per-iteration debug poses. It is pure geometry-to-message code with no ROS
+    behaviour beyond the message types, yet it sits inside the node struct and so has no test at all.
+    Phase 1's frame change had to be verified by an operator looking at where an arrow pointed — that is
+    exactly the code that draws the arrow.
+  </p>
+
+  <div class="mt-4 bg-black/20 rounded-lg p-4">
+    <p class="text-xs uppercase text-slate-400 mb-3">Where the 3094 lines go</p>
+    <div class="flex h-8 rounded overflow-hidden text-[10px] font-semibold text-slate-900">
+      <div style="width:15%" class="bg-sky-400 flex items-center justify-center">params/config 450</div>
+      <div style="width:20%" class="bg-emerald-400 flex items-center justify-center">detection pipeline 620</div>
+      <div style="width:19%" class="bg-amber-300 flex items-center justify-center">markers 584</div>
+      <div style="width:10%" class="bg-fuchsia-300 flex items-center justify-center">cloud decode 300</div>
+      <div style="width:12%" class="bg-slate-300 flex items-center justify-center">covariance 350</div>
+      <div style="width:24%" class="bg-slate-500 flex items-center justify-center text-slate-100">the rest</div>
+    </div>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Solution &amp; benefits</h3>
+  <p class="mt-2 text-slate-300">
+    A module that turns a board detection plus a header into the marker arrays. Interface: one call per
+    visual. <strong>Locality</strong>: the marker geometry stops being interleaved with publishing.
+    <strong>Tests</strong>: marker positions become assertable — the corner-aligned frame could be pinned in
+    a unit test instead of by eye.
+  </p>
+</section>
+
+<!-- ============ C4 ============ -->
+<section class="card rounded-xl p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-2xl font-semibold">4 · PointCloud2 decoding as one module</h2>
+    <span class="shrink-0 px-3 py-1 rounded-full bg-sky-500/15 text-sky-300 border border-sky-600 text-xs font-semibold uppercase tracking-wide">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Files</h3>
+  <ul class="mt-2 text-sm font-mono text-slate-300 space-y-1">
+    <li>ros/lidar_board_detector/src/main.rs <span class="text-slate-500">(convert_pointcloud2_to_points, read_coord)</span></li>
+    <li>ros/pointcloud_image_overlay/pointcloud_image_overlay/overlay_node.py</li>
+    <li>rust/board-cluster-detector/src/background.rs</li>
+  </ul>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Problem &amp; solution</h3>
+  <p class="mt-2 text-slate-300">
+    Field offsets, datatypes, endianness and point striding are decoded in three places across two
+    languages. <em>Two adapters means a real seam</em> — this one has three. A malformed-cloud bug fixed in
+    the detector is not fixed in the overlay. One decoding module per language, with the field-layout
+    rules behind it, and the callers stop knowing what <code>point_step</code> means.
+  </p>
+  <p class="mt-3 text-slate-300">
+    Weaker than 1 and 2 because the duplication is stable and low-churn — worth doing when one of these
+    files is next opened, not as its own campaign.
+  </p>
+</section>
+
+<!-- ============ C5 ============ -->
+<section class="card rounded-xl p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-2xl font-semibold">5 · The detection pipeline as a value, not a procedure</h2>
+    <span class="shrink-0 px-3 py-1 rounded-full bg-slate-500/15 text-slate-300 border border-slate-600 text-xs font-semibold uppercase tracking-wide">Speculative</span>
+  </div>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Files</h3>
+  <p class="mt-2 text-sm font-mono text-slate-300">ros/lidar_board_detector/src/main.rs — <code>process_pointcloud</code>, lines 904–1218</p>
+
+  <h3 class="mt-5 text-sm uppercase tracking-widest text-slate-400">Problem &amp; solution</h3>
+  <p class="mt-2 text-slate-300">
+    A 300-line procedure that filters, fits a plane, runs ICP, scores the fit, and publishes eight debug
+    topics along the way — with early returns that publish an empty detection array. The publishing is
+    braided through the decision-making, so the decisions can't be tested and the reject reasons can only
+    be read from logs.
+  </p>
+  <p class="mt-3 text-slate-300">
+    Deepening it means returning a result — detection or rejection-with-reason, plus the debug artefacts —
+    and letting the node publish. Marked speculative because <code>docs/superpowers/plans/2026-07-28-boarddet-reject-reason-diagnostics.md</code>
+    is already in flight over this area; it should absorb this rather than compete with it.
+  </p>
+</section>
+
+<!-- ============ TOP ============ -->
+<section class="rounded-xl p-6 border border-emerald-700 bg-emerald-950/30">
+  <h2 class="text-2xl font-semibold text-emerald-300">Top recommendation — candidate 1</h2>
+  <p class="mt-3 text-slate-200">
+    Take the synchronized detection pair first, because the argument for it is not hypothetical: the two
+    defects fixed today still exist in <code>lidar_to_lidar_solver</code>, which is launched with the
+    infinite window at <code>calibrate.launch.py:285</code> and has no epoch reset. That is what missing
+    locality costs, stated in a bug rather than in principle.
+  </p>
+  <p class="mt-3 text-slate-200">
+    It is also the cheapest of the two strong candidates: the behaviour is already written and already
+    tested as pure functions — it needs a home, not an invention. Candidate 2 is the better follow-up,
+    and Stage 2 of the diamond-frame work will want it anyway.
+  </p>
+</section>
+
+<footer class="text-center text-slate-500 text-sm pb-10">
+  Vocabulary: module · interface · depth · seam · adapter · leverage · locality.
+</footer>
+</main>
+</body>
+</html>
