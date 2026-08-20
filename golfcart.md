@@ -10,10 +10,10 @@ just republish <left|right>
 
 In terminal 3, launch the solver
 ```bash
-just log_level=info use_advanced_solver=true lidar-camera seyond_<left|right>.yaml
+just log_level=info solver_mode=manual lidar-camera seyond_<left|right>.yaml
 ```
 
 In terminal 4, open the solver's control panel
 ```bash
-just advanced-solver-controller
+just manual-solver-controller
 ```

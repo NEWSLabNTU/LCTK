@@ -6,7 +6,7 @@
 - **Verified:** 2026-08-13 — `extrinsic_solver_node/main.py:475-575`, `advanced_extrinsic_solver/main.py:1589-1656`, read against the landed `rust/hollow-board-config/src/lib.rs`
 - **Spec (the fix):** [`2026-08-14-lidar-to-camera-solver-diamond-frame.md`](../superpowers/specs/2026-08-14-lidar-to-camera-solver-diamond-frame.md) — **this is the target.** Closing H-11 means implementing that spec's three stages. It fixes the names, the staging and the validation gate; the description below is the diagnosis it was written from.
 - **Spec (the cause):** [`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md) — Phase 1, see "Out of Scope" and "Why the phase gap needs a guard rather than a note"
-- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./M-14-corner-order-brittle.md) (the duplicated corner layout — closed by the Phase 2 geometry extraction), [M-12](./M-12-no-robust-estimation-or-refinement.md) (the estimator asymmetry — its default-vs-advanced half closes at Phase 2 Stage 2), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps to version 4), [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) and [L-23](./L-23-debug-mode-parameter-never-read.md) (found while scoping the fix)
+- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./M-14-corner-order-brittle.md) (the duplicated corner layout — closed by the Phase 2 geometry extraction), [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) (the estimator asymmetry — closed by Phase 2 Stage 2), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps to version 4), [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) and [L-23](./L-23-debug-mode-parameter-never-read.md) (found while scoping the fix)
 
 ## Problem
 
@@ -142,3 +142,12 @@ gate. One caveat carried forward: the gate is **visual**, not numerical. A 45° 
 reprojection RMS low because the 2×2 marker grid is symmetric, so a low residual must never be
 accepted as evidence that this issue is fixed. The observable signatures are the ~707 mm origin shift
 and the overlay picture.
+
+**Update (2026-08-18, Stage 2).** `lidar_to_camera_solver` now owns both exact operating modes:
+`continuous` (default, latest-pair auto-solve) and `manual` (service-driven multi-pose buffer).
+Config-driven launch and every justfile path always start that package and pass `solver_mode`; the
+removed `use_advanced_solver` boolean has no compatibility alias, and `extrinsic_solver_node` is no
+longer reachable from those paths. Continuous mode replaces its one retained pair atomically and
+uses the same float64 SQPnP, LM-refined, covariance-aware backend as manual mode. Focused coverage
+pins latest-pair replacement and the SQPnP-plus-LM calls. `just build`, all 240 Rust tests, and all
+181 Python tests pass. H-11 remains open until Stage 3 deletes the superseded packages and references.

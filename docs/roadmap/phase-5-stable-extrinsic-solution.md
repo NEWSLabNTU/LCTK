@@ -135,7 +135,7 @@ separation is 190× on conditioning and ~6× on subset spread.
 
 ## Stage 5.2 — Robust estimator
 
-Tracked as [M-12](../issues/M-12-no-robust-estimation-or-refinement.md),
+Tracked as [M-12](../issues/archive/M-12-no-robust-estimation-or-refinement.md),
 [M-13](../issues/archive/M-13-icp-quality-not-propagated.md).
 
 1. **Refine.** `solvePnPRefineLM` (or `RefineVVS`) after the SQPnP initialisation. The advanced

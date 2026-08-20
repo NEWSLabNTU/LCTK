@@ -498,7 +498,7 @@ def _resolve_service_base(node, console, override):
         console.print("[red]none found[/]")
         console.print(
             "[red]No lidar_to_camera_solver services on the ROS graph.[/]\n"
-            "[dim]Is the solver running with use_advanced_solver=true?[/]"
+            "[dim]Is the solver running with solver_mode=manual?[/]"
         )
         return None
     if len(bases) == 1:

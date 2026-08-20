@@ -1,7 +1,7 @@
 # Spec: `lidar_to_camera_solver` on the corner-aligned board frame (Phase 2)
 
 - **Date:** 2026-08-14
-- **Status:** ready for implementation
+- **Status:** Stage 1 and Stage 2 implemented; Stage 3 pending
 - **Phase 1:** `2026-08-13-corner-aligned-board-frame.md` (landed, field-validated on the two-LiDAR rig)
 - **Closes:** H-11. **Incidentally closes:** M-12 (at Stage 2), M-14
 - **Related:** M-13, M-21, L-10

@@ -13,7 +13,7 @@ ENABLE_ICP_ITERATION_DEBUG="${enable_icp_iteration_debug:-true}"
 LOG_LEVEL="${log_level:-info}"
 RVIZ="${rviz:-true}"
 USE_BEST_EFFORT_QOS="${use_best_effort_qos:-true}"
-USE_ADVANCED_SOLVER="${use_advanced_solver:-true}"
+SOLVER_MODE="${solver_mode:-continuous}"
 CAMERA_TOPIC="${camera_topic:-/sensing/camera/zedxm/zed_node/left_raw/image_raw_color}"
 POINTCLOUD_TOPIC="${pointcloud_topic:-/sensing/lidar/concatenated/pointcloud}"
 
@@ -35,15 +35,15 @@ Options:
     --no-rviz               Disable RViz
     --qos-best-effort       Use best effort QoS (default: $USE_BEST_EFFORT_QOS)
     --qos-reliable          Use reliable QoS (for rosbag playback)
-    --advanced-solver       Use advanced solver (default: $USE_ADVANCED_SOLVER)
-    --basic-solver          Use basic solver
+    --manual-solver         Use service-driven multi-pose solver
+    --continuous-solver     Auto-solve each latest detection pair (default: $SOLVER_MODE)
     -c, --camera TOPIC      Camera topic (default: $CAMERA_TOPIC)
     -p, --pointcloud TOPIC  Pointcloud topic (default: $POINTCLOUD_TOPIC)
 
 Environment Variables:
     All options can also be set via environment variables:
     debug_mode, enable_icp_iteration_debug, log_level, rviz,
-    use_best_effort_qos, use_advanced_solver, camera_topic, pointcloud_topic
+    use_best_effort_qos, solver_mode, camera_topic, pointcloud_topic
 
 Examples:
     # Launch with defaults
@@ -106,12 +106,12 @@ while [[ $# -gt 0 ]]; do
             USE_BEST_EFFORT_QOS="false"
             shift
             ;;
-        --advanced-solver)
-            USE_ADVANCED_SOLVER="true"
+        --manual-solver)
+            SOLVER_MODE="manual"
             shift
             ;;
-        --basic-solver)
-            USE_ADVANCED_SOLVER="false"
+        --continuous-solver)
+            SOLVER_MODE="continuous"
             shift
             ;;
         -c|--camera)
@@ -130,6 +130,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$SOLVER_MODE" != "continuous" && "$SOLVER_MODE" != "manual" ]]; then
+    echo "Error: solver_mode must be 'continuous' or 'manual', got '$SOLVER_MODE'"
+    exit 1
+fi
+
 # Check if workspace is built
 if [ ! -f "$WORKSPACE_DIR/install/setup.sh" ]; then
     echo "Error: Workspace not built. Please run 'make build' first."
@@ -145,7 +150,7 @@ echo "ICP iteration debug:    $ENABLE_ICP_ITERATION_DEBUG"
 echo "Log level:              $LOG_LEVEL"
 echo "RViz:                   $RVIZ"
 echo "QoS:                    $([ "$USE_BEST_EFFORT_QOS" = "true" ] && echo "Best Effort" || echo "Reliable")"
-echo "Solver:                 $([ "$USE_ADVANCED_SOLVER" = "true" ] && echo "Advanced" || echo "Basic")"
+echo "Solver mode:            $SOLVER_MODE"
 echo "Camera topic:           $CAMERA_TOPIC"
 echo "Pointcloud topic:       $POINTCLOUD_TOPIC"
 echo "========================================"
@@ -169,6 +174,6 @@ ros2 launch lctk_launch lidar_camera_calibration.launch.xml \
     enable_rviz:="$RVIZ" \
     log_level:="$LOG_LEVEL" \
     use_best_effort_qos:="$USE_BEST_EFFORT_QOS" \
-    use_advanced_solver:="$USE_ADVANCED_SOLVER" \
+    solver_mode:="$SOLVER_MODE" \
     camera_topic:="$CAMERA_TOPIC" \
     pointcloud_topic:="$POINTCLOUD_TOPIC"

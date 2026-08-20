@@ -48,9 +48,11 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # (a typo like "realtim" would otherwise ship offline QoS to a live sensor).
     if mode not in ("offline", "realtime"):
         raise RuntimeError(f"Invalid mode '{mode}'; expected 'offline' or 'realtime'.")
-    use_advanced_solver = (
-        LaunchConfiguration("use_advanced_solver").perform(context) == "true"
-    )
+    solver_mode = LaunchConfiguration("solver_mode").perform(context)
+    if solver_mode not in ("continuous", "manual"):
+        raise RuntimeError(
+            f"Invalid solver_mode '{solver_mode}'; expected 'continuous' or 'manual'."
+        )
     enable_overlay = LaunchConfiguration("enable_overlay").perform(context) == "true"
     enable_judge = LaunchConfiguration("enable_judge").perform(context) == "true"
 
@@ -186,75 +188,43 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
     # Generate lidar-camera solver nodes
     for solver in pipeline.lidar_camera_solvers:
-        solver_type = "advanced" if use_advanced_solver else "standard"
         nodes.append(
             LogInfo(
-                msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name}) [{solver_type}]"
+                msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name}) [{solver_mode}]"
             )
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
-
-        if use_advanced_solver:
-            nodes.append(
-                Node(
-                    package="lidar_to_camera_solver",
-                    executable="lidar_to_camera_solver",
-                    name="lidar_to_camera_solver",
-                    namespace=solver.namespace,
-                    output="screen",
-                    arguments=node_args,
-                    parameters=[
-                        {
-                            "parent_frame": solver.parent_frame,
-                            "child_frame": solver.child_frame,
-                            "camera_topic": solver.camera_topic,
-                            "aruco_config_file": solver.aruco_config,
-                            "debug_mode": debug_mode == "true",
-                            "publishing_rate": 10.0,
-                            "use_best_effort_qos": use_best_effort_qos,
-                            "sync_tolerance_ms": sync_tolerance_ms,
-                            "sync_queue_size": sync_queue_size,
-                            "sync_drop_policy": sync_drop_policy,
-                        }
-                    ],
-                    remappings=[
-                        ("aruco_detections", solver.aruco_detections_topic),
-                        ("calibration_board_detections", solver.board_detections_topic),
-                        ("extrinsic_transform", solver.output_topic),
-                    ],
-                )
+        nodes.append(
+            Node(
+                package="lidar_to_camera_solver",
+                executable="lidar_to_camera_solver",
+                name="lidar_to_camera_solver",
+                namespace=solver.namespace,
+                output="screen",
+                arguments=node_args,
+                parameters=[
+                    {
+                        "solver_mode": solver_mode,
+                        "parent_frame": solver.parent_frame,
+                        "child_frame": solver.child_frame,
+                        "camera_topic": solver.camera_topic,
+                        "aruco_config_file": solver.aruco_config,
+                        "debug_mode": debug_mode == "true",
+                        "publishing_rate": 10.0,
+                        "use_best_effort_qos": use_best_effort_qos,
+                        "sync_tolerance_ms": sync_tolerance_ms,
+                        "sync_queue_size": sync_queue_size,
+                        "sync_drop_policy": sync_drop_policy,
+                    }
+                ],
+                remappings=[
+                    ("aruco_detections", solver.aruco_detections_topic),
+                    ("calibration_board_detections", solver.board_detections_topic),
+                    ("extrinsic_transform", solver.output_topic),
+                ],
             )
-        else:
-            # Standard solver - publishes transform on each detection pair
-            nodes.append(
-                Node(
-                    package="extrinsic_solver_node",
-                    executable="extrinsic_solver_node",
-                    name="extrinsic_solver",
-                    namespace=solver.namespace,
-                    output="screen",
-                    arguments=node_args,
-                    parameters=[
-                        {
-                            "parent_frame": solver.parent_frame,
-                            "child_frame": solver.child_frame,
-                            "camera_topic": solver.camera_topic,
-                            "aruco_config_file": solver.aruco_config,
-                            "debug_mode": debug_mode == "true",
-                            "use_best_effort_qos": use_best_effort_qos,
-                            "sync_tolerance_ms": sync_tolerance_ms,
-                            "sync_queue_size": sync_queue_size,
-                            "sync_drop_policy": sync_drop_policy,
-                        }
-                    ],
-                    remappings=[
-                        ("aruco_detections", solver.aruco_detections_topic),
-                        ("calibration_board_detections", solver.board_detections_topic),
-                        ("extrinsic_transform", solver.output_topic),
-                    ],
-                )
-            )
+        )
 
     # Generate lidar-lidar solver nodes
     for solver in pipeline.lidar_lidar_solvers:
@@ -428,9 +398,9 @@ def generate_launch_description() -> LaunchDescription:
                 description="Path to RViz config file. Override for different setups, e.g. two_lidar_calibration.rviz",
             ),
             DeclareLaunchArgument(
-                "use_advanced_solver",
-                default_value="false",
-                description="Use advanced multi-pose solver (requires manual detection buffering) vs standard solver (auto-publishes)",
+                "solver_mode",
+                default_value="continuous",
+                description="LiDAR-camera solver behaviour: 'continuous' (auto-publishes latest pair) or 'manual' (service-driven multi-pose buffer)",
             ),
             DeclareLaunchArgument(
                 "enable_overlay",
