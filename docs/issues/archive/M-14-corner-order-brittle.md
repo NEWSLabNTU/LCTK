@@ -85,7 +85,7 @@ Two safe, verifiable parts landed; the deeper algorithm change is left with a pl
   but is a detector-algorithm change whose improvement can only be validated with
   board captures near 45° roll — not reproducible headlessly here. The lower-risk
   route is the H-09 per-pose reprojection residual, which makes a 90°-permuted pose
-  trivially detectable and lets [M-12](./M-12-no-robust-estimation-or-refinement.md)
+  trivially detectable and lets [M-12](./archive/M-12-no-robust-estimation-or-refinement.md)
   reject it.
 - **Camera cross-validation** of the LiDAR-derived in-plane orientation against the
   ArUco IDs (part 1b) — needs the image-orientation path.

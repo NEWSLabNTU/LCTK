@@ -1,4 +1,4 @@
-"""ROS adapter for buffered multi-pose LiDAR-to-camera calibration."""
+"""ROS adapter for continuous and manual LiDAR-to-camera calibration."""
 
 import json
 import sys
@@ -57,6 +57,16 @@ from lidar_to_camera_solver.detection_format import (
     select_loaded_adjustment,
 )
 
+SOLVER_MODES = ("continuous", "manual")
+
+
+def parse_solver_mode(value: str) -> str:
+    """Validate the operator-facing solver policy."""
+    if value not in SOLVER_MODES:
+        choices = "', '".join(SOLVER_MODES)
+        raise ValueError(f"Invalid solver_mode '{value}'; expected '{choices}'.")
+    return value
+
 
 def rotation_vector_to_euler(rvec: np.ndarray, *, degrees: bool = False) -> np.ndarray:
     """Render one solved rotation vector for ROS response fields."""
@@ -71,12 +81,16 @@ class LidarToCameraSolver(Node):
         super().__init__("lidar_to_camera_solver")
         self._declare_parameters()
 
+        self.solver_mode = parse_solver_mode(self._string_parameter("solver_mode"))
         self.parent_frame = self._string_parameter("parent_frame")
         self.child_frame = self._string_parameter("child_frame")
         camera_topic = self._string_parameter("camera_topic")
         aruco_config_file = self._string_parameter("aruco_config_file")
         publishing_rate = self._double_parameter("publishing_rate")
         self.min_frames_required = self._integer_parameter("min_frames_required")
+        self.solve_min_frames = (
+            1 if self.solver_mode == "continuous" else self.min_frames_required
+        )
         self.min_normal_spread_deg = self._double_parameter("min_normal_spread_deg")
         self.min_depth_range_m = self._double_parameter("min_depth_range_m")
         self.enforce_pose_diversity = self._bool_parameter("enforce_pose_diversity")
@@ -114,6 +128,7 @@ class LidarToCameraSolver(Node):
         self.current_tvec: np.ndarray | None = None
         self.last_transform: TransformStamped | None = None
         self.publishing_enabled = False
+        self._continuous_solve_count = 0
         self.state_lock = threading.RLock()
 
         reliability = (
@@ -145,6 +160,11 @@ class LidarToCameraSolver(Node):
             msg_types=[Detection2DArray, Detection3DArray],
             config=pair_source_config,
             qos=qos_profile,
+            on_pair=(
+                self._continuous_pair_callback
+                if self.solver_mode == "continuous"
+                else None
+            ),
         )
 
         if camera_topic and "/" in camera_topic:
@@ -154,16 +174,21 @@ class LidarToCameraSolver(Node):
         self.camera_info_subscription = self.create_subscription(
             CameraInfo, camera_info_topic, self.camera_info_callback, qos_profile
         )
-        self._create_services()
+        if self.solver_mode == "manual":
+            self._create_services()
+        else:
+            self._services = []
         self.get_logger().info(
             "LiDAR-to-camera solver initialized\n"
-            f"Minimum frames before solving: {self.min_frames_required}\n"
+            f"Solver mode: {self.solver_mode}\n"
+            f"Minimum frames before solving: {self.solve_min_frames}\n"
             f"Camera info: {camera_info_topic}\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}"
         )
 
     def _declare_parameters(self) -> None:
         parameters = (
+            ("solver_mode", "continuous"),
             ("parent_frame", "lidar"),
             ("child_frame", "camera"),
             ("camera_topic", ""),
@@ -226,7 +251,7 @@ class LidarToCameraSolver(Node):
         return DetectionBuffer(
             camera_matrix=camera_matrix,
             marker_corners_by_id=self.marker_corners_by_id,
-            min_frames_required=self.min_frames_required,
+            min_frames_required=self.solve_min_frames,
             min_normal_spread_deg=self.min_normal_spread_deg,
             min_depth_range_m=self.min_depth_range_m,
             enforce_pose_diversity=self.enforce_pose_diversity,
@@ -261,6 +286,44 @@ class LidarToCameraSolver(Node):
             self.last_transform.header.stamp = self.get_clock().now().to_msg()
             self.transform_publisher.publish(self.last_transform)
             self._publish_axis_markers()
+
+    def _continuous_pair_callback(self, messages: tuple[object, ...]) -> None:
+        """Replace the latest capture, solve it, and publish without operator action."""
+        buffer = self.detection_buffer
+        if buffer is None:
+            self.get_logger().warn(
+                "Ignoring synchronized detection pair: no camera info available",
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        aruco, board = messages
+        update = buffer.restore(
+            (DetectionPair(aruco=aruco, board=board),), append=False
+        )
+        if not update.accepted:
+            self.get_logger().error(
+                f"Continuous solve rejected detection pair: {self._rejection_text(update)}",
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        self._continuous_solve_count += 1
+        self._apply_update(
+            update,
+            log_quality_warnings=self._continuous_solve_count % 30 == 1,
+        )
+        if not isinstance(update.snapshot.outcome, Solved):
+            self.get_logger().warn(
+                f"Continuous solve unavailable: {self._status_text(update.snapshot)}",
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        # Match the superseded continuous solver's observable behaviour: each
+        # synchronized pair produces a publication immediately. The normal timer
+        # continues refreshing the latest transform for late subscribers.
+        self._publishing_timer_callback()
 
     def _publish_axis_markers(self):
         if self.last_transform is None:
@@ -352,7 +415,9 @@ class LidarToCameraSolver(Node):
         detail = f" ({rejection.detail})" if rejection.detail else ""
         return f"{messages[rejection.code]}{detail}"
 
-    def _apply_update(self, update: BufferUpdate) -> None:
+    def _apply_update(
+        self, update: BufferUpdate, *, log_quality_warnings: bool = True
+    ) -> None:
         """Rebase or clear adjustment after one accepted buffer revision."""
         if not update.accepted:
             return
@@ -368,7 +433,7 @@ class LidarToCameraSolver(Node):
                 self.publishing_enabled = True
             else:
                 self._clear_adjustment_locked()
-        if isinstance(outcome, Solved):
+        if isinstance(outcome, Solved) and log_quality_warnings:
             warnings = outcome.estimate.quality.warnings()
             if warnings:
                 self.get_logger().warn("\n".join(warnings))

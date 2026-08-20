@@ -43,8 +43,7 @@ use serde::Deserialize;
 /// The fixture lives outside this crate on purpose: it is a contract between the Rust
 /// detector and the Python camera solver, and a contract should not be a guest in one
 /// side's test tree. Both languages read `fixtures/board/` at the repository root.
-const GOLDEN: &str =
-    include_str!("../../../fixtures/board/marker_corners_world.golden.json");
+const GOLDEN: &str = include_str!("../../../fixtures/board/marker_corners_world.golden.json");
 
 /// Positional tolerance, in metres. The fixture carries exact decimal geometry, so the
 /// only error in play is f64 round-off through a rotation and a translation.

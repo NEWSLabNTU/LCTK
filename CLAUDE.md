@@ -31,8 +31,8 @@ just
   - `aruco_locator_node/` - ArUco marker detection from camera images
   - `aruco_generator_node/` - Prints the ArUco board pattern from `aruco_pattern.json5`
   - `lidar_board_detector/` - Calibration board detection from point clouds
-  - `extrinsic_solver_node/` - Auto-publishing single-pose LiDAR-camera solver (default)
-  - `lidar_to_camera_solver/` - Multi-pose buffered LiDAR-camera solver with services
+  - `extrinsic_solver_node/` - Superseded LiDAR-camera solver (unreachable from config-driven launch; pending deletion)
+  - `lidar_to_camera_solver/` - LiDAR-camera solver with continuous and manual modes
   - `interactive_solver_controller/` - Rich TUI driving `lidar_to_camera_solver`
   - `lidar_to_lidar_solver/` - LiDAR-to-LiDAR calibration solver
   - `lctk_quality/` + `calibration_judge/` - Extrinsic quality metric (H-09)
@@ -96,7 +96,7 @@ just calibrate /path/to/config.yaml
 # Justfile variables (override with just var=value command)
 just demo mode=realtime              # Use realtime mode (BEST_EFFORT QoS, no buffering)
 just demo mode=offline               # Use offline mode (RELIABLE QoS, default)
-just demo use_advanced_solver=true   # Use multi-pose buffered solver
+just demo solver_mode=manual         # Use service-driven multi-pose buffering
 just demo debug_mode=false           # Disable debug output
 
 # Documentation (run from book/ directory)
@@ -453,9 +453,9 @@ hand `detect_markers` a rectified image.
 **Generated Nodes:**
 - `lidar_board_detector` - One per unique (lidar, marker) pair
 - `aruco_locator_node` - One per camera
-- LiDAR-camera solver (one per pair) - selected by `use_advanced_solver` argument:
-  - `extrinsic_solver_node` (default) - Auto-publishes transform on each detection pair
-  - `lidar_to_camera_solver` - Multi-pose buffered solver with manual control
+- `lidar_to_camera_solver` (one per LiDAR-camera pair), selected by `solver_mode`:
+  - `continuous` (default) - Auto-solves and publishes from each latest detection pair
+  - `manual` - Multi-pose buffered solve with service control
 - `lidar_to_lidar_solver` - One per lidar-lidar pair
 
 **Synchronizer Parameters (Conflux):**
@@ -463,7 +463,8 @@ hand `detect_markers` a rectified image.
 The maintained `lidar_to_camera_solver` and `lidar_to_lidar_solver` use
 `lctk_sync.DetectionPairSource`, which owns Conflux, finite-window validation, replay recovery,
 freshness/skew checks and operator diagnosis. The legacy `extrinsic_solver_node` still calls Conflux
-directly and is scheduled for deletion by the diamond-frame plan.
+directly, is unreachable from config-driven launch, and is scheduled for deletion by the
+diamond-frame plan.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -511,15 +512,21 @@ ros2 launch lctk_sample_data two_lidar.launch.xml
 just two-lidar
 ```
 
-### Standard Extrinsic Solver (Default)
+### LiDAR-to-Camera Solver: Continuous Mode (Default)
 
-The `extrinsic_solver_node` automatically publishes transforms whenever it receives a synchronized ArUco detection and board detection pair. No manual intervention required - transforms are published continuously to `/calibration/<lidar>_<camera>/extrinsic_transform`.
+`lidar_to_camera_solver` with `solver_mode=continuous` automatically replaces its latest detection
+pair, solves it with SQPnP plus LM refinement, and publishes to
+`/calibration/<lidar>_<camera>/extrinsic_transform`. This single-pose path is useful for quick visual
+checks but is under-constrained by construction; low reprojection RMS is not proof of a good
+calibration.
 
-Use this for quick calibration verification or when you want real-time transform updates.
+Use it for quick calibration verification or real-time transform updates.
 
-### LiDAR-to-Camera Solver (multi-pose)
+### LiDAR-to-Camera Solver: Manual Mode
 
-The `lidar_to_camera_solver` node provides multi-pose calibration with manual adjustment capabilities. Enable with `use_advanced_solver=true`.
+`lidar_to_camera_solver` with `solver_mode=manual` provides multi-pose calibration with manual
+adjustment capabilities. Run `just solver_mode=manual lidar-camera` (or `just solver_mode=manual
+demo`), then `just manual-solver-controller`.
 
 **Services** (under `~/calibration/<pair>/lidar_to_camera_solver/`):
 - `add_detection` - Add current ArUco + board detection pair to buffer

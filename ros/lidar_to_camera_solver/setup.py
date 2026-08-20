@@ -20,7 +20,7 @@ setup(
     zip_safe=True,
     maintainer="NEWSLAB NTU",
     maintainer_email="lctk@ntu.edu.tw",
-    description="Simple Python ROS 2 node for demonstrating solvePnP with ArUco and board detections",
+    description="Continuous and manual LiDAR-to-camera extrinsic calibration solver",
     license="MIT",
     tests_require=["pytest"],
     entry_points={

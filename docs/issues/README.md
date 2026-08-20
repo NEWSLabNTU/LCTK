@@ -23,6 +23,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-09](./archive/H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
 | [H-10](./archive/H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🟢 |
 | [H-11](./H-11-camera-solvers-stale-board-frame.md) | High | Camera solvers still use the old edge-aligned board frame → extrinsic wrong by 45°, half of it silently | 🔴 |
+| [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
+| [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -34,7 +36,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-09](./archive/M-09-marker-ids-hard-index.md) | Medium | `marker_ids[0..3]` hard index → IndexError on short config | 🟢 |
 | [M-10](./archive/M-10-multi-marker-config-collisions.md) | Medium | Multi-marker camera uses wrong ArUco config; duplicate pairs collide | 🟢 |
 | [M-11](./archive/M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🟢 |
-| [M-12](./M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🟡 |
+| [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🟢 |
 | [M-13](./archive/M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🟢 |
 | [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
@@ -67,7 +69,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-21](./archive/L-21-find-correspondences-duplicated-tests-wrong-body.md) | Low | `find_correspondences` duplicated; inline tests exercise the serial copy the node never runs | 🟢 |
 | [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) | Low | `advanced_extrinsic_solver` imports `lctk_interfaces` without declaring the dependency | 🔴 |
 | [L-23](./L-23-debug-mode-parameter-never-read.md) | Low | `debug_mode` declared by both solvers, read by neither | 🔴 |
-| [L-24](./L-24-board-geometry-import-test-egl-stdout.md) | Low | Board-geometry import test rejects unrelated Jetson EGL stdout | 🔴 |
+| [L-24](./archive/L-24-board-geometry-import-test-egl-stdout.md) | Low | Board-geometry import test rejects unrelated Jetson EGL stdout | 🟢 |
 
 ## Three headline gaps
 

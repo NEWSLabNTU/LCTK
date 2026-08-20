@@ -3,7 +3,7 @@
 <package format="3">
   <name>lidar_to_camera_solver</name>
   <version>0.1.0</version>
-  <description>Python ROS 2 node for demonstrating solvePnP with ArUco and board detections</description>
+  <description>Continuous and manual LiDAR-to-camera extrinsic calibration solver</description>
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
   <license>MIT</license>
 
@@ -33,4 +33,3 @@
     <build_type>ament_python</build_type>
   </export>
 </package>
-

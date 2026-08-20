@@ -2,7 +2,7 @@
 
 **Severity:** Low
 
-**Status:** 🔴 Open
+**Status:** 🟢 Fixed (2026-08-18)
 
 ## Symptom
 
@@ -25,3 +25,11 @@ diagnostics fail the assertion.
   line, without accepting `rclpy=True`.
 - Keep checking the subprocess return code and stderr.
 - Verify `just test` on Jetson.
+
+## Resolution
+
+The subprocess now prints a unique `LCTK_BOARD_GEOMETRY_RCLPY=<bool>` sentinel. The test selects
+that complete line and requires its value to be `False`, so unrelated NVIDIA EGL diagnostics no
+longer corrupt the assertion while `rclpy=True` still fails.
+
+Verified on Jetson: `just test` collected and passed 240 Rust tests and 181 Python tests.
