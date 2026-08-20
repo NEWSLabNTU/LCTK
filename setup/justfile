@@ -106,6 +106,11 @@ python: _init ros2
 opencv: _init system-base
     @just _run opencv "{{scripts_dir}}/install-opencv.sh"
 
+# Side-install OpenCV 4.5.4 headers into a private prefix (JetPack hosts, where
+# NVIDIA's libopencv-dev 4.8.0 owns /usr/include/opencv4 and has no aruco module)
+opencv-45-prefix: _init
+    @"{{scripts_dir}}/install-opencv-4.5-prefix.sh"
+
 # Install GStreamer for video processing
 gstreamer: _init system-base
     @just _run gstreamer "{{scripts_dir}}/install-gstreamer.sh"
