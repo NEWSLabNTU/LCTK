@@ -1,4 +1,4 @@
-Projecting a 3D LiDAR point cloud into a 2D image is a common preprocessing step in autonomous driving, robotics, and computer vision. It allows you to use standard 2D convolutional neural networks (CNNs) or traditional image-processing techniques on 3D data. 
+Projecting a 3D LiDAR point cloud into a 2D image is a common preprocessing step in autonomous driving, robotics, and computer vision. It allows you to use standard 2D convolutional neural networks (CNNs) or traditional image-processing techniques on 3D data.
 
 Depending on your application, there are several standard ways to perform this projection.
 
@@ -64,7 +64,7 @@ Similar to BEV, this projects the points onto vertical planes (such as the $Y-Z$
 
 ### Implementation Tips
 *   **Handling Sparsity:** Point clouds are sparse, meaning your 2D projection may have many empty pixels (NaNs or zeros). Depending on your downstream task, you can use dilation, interpolation (like KNN or bilateral filtering), or let convolutional layers learn to handle the sparse inputs.
-*   **Libraries:** 
+*   **Libraries:**
     *   **NumPy / OpenCV:** Direct, fast implementation of grid discretization and perspective matrix multiplication.
     *   **Open3D / PyTorch3D:** Excellent tools for visualizing and projecting 3D data.
     *   **OpenPCDet:** A popular open-source toolbox that provides optimized, highly efficient CUDA/C++ implementations for converting raw point clouds to BEV grids for deep learning models.
@@ -77,7 +77,7 @@ The "best" 2D representation for your raw point cloud depends heavily on your sp
 ---
 
 ### 1. Learned BEV Pseudo-Images (Pillars)
-Instead of using hand-crafted features (like max height or density), this method uses a lightweight neural network to learn the 2D representation. 
+Instead of using hand-crafted features (like max height or density), this method uses a lightweight neural network to learn the 2D representation.
 
 *   **How it works:** The 3D space is discretized into vertical columns called "pillars" (essentially voxels that are infinite in the $Z$ direction). The points within each pillar are passed through a tiny PointNet (a simple MLP) to output a high-dimensional feature vector. These vectors are mapped back to their 2D grid coordinates, creating a dense $H \times W \times C$ **pseudo-image** (where $C$ is the learned feature dimension).
 *   **Why it’s good:** It combines the computational speed of 2D convolutions with the expressive power of 3D point learning. It prevents the manual fine-tuning of handcrafted features.
@@ -89,7 +89,7 @@ Instead of using hand-crafted features (like max height or density), this method
 A range image is a native representation for rotating LiDAR sensors. It projects the point cloud onto a cylindrical or spherical grid based on the laser beam angles.
 
 *   **How it works:** Every pixel in the 2D range image corresponds directly to a specific horizontal and vertical angle of the LiDAR's physical channels. The pixel values typically encode range (distance), intensity, and raw $x, y, z$ coordinates.
-*   **Why it’s good:** 
+*   **Why it’s good:**
     *   It is incredibly dense with virtually no "empty" pixels, making 2D CNNs highly efficient.
     *   It preserves topological neighborhood relationships (points close to each other in 3D are generally close in the range image).
 *   **Best for:** Fast semantic segmentation (e.g., *RangeNet++*) and real-time obstacle detection.
@@ -108,7 +108,7 @@ Often used in modern 3D reconstruction and neural rendering, this method represe
 ### 4. Multi-View Renderings (Virtual Camera Views)
 If you have a defined 3D object (like a CAD model or isolated point cloud of a vehicle) rather than a massive outdoor scene, you can "photograph" it from multiple virtual camera angles.
 
-*   **How it works:** Place $N$ virtual cameras in a circle or sphere around the object and render 2D depth, intensity, or RGB-shaded images. 
+*   **How it works:** Place $N$ virtual cameras in a circle or sphere around the object and render 2D depth, intensity, or RGB-shaded images.
 *   **Why it’s good:** It allows you to use standard, pre-trained image classification networks (like ResNet or Vision Transformers) directly on your 3D data without retraining them from scratch on point clouds.
 *   **Best for:** 3D object classification, shape retrieval (e.g., *MVCNN*), and quality inspection.
 
