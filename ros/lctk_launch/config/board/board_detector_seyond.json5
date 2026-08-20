@@ -39,7 +39,7 @@
     "side_m": 1.0,
     "side_tol": 0.20,
     "cell_m": 0.02,
-    "square_icp_residual_max": 0.45,
+    "square_icp_residual_max": 0.85,
     // pose / stance
     "up_axis": [1.0, 0.0, 0.0],     // Falcon: X = up, Z = forward
     "stance_floor": 0.9,
@@ -67,7 +67,7 @@
     "max_icp_iterations": 50,
     "icp_pose_weight_threshold": 1e-4,
     "icp_rejection_threshold": 0.008,
-    "icp_good_fit_threshold": 0.035,
+    "icp_good_fit_threshold": 0.05,
     "icp_outlier_threshold": 0.050,
     "icp_damping_factor": 0.5,
     "icp_min_inlier_points": 300,   // sparse far board yields fewer plane inliers; 500 aborted ICP early
