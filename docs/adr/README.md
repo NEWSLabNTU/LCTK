@@ -61,6 +61,7 @@ module is the wrong shape).
 | ADR | Decision | Status |
 |---|---|---|
 | [0001](./0001-detection-pair-source.md) | The synchronized detection pair is one module, and it refuses an infinite window | accepted |
+| [0002](./0002-detection-buffer.md) | The detection buffer owns every estimate derived from its captures | accepted |
 
 Reviews:
 

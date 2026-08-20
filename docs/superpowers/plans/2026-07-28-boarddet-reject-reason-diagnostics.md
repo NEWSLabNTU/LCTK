@@ -885,10 +885,12 @@ git commit -m "feat(boarddet): detect() folds furthest reject into DetectOutcome
 Run: `uv run pytest`
 Expected: PASS — every pre-existing test unchanged (byte-identical guard holds) plus the new `test_reject.py` and the added cases in `test_candidates_a/b`, `test_scorer`, `test_detector`.
 
-- [ ] **Step 2: Lint**
+- [ ] **Step 2: Lint (best-effort)**
 
-Run: `uv run ruff check src/boarddet tests`
-Expected: clean (fix any unused-import / line-length issues introduced).
+This experiment does not depend on ruff (the repo lints only `ros/`, not
+`experiments/`). If `uv run ruff check src/boarddet tests` runs, fix any
+unused-import / line-length issues; if ruff is unavailable, skip this step
+(nothing to install — do not add ruff as a dependency).
 
 - [ ] **Step 3: Manual smoke — reject reason on a real no-detection frame**
 
