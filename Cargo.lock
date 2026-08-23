@@ -574,8 +574,11 @@ name = "calibration-target"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "indexmap 2.14.0",
  "json5",
+ "nalgebra",
  "serde",
+ "serde_json",
  "sha2",
 ]
 
