@@ -5,7 +5,7 @@
 
 use crate::{
     background::BackgroundModel,
-    config::{BoardConfig, ForegroundMethod},
+    config::{ForegroundMethod, TargetDetectionParams},
     dbscan::{anisotropic_scaled, cluster_anisotropic, dbscan},
     geometry::{extent_2d, fit_plane, plane_rms, project_to_plane, PlaneModel},
 };
@@ -33,7 +33,10 @@ fn centroid(points: &[Point3<f64>]) -> Point3<f64> {
 /// Ports `candidates/__init__.py:plausible_board_patch` (default threshold
 /// path only -- no `rejects` side channel; that's a diagnostics feature not
 /// in this port's scope).
-pub fn plausible_board_patch(points: &[Point3<f64>], board: &BoardConfig) -> Option<Candidate> {
+pub fn plausible_board_patch(
+    points: &[Point3<f64>],
+    board: &TargetDetectionParams<'_>,
+) -> Option<Candidate> {
     if points.len() < board.patch_min_points {
         return None;
     }
@@ -44,9 +47,10 @@ pub fn plausible_board_patch(points: &[Point3<f64>], board: &BoardConfig) -> Opt
         return None;
     }
     let ext = extent_2d(&project_to_plane(points, &plane));
-    let diag = board.side_m * 2.0_f64.sqrt();
+    let side_m = board.target_side().as_metres();
+    let diag = side_m * 2.0_f64.sqrt();
     let (lo, hi) = (
-        board.patch_extent_lo_frac * board.side_m,
+        board.patch_extent_lo_frac * side_m,
         board.patch_extent_hi_diag_frac * diag,
     );
     if !(lo <= ext && ext <= hi) {
@@ -114,12 +118,12 @@ fn ransac_plane_inliers(pts: &[Point3<f64>], dist: f64) -> Vec<usize> {
 /// RANSAC), seeded deterministically per RANSAC call.
 pub fn remove_big_planes(
     points: &[Point3<f64>],
-    board: &BoardConfig,
+    board: &TargetDetectionParams<'_>,
     dist: f64,
     min_frac: f64,
     vertical_gap_deg: f64,
 ) -> Vec<Point3<f64>> {
-    let diag = board.side_m * 2.0_f64.sqrt();
+    let diag = board.target_side().as_metres() * 2.0_f64.sqrt();
     let mut remaining: Vec<Point3<f64>> = points.to_vec();
 
     for _ in 0..6 {
@@ -199,7 +203,7 @@ pub fn remove_big_planes(
 /// `big_plane_residual`.
 pub fn big_plane_residual(
     points: &[Point3<f64>],
-    board: &BoardConfig,
+    board: &TargetDetectionParams<'_>,
     vertical_gap_deg: f64,
 ) -> Vec<Point3<f64>> {
     remove_big_planes(
@@ -221,13 +225,13 @@ pub fn big_plane_residual(
 fn merge_coplanar_clusters(
     points: &[Point3<f64>],
     labels: &[i64],
-    board: &BoardConfig,
+    board: &TargetDetectionParams<'_>,
 ) -> Vec<Vec<Point3<f64>>> {
     let seed_min_points = board.merge_seed_min_points;
     let offset_tol = board.merge_offset_tol;
     let merge_dist_factor = board.merge_dist_factor;
 
-    let diag = board.side_m * 2.0_f64.sqrt();
+    let diag = board.target_side().as_metres() * 2.0_f64.sqrt();
 
     let mut label_ids: Vec<i64> = labels.iter().copied().filter(|&l| l >= 0).collect();
     label_ids.sort_unstable();
@@ -302,7 +306,7 @@ fn merge_coplanar_clusters(
 /// Ports `_cluster_and_gate`.
 pub fn cluster_and_gate(
     fg: &[Point3<f64>],
-    board: &BoardConfig,
+    board: &TargetDetectionParams<'_>,
     cluster_eps: f64,
     cluster_min_points: usize,
     vertical_gap_deg: f64,
@@ -323,7 +327,10 @@ pub fn cluster_and_gate(
 /// Approach B: remove large planes, Euclidean-cluster the rest, gate
 /// clusters. Ports `generate_cluster_after_ground` (renamed in this port --
 /// see task-5 brief).
-pub fn generate_plane_strip(points: &[Point3<f64>], board: &BoardConfig) -> Vec<Candidate> {
+pub fn generate_plane_strip(
+    points: &[Point3<f64>],
+    board: &TargetDetectionParams<'_>,
+) -> Vec<Candidate> {
     let rest = remove_big_planes(
         points,
         board,
@@ -346,7 +353,7 @@ pub fn generate_plane_strip(points: &[Point3<f64>], board: &BoardConfig) -> Vec<
 /// before clustering runs.
 pub fn generate_background_diff(
     dn: &[Point3<f64>],
-    board: &BoardConfig,
+    board: &TargetDetectionParams<'_>,
     background: &BackgroundModel,
 ) -> Vec<Candidate> {
     let fg = background.foreground_points(dn);
@@ -369,7 +376,7 @@ pub fn generate_background_diff(
 /// yields empty for both.
 pub fn foreground_and_candidates(
     dn: &[Point3<f64>],
-    board: &BoardConfig,
+    board: &TargetDetectionParams<'_>,
     method: ForegroundMethod,
     background: Option<&BackgroundModel>,
 ) -> (Vec<Point3<f64>>, Vec<Candidate>) {

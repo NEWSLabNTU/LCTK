@@ -1,10 +1,12 @@
 use serde::Deserialize;
-use std::{path::Path, str::FromStr};
+use std::{
+    ops::{Deref, DerefMut},
+    path::Path,
+    str::FromStr,
+};
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct BoardConfig {
-    #[serde(default = "d_side_m")]
-    pub side_m: f64,
+pub struct DetectorTuning {
     #[serde(default = "d_side_tol")]
     pub side_tol: f64,
     #[serde(default = "d_cell_m")]
@@ -32,39 +34,79 @@ pub struct BoardConfig {
     pub isolation_max_density: f64,
 
     // ---- formerly-hardcoded tuning knobs (defaults preserve prior behaviour) ----
-    /// plane-strip: RANSAC inlier distance (m) for big-plane removal.
     #[serde(default = "d_strip_plane_dist")]
     pub strip_plane_dist: f64,
-    /// plane-strip: min inlier fraction to treat a plane as "big" and strip it.
     #[serde(default = "d_strip_plane_min_frac")]
     pub strip_plane_min_frac: f64,
-    /// coplanar-merge: min cluster size to seed a merge group.
     #[serde(default = "d_merge_seed_min_points")]
     pub merge_seed_min_points: usize,
-    /// coplanar-merge: max mean point-to-plane offset (m) to absorb a cluster.
     #[serde(default = "d_merge_offset_tol")]
     pub merge_offset_tol: f64,
-    /// coplanar-merge: max centroid gap to merge = factor * board diagonal.
     #[serde(default = "d_merge_dist_factor")]
     pub merge_dist_factor: f64,
-    /// board-patch gate: min points for a patch to be a candidate.
     #[serde(default = "d_patch_min_points")]
     pub patch_min_points: usize,
-    /// board-patch gate: accept extent >= this fraction of side_m.
     #[serde(default = "d_patch_extent_lo_frac")]
     pub patch_extent_lo_frac: f64,
-    /// board-patch gate: accept extent <= this fraction of the board diagonal.
     #[serde(default = "d_patch_extent_hi_diag_frac")]
     pub patch_extent_hi_diag_frac: f64,
-    /// isolation: max |point-to-plane| (m) to count a point coplanar.
     #[serde(default = "d_iso_coplanar_tol")]
     pub isolation_coplanar_tol: f64,
-    /// isolation: inner edge of the exterior density band (m).
     #[serde(default = "d_iso_band_lo")]
     pub isolation_band_lo: f64,
-    /// isolation: outer edge of the exterior density band (m).
     #[serde(default = "d_iso_band_hi")]
     pub isolation_band_hi: f64,
+}
+
+/// Deprecated compatibility configuration for callers that still serialize a
+/// physical board side alongside detector tuning. New code receives a
+/// [`TargetSide`] at the detection boundary and uses [`DetectorTuning`].
+/// Its fields are intentionally private: direct struct literals are not part of
+/// the migration contract; use [`BoardConfig::new`], [`BoardConfig::side_m`],
+/// and [`BoardConfig::tuning`].
+#[deprecated(note = "load target geometry separately and use DetectorTuning")]
+#[derive(Debug, Clone, Deserialize)]
+pub struct BoardConfig {
+    /// Deprecated physical geometry. Kept only while old launch files and
+    /// callers migrate; [`crate::detector::detect`] delegates it to the target
+    /// side interface immediately.
+    #[serde(default = "d_side_m")]
+    side_m: f64,
+    #[serde(flatten)]
+    tuning: DetectorTuning,
+}
+
+#[allow(deprecated)]
+impl Deref for BoardConfig {
+    type Target = DetectorTuning;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tuning
+    }
+}
+
+#[allow(deprecated)]
+impl DerefMut for BoardConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tuning
+    }
+}
+
+#[allow(deprecated)]
+impl BoardConfig {
+    /// Migration constructor for legacy config readers. New target-aware code
+    /// passes these values independently to `detect_for_target`.
+    pub fn new(side_m: f64, tuning: DetectorTuning) -> Self {
+        Self { side_m, tuning }
+    }
+
+    pub fn side_m(&self) -> f64 {
+        self.side_m
+    }
+
+    pub fn tuning(&self) -> &DetectorTuning {
+        &self.tuning
+    }
 }
 
 fn d_side_m() -> f64 {
@@ -147,7 +189,7 @@ pub struct IsolationBand {
     pub hi: f64,
 }
 
-impl BoardConfig {
+impl DetectorTuning {
     /// The isolation gate's exterior-band geometry.
     pub fn isolation_band(&self) -> IsolationBand {
         IsolationBand {
@@ -158,34 +200,106 @@ impl BoardConfig {
     }
 }
 
-pub fn production_config(side_m: f64, up_axis: [f64; 3], cluster_min_points: usize) -> BoardConfig {
-    BoardConfig {
-        side_m,
-        up_axis,
-        cluster_min_points,
-        cluster_eps: 0.15,
-        side_tol: 0.20,
-        cell_m: 0.02,
-        vertical_gap_deg: 3.0,
-        flatness_rms_max: 0.045, // presets.py
-        stance_floor: 0.9,       // presets.py
-        square_icp_residual_max: 0.45,
-        isolation: true, // presets.py
-        isolation_max_density: 0.3,
-        strip_plane_dist: 0.05,
-        strip_plane_min_frac: 0.08,
-        merge_seed_min_points: 40,
-        merge_offset_tol: 0.02,
-        merge_dist_factor: 1.6,
-        patch_min_points: 60,
-        patch_extent_lo_frac: 0.5,
-        patch_extent_hi_diag_frac: 1.8,
-        isolation_coplanar_tol: 0.03,
-        isolation_band_lo: 0.05,
-        isolation_band_hi: 0.30,
+/// Validated physical side of the selected calibration target, in metres.
+///
+/// This deliberately carries only the fact board clustering needs. The target
+/// definition remains owned by `calibration-target`; this crate must not infer
+/// target-frame axes, cutouts, or fiducial layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TargetSide(f64);
+
+impl TargetSide {
+    pub fn metres(side_m: f64) -> anyhow::Result<Self> {
+        if !side_m.is_finite() || side_m <= 0.0 {
+            anyhow::bail!("target side must be finite and positive, got {side_m}");
+        }
+        Ok(Self(side_m))
+    }
+
+    pub fn as_metres(self) -> f64 {
+        self.0
     }
 }
 
+impl TryFrom<f64> for TargetSide {
+    type Error = anyhow::Error;
+
+    fn try_from(side_m: f64) -> Result<Self, Self::Error> {
+        Self::metres(side_m)
+    }
+}
+
+/// Neutral view shared by candidate generation and square fitting. It couples
+/// the selected target's one required geometric fact with detector tuning,
+/// without depending on the deprecated serialized facade.
+#[derive(Debug, Clone, Copy)]
+pub struct TargetDetectionParams<'a> {
+    target_side: TargetSide,
+    tuning: &'a DetectorTuning,
+}
+
+impl<'a> TargetDetectionParams<'a> {
+    pub fn new(target_side: TargetSide, tuning: &'a DetectorTuning) -> Self {
+        Self {
+            target_side,
+            tuning,
+        }
+    }
+
+    pub fn target_side(self) -> TargetSide {
+        self.target_side
+    }
+
+    pub fn tuning(self) -> &'a DetectorTuning {
+        self.tuning
+    }
+}
+
+impl Deref for TargetDetectionParams<'_> {
+    type Target = DetectorTuning;
+
+    fn deref(&self) -> &Self::Target {
+        self.tuning
+    }
+}
+
+pub fn production_tuning(up_axis: [f64; 3], cluster_min_points: usize) -> DetectorTuning {
+    DetectorTuning {
+        cluster_eps: d_cluster_eps(),
+        side_tol: d_side_tol(),
+        cell_m: d_cell_m(),
+        vertical_gap_deg: d_vertical_gap_deg(),
+        flatness_rms_max: 0.045, // production override of serde default
+        stance_floor: 0.9,       // production override of serde default
+        square_icp_residual_max: d_square_res(),
+        isolation: true, // production override of serde default
+        isolation_max_density: d_iso_density(),
+        strip_plane_dist: d_strip_plane_dist(),
+        strip_plane_min_frac: d_strip_plane_min_frac(),
+        merge_seed_min_points: d_merge_seed_min_points(),
+        merge_offset_tol: d_merge_offset_tol(),
+        merge_dist_factor: d_merge_dist_factor(),
+        patch_min_points: d_patch_min_points(),
+        patch_extent_lo_frac: d_patch_extent_lo_frac(),
+        patch_extent_hi_diag_frac: d_patch_extent_hi_diag_frac(),
+        isolation_coplanar_tol: d_iso_coplanar_tol(),
+        isolation_band_lo: d_iso_band_lo(),
+        isolation_band_hi: d_iso_band_hi(),
+        up_axis,
+        cluster_min_points,
+    }
+}
+
+/// Deprecated compatibility constructor. New callers use [`TargetSide`] and
+/// [`production_tuning`] independently.
+#[deprecated(note = "use TargetSide and production_tuning independently")]
+#[allow(deprecated)]
+pub fn production_config(side_m: f64, up_axis: [f64; 3], cluster_min_points: usize) -> BoardConfig {
+    BoardConfig::new(side_m, production_tuning(up_axis, cluster_min_points))
+}
+
+#[allow(deprecated)]
+#[deprecated(note = "load target geometry separately; parse DetectorTuning instead")]
 pub fn load_board_config_json5(path: &Path) -> anyhow::Result<BoardConfig> {
     let text = std::fs::read_to_string(path)?;
     Ok(json5::from_str(&text)?)
@@ -213,6 +327,7 @@ impl FromStr for ForegroundMethod {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Characterizes the serialized migration facade.
 mod flatten_tests {
     use super::*;
     use serde::Deserialize;
