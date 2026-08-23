@@ -137,7 +137,9 @@ def migrate_v3_to_v4(data: dict, *, convention: str) -> dict:
         )
 
     migrated = dict(data)
-    migrated["version"] = FORMAT_VERSION
+    # This is intentionally literal.  v3 data has the v4 layout after migration;
+    # a later current format must not relabel it as carrying fields it never gained.
+    migrated["version"] = 4
     migrated["board_frame_convention"] = convention
     return migrated
 
