@@ -62,6 +62,7 @@ module is the wrong shape).
 |---|---|---|
 | [0001](./0001-detection-pair-source.md) | The synchronized detection pair is one module, and it refuses an infinite window | accepted |
 | [0002](./0002-detection-buffer.md) | The detection buffer owns every estimate derived from its captures | accepted |
+| [0003](./0003-selectable-calibration-targets.md) | Calibration targets share one interface and are selected once per launch | accepted |
 
 Reviews:
 
