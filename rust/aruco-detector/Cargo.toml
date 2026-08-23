@@ -16,6 +16,7 @@ noisy_float = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = { workspace = true }
 sensor_msgs.workspace = true
+calibration-target = { version = "0.1.0", path = "../calibration-target" }
 
 [dependencies.opencv]
 workspace = true

@@ -1,4 +1,6 @@
 use crate::ArucoDictionary;
+use anyhow::Result;
+use calibration_target::{ArucoDictionary as TargetDictionary, ValidatedTarget};
 use measurements::Length;
 use noisy_float::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,36 @@ pub struct MultiArucoPattern {
 }
 
 impl MultiArucoPattern {
+    /// Derive the printable ArUco pattern from the validated physical target.
+    ///
+    /// This is the only bridge from Target Definition to the legacy low-level
+    /// renderer/detector shape.  It deliberately does not expose plate geometry:
+    /// the paper placement remains available only as target-owned metadata.
+    pub fn from_target(target: &ValidatedTarget) -> Result<Self> {
+        let fiducial = target.fiducial();
+        let dictionary = match fiducial.dictionary {
+            TargetDictionary::Dict5x5x1000 => ArucoDictionary::DICT_5X5_1000,
+        };
+
+        Ok(Self {
+            marker_ids: fiducial.marker_ids.clone(),
+            dictionary,
+            board_size: Length::from_meters(fiducial.paper_side_um as f64 / 1_000_000.0),
+            board_border_size: Length::from_meters(fiducial.outer_border_um as f64 / 1_000_000.0),
+            marker_square_size_ratio: r64(fiducial.marker_fill_ratio),
+            num_squares_per_side: fiducial.cells_per_side,
+            border_bits: fiducial.border_bits,
+            paper_placement: Some(MarkerPaperPlacement {
+                toward_left_corner: Length::from_meters(
+                    fiducial.paper_center_x_um as f64 / 1_000_000.0,
+                ),
+                toward_top_corner: Length::from_meters(
+                    fiducial.paper_center_y_um as f64 / 1_000_000.0,
+                ),
+            }),
+        })
+    }
+
     pub fn paper_size(&self) -> Length {
         self.board_size
     }
@@ -153,5 +185,47 @@ impl MarkerPaperPlacement {
             toward_left_corner: Length::from_meters(0.0),
             toward_top_corner: (marker_paper_size - board_width) / 2f64.sqrt(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOLID: &[u8] =
+        include_bytes!("../../../ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5");
+    const HOLLOW: &[u8] =
+        include_bytes!("../../../ros/lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
+
+    #[test]
+    fn solid_target_derives_exact_single_marker_paper() {
+        let target = ValidatedTarget::parse_json5(SOLID).unwrap();
+        let pattern = MultiArucoPattern::from_target(&target).unwrap();
+
+        assert_eq!(pattern.marker_ids, vec![1]);
+        assert_eq!(pattern.dictionary, ArucoDictionary::DICT_5X5_1000);
+        assert_eq!(pattern.num_squares_per_side, 1);
+        assert_eq!(pattern.board_size.as_millimeters(), 600.0);
+        assert_eq!(pattern.board_border_size.as_millimeters(), 60.0);
+        assert_eq!(pattern.marker_size().as_millimeters(), 480.0);
+        assert_eq!(
+            pattern.paper_placement,
+            Some(MarkerPaperPlacement {
+                toward_left_corner: Length::from_millimeters(0.0),
+                toward_top_corner: Length::from_millimeters(0.0),
+            })
+        );
+    }
+
+    #[test]
+    fn hollow_target_preserves_legacy_paper_pattern() {
+        let target = ValidatedTarget::parse_json5(HOLLOW).unwrap();
+        let pattern = MultiArucoPattern::from_target(&target).unwrap();
+
+        assert_eq!(pattern.marker_ids, vec![696, 64, 306, 195]);
+        assert_eq!(pattern.num_squares_per_side, 2);
+        assert_eq!(pattern.board_size.as_millimeters(), 500.0);
+        assert_eq!(pattern.board_border_size.as_millimeters(), 10.0);
+        assert_eq!(pattern.marker_size().as_millimeters(), 192.0);
     }
 }

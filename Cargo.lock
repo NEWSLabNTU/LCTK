@@ -168,6 +168,7 @@ name = "aruco-config"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "calibration-target",
  "measurements",
  "newslab-serde-measurements",
  "noisy_float",
@@ -182,6 +183,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "aruco-config",
+ "calibration-target",
  "clap",
  "cv-convert",
  "indexmap 2.14.0",
@@ -203,6 +205,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "aruco-config",
+ "calibration-target",
  "clap",
  "console",
  "dialoguer",
@@ -223,6 +226,7 @@ dependencies = [
  "anyhow",
  "aruco-config",
  "aruco-detector",
+ "calibration-target",
  "clap",
  "cv-convert",
  "json5",
