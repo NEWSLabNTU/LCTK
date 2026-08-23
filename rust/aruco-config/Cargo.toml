@@ -12,6 +12,7 @@ serde = { workspace = true }
 anyhow = { workspace = true }
 strum = { workspace = true }
 newslab-serde-measurements = { workspace = true }
+calibration-target = { version = "0.1.0", path = "../calibration-target" }
 
 [dependencies.opencv]
 workspace = true

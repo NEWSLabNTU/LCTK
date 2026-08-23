@@ -23,6 +23,7 @@ use aruco_config::{
     CornerRefinementParams, MultiArucoPattern,
 };
 use aruco_detector::multi_aruco::{Builder, Detector};
+use calibration_target::ValidatedTarget;
 use measurements::Length;
 use noisy_float::prelude::*;
 use opencv::{
@@ -38,6 +39,10 @@ const DISTORTION: [f64; 5] = [-0.25, 0.08, 0.0, 0.0, 0.0];
 const NO_DISTORTION: [f64; 5] = [0.0; 5];
 
 const PAD_PX: i32 = 60;
+const SOLID_TARGET: &[u8] =
+    include_bytes!("../../../ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5");
+const HOLLOW_TARGET: &[u8] =
+    include_bytes!("../../../ros/lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
 
 fn pattern() -> MultiArucoPattern {
     MultiArucoPattern {
@@ -106,6 +111,141 @@ fn detector(
         detector_params,
     }
     .build()
+}
+
+#[test]
+fn solid_target_profile_accepts_exactly_its_single_marker() -> Result<()> {
+    let target = ValidatedTarget::parse_json5(SOLID_TARGET)?;
+    let pattern = aruco_config::MultiArucoPattern::from_target(&target)?;
+    let image = {
+        let board = pattern.to_opencv_mat(20.0)?;
+        let mut padded = Mat::default();
+        core::copy_make_border(
+            &board,
+            &mut padded,
+            PAD_PX,
+            PAD_PX,
+            PAD_PX,
+            PAD_PX,
+            BORDER_CONSTANT,
+            Scalar::new(255.0, 255.0, 255.0, 0.0),
+        )?;
+        padded
+    };
+
+    let detector = Builder::from_target(
+        &target,
+        camera_info(&image, &NO_DISTORTION),
+        params(CornerRefinementMethod::NONE, 5),
+    )?
+    .build()?;
+    let detection = detector
+        .detect_markers(&image)?
+        .expect("the target profile must accept its rendered ID 1 marker");
+
+    let markers: Vec<_> = detection.markers().collect();
+    assert_eq!(
+        markers.iter().map(|marker| marker.id).collect::<Vec<_>>(),
+        vec![1]
+    );
+    let corners = markers[0].corners;
+    // OpenCV's stable marker order is top-left, top-right, bottom-right, bottom-left.
+    assert!(corners[0].x < corners[1].x && corners[0].y < corners[3].y);
+    assert!(corners[2].x > corners[3].x && corners[2].y > corners[1].y);
+
+    let correspondences = markers[0].target_correspondences(&target)?;
+    let radius = 0.480 / 2f64.sqrt();
+    let expected_object_points = [
+        nalgebra::Point3::new(-radius, 0.0, 0.0), // right
+        nalgebra::Point3::new(0.0, radius, 0.0),  // top
+        nalgebra::Point3::new(radius, 0.0, 0.0),  // left
+        nalgebra::Point3::new(0.0, -radius, 0.0), // bottom
+    ];
+    assert_eq!(correspondences.image_corners, corners);
+    for (actual, expected) in correspondences
+        .object_corners
+        .iter()
+        .zip(expected_object_points)
+    {
+        assert!((actual - expected).norm() < 1e-12);
+    }
+    Ok(())
+}
+
+#[test]
+fn hollow_target_retains_marker_and_cell_order() -> Result<()> {
+    let target = ValidatedTarget::parse_json5(HOLLOW_TARGET)?;
+    let pattern = aruco_config::MultiArucoPattern::from_target(&target)?;
+    let image = {
+        let board = pattern.to_opencv_mat(20.0)?;
+        let mut padded = Mat::default();
+        core::copy_make_border(
+            &board,
+            &mut padded,
+            PAD_PX,
+            PAD_PX,
+            PAD_PX,
+            PAD_PX,
+            BORDER_CONSTANT,
+            Scalar::new(255.0, 255.0, 255.0, 0.0),
+        )?;
+        padded
+    };
+    let detector = Builder::from_target(
+        &target,
+        camera_info(&image, &NO_DISTORTION),
+        params(CornerRefinementMethod::NONE, 5),
+    )?
+    .build()?;
+    let detection = detector
+        .detect_markers(&image)?
+        .expect("legacy hollow renderer must remain detectable");
+    let markers: Vec<_> = detection.markers().collect();
+
+    assert_eq!(
+        markers.iter().map(|marker| marker.id).collect::<Vec<_>>(),
+        vec![696, 64, 306, 195]
+    );
+    let image_center = |id| {
+        let corners = markers
+            .iter()
+            .find(|marker| marker.id == id)
+            .unwrap()
+            .corners;
+        (
+            corners.iter().map(|point| point.x).sum::<f32>() / 4.0,
+            corners.iter().map(|point| point.y).sum::<f32>() / 4.0,
+        )
+    };
+    let (x696, y696) = image_center(696);
+    let (x64, y64) = image_center(64);
+    let (x306, y306) = image_center(306);
+    let (x195, y195) = image_center(195);
+    assert!(x696 < x64 && y696 < y306);
+    assert!(x306 < x195 && y64 < y195);
+
+    let object_center = |id| -> Result<nalgebra::Point3<f64>> {
+        let correspondence = markers
+            .iter()
+            .find(|marker| marker.id == id)
+            .unwrap()
+            .target_correspondences(&target)?;
+        Ok(correspondence
+            .object_corners
+            .iter()
+            .map(|point| point.coords)
+            .sum::<nalgebra::Vector3<f64>>()
+            .scale(0.25)
+            .into())
+    };
+    let bottom = object_center(696)?;
+    let left = object_center(64)?;
+    let right = object_center(306)?;
+    let top = object_center(195)?;
+    assert!(bottom.y < left.y && bottom.y < right.y);
+    assert!(top.y > left.y && top.y > right.y);
+    assert!(left.x > 0.0 && right.x < 0.0);
+    Ok(())
 }
 
 /// Flatten a detection into `(id, x, y)` per corner, in the detector's configured marker order.

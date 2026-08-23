@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
 use aruco_config::{ArucoDictionary, MultiArucoPattern};
+use calibration_target::ValidatedTarget;
 use console::Term;
 use dialoguer::{Confirm, Input, Select};
 use indexmap::IndexSet;
@@ -12,7 +13,7 @@ use opencv::{
     prelude::*,
 };
 use rand::prelude::*;
-use std::io::prelude::*;
+use std::{io::prelude::*, path::Path};
 use strum::VariantNames;
 
 pub mod config;
@@ -24,6 +25,37 @@ const MILLIMETERS_PER_INCH: f64 = 25.4;
 pub struct ArucoGenerator;
 
 impl ArucoGenerator {
+    /// Render a target's complete logical paper without writing it.
+    pub fn render_target(target: &ValidatedTarget, dpi: f64) -> Result<Mat> {
+        ensure!(dpi > 0.0, "dpi must be positive");
+        MultiArucoPattern::from_target(target)?.to_opencv_mat(dpi)
+    }
+
+    /// Render the fiducial paper specified by a Target Definition.
+    ///
+    /// `dpi` controls pixels only. The logical paper dimensions, white margin,
+    /// marker size, IDs and dictionary all come from the immutable target.
+    pub fn generate_target_image(
+        target: &ValidatedTarget,
+        dpi: f64,
+        output_path: impl AsRef<Path>,
+        preview: bool,
+    ) -> Result<()> {
+        let image = Self::render_target(target, dpi)?;
+        let output_path = output_path.as_ref();
+        imgcodecs::imwrite(
+            output_path.to_string_lossy().as_ref(),
+            &image,
+            &Vector::<i32>::new(),
+        )?;
+
+        if preview {
+            highgui::imshow("preview", &image)?;
+            highgui::wait_key(0)?;
+        }
+        Ok(())
+    }
+
     /// Generate ArUco image from configuration
     pub fn generate_from_config(config: &Config, preview: bool) -> Result<()> {
         config.validate()?;
@@ -456,5 +488,100 @@ impl InteractiveBuilder {
         };
 
         Ok(marker_ids)
+    }
+}
+
+#[cfg(test)]
+mod target_renderer_tests {
+    use super::*;
+    use opencv::{
+        core::{self, Point, Rect},
+        imgproc,
+    };
+
+    const SOLID: &[u8] =
+        include_bytes!("../../../ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5");
+    const HOLLOW: &[u8] =
+        include_bytes!("../../../ros/lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
+    const TEN_PIXELS_PER_MM_DPI: f64 = 254.0;
+
+    fn ink_bounds(image: &Mat) -> Result<Rect> {
+        let mut ink = Mat::default();
+        core::bitwise_not(image, &mut ink, &core::no_array())?;
+        let mut points = Vector::<Point>::new();
+        core::find_non_zero(&ink, &mut points)?;
+        Ok(imgproc::bounding_rect(&points)?)
+    }
+
+    fn pixel(image: &Mat, x: i32, y: i32) -> u8 {
+        *image.at_2d::<u8>(y, x).unwrap()
+    }
+
+    fn assert_marker_roi(
+        image: &Mat,
+        pattern: &MultiArucoPattern,
+        id: u32,
+        rect: Rect,
+    ) -> Result<()> {
+        let mut expected = Mat::default();
+        pattern.dictionary.to_opencv_dictionary()?.draw_marker(
+            id as i32,
+            rect.width,
+            &mut expected,
+            pattern.border_bits as i32,
+        )?;
+        let roi = Mat::roi(image, rect)?;
+        let mut unequal = Mat::default();
+        core::compare(&roi, &expected, &mut unequal, core::CMP_NE)?;
+        assert_eq!(core::count_non_zero(&unequal)?, 0, "marker ID {id}");
+        Ok(())
+    }
+
+    #[test]
+    fn solid_renderer_has_exact_600_mm_paper_and_60_mm_margin() -> Result<()> {
+        let target = ValidatedTarget::parse_json5(SOLID)?;
+        let image = ArucoGenerator::render_target(&target, TEN_PIXELS_PER_MM_DPI)?;
+        let pattern = MultiArucoPattern::from_target(&target)?;
+
+        assert_eq!((image.cols(), image.rows()), (6000, 6000));
+        assert_eq!(pattern.marker_ids, vec![1]);
+        // The marker occupies [600, 5400) on each axis. Taking the bounding box of
+        // all non-white ink measures the quiet zone without assuming its interior
+        // code cells are black.
+        assert_eq!(ink_bounds(&image)?, Rect::new(600, 600, 4800, 4800));
+        assert_eq!(pixel(&image, 599, 3000), 255);
+        assert_eq!(pixel(&image, 600, 3000), 0);
+        assert_eq!(pixel(&image, 5399, 3000), 0);
+        assert_eq!(pixel(&image, 5400, 3000), 255);
+        assert_marker_roi(&image, &pattern, 1, Rect::new(600, 600, 4800, 4800))?;
+        Ok(())
+    }
+
+    #[test]
+    fn hollow_renderer_preserves_legacy_2x2_pixel_layout() -> Result<()> {
+        let target = ValidatedTarget::parse_json5(HOLLOW)?;
+        let image = ArucoGenerator::render_target(&target, TEN_PIXELS_PER_MM_DPI)?;
+        let pattern = MultiArucoPattern::from_target(&target)?;
+
+        assert_eq!((image.cols(), image.rows()), (5000, 5000));
+        // Legacy geometry: 100 px paper border, 2400 px cells, 1920 px markers,
+        // hence marker boxes [340,2260) and [2740,4660) on both axes.
+        assert_eq!(ink_bounds(&image)?, Rect::new(340, 340, 4320, 4320));
+        for &(x, y) in &[(340, 340), (2740, 340), (340, 2740), (2740, 2740)] {
+            assert_eq!(pixel(&image, x, y), 0);
+        }
+        assert_eq!(pixel(&image, 339, 340), 255);
+        assert_eq!(pixel(&image, 2260, 1000), 255);
+        assert_eq!(pixel(&image, 2739, 1000), 255);
+        assert_eq!(pixel(&image, 4660, 340), 255);
+        for (&id, rect) in pattern.marker_ids.iter().zip([
+            Rect::new(340, 340, 1920, 1920),
+            Rect::new(2740, 340, 1920, 1920),
+            Rect::new(340, 2740, 1920, 1920),
+            Rect::new(2740, 2740, 1920, 1920),
+        ]) {
+            assert_marker_roi(&image, &pattern, id, rect)?;
+        }
+        Ok(())
     }
 }

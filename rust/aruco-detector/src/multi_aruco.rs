@@ -1,5 +1,6 @@
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use aruco_config::{ArucoDetectorParams, MultiArucoPattern};
+use calibration_target::ValidatedTarget;
 use cv_convert::{OpenCvPose, TryToCv};
 use indexmap::IndexSet;
 use itertools::{iproduct, izip};
@@ -38,6 +39,39 @@ impl Detection {
 pub struct ImageMarker {
     pub id: i32,
     pub corners: [Point2<f32>; 4],
+}
+
+/// A detected marker paired with its canonical target-local object points.
+///
+/// Array index is the correspondence contract: OpenCV image corners
+/// `[top-left, top-right, bottom-right, bottom-left]` pair with target-local
+/// `[right, top, left, bottom]` for the diamond-mounted paper.
+#[derive(Clone, Debug)]
+pub struct TargetMarkerCorrespondences {
+    pub id: u32,
+    pub image_corners: [Point2<f32>; 4],
+    pub object_corners: [Point3<f64>; 4],
+}
+
+impl ImageMarker {
+    pub fn target_correspondences(
+        &self,
+        target: &ValidatedTarget,
+    ) -> Result<TargetMarkerCorrespondences> {
+        let id = u32::try_from(self.id).context("detected ArUco ID must not be negative")?;
+        let object_corners = target
+            .marker_corners_by_id()
+            .get(&id)
+            .copied()
+            .with_context(|| {
+                format!("ArUco ID {id} is not part of target {}", target.target_id())
+            })?;
+        Ok(TargetMarkerCorrespondences {
+            id,
+            image_corners: self.corners,
+            object_corners,
+        })
+    }
 }
 
 /// An ArUco marker on an image with pose estimation.
@@ -300,6 +334,20 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Build a detector profile from a Target Definition. Detector tuning and camera
+    /// intrinsics stay caller-owned; all printed geometry comes from `target`.
+    pub fn from_target(
+        target: &ValidatedTarget,
+        camera_info: CameraInfo,
+        detector_params: ArucoDetectorParams,
+    ) -> Result<Self> {
+        Ok(Self {
+            pattern: MultiArucoPattern::from_target(target)?,
+            camera_info,
+            detector_params,
+        })
+    }
+
     pub fn build(self) -> Result<Detector> {
         let Self {
             pattern,
