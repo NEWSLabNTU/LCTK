@@ -264,3 +264,87 @@ fn test_iterator_termination_reason() {
     let reason_in_progress = iterator.termination_reason(&state_in_progress);
     assert!(reason_in_progress.contains("Unknown") || reason_in_progress.contains("Insufficient"));
 }
+
+/// Freeze the historical step-then-check protocol.
+///
+/// `initial_state` intentionally contains no calculated correspondences.  Consequently
+/// `should_terminate` reports the initial state as unsuitable for Kabsch even when it
+/// already carries enough input points.  Production callers take one step before asking
+/// this predicate; changing either side of that protocol is a behavioural change, not a
+/// harmless estimator refactor (M-21 documents the awkward API shape).
+#[test]
+fn initial_state_requires_one_step_before_termination_check_is_meaningful() {
+    let config = create_test_config();
+    let board_params = create_test_board_params();
+    let mut iterator = BoardIcpIterator::new(&config, board_params, None);
+
+    let state = iterator.initial_state(Isometry3::identity(), create_test_points());
+    assert_eq!(state.inlier_points.len(), 4);
+    assert_eq!(state.good_correspondences, 0);
+    assert!(iterator.should_terminate(&state));
+    assert_eq!(
+        iterator.termination_reason(&state),
+        "Insufficient points for Kabsch: 0"
+    );
+
+    let next = iterator.step(&state);
+    assert_eq!(next.iteration, 1);
+    assert_eq!(next.previous_loss, Some(f64::INFINITY));
+    assert_eq!(next.total_correspondences, 4);
+    assert_eq!(next.good_correspondences, 0);
+    assert_eq!(next.correspondences.len(), 0);
+    // This is not exactly 1 m because the current nearest-surface projection moves
+    // one or more of these points slightly around a cutout.  Keep the measured value
+    // as a legacy golden rather than rounding it to the intuitive plane distance.
+    let expected_avg_loss = 1.000_107_221_550_572_9;
+    assert!(
+        (next.avg_loss - expected_avg_loss).abs() < 1e-12,
+        "avg loss changed: got {}, expected {expected_avg_loss}",
+        next.avg_loss
+    );
+    assert_eq!(next.board_pose, state.board_pose);
+    assert_eq!(next.termination_count, 0);
+    assert_eq!(
+        iterator.termination_reason(&next),
+        "Insufficient points for Kabsch: 0"
+    );
+}
+
+/// Pin the documented ordering of all historical termination exits.
+///
+/// In particular, the stable-pose condition is strictly `> 100`, not `>= 100`, and a
+/// good fit wins over every other condition.  This preserves current hollow behavior
+/// while the replacement target estimator is introduced; it does not endorse or repair
+/// M-21's unreachable stable-pose exit under shipped iteration caps.
+#[test]
+fn termination_exit_order_and_stable_pose_boundary_are_legacy_contract() {
+    let config = create_test_config();
+    let board_params = create_test_board_params();
+    let iterator = BoardIcpIterator::new(&config, board_params, None);
+    let mut state = iterator.initial_state(Isometry3::identity(), create_test_points());
+
+    // Construct an otherwise live post-step state, then test the precise stable-pose
+    // boundary independently of Kabsch or the loss gate.
+    state.iteration = config.max_icp_iterations - 1;
+    state.avg_loss = config.icp_rejection_threshold;
+    state.total_correspondences = 4;
+    state.good_correspondences = 4;
+    state.correspondences = vec![(Point3::origin(), Point3::origin()); 4];
+    state.termination_count = 100;
+    assert!(!iterator.should_terminate(&state));
+    assert_eq!(iterator.termination_reason(&state), "Unknown");
+
+    state.termination_count = 101;
+    assert!(iterator.should_terminate(&state));
+    assert_eq!(
+        iterator.termination_reason(&state),
+        "Converged (stable pose)"
+    );
+
+    // Good-fit success is checked first, even when stable pose and maximum iteration
+    // would independently stop the iterator.
+    state.avg_loss = config.icp_rejection_threshold / 2.0;
+    state.iteration = config.max_icp_iterations;
+    assert!(iterator.should_terminate(&state));
+    assert_eq!(iterator.termination_reason(&state), "Converged (good fit)");
+}
