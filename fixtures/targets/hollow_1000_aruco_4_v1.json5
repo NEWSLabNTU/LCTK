@@ -1,0 +1,15 @@
+// Same physical target as ros/lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5.
+// Cutout order has no geometric meaning and is deliberately shuffled.
+{
+  target_id: "hollow_1000_aruco_4", revision: 1, schema_version: 1,
+  board_frame_convention: "corner_aligned_plate_center_v1",
+  plate: { side: "1m", surface: { kind: "perforated", circular_cutouts: [
+    { radius: "0.15m", center: { y: "0m", x: "-0.282842712m" } },
+    { center: { x: "0m", y: "0.282842712m" }, radius: "150mm" },
+    { center: { x: "0.282842712m", y: "0.0m" }, radius: "0.150m" },
+  ]}},
+  fiducial: { kind: "square_aruco_grid", dictionary: "DICT_5X5_1000", marker_ids: [696, 64, 306, 195],
+    paper_side: "0.5m", paper_center: { toward_left_corner: "0m", toward_top_corner: "-0.353553391m" },
+    outer_border: "0.01m", cells_per_side: 2, marker_fill_ratio: 0.8, border_bits: 1 },
+  lidar_orientation_reference: { kind: "asymmetric_cutouts" },
+}
