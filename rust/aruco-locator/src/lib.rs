@@ -3,6 +3,7 @@ pub mod config;
 use anyhow::{bail, Result};
 use aruco_config::{ArucoDetectorParams, MultiArucoPattern};
 use aruco_detector::multi_aruco::ImageMarker;
+use calibration_target::ValidatedTarget;
 use config::MrptCalibration;
 use opencv::{
     core::{Point2i, Scalar},
@@ -25,6 +26,21 @@ pub struct ArucoDetectorConfig {
 }
 
 impl ArucoDetectorConfig {
+    /// Construct a detector configuration from a Target Definition. This is the
+    /// target-driven seam for ROS adapters; the legacy file loader remains for
+    /// callers not yet migrated.
+    pub fn from_target(
+        camera_info: CameraInfo,
+        target: &ValidatedTarget,
+        detector_params: ArucoDetectorParams,
+    ) -> Result<Self> {
+        Ok(Self {
+            camera_info,
+            aruco_pattern: MultiArucoPattern::from_target(target)?,
+            detector_params,
+        })
+    }
+
     /// Load configuration from intrinsics, pattern, and (optionally) detector-params files.
     ///
     /// `detector_params_file` may be `None`, in which case the defaults apply — which enable

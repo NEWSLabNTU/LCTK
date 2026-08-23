@@ -11,6 +11,7 @@ rand = { workspace = true }
 console = "0.15.7"
 indexmap = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../../rust/aruco-config", features = ["with-opencv"] }
+calibration-target = { version = "0.1.0", path = "../../rust/calibration-target" }
 measurements = { workspace = true }
 noisy_float = { workspace = true }
 strum = { workspace = true }
