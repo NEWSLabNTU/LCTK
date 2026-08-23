@@ -8,7 +8,7 @@
 //! rotating calipers) and `seed_center` (the size-gated seed selection from
 //! `detector.py::_quad_center` / the `square_icp` seed logic).
 
-use crate::config::BoardConfig;
+use crate::config::TargetDetectionParams;
 
 /// Result of a minimum-area bounding rectangle computation, matching the
 /// geometry (not necessarily the corner ordering/labeling) of
@@ -144,7 +144,7 @@ pub fn min_area_rect(coords: &[[f64; 2]]) -> Option<MinAreaRect> {
 /// plus the size gate from `scorer.py`'s `anisotropic` branch): compute
 /// `min_area_rect`, and if it exists and passes the size gate, return its
 /// center; otherwise fall back to the centroid of `coords`.
-pub fn seed_center(coords: &[[f64; 2]], board: &BoardConfig) -> [f64; 2] {
+pub fn seed_center(coords: &[[f64; 2]], board: &TargetDetectionParams<'_>) -> [f64; 2] {
     let centroid = || {
         let n = coords.len() as f64;
         let sx: f64 = coords.iter().map(|p| p[0]).sum();
@@ -166,8 +166,9 @@ pub fn seed_center(coords: &[[f64; 2]], board: &BoardConfig) -> [f64; 2] {
         return centroid();
     }
 
-    let lo = board.side_m * (1.0 - 2.0 * board.side_tol);
-    let hi = board.side_m * (1.0 + 2.0 * board.side_tol);
+    let side_m = board.target_side().as_metres();
+    let lo = side_m * (1.0 - 2.0 * board.side_tol);
+    let hi = side_m * (1.0 + 2.0 * board.side_tol);
 
     let mean_side: f64 = {
         let c = rect.corners;
