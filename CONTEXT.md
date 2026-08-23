@@ -5,6 +5,31 @@ well the captured geometry constrains that estimate.
 
 ## Language
 
+**Calibration Target**:
+The physical artifact observed by the sensors: one plate, its fiducial layout, its canonical frame,
+and the identity binding those facts together.
+_Avoid_: Marker, hollow board (for the general concept), ArUco board
+
+**Target Definition**:
+The immutable description of one Calibration Target's physical geometry and fiducial layout. It
+excludes sensor-specific detection settings and deployment-specific cropping.
+_Avoid_: Board config, ArUco config, detector config
+
+**Target Identity**:
+The versioned identity of a Target Definition, used to prevent observations or archives from one
+Calibration Target being interpreted as another.
+_Avoid_: Frame convention, target name, config path
+
+**Detector Tuning**:
+Sensor- and operating-range-specific settings controlling how observations of a Calibration Target
+are found and accepted.
+_Avoid_: Target Definition, board geometry
+
+**LiDAR Orientation Reference**:
+The physical evidence that identifies a Calibration Target's named in-plane axes to a LiDAR: either
+asymmetric cutouts or a required local axis aligned with mounting-up.
+_Avoid_: Initial rotation, ICP orientation, camera marker orientation
+
 **Detection Pair**:
 One genuinely simultaneous camera ArUco detection and LiDAR board detection describing the same
 observation instant.
