@@ -1,13 +1,21 @@
 //! Validated, immutable physical definitions of calibration targets.
 //!
 //! This crate deliberately owns only Target Definition parsing, validation and semantic
-//! identity. Surface projection and posed geometry belong to the next migration packet.
+//! identity and canonical board-local geometry.
+
+mod geometry;
+
+use geometry::SurfaceAdapter;
+pub use geometry::{Correspondence, PosedTarget, TargetAxes};
 
 use anyhow::{bail, Context, Result};
+use indexmap::IndexMap;
+use nalgebra::{Isometry3, Point3, Vector3};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const DIAMOND_TOLERANCE_UM: i64 = 2;
+const SQRT_2: f64 = std::f64::consts::SQRT_2;
 
 /// The stable Target Definition seam.  `CalibrationTarget` remains as the compatibility
 /// name while callers migrate.
@@ -22,6 +30,8 @@ pub struct CalibrationTarget {
     plate: Plate,
     fiducial: Fiducial,
     lidar_orientation_reference: LidarOrientationReference,
+    marker_corners_by_id: IndexMap<u32, [Point3<f64>; 4]>,
+    surface_adapter: SurfaceAdapter,
     identity: TargetIdentity,
 }
 
@@ -62,6 +72,110 @@ impl CalibrationTarget {
 
     pub fn lidar_orientation_reference(&self) -> &LidarOrientationReference {
         &self.lidar_orientation_reference
+    }
+
+    /// Pose this immutable target in a sensor frame. The supplied isometry's origin is
+    /// the plate centre and its axes are the canonical target axes.
+    pub fn posed(&self, pose: Isometry3<f64>) -> PosedTarget<'_> {
+        PosedTarget::new(self, pose)
+    }
+
+    pub(crate) fn surface_adapter(&self) -> &SurfaceAdapter {
+        &self.surface_adapter
+    }
+
+    /// Canonical local origin: plate centre.
+    pub fn local_center(&self) -> Point3<f64> {
+        Point3::origin()
+    }
+
+    /// Canonical `+X`: centre toward named left corner.
+    pub fn local_x_axis(&self) -> Vector3<f64> {
+        Vector3::x()
+    }
+
+    /// Canonical `+Y`: centre toward named top corner (board local up).
+    pub fn local_y_axis(&self) -> Vector3<f64> {
+        Vector3::y()
+    }
+
+    /// Canonical `+Z`: plate normal.
+    pub fn local_z_axis(&self) -> Vector3<f64> {
+        Vector3::z()
+    }
+
+    pub fn half_diagonal_m(&self) -> f64 {
+        self.plate.side_um as f64 / 1_000_000.0 / SQRT_2
+    }
+
+    pub fn local_top_corner(&self) -> Point3<f64> {
+        Point3::new(0.0, self.half_diagonal_m(), 0.0)
+    }
+
+    pub fn local_bottom_corner(&self) -> Point3<f64> {
+        Point3::new(0.0, -self.half_diagonal_m(), 0.0)
+    }
+
+    pub fn local_left_corner(&self) -> Point3<f64> {
+        Point3::new(self.half_diagonal_m(), 0.0, 0.0)
+    }
+
+    pub fn local_right_corner(&self) -> Point3<f64> {
+        Point3::new(-self.half_diagonal_m(), 0.0, 0.0)
+    }
+
+    pub fn local_paper_center(&self) -> Point3<f64> {
+        Point3::new(
+            self.fiducial.paper_center_x_um as f64 / 1_000_000.0,
+            self.fiducial.paper_center_y_um as f64 / 1_000_000.0,
+            0.0,
+        )
+    }
+
+    /// Map paper-edge coordinates (metres) to canonical target-local coordinates.
+    pub fn local_marker_paper_point(&self, u_m: f64, v_m: f64) -> Point3<f64> {
+        let half_paper_m = self.fiducial.paper_side_um as f64 / 2_000_000.0;
+        let center = self.local_paper_center();
+        let u_direction = (self.local_y_axis() + self.local_x_axis()) / SQRT_2;
+        let v_direction = (self.local_y_axis() - self.local_x_axis()) / SQRT_2;
+        center - (u_direction + v_direction) * half_paper_m + u_direction * u_m + v_direction * v_m
+    }
+
+    /// ArUco corners in canonical target-local coordinates, keyed by marker ID. Each
+    /// array is `[right, top, left, bottom]`, matching existing camera consumers.
+    pub fn marker_corners_by_id(&self) -> &IndexMap<u32, [Point3<f64>; 4]> {
+        &self.marker_corners_by_id
+    }
+
+    fn compute_marker_corners_by_id(&self) -> IndexMap<u32, [Point3<f64>; 4]> {
+        let fiducial = &self.fiducial;
+        let cells = fiducial.cells_per_side as usize;
+        let paper_m = fiducial.paper_side_um as f64 / 1_000_000.0;
+        let border_m = fiducial.outer_border_um as f64 / 1_000_000.0;
+        let square_m = (paper_m - 2.0 * border_m) / cells as f64;
+        let marker_m = square_m * fiducial.marker_fill_ratio;
+        let marker_border_m = (square_m - marker_m) / 2.0;
+        let origin_m = border_m + marker_border_m;
+
+        fiducial
+            .marker_ids
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, marker_id)| {
+                // Keep legacy 2x2 enumeration: bottom, left, right, top. This general
+                // row-major-in-u order also yields the sole cell for 1x1.
+                let u_cell = index % cells;
+                let v_cell = index / cells;
+                let base_u = origin_m + u_cell as f64 * square_m;
+                let base_v = origin_m + v_cell as f64 * square_m;
+                let bottom = self.local_marker_paper_point(base_u, base_v);
+                let left = self.local_marker_paper_point(base_u + marker_m, base_v);
+                let right = self.local_marker_paper_point(base_u, base_v + marker_m);
+                let top = self.local_marker_paper_point(base_u + marker_m, base_v + marker_m);
+                (marker_id, [right, top, left, bottom])
+            })
+            .collect()
     }
 
     pub fn canonical_bytes(&self) -> Vec<u8> {
@@ -160,6 +274,10 @@ impl CalibrationTarget {
         let fiducial = Fiducial::validate(raw.fiducial, side_um, &surface)?;
         let lidar_orientation_reference =
             LidarOrientationReference::validate(raw.lidar_orientation_reference, &surface)?;
+        // Select and build surface implementation once. Every posed view borrows this
+        // immutable adapter; pose creation performs no target-kind dispatch or cutout
+        // conversion.
+        let surface_adapter = SurfaceAdapter::from_plate(side_um, &surface);
         let mut target = Self {
             schema_version: raw.schema_version,
             target_id: raw.target_id,
@@ -168,8 +286,11 @@ impl CalibrationTarget {
             plate: Plate { side_um, surface },
             fiducial,
             lidar_orientation_reference,
+            marker_corners_by_id: IndexMap::new(),
+            surface_adapter,
             identity: TargetIdentity::placeholder(),
         };
+        target.marker_corners_by_id = target.compute_marker_corners_by_id();
         target.identity = TargetIdentity::from_canonical(&target);
         Ok(target)
     }
@@ -702,6 +823,225 @@ mod tests {
     }
 
     #[test]
+    fn solid_marker_is_exactly_480_mm_and_uses_camera_corner_order() {
+        let target = ValidatedTarget::parse_json5(SOLID.as_bytes()).unwrap();
+        let corners = target.marker_corners_by_id();
+        let marker = corners.get(&1).expect("solid target has marker ID 1");
+        let half_diagonal = 0.480 / 2f64.sqrt();
+        let expected = [
+            Point3::new(-half_diagonal, 0.0, 0.0), // right
+            Point3::new(0.0, half_diagonal, 0.0),  // top
+            Point3::new(half_diagonal, 0.0, 0.0),  // left
+            Point3::new(0.0, -half_diagonal, 0.0), // bottom
+        ];
+        for (actual, expected) in marker.iter().zip(expected) {
+            assert!(
+                (actual - expected).norm() < 1e-12,
+                "got {actual:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hollow_marker_layout_keeps_legacy_id_to_cell_binding() {
+        let target = ValidatedTarget::parse_json5(HOLLOW.as_bytes()).unwrap();
+        let corners = target.marker_corners_by_id();
+        assert_eq!(corners.len(), 4);
+        assert_eq!(
+            corners.keys().copied().collect::<Vec<_>>(),
+            [696, 64, 306, 195]
+        );
+
+        // Legacy order is bottom, left, right, top. This pins IDs to their physical
+        // cells, not merely to four geometrically plausible marker squares.
+        let marker_centers = [696_u32, 64, 306, 195].map(|id| {
+            let corners = corners.get(&id).unwrap();
+            Point3::from((corners[0].coords + corners[2].coords) / 2.0)
+        });
+        assert!(marker_centers[0].x < marker_centers[1].x);
+        assert!(marker_centers[0].y < marker_centers[2].y);
+        assert!(marker_centers[3].x > marker_centers[2].x);
+        assert!(marker_centers[3].y > marker_centers[1].y);
+    }
+
+    #[test]
+    fn posed_target_preserves_named_axes_corners_markers_and_input_order() {
+        let target = ValidatedTarget::parse_json5(SOLID.as_bytes()).unwrap();
+        let pose = Isometry3::from_parts(
+            nalgebra::Translation3::new(1.5, -2.0, 0.75),
+            nalgebra::UnitQuaternion::from_euler_angles(0.4, -0.3, 1.2),
+        );
+        let posed = target.posed(pose);
+        assert!((posed.center() - Point3::from(pose.translation.vector)).norm() < 1e-12);
+        assert!(
+            (posed.top_corner() - pose.transform_point(&target.local_top_corner())).norm() < 1e-12
+        );
+        assert!(
+            (posed.bottom_corner() - pose.transform_point(&target.local_bottom_corner())).norm()
+                < 1e-12
+        );
+        assert!(
+            (posed.left_corner() - pose.transform_point(&target.local_left_corner())).norm()
+                < 1e-12
+        );
+        assert!(
+            (posed.right_corner() - pose.transform_point(&target.local_right_corner())).norm()
+                < 1e-12
+        );
+        assert!((posed.x_axis().into_inner() - pose * Vector3::x()).norm() < 1e-12);
+        assert!((posed.board_up().into_inner() - pose * Vector3::y()).norm() < 1e-12);
+        assert!((posed.z_axis().into_inner() - pose * Vector3::z()).norm() < 1e-12);
+        let axes = posed.axes();
+        assert_eq!(axes.toward_left_corner, posed.x_axis());
+        assert_eq!(axes.toward_top_corner, posed.y_axis());
+        assert_eq!(axes.normal, posed.z_axis());
+
+        let inputs = [
+            pose.transform_point(&Point3::new(0.0, 0.0, 0.3)),
+            pose.transform_point(&Point3::new(2.0, 0.0, -0.2)),
+            pose.transform_point(&Point3::new(0.0, 2.0, 0.4)),
+        ];
+        let outputs = posed.closest_points(inputs);
+        assert_eq!(outputs.len(), inputs.len());
+        assert!((outputs[0].closest - pose.transform_point(&Point3::origin())).norm() < 1e-12);
+        assert!((outputs[1].closest - posed.left_corner()).norm() < 1e-12);
+        assert!((outputs[2].closest - posed.top_corner()).norm() < 1e-12);
+
+        let world_marker = posed.marker_corners_by_id();
+        let local_marker = target.marker_corners_by_id();
+        for (id, local) in local_marker {
+            let expected = (*local).map(|point| pose.transform_point(&point));
+            assert_eq!(world_marker.get(id), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn posed_targets_borrow_one_validated_surface_adapter() {
+        for source in [SOLID, HOLLOW] {
+            let target = ValidatedTarget::parse_json5(source.as_bytes()).unwrap();
+            let first = target.posed(Isometry3::identity());
+            let second = target.posed(Isometry3::translation(1.0, 2.0, 3.0));
+            assert_eq!(
+                first.surface_adapter_address(),
+                second.surface_adapter_address(),
+                "{} rebuilt its surface adapter per pose",
+                target.target_id()
+            );
+        }
+    }
+
+    #[test]
+    fn correspondences_retain_owned_metadata_and_input_order() {
+        #[derive(Debug, PartialEq)]
+        struct TaggedPoint {
+            tag: &'static str,
+            point: Point3<f64>,
+        }
+        impl std::borrow::Borrow<Point3<f64>> for TaggedPoint {
+            fn borrow(&self) -> &Point3<f64> {
+                &self.point
+            }
+        }
+
+        let target = ValidatedTarget::parse_json5(SOLID.as_bytes()).unwrap();
+        let posed = target.posed(Isometry3::identity());
+        let correspondences = posed.closest_points([
+            TaggedPoint {
+                tag: "first",
+                point: Point3::new(0.0, 0.0, 0.4),
+            },
+            TaggedPoint {
+                tag: "second",
+                point: Point3::new(2.0, 0.0, -0.3),
+            },
+        ]);
+
+        assert_eq!(correspondences[0].input.tag, "first");
+        assert_eq!(correspondences[0].input.point.z, 0.4);
+        assert_eq!(correspondences[0].closest, Point3::origin());
+        assert_eq!(correspondences[1].input.tag, "second");
+        assert_eq!(correspondences[1].closest, posed.left_corner());
+    }
+
+    #[test]
+    fn both_surface_adapters_hold_projection_properties_under_random_poses() {
+        let mut rng = Lcg::new(0x5eed_0008);
+        for source in [SOLID, HOLLOW] {
+            let target = ValidatedTarget::parse_json5(source.as_bytes()).unwrap();
+            let mut poses = vec![Isometry3::identity()];
+            poses.extend((0..8).map(|_| rng.pose()));
+            for pose in poses {
+                let posed = target.posed(pose);
+                for _ in 0..80 {
+                    let query_local = Point3::new(
+                        rng.range(-1.5, 1.5),
+                        rng.range(-1.5, 1.5),
+                        rng.range(-1.0, 1.0),
+                    );
+                    let actual = posed.closest_point(&pose.transform_point(&query_local));
+                    let local = pose.inverse_transform_point(&actual);
+                    assert!(local.z.abs() < 1e-12);
+                    assert!(
+                        local.x.abs() + local.y.abs() <= target.half_diagonal_m() + 1e-12,
+                        "{local:?} outside target plate"
+                    );
+                    if let Surface::Perforated { circular_cutouts } = &target.plate().surface {
+                        for cutout in circular_cutouts {
+                            let distance = (local.x - cutout.x_um as f64 / 1e6)
+                                .hypot(local.y - cutout.y_um as f64 / 1e6);
+                            assert!(distance + 1e-12 >= cutout.radius_um as f64 / 1e6);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn perforated_surface_projects_hole_centres_to_deterministic_rims() {
+        let target = ValidatedTarget::parse_json5(HOLLOW.as_bytes()).unwrap();
+        let posed = target.posed(Isometry3::identity());
+        let Surface::Perforated { circular_cutouts } = &target.plate().surface else {
+            panic!("hollow target must be perforated");
+        };
+        for cutout in circular_cutouts {
+            let actual = posed.closest_point(&Point3::new(
+                cutout.x_um as f64 / 1e6,
+                cutout.y_um as f64 / 1e6,
+                0.25,
+            ));
+            let expected = Point3::new(
+                (cutout.x_um + cutout.radius_um) as f64 / 1e6,
+                cutout.y_um as f64 / 1e6,
+                0.0,
+            );
+            assert!((actual - expected).norm() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn near_cutout_centre_preserves_every_nonzero_radial_direction() {
+        let target = ValidatedTarget::parse_json5(HOLLOW.as_bytes()).unwrap();
+        let posed = target.posed(Isometry3::identity());
+        let Surface::Perforated { circular_cutouts } = &target.plate().surface else {
+            panic!("hollow target must be perforated");
+        };
+        let cutout = &circular_cutouts[0];
+        let center = Point3::new(cutout.x_um as f64 / 1e6, cutout.y_um as f64 / 1e6, 0.0);
+        let query = center + Vector3::new(5e-13, -4e-13, 0.7);
+        let actual = posed.closest_point(&query);
+        // Use representable displacement received by production code. At this scale,
+        // adding a tiny displacement to a nonzero centre incurs visible cancellation.
+        let radial = Vector3::new(query.x - center.x, query.y - center.y, 0.0).normalize();
+        let expected = center + radial * (cutout.radius_um as f64 / 1e6);
+        assert!(
+            (actual - expected).norm() < 1e-12,
+            "near-centre direction lost: got {actual:?}, expected {expected:?}"
+        );
+        assert!(actual.y < center.y, "must retain negative Y component");
+    }
+
+    #[test]
     fn derived_legacy_cutout_lengths_round_to_micrometres() {
         let target = CalibrationTarget::from_json5(HOLLOW.as_bytes()).unwrap();
         let Surface::Perforated { circular_cutouts } = &target.plate().surface else {
@@ -943,5 +1283,52 @@ mod tests {
           fiducial: { kind: "square_aruco_grid", dictionary: "DICT_5X5_1000", marker_ids: [1], paper_side: "100mm",
             paper_center: { toward_left_corner: "0mm", toward_top_corner: "0mm" }, outer_border: "1mm", cells_per_side: 1, marker_fill_ratio: 1.0, border_bits: 1 },
           lidar_orientation_reference: { kind: "asymmetric_cutouts" } }"#.to_owned()
+    }
+
+    struct Lcg {
+        state: u64,
+    }
+
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Self { state: seed }
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.state = self
+                .state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.state
+        }
+
+        fn range(&mut self, low: f64, high: f64) -> f64 {
+            let unit = (self.next_u64() >> 11) as f64 / (1_u64 << 53) as f64;
+            low + (high - low) * unit
+        }
+
+        fn pose(&mut self) -> Isometry3<f64> {
+            let axis = loop {
+                let candidate = Vector3::new(
+                    self.range(-1.0, 1.0),
+                    self.range(-1.0, 1.0),
+                    self.range(-1.0, 1.0),
+                );
+                if candidate.norm() > 0.25 {
+                    break nalgebra::Unit::new_normalize(candidate);
+                }
+            };
+            Isometry3::from_parts(
+                nalgebra::Translation3::new(
+                    self.range(-2.0, 2.0),
+                    self.range(-2.0, 2.0),
+                    self.range(-2.0, 2.0),
+                ),
+                nalgebra::UnitQuaternion::from_axis_angle(
+                    &axis,
+                    self.range(0.0, std::f64::consts::TAU),
+                ),
+            )
+        }
     }
 }
