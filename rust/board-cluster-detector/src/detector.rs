@@ -5,17 +5,29 @@
 //! Only the square-icp branch is ported (the production path). The non-icp
 //! scoring branch is out of scope.
 
+#![allow(deprecated)] // This module owns the temporary legacy facade.
+
 use nalgebra::Point3;
 
 use crate::{
     background::BackgroundModel,
-    candidates::{foreground_and_candidates, Candidate},
-    config::{BoardConfig, ForegroundMethod},
+    candidates::foreground_and_candidates,
+    config::{BoardConfig, DetectorTuning, ForegroundMethod, TargetDetectionParams, TargetSide},
     geometry::{self, project_to_plane, PlaneModel},
     pose::{board_pose, isolation_density, stance_3d, BoardDetection},
     scorer::seed_center,
-    square_fit::fit_fixed_square,
+    square_fit::{fit_fixed_square, SquareFit},
 };
+
+/// Target-neutral evidence produced by board clustering. It deliberately does
+/// not name a board-local axis or orientation: those belong to the target pose
+/// estimator, which has the selected target's orientation reference.
+#[derive(Debug, Clone)]
+pub struct SquarePlaneObservation {
+    pub points: Vec<Point3<f64>>,
+    pub plane: PlaneModel,
+    pub square_fit: SquareFit,
+}
 
 /// Why no board was detected. The first three (`Flatness`, `Extent`,
 /// `SizeGate`) are raised inside candidate generation
@@ -68,6 +80,9 @@ pub struct DetectOutcome {
     pub detection: Option<BoardDetection>,
     pub selected_points: Option<Vec<Point3<f64>>>,
     pub selected_plane: Option<PlaneModel>,
+    /// Target-neutral square/plane evidence retained for downstream target pose
+    /// estimation. `detection` remains the deprecated legacy pose facade.
+    pub observation: Option<SquarePlaneObservation>,
     pub n_candidates: usize,
     pub reject: Option<RejectReason>,
     /// Numbers behind `reject` for the furthest candidate (None if accepted or
@@ -88,12 +103,66 @@ pub struct DetectOutcome {
     pub rejected_cluster: Vec<Point3<f64>>,
 }
 
+/// Result of the target-side detector interface. Its public evidence is only a
+/// fitted known-size square and plane; no target-frame pose is constructed
+/// here. Diagnostics preserve the established bbox-free surface.
+#[derive(Debug, Clone)]
+pub struct TargetDetectOutcome {
+    pub observation: Option<SquarePlaneObservation>,
+    pub n_candidates: usize,
+    pub reject: Option<RejectReason>,
+    pub reject_detail: Option<RejectDetail>,
+    pub foreground_points: Vec<Point3<f64>>,
+    pub rejected_cluster: Vec<Point3<f64>>,
+    candidates: Vec<NeutralCandidate>,
+    square_furthest: Option<FurthestReject>,
+}
+
+#[derive(Debug, Clone)]
+struct NeutralCandidate {
+    observation: SquarePlaneObservation,
+    isolation_reject: Option<RejectDetail>,
+}
+
+#[derive(Debug, Clone)]
+struct FurthestReject {
+    reason: RejectReason,
+    detail: RejectDetail,
+    points: Vec<Point3<f64>>,
+}
+
+fn consider_reject(
+    furthest: &mut Option<FurthestReject>,
+    reason: RejectReason,
+    detail: RejectDetail,
+    points: &[Point3<f64>],
+) {
+    let take = match furthest.as_ref() {
+        None => true,
+        Some(current) if reason.rank() > current.reason.rank() => true,
+        Some(current) if reason.rank() == current.reason.rank() => {
+            (detail.measured - detail.threshold).abs()
+                < (current.detail.measured - current.detail.threshold).abs()
+        }
+        Some(_) => false,
+    };
+    if take {
+        *furthest = Some(FurthestReject {
+            reason,
+            detail,
+            points: points.to_vec(),
+        });
+    }
+}
+
 /// Detect the calibration board in one frame.
 ///
 /// Ports `detector.py:detect` (square_icp branch): `finite_only` ->
 /// `voxel_downsample` -> per-method candidate generation -> per candidate
 /// {project, seed, fixed-square fit, pose, stance gate, isolation gate} ->
 /// keep the lowest-residual survivor.
+#[deprecated(note = "load the selected target and call detect_for_target")]
+#[allow(deprecated)]
 pub fn detect(
     points: &[Point3<f64>],
     board: &BoardConfig,
@@ -101,100 +170,28 @@ pub fn detect(
     voxel: f64,
     background: Option<&BackgroundModel>,
 ) -> DetectOutcome {
-    let pts = geometry::finite_only(points);
-    let dn = geometry::voxel_downsample(&pts, voxel);
+    let target_side = TargetSide::metres(board.side_m())
+        .expect("legacy BoardConfig side_m must be finite and positive");
+    let target = detect_for_target(
+        points,
+        target_side,
+        board.tuning(),
+        method,
+        voxel,
+        background,
+    );
 
-    // No background yet for Method E: nothing to diff against.
-    if method == ForegroundMethod::BackgroundSubtraction && background.is_none() {
-        return DetectOutcome {
-            detection: None,
-            selected_points: None,
-            selected_plane: None,
-            n_candidates: 0,
-            reject: Some(RejectReason::NoClusters),
-            reject_detail: None,
-            foreground_points: Vec::new(),
-            rejected_cluster: Vec::new(),
-        };
-    }
+    let mut best: Option<(BoardDetection, SquarePlaneObservation)> = None;
+    let mut furthest = target.square_furthest.clone();
 
-    // `foreground_points` is the RAW per-method foreground (Method E:
-    // background-subtracted points; Method B: non-big-plane remainder), captured
-    // BEFORE clustering/merge/gate — the true foreground, not surviving clusters.
-    let (foreground_points, cands) = foreground_and_candidates(&dn, board, method, background);
-    let n_candidates = cands.len();
-
-    let mut best_residual = f64::INFINITY;
-    let mut best_det: Option<BoardDetection> = None;
-    let mut best_points: Option<Vec<Point3<f64>>> = None;
-    let mut best_plane: Option<PlaneModel> = None;
-    // The furthest-progressed rejected candidate: which gate it failed, by how
-    // much, and its member points (published for debug so the operator can SEE
-    // the cluster that nearly passed). `None` until some candidate reaches a gate.
-    struct Furthest {
-        reason: RejectReason,
-        detail: RejectDetail,
-        points: Vec<Point3<f64>>,
-    }
-    let mut furthest: Option<Furthest> = None;
-    // Record a gate failure. The furthest reject wins by rank; ties (same gate)
-    // keep the candidate that missed by the smallest margin — the most
-    // informative "how close was it" reading.
-    let mut consider = |reason: RejectReason, measured: f64, threshold: f64, cand: &Candidate| {
-        let take = match &furthest {
-            None => true,
-            Some(f) => {
-                if reason.rank() > f.reason.rank() {
-                    true
-                } else if reason.rank() == f.reason.rank() {
-                    (measured - threshold).abs() < (f.detail.measured - f.detail.threshold).abs()
-                } else {
-                    false
-                }
-            }
-        };
-        if take {
-            furthest = Some(Furthest {
-                reason,
-                detail: RejectDetail {
-                    measured,
-                    threshold,
-                },
-                points: cand.points.clone(),
-            });
-        }
-    };
-
-    for cand in &cands {
-        let coords = project_to_plane(&cand.points, &cand.plane);
-        let seed = seed_center(&coords, board);
-        let fit = fit_fixed_square(&coords, board.side_m, Some(seed), None);
-        let fit = match fit {
-            Some(f) if f.residual < board.square_icp_residual_max => f,
-            // Failed square fit: report the residual (NaN when the fit itself
-            // returned nothing, e.g. too few points) against its threshold.
-            Some(f) => {
-                consider(
-                    RejectReason::SquareResidual,
-                    f.residual,
-                    board.square_icp_residual_max,
-                    cand,
-                );
-                continue;
-            }
-            None => {
-                consider(
-                    RejectReason::SquareResidual,
-                    f64::NAN,
-                    board.square_icp_residual_max,
-                    cand,
-                );
-                continue;
-            }
-        };
-
+    // Deliberately preserve the legacy gate order: stance precedes isolation.
+    // Neutral detection computed isolation without constructing axes, but the
+    // facade delays applying that result until after its legacy stance gate.
+    for candidate in &target.candidates {
+        let observation = &candidate.observation;
+        let fit = observation.square_fit;
         let det = board_pose(
-            &cand.plane,
+            &observation.plane,
             &fit.corners_2d,
             1.0 / (1.0 + fit.residual),
             board.up_axis,
@@ -203,50 +200,209 @@ pub fn detect(
         if board.stance_floor > 0.0 {
             let stance = stance_3d(&det.corners_3d, board.up_axis);
             if stance <= board.stance_floor {
-                consider(RejectReason::Stance, stance, board.stance_floor, cand);
-                continue;
-            }
-        }
-
-        if board.isolation {
-            let density =
-                isolation_density(&dn, &cand.plane, &fit.corners_2d, &board.isolation_band());
-            if density > board.isolation_max_density {
-                consider(
-                    RejectReason::Isolation,
-                    density,
-                    board.isolation_max_density,
-                    cand,
+                consider_reject(
+                    &mut furthest,
+                    RejectReason::Stance,
+                    RejectDetail {
+                        measured: stance,
+                        threshold: board.stance_floor,
+                    },
+                    &observation.points,
                 );
                 continue;
             }
         }
 
-        if fit.residual < best_residual {
-            best_residual = fit.residual;
-            best_det = Some(det);
-            best_points = Some(cand.points.clone());
-            best_plane = Some(cand.plane);
+        if let Some(detail) = candidate.isolation_reject {
+            consider_reject(
+                &mut furthest,
+                RejectReason::Isolation,
+                detail,
+                &observation.points,
+            );
+            continue;
+        }
+
+        let replace = best
+            .as_ref()
+            .is_none_or(|(_, current)| fit.residual < current.square_fit.residual);
+        if replace {
+            best = Some((det, observation.clone()));
         }
     }
 
-    // On an accepted frame there is no reject to report and the rejected-cluster
-    // debug cloud is empty; otherwise report the furthest gate failure and the
-    // points of the candidate that produced it.
-    let (reject, reject_detail, rejected_cluster) = match (best_det.is_some(), furthest) {
+    let accepted = best.is_some();
+    let (detection, observation) = best
+        .map(|(detection, observation)| (Some(detection), Some(observation)))
+        .unwrap_or((None, None));
+    let (reject, reject_detail, rejected_cluster) = legacy_reject(accepted, furthest);
+    let (selected_points, selected_plane) = observation
+        .as_ref()
+        .map(|observation| (Some(observation.points.clone()), Some(observation.plane)))
+        .unwrap_or((None, None));
+
+    DetectOutcome {
+        detection,
+        selected_points,
+        selected_plane,
+        observation,
+        n_candidates: target.n_candidates,
+        reject,
+        reject_detail,
+        foreground_points: target.foreground_points,
+        rejected_cluster,
+    }
+}
+
+fn legacy_reject(
+    accepted: bool,
+    furthest: Option<FurthestReject>,
+) -> (Option<RejectReason>, Option<RejectDetail>, Vec<Point3<f64>>) {
+    match (accepted, furthest) {
         (true, _) => (None, None, Vec::new()),
         (false, Some(f)) => (Some(f.reason), Some(f.detail), f.points),
         (false, None) => (Some(RejectReason::NoClusters), None, Vec::new()),
-    };
+    }
+}
 
-    DetectOutcome {
-        detection: best_det,
-        selected_points: best_points,
-        selected_plane: best_plane,
+/// Detect a selected calibration target's square face.
+///
+/// The physical side enters only through [`TargetSide`]. `DetectorTuning`
+/// contains sensor/range operating knobs, not target geometry. The returned
+/// observation is intentionally axis-neutral for W3's target pose estimator.
+pub fn detect_for_target(
+    points: &[Point3<f64>],
+    target_side: TargetSide,
+    tuning: &DetectorTuning,
+    method: ForegroundMethod,
+    voxel: f64,
+    background: Option<&BackgroundModel>,
+) -> TargetDetectOutcome {
+    let params = TargetDetectionParams::new(target_side, tuning);
+    let pts = geometry::finite_only(points);
+    let dn = geometry::voxel_downsample(&pts, voxel);
+
+    // No background yet for Method E: nothing to diff against.
+    if method == ForegroundMethod::BackgroundSubtraction && background.is_none() {
+        return TargetDetectOutcome {
+            observation: None,
+            n_candidates: 0,
+            reject: Some(RejectReason::NoClusters),
+            reject_detail: None,
+            foreground_points: Vec::new(),
+            rejected_cluster: Vec::new(),
+            candidates: Vec::new(),
+            square_furthest: None,
+        };
+    }
+
+    // `foreground_points` is the RAW per-method foreground (Method E:
+    // background-subtracted points; Method B: non-big-plane remainder), captured
+    // BEFORE clustering/merge/gate — the true foreground, not surviving clusters.
+    let (foreground_points, cands) = foreground_and_candidates(&dn, &params, method, background);
+    let n_candidates = cands.len();
+
+    let mut best_observation: Option<SquarePlaneObservation> = None;
+    let mut square_furthest: Option<FurthestReject> = None;
+    let mut neutral_furthest: Option<FurthestReject> = None;
+    let mut candidates = Vec::new();
+
+    for cand in &cands {
+        let coords = project_to_plane(&cand.points, &cand.plane);
+        let seed = seed_center(&coords, &params);
+        let fit = fit_fixed_square(&coords, target_side.as_metres(), Some(seed), None);
+        let fit = match fit {
+            Some(f) if f.residual < tuning.square_icp_residual_max => f,
+            // Failed square fit: report the residual (NaN when the fit itself
+            // returned nothing, e.g. too few points) against its threshold.
+            Some(f) => {
+                consider_reject(
+                    &mut square_furthest,
+                    RejectReason::SquareResidual,
+                    RejectDetail {
+                        measured: f.residual,
+                        threshold: tuning.square_icp_residual_max,
+                    },
+                    &cand.points,
+                );
+                continue;
+            }
+            None => {
+                consider_reject(
+                    &mut square_furthest,
+                    RejectReason::SquareResidual,
+                    RejectDetail {
+                        measured: f64::NAN,
+                        threshold: tuning.square_icp_residual_max,
+                    },
+                    &cand.points,
+                );
+                continue;
+            }
+        };
+
+        let isolation_reject = if tuning.isolation {
+            let density =
+                isolation_density(&dn, &cand.plane, &fit.corners_2d, &tuning.isolation_band());
+            if density > tuning.isolation_max_density {
+                Some(RejectDetail {
+                    measured: density,
+                    threshold: tuning.isolation_max_density,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let observation = SquarePlaneObservation {
+            points: cand.points.clone(),
+            plane: cand.plane,
+            square_fit: fit,
+        };
+        if let Some(detail) = isolation_reject {
+            consider_reject(
+                &mut neutral_furthest,
+                RejectReason::Isolation,
+                detail,
+                &cand.points,
+            );
+        } else if best_observation
+            .as_ref()
+            .is_none_or(|current| fit.residual < current.square_fit.residual)
+        {
+            best_observation = Some(observation.clone());
+        }
+        candidates.push(NeutralCandidate {
+            observation,
+            isolation_reject,
+        });
+    }
+
+    if let Some(square) = square_furthest.clone() {
+        consider_reject(
+            &mut neutral_furthest,
+            square.reason,
+            square.detail,
+            &square.points,
+        );
+    }
+    let (reject, reject_detail, rejected_cluster) =
+        match (best_observation.is_some(), neutral_furthest) {
+            (true, _) => (None, None, Vec::new()),
+            (false, Some(f)) => (Some(f.reason), Some(f.detail), f.points),
+            (false, None) => (Some(RejectReason::NoClusters), None, Vec::new()),
+        };
+
+    TargetDetectOutcome {
+        observation: best_observation,
         n_candidates,
         reject,
         reject_detail,
         foreground_points,
         rejected_cluster,
+        candidates,
+        square_furthest,
     }
 }

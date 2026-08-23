@@ -1,4 +1,9 @@
-use board_cluster_detector::{config::production_config, scorer::*};
+#![allow(deprecated)] // Legacy fixture/config contract.
+
+use board_cluster_detector::{
+    config::{production_tuning, TargetDetectionParams, TargetSide},
+    scorer::*,
+};
 
 #[test]
 fn min_area_rect_of_axis_square() {
@@ -28,9 +33,10 @@ fn min_area_rect_of_rotated_square() {
 
 #[test]
 fn seed_center_falls_back_to_centroid_when_wrong_size() {
-    let board = production_config(1.0, [0.0, 0.0, 1.0], 30);
+    let tuning = production_tuning([0.0, 0.0, 1.0], 30);
+    let params = TargetDetectionParams::new(TargetSide::metres(1.0).unwrap(), &tuning);
     // a 0.1 m blob -> fails size gate -> centroid fallback
     let blob = vec![[0.0, 0.0], [0.1, 0.0], [0.1, 0.1], [0.0, 0.1]];
-    let c = seed_center(&blob, &board);
+    let c = seed_center(&blob, &params);
     assert!((c[0] - 0.05).abs() < 1e-9 && (c[1] - 0.05).abs() < 1e-9);
 }
