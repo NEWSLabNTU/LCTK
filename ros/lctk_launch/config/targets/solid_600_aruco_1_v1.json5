@@ -1,0 +1,32 @@
+// 600 mm solid Calibration Target.  The complete face is one centred ArUco sign.
+{
+  schema_version: 1,
+  target_id: "solid_600_aruco_1",
+  revision: 1,
+  board_frame_convention: "corner_aligned_plate_center_v1",
+
+  plate: {
+    side: "600mm",
+    surface: { kind: "solid" },
+  },
+
+  fiducial: {
+    kind: "square_aruco_grid",
+    dictionary: "DICT_5X5_1000",
+    marker_ids: [1],
+    paper_side: "600mm",
+    paper_center: {
+      toward_left_corner: "0mm",
+      toward_top_corner: "0mm",
+    },
+    outer_border: "60mm",
+    cells_per_side: 1,
+    marker_fill_ratio: 1.0,
+    border_bits: 1,
+  },
+
+  lidar_orientation_reference: {
+    kind: "mounting_up",
+    local_axis: "+y",
+  },
+}

@@ -46,6 +46,7 @@ json5 = "0.4.1"
 serde_json = "1.0.107"
 serde-loader = { version = "0.2.0", features = ["json5"] }
 serde_yaml = "0.9.25"
+sha2 = "0.10"
 
 # Numeric/data processing
 itertools = "0.11.0"

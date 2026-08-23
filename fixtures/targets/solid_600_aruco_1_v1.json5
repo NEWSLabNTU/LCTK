@@ -1,0 +1,15 @@
+// Same physical target as ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5.
+// Deliberately reordered and expressed in metres.
+{
+  lidar_orientation_reference: { local_axis: "+y", kind: "mounting_up" },
+  fiducial: {
+    border_bits: 1, marker_fill_ratio: 1.0, cells_per_side: 1,
+    outer_border: "0.060m", paper_center: { toward_top_corner: "0m", toward_left_corner: "0.0mm" },
+    paper_side: "0.6m", marker_ids: [1], dictionary: "DICT_5X5_1000", kind: "square_aruco_grid",
+  },
+  plate: { surface: { kind: "solid" }, side: "0.600m" },
+  board_frame_convention: "corner_aligned_plate_center_v1",
+  revision: 1,
+  schema_version: 1,
+  target_id: "solid_600_aruco_1",
+}
