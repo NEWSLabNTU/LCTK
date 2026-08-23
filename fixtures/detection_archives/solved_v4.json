@@ -1,0 +1,8 @@
+{
+  "version": 4,
+  "board_frame_convention": "corner_aligned_plate_center_v1",
+  "transform": {
+    "rvec": [0.1, -0.2, 0.3],
+    "tvec": [1.25, -0.5, 2.75]
+  }
+}

@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 from ruamel.yaml import YAML
 
+from .archive_contract import archive_export_error
 from .frames import entry_to_transform, kit_to_camera_link, transform_to_entry
 
 DEFAULT_KIT_FRAME = "sensor_kit_base_link"
@@ -27,7 +28,9 @@ class ExportError(Exception):
 #: must have been produced in. Kept as literals rather than imported from
 #: `lidar_to_camera_solver` so this package stays independently installable; the pytest
 #: suite runs both and would catch a divergence.
-SUPPORTED_FORMAT_VERSION = 4
+# v4 is legacy but its solved transform remains exportable.  v5 adds a structural
+# Target Identity, checked by ``archive_export_error`` without loading a target file.
+SUPPORTED_FORMAT_VERSION = 5
 SUPPORTED_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
 
 
@@ -39,25 +42,9 @@ def check_format_version(path, data):
     it read only `transform.rvec`/`transform.tvec`, and its own fixtures declared
     `"version": 2` and passed.
     """
-    version = data.get("version", 0)
-    if version != SUPPORTED_FORMAT_VERSION:
-        raise ExportError(
-            f"{path}: detection file version {version}, expected "
-            f"{SUPPORTED_FORMAT_VERSION}. Versions below 4 record no board-frame "
-            "convention, so their transform may be wrong by a silent 45-degree "
-            "in-plane rotation (the 2x2 ArUco grid is symmetric, so the reprojection "
-            "error stays low) plus a ~707 mm origin shift. Re-capture, or convert a "
-            "file you still trust with: ros2 run lidar_to_camera_solver "
-            "migrate_detections --help"
-        )
-
-    convention = data.get("board_frame_convention")
-    if convention is None or convention.strip() != SUPPORTED_FRAME_CONVENTION:
-        raise ExportError(
-            f"{path}: board-frame convention {convention!r}, expected "
-            f"'{SUPPORTED_FRAME_CONVENTION}'. The stored transform means something "
-            "else; exporting it would put a wrong extrinsic on a vehicle."
-        )
+    error = archive_export_error(data, expected_frame=SUPPORTED_FRAME_CONVENTION)
+    if error is not None:
+        raise ExportError(f"{path}: {error}")
 
 
 def load_solver_transform(path):
