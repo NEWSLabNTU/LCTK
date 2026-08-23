@@ -1,0 +1,15 @@
+{
+  "version": 5,
+  "board_frame_convention": "corner_aligned_plate_center_v1",
+  "target_identity": {
+    "schema_version": 1,
+    "target_id": "solid_600_aruco_1",
+    "revision": 1,
+    "semantic_sha256": "9cf600d684a91ab3df6fdf549d71460fc6fc5321a037d5f61393bbd9db5b04fb",
+    "board_frame_convention": "corner_aligned_plate_center_v1"
+  },
+  "transform": {
+    "rvec": [0.1, -0.2, 0.3],
+    "tvec": [1.25, -0.5, 2.75]
+  }
+}
