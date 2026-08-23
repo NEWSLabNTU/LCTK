@@ -1,0 +1,39 @@
+// Existing 1000 mm perforated Calibration Target, expressed in its canonical
+// corner-aligned frame.  Cutout list order is intentionally not semantic.
+{
+  schema_version: 1,
+  target_id: "hollow_1000_aruco_4",
+  revision: 1,
+  board_frame_convention: "corner_aligned_plate_center_v1",
+
+  plate: {
+    side: "1000mm",
+    surface: {
+      kind: "perforated",
+      circular_cutouts: [
+        { center: { x: "282.842712mm", y: "0mm" }, radius: "150mm" },
+        { center: { x: "0mm", y: "282.842712mm" }, radius: "150mm" },
+        { center: { x: "-282.842712mm", y: "0mm" }, radius: "150mm" },
+      ],
+    },
+  },
+
+  fiducial: {
+    kind: "square_aruco_grid",
+    dictionary: "DICT_5X5_1000",
+    marker_ids: [696, 64, 306, 195],
+    paper_side: "500mm",
+    paper_center: {
+      toward_left_corner: "0mm",
+      toward_top_corner: "-353.553391mm",
+    },
+    outer_border: "10mm",
+    cells_per_side: 2,
+    marker_fill_ratio: 0.8,
+    border_bits: 1,
+  },
+
+  lidar_orientation_reference: {
+    kind: "asymmetric_cutouts",
+  },
+}

@@ -1,0 +1,61 @@
+# Calibration Target canonical-identity golden, schema version 1.
+#
+# Grammar: each canonical record is `field-name:UTF-8-value-byte-count:value\n`.
+# Records appear in the documented fixed field order.  A target block is target-keyed,
+# then gives its SHA-256 and the exact UTF-8 canonical bytes between `canonical_bytes:`
+# and `---`.  Rust and Python must compare both bytes and digest exactly.
+target_id=solid_600_aruco_1
+semantic_sha256=9cf600d684a91ab3df6fdf549d71460fc6fc5321a037d5f61393bbd9db5b04fb
+canonical_bytes:
+schema_version:1:1
+target_id:17:solid_600_aruco_1
+revision:1:1
+board_frame_convention:30:corner_aligned_plate_center_v1
+plate.side_um:6:600000
+plate.surface.kind:5:solid
+fiducial.kind:17:square_aruco_grid
+fiducial.dictionary:13:DICT_5X5_1000
+fiducial.marker_ids[0]:1:1
+fiducial.paper_side_um:6:600000
+fiducial.paper_center.toward_left_corner_um:1:0
+fiducial.paper_center.toward_top_corner_um:1:0
+fiducial.outer_border_um:5:60000
+fiducial.cells_per_side:1:1
+fiducial.marker_fill_ratio_f64_bits:19:4607182418800017408
+fiducial.border_bits:1:1
+lidar_orientation_reference.kind:11:mounting_up
+lidar_orientation_reference.local_axis:2:+y
+---
+target_id=hollow_1000_aruco_4
+semantic_sha256=b593a42e900e46c5f670c58dadf0cdcaabca68684ed2e0aa788084092535e5ae
+canonical_bytes:
+schema_version:1:1
+target_id:19:hollow_1000_aruco_4
+revision:1:1
+board_frame_convention:30:corner_aligned_plate_center_v1
+plate.side_um:7:1000000
+plate.surface.kind:10:perforated
+plate.surface.circular_cutouts[0].x_um:7:-282843
+plate.surface.circular_cutouts[0].y_um:1:0
+plate.surface.circular_cutouts[0].radius_um:6:150000
+plate.surface.circular_cutouts[1].x_um:1:0
+plate.surface.circular_cutouts[1].y_um:6:282843
+plate.surface.circular_cutouts[1].radius_um:6:150000
+plate.surface.circular_cutouts[2].x_um:6:282843
+plate.surface.circular_cutouts[2].y_um:1:0
+plate.surface.circular_cutouts[2].radius_um:6:150000
+fiducial.kind:17:square_aruco_grid
+fiducial.dictionary:13:DICT_5X5_1000
+fiducial.marker_ids[0]:3:696
+fiducial.marker_ids[1]:2:64
+fiducial.marker_ids[2]:3:306
+fiducial.marker_ids[3]:3:195
+fiducial.paper_side_um:6:500000
+fiducial.paper_center.toward_left_corner_um:1:0
+fiducial.paper_center.toward_top_corner_um:7:-353553
+fiducial.outer_border_um:5:10000
+fiducial.cells_per_side:1:2
+fiducial.marker_fill_ratio_f64_bits:19:4605380978949069210
+fiducial.border_bits:1:1
+lidar_orientation_reference.kind:18:asymmetric_cutouts
+---
