@@ -1,0 +1,5 @@
+uint32 schema_version
+string target_id
+uint32 revision
+string semantic_sha256
+string board_frame_convention
