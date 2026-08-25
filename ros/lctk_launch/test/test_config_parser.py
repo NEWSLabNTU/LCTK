@@ -10,6 +10,8 @@ Usage:
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add the package to path for standalone testing
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -66,6 +68,29 @@ def test_vehicle_config():
     assert pipeline.calibration_plan.reference_frame == "L1"
     assert len(pipeline.calibration_plan.tree_edges) == 5
     assert len(pipeline.calibration_plan.validation_edges) == 0
+
+
+@pytest.mark.parametrize(
+    "example_name",
+    [
+        "sample_data.yaml",
+        "seyond_left.yaml",
+        "seyond_right.yaml",
+        "two_lidar.yaml",
+        "vehicle.yaml",
+    ],
+)
+def test_all_maintained_legacy_examples_parse(example_name):
+    """W5-A: every maintained example crosses the explicit hollow translation."""
+    config_path = Path(__file__).parent.parent / "config" / "examples" / example_name
+
+    pipeline = CalibrationConfigParser(str(config_path)).parse()
+
+    identities = {
+        detector.target_identity for detector in pipeline.lidar_board_detectors
+    }
+    assert identities
+    assert {identity.target_id for identity in identities} == {"hollow_1000_aruco_4"}
 
 
 def test_two_lidar_config():
@@ -250,6 +275,245 @@ markers:
     parser = CalibrationConfigParser(str(config_path))
     with pytest.raises(ValueError, match="bbox_config"):
         parser.parse()
+
+
+TARGETS = Path(__file__).parent.parent / "config" / "targets"
+
+
+def _write_new_schema_config(tmp_path, first_target, second_target=None):
+    """Write a parser-only config; tuning/bbox files need not exist to parse."""
+    second_marker = ""
+    if second_target is not None:
+        second_marker = f"""
+  target_b:
+    target_config: {second_target}
+    detector_config: /tmp/detector-b.json5
+    bbox_config: /tmp/bbox-b.json5
+    aruco_detector_config: /tmp/aruco-detector-a.json5
+    pairs:
+      - [lidar_b, camera]
+"""
+    config_path = tmp_path / "new_schema.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    lidar_a:
+      pointcloud_topic: /lidar/a
+      frame_id: lidar_a_frame
+    lidar_b:
+      pointcloud_topic: /lidar/b
+      frame_id: lidar_b_frame
+  cameras:
+    camera:
+      image_topic: /camera/image
+      frame_id: camera_frame
+markers:
+  target_a:
+    target_config: {first_target}
+    detector_config: /tmp/detector-a.json5
+    bbox_config: /tmp/bbox-a.json5
+    aruco_detector_config: /tmp/aruco-detector-a.json5
+    pairs:
+      - [lidar_a, camera]
+{second_marker}
+"""
+    )
+    return config_path
+
+
+def test_new_target_schema_parses_without_ros_startup(tmp_path):
+    config_path = _write_new_schema_config(
+        tmp_path, TARGETS / "solid_600_aruco_1_v1.json5"
+    )
+
+    pipeline = CalibrationConfigParser(str(config_path)).parse()
+
+    assert (
+        pipeline.lidar_board_detectors[0].target_identity.target_id
+        == "solid_600_aruco_1"
+    )
+    assert pipeline.lidar_board_detectors[0].detector_config == "/tmp/detector-a.json5"
+    assert pipeline.aruco_locators[0].aruco_config is None
+    assert pipeline.aruco_locators[0].target_config.endswith(
+        "solid_600_aruco_1_v1.json5"
+    )
+
+
+def test_different_paths_with_same_target_identity_share_sensor(tmp_path):
+    equivalent_target = tmp_path / "same_target_different_format.json5"
+    equivalent_target.write_text(
+        """// Key order, comments, and equivalent units are not semantic.
+{
+  lidar_orientation_reference: { local_axis: "+y", kind: "mounting_up" },
+  fiducial: {
+    border_bits: 1,
+    marker_fill_ratio: 1.0,
+    cells_per_side: 1,
+    outer_border: "0.060m",
+    paper_center: { toward_top_corner: "0mm", toward_left_corner: "0mm" },
+    paper_side: "0.600m",
+    marker_ids: [1],
+    dictionary: "DICT_5X5_1000",
+    kind: "square_aruco_grid",
+  },
+  plate: { surface: { kind: "solid" }, side: "0.600m" },
+  board_frame_convention: "corner_aligned_plate_center_v1",
+  revision: 1,
+  target_id: "solid_600_aruco_1",
+  schema_version: 1,
+}
+"""
+    )
+    config_path = _write_new_schema_config(
+        tmp_path,
+        TARGETS / "solid_600_aruco_1_v1.json5",
+        equivalent_target,
+    )
+
+    pipeline = CalibrationConfigParser(str(config_path)).parse()
+
+    assert len(pipeline.aruco_locators) == 1
+    assert (
+        pipeline.lidar_board_detectors[0].target_identity
+        == pipeline.lidar_board_detectors[1].target_identity
+    )
+
+
+def test_different_target_identities_on_one_sensor_reject(tmp_path):
+    config_path = _write_new_schema_config(
+        tmp_path,
+        TARGETS / "solid_600_aruco_1_v1.json5",
+        TARGETS / "hollow_1000_aruco_4_v1.json5",
+    )
+
+    with pytest.raises(
+        ValueError, match="Camera Target Identities|Sensor 'camera'.*different"
+    ):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+def test_legacy_schema_translates_to_explicit_hollow_target(tmp_path):
+    config_path = tmp_path / "legacy.yaml"
+    config_path.write_text(
+        """
+devices:
+  lidars:
+    lidar:
+      pointcloud_topic: /lidar
+      frame_id: lidar_frame
+markers:
+  board:
+    type: hollow_board
+    board_config: /tmp/legacy-board.json5
+    aruco_config: /tmp/legacy-aruco.json5
+    bbox_config: /tmp/bbox.json5
+    pairs:
+      - [lidar, lidar]
+"""
+    )
+
+    pipeline = CalibrationConfigParser(str(config_path)).parse()
+
+    assert (
+        pipeline.lidar_board_detectors[0].target_identity.target_id
+        == "hollow_1000_aruco_4"
+    )
+    assert pipeline.lidar_board_detectors[0].target_config.endswith(
+        "hollow_1000_aruco_4_v1.json5"
+    )
+
+
+def test_marker_rejects_mixed_legacy_and_new_schema(tmp_path):
+    config_path = tmp_path / "mixed.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    lidar:
+      pointcloud_topic: /lidar
+      frame_id: lidar_frame
+markers:
+  board:
+    type: hollow_board
+    board_config: /tmp/legacy-board.json5
+    target_config: {TARGETS / "solid_600_aruco_1_v1.json5"}
+    detector_config: /tmp/detector.json5
+    pairs:
+      - [lidar, lidar]
+"""
+    )
+
+    with pytest.raises(ValueError, match="mixes legacy"):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+def test_lidar_rejects_mixed_board_and_detector_overrides(tmp_path):
+    config_path = tmp_path / "mixed_lidar.yaml"
+    config_path.write_text(
+        """
+devices:
+  lidars:
+    lidar:
+      pointcloud_topic: /lidar
+      frame_id: lidar_frame
+      board_config: /tmp/legacy-board.json5
+      detector_config: /tmp/detector.json5
+markers: {}
+"""
+    )
+
+    with pytest.raises(
+        ValueError, match="both legacy 'board_config' and new 'detector_config'"
+    ):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+@pytest.mark.parametrize(
+    ("device_override", "marker_fields", "expected_fields"),
+    [
+        (
+            "board_config: /tmp/device-legacy-board.json5",
+            """target_config: {solid_target}
+    detector_config: /tmp/marker-detector.json5""",
+            ("board_config", "target_config", "detector_config"),
+        ),
+        (
+            "detector_config: /tmp/device-detector.json5",
+            """type: hollow_board
+    board_config: /tmp/marker-legacy-board.json5
+    aruco_config: /tmp/marker-legacy-aruco.json5""",
+            ("detector_config", "type", "board_config", "aruco_config"),
+        ),
+    ],
+)
+def test_lidar_rejects_cross_level_schema_mix(
+    tmp_path, device_override, marker_fields, expected_fields
+):
+    config_path = tmp_path / "cross_level_mixed.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    lidar:
+      pointcloud_topic: /lidar
+      frame_id: lidar_frame
+      {device_override}
+markers:
+  board:
+    {marker_fields.format(solid_target=TARGETS / "solid_600_aruco_1_v1.json5")}
+    bbox_config: /tmp/bbox.json5
+    pairs:
+      - [lidar, lidar]
+"""
+    )
+
+    with pytest.raises(ValueError) as error:
+        CalibrationConfigParser(str(config_path)).parse()
+    message = str(error.value)
+    assert "Sensor 'lidar'" in message
+    assert "marker 'board'" in message
+    assert all(field in message for field in expected_fields)
 
 
 if __name__ == "__main__":
