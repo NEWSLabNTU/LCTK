@@ -1,0 +1,13 @@
+[package]
+name = "calibration-target-detector"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85.0"
+
+[dependencies]
+anyhow = { workspace = true }
+nalgebra = { workspace = true }
+board-cluster-detector = { path = "../board-cluster-detector" }
+
+[dev-dependencies]
+approx = { workspace = true }
