@@ -17,6 +17,7 @@ from enum import Enum
 from pathlib import Path
 
 import yaml
+from lctk_target import TargetIdentity, load_target
 
 from lctk_launch.calibration_planner import CalibrationPlan, compute_plan, format_plan
 
@@ -25,6 +26,13 @@ from lctk_launch.calibration_planner import CalibrationPlan, compute_plan, forma
 # predate the aruco_detector_config key, keep working.
 DEFAULT_ARUCO_DETECTOR_CONFIG = (
     "$(find-pkg-share lctk_launch)/config/aruco/aruco_detector.json5"
+)
+
+# W5-A compatibility has exactly one meaning: the physical target used by all
+# maintained pre-target-config examples.  Do not infer a target from legacy
+# board/ArUco files: those files contain split, non-authoritative geometry.
+LEGACY_HOLLOW_TARGET_CONFIG = (
+    "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
 )
 
 
@@ -77,6 +85,7 @@ class LidarDevice:
     board_config_override: str | None = (
         None  # Per-lidar board_config, overrides marker's
     )
+    detector_config_override: str | None = None
     bbox_config_override: str | None = None  # Per-lidar bbox_config, overrides marker's
 
 
@@ -94,8 +103,14 @@ class Marker:
     """Calibration marker configuration."""
 
     name: str
-    marker_type: MarkerType
-    board_config: str  # Path to board configuration file
+    marker_type: MarkerType | None
+    # Target Definition and detector tuning are the new, separate contract.
+    target_config: str
+    target_identity: TargetIdentity
+    detector_config: str | None
+    # The remaining legacy fields exist only until W5-E1.  They let the old
+    # launch graph run maintained hollow examples while W5-C is pending.
+    board_config: str | None
     aruco_config: str | None = None  # Path to ArUco pattern config (optional)
     bbox_config: str | None = None  # Path to bounding box filter config (optional)
     # Path to ArUco *detector* tuning (corner refinement, adaptive threshold). Optional:
@@ -121,7 +136,10 @@ class LidarBoardDetectorNode:
     lidar_name: str
     marker_name: str
     pointcloud_topic: str
-    board_config: str
+    target_config: str
+    target_identity: TargetIdentity
+    detector_config: str | None
+    board_config: str | None
     aruco_config: str | None
     bbox_config: str | None
     output_topic: str  # Detection output topic
@@ -136,7 +154,9 @@ class ArucoLocatorNode:
     camera_name: str
     image_topic: str
     frame_id: str
-    aruco_config: str
+    target_config: str
+    target_identity: TargetIdentity
+    aruco_config: str | None
     aruco_detector_config: str
     output_topic: str  # Detection output topic
 
@@ -155,7 +175,9 @@ class LidarCameraSolverNode:
     board_detections_topic: str
     aruco_detections_topic: str
     camera_topic: str  # For camera_info derivation
-    aruco_config: str  # Path to ArUco pattern config (required for solver)
+    target_config: str
+    target_identity: TargetIdentity
+    aruco_config: str | None
     output_topic: str
 
 
@@ -287,6 +309,16 @@ class CalibrationConfigParser:
             board_config_override = config.get("board_config")
             if board_config_override:
                 board_config_override = resolve_package_path(board_config_override)
+            detector_config_override = config.get("detector_config")
+            if detector_config_override:
+                detector_config_override = resolve_package_path(
+                    detector_config_override
+                )
+            if board_config_override and detector_config_override:
+                raise ValueError(
+                    f"LiDAR '{name}' supplies both legacy 'board_config' and "
+                    "new 'detector_config'. Select one configuration schema."
+                )
             bbox_config_override = config.get("bbox_config")
             if bbox_config_override:
                 bbox_config_override = resolve_package_path(bbox_config_override)
@@ -295,6 +327,7 @@ class CalibrationConfigParser:
                 pointcloud_topic=config["pointcloud_topic"],
                 frame_id=config["frame_id"],
                 board_config_override=board_config_override,
+                detector_config_override=detector_config_override,
                 bbox_config_override=bbox_config_override,
             )
 
@@ -309,31 +342,95 @@ class CalibrationConfigParser:
     def _parse_markers(self, markers_config: dict) -> None:
         """Parse marker definitions."""
         for name, config in markers_config.items():
-            marker_type = MarkerType(config["type"])
-            # Resolve package paths in config file paths
-            board_config = resolve_package_path(config["board_config"])
-            aruco_config = config.get("aruco_config")
-            if aruco_config:
-                aruco_config = resolve_package_path(aruco_config)
-            bbox_config = config.get("bbox_config")
-            if bbox_config:
-                bbox_config = resolve_package_path(bbox_config)
-            aruco_detector_config = config.get("aruco_detector_config")
-            if aruco_detector_config:
-                aruco_detector_config = resolve_package_path(aruco_detector_config)
-
-            self.markers[name] = Marker(
-                name=name,
-                marker_type=marker_type,
-                board_config=board_config,
-                aruco_config=aruco_config,
-                bbox_config=bbox_config,
-                aruco_detector_config=aruco_detector_config,
+            has_new_schema = "target_config" in config or "detector_config" in config
+            has_legacy_schema = any(
+                key in config for key in ("type", "board_config", "aruco_config")
             )
+            if has_new_schema and has_legacy_schema:
+                raise ValueError(
+                    f"Marker '{name}' mixes legacy (type/board_config/aruco_config) "
+                    "and new (target_config/detector_config) parameters. Select one schema."
+                )
+            if has_new_schema:
+                self._parse_new_marker(name, config)
+                continue
+            if has_legacy_schema:
+                self._parse_legacy_marker(name, config)
+                continue
+            raise ValueError(
+                f"Marker '{name}' must provide 'target_config' and 'detector_config', "
+                "or use the temporary hollow-board compatibility schema."
+            )
+
+    def _parse_new_marker(self, name: str, config: dict) -> None:
+        """Parse the target-definition schema without interpreting its geometry."""
+        missing = [
+            key for key in ("target_config", "detector_config") if not config.get(key)
+        ]
+        if missing:
+            raise ValueError(
+                f"Marker '{name}' is missing required new-schema parameter(s): "
+                f"{', '.join(missing)}"
+            )
+        target_config = resolve_package_path(config["target_config"])
+        target = load_target(target_config)
+        detector_config = resolve_package_path(config["detector_config"])
+        bbox_config = config.get("bbox_config")
+        if bbox_config:
+            bbox_config = resolve_package_path(bbox_config)
+        aruco_detector_config = config.get("aruco_detector_config")
+        if aruco_detector_config:
+            aruco_detector_config = resolve_package_path(aruco_detector_config)
+
+        self.markers[name] = Marker(
+            name=name,
+            marker_type=None,
+            target_config=target_config,
+            target_identity=target.identity,
+            detector_config=detector_config,
+            board_config=None,
+            aruco_config=None,
+            bbox_config=bbox_config,
+            aruco_detector_config=aruco_detector_config,
+        )
+
+    def _parse_legacy_marker(self, name: str, config: dict) -> None:
+        """Translate the retired split schema to the one explicit hollow target."""
+        if "type" not in config or "board_config" not in config:
+            raise ValueError(
+                f"Legacy marker '{name}' requires both 'type: hollow_board' and "
+                "'board_config'. Migrate to target_config/detector_config."
+            )
+        marker_type = MarkerType(config["type"])
+        target_config = resolve_package_path(LEGACY_HOLLOW_TARGET_CONFIG)
+        target = load_target(target_config)
+        board_config = resolve_package_path(config["board_config"])
+        aruco_config = config.get("aruco_config")
+        if aruco_config:
+            aruco_config = resolve_package_path(aruco_config)
+        bbox_config = config.get("bbox_config")
+        if bbox_config:
+            bbox_config = resolve_package_path(bbox_config)
+        aruco_detector_config = config.get("aruco_detector_config")
+        if aruco_detector_config:
+            aruco_detector_config = resolve_package_path(aruco_detector_config)
+
+        self.markers[name] = Marker(
+            name=name,
+            marker_type=marker_type,
+            target_config=target_config,
+            target_identity=target.identity,
+            detector_config=None,
+            board_config=board_config,
+            aruco_config=aruco_config,
+            bbox_config=bbox_config,
+            aruco_detector_config=aruco_detector_config,
+        )
 
     def _validate(self) -> None:
         """Validate configuration consistency."""
         all_devices = set(self.lidars.keys()) | set(self.cameras.keys())
+        identities_by_device: dict[str, TargetIdentity] = {}
 
         for pair in self.calibration_pairs:
             # Check devices exist
@@ -364,6 +461,43 @@ class CalibrationConfigParser:
                     "Supported: lidar-camera, lidar-lidar"
                 )
 
+            marker = self.markers[pair.marker]
+            for device_name in (pair.device1, pair.device2):
+                lidar = self.lidars.get(device_name)
+                if (
+                    lidar is not None
+                    and marker.marker_type is None
+                    and lidar.board_config_override is not None
+                ):
+                    raise ValueError(
+                        f"Sensor '{device_name}' uses legacy 'board_config' while marker "
+                        f"'{pair.marker}' uses new 'target_config'/'detector_config'. "
+                        "Conflicting configuration schemas cannot be combined."
+                    )
+                if (
+                    lidar is not None
+                    and marker.marker_type is not None
+                    and lidar.detector_config_override is not None
+                ):
+                    raise ValueError(
+                        f"Sensor '{device_name}' uses new 'detector_config' while marker "
+                        f"'{pair.marker}' uses legacy 'type'/'board_config'/'aruco_config'. "
+                        "Conflicting configuration schemas cannot be combined."
+                    )
+                previous = identities_by_device.setdefault(
+                    device_name, marker.target_identity
+                )
+                if previous != marker.target_identity:
+                    raise ValueError(
+                        f"Sensor '{device_name}' is assigned different Calibration Target "
+                        "Identities: "
+                        f"{previous.target_id}@{previous.revision} "
+                        f"({previous.semantic_sha256}) and "
+                        f"{marker.target_identity.target_id}@{marker.target_identity.revision} "
+                        f"({marker.target_identity.semantic_sha256}). One sensor must use "
+                        "one semantic target per launch."
+                    )
+
     def _get_device_type(self, device_name: str) -> DeviceType:
         """Get the type of a device by name."""
         if device_name in self.lidars:
@@ -393,12 +527,11 @@ class CalibrationConfigParser:
             lidar = self.lidars[lidar_name]
             marker = self.markers[marker_name]
 
-            # H-04: the lidar_board_detector declares aruco_pattern_file and
-            # bbox_file as mandatory ROS parameters (it needs the marker paper
-            # size for board geometry and the bbox for the ROI filter). If the
-            # marker omits them the node crashes at startup with an opaque
-            # mandatory-parameter error, so fail fast here with a clear message.
-            if not marker.aruco_config:
+            # The old graph still needs a standalone pattern config.  It only
+            # applies to the compatibility schema and is removed with that
+            # graph path in W5-E1; target-config markers provide geometry from
+            # their Target Definition instead.
+            if marker.marker_type is not None and not marker.aruco_config:
                 raise ValueError(
                     f"Marker '{marker_name}' (used by lidar '{lidar_name}') is missing "
                     "'aruco_config', which the lidar_board_detector requires."
@@ -415,6 +548,7 @@ class CalibrationConfigParser:
 
             # Per-lidar overrides take precedence over marker-level configs
             board_config = lidar.board_config_override or marker.board_config
+            detector_config = lidar.detector_config_override or marker.detector_config
             bbox_config = lidar.bbox_config_override or marker.bbox_config
 
             config.lidar_board_detectors.append(
@@ -424,6 +558,9 @@ class CalibrationConfigParser:
                     lidar_name=lidar_name,
                     marker_name=marker_name,
                     pointcloud_topic=lidar.pointcloud_topic,
+                    target_config=marker.target_config,
+                    target_identity=marker.target_identity,
+                    detector_config=detector_config,
                     board_config=board_config,
                     aruco_config=marker.aruco_config,
                     bbox_config=bbox_config,
@@ -449,14 +586,20 @@ class CalibrationConfigParser:
             # using whichever came first (which would make the detector and the
             # solver for another pair disagree on the pattern).
             aruco_configs = set()
+            target_identities = set()
             for pair in self.calibration_pairs:
                 if camera_name in (pair.device1, pair.device2):
                     marker = self.markers[pair.marker]
+                    target_identities.add(marker.target_identity)
                     if marker.aruco_config:
                         aruco_configs.add(marker.aruco_config)
 
-            if not aruco_configs:
-                raise ValueError(f"No ArUco config found for camera {camera_name}")
+            if len(target_identities) != 1:
+                # _validate reports the same conflict per sensor, but retain a
+                # local guard because this construction owns one locator.
+                raise ValueError(
+                    f"Camera {camera_name} does not have one Calibration Target Identity"
+                )
             if len(aruco_configs) > 1:
                 raise ValueError(
                     f"Camera {camera_name} observes markers with different ArUco "
@@ -464,7 +607,7 @@ class CalibrationConfigParser:
                     "use one pattern. Use the same ArUco pattern for all boards this "
                     "camera observes."
                 )
-            aruco_config = next(iter(aruco_configs))
+            aruco_config = next(iter(aruco_configs)) if aruco_configs else None
 
             # Same one-locator-per-camera constraint applies to the detector tuning (H-08).
             # Markers that omit the key fall back to the shipped default.
@@ -497,6 +640,14 @@ class CalibrationConfigParser:
                     camera_name=camera_name,
                     image_topic=camera.image_topic,
                     frame_id=camera.frame_id,
+                    target_config=self.markers[
+                        next(
+                            pair.marker
+                            for pair in self.calibration_pairs
+                            if camera_name in (pair.device1, pair.device2)
+                        )
+                    ].target_config,
+                    target_identity=next(iter(target_identities)),
                     aruco_config=aruco_config,
                     aruco_detector_config=aruco_detector_config,
                     output_topic=output_topic,
@@ -545,7 +696,7 @@ class CalibrationConfigParser:
         aruco_topic = f"/calibration/{camera_name}/aruco_detections"
         output_topic = f"/{namespace}/extrinsic_transform"
 
-        if marker.aruco_config is None:
+        if marker.marker_type is not None and marker.aruco_config is None:
             raise ValueError(
                 f"ArUco config required for lidar-camera solver with marker {marker_name}"
             )
@@ -562,6 +713,8 @@ class CalibrationConfigParser:
                 board_detections_topic=board_topic,
                 aruco_detections_topic=aruco_topic,
                 camera_topic=camera.image_topic,
+                target_config=marker.target_config,
+                target_identity=marker.target_identity,
                 aruco_config=marker.aruco_config,
                 output_topic=output_topic,
             )
