@@ -26,6 +26,9 @@ from lctk_autoware_export.frames import (
 xacro = pytest.importorskip("xacro", reason="ROS xacro not on PYTHONPATH")
 
 FIXTURES = Path(__file__).parent / "fixtures"
+ARCHIVE_FIXTURES = (
+    Path(__file__).resolve().parents[3] / "fixtures" / "detection_archives"
+)
 
 
 def test_exported_yaml_round_trips_through_xacro(tmp_path):
@@ -93,3 +96,42 @@ def test_exported_yaml_round_trips_through_xacro(tmp_path):
     )
     T_expected = kit_to_camera_link(T_kit_lidar, rvec, tvec)
     np.testing.assert_allclose(T_urdf, T_expected, atol=1e-9)
+
+
+def test_paired_archives_produce_identical_xacro_transforms(tmp_path):
+    """The v5 identity must not change an already-solved export transform."""
+    transforms = []
+    for name in ("solved_v4.json", "solved_v5.json"):
+        detections = tmp_path / name
+        detections.write_text((ARCHIVE_FIXTURES / name).read_text())
+        config_dir = tmp_path / name.removesuffix(".json")
+        config_dir.mkdir()
+        target = config_dir / "sensor_kit_calibration.yaml"
+        shutil.copy(FIXTURES / "sensor_kit_calibration.yaml", target)
+
+        rvec, tvec = load_solver_transform(detections)
+        patch_calibration(
+            target,
+            rvec=rvec,
+            tvec=tvec,
+            camera_frame="camera0/camera_link",
+            lidar_frame="velodyne_top_base_link",
+        )
+        urdf = xacro.process_file(
+            str(FIXTURES / "sensor_kit.xacro"),
+            mappings={"config_dir": str(config_dir)},
+        ).toxml()
+        origin = ET.fromstring(urdf).find(
+            "joint[@name='camera0/camera_link_joint']/origin"
+        )
+        assert origin is not None, urdf
+        transforms.append(
+            np.array(
+                [
+                    *(float(v) for v in origin.get("xyz").split()),
+                    *(float(v) for v in origin.get("rpy").split()),
+                ]
+            )
+        )
+
+    np.testing.assert_array_equal(transforms[0], transforms[1])
