@@ -62,7 +62,7 @@ def archive_export_error(data: object, *, expected_frame: str) -> str | None:
     ):
         return f"detection file version {version!r}, expected 4 or 5"
     convention = data.get("board_frame_convention")
-    if not isinstance(convention, str) or convention.strip() != expected_frame:
+    if not isinstance(convention, str) or convention != expected_frame:
         return (
             f"board-frame convention {convention!r}, expected {expected_frame!r}. "
             "The stored transform means something else; exporting it would put a "
