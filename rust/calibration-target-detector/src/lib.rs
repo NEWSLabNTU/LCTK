@@ -1,9 +1,10 @@
-//! Target-neutral square-and-plane observation for calibration-target pose estimation.
+//! Calibration-target pose estimation.
 //!
-//! This crate deliberately stops before target pose estimation.  It converts the
-//! fitted square evidence from `board-cluster-detector` into sensor-facing plane
-//! geometry and four possible named board-up axes.  Surface adapters choose and
-//! refine a candidate later; this module knows neither solid nor perforated targets.
+//! [`TargetPoseEstimator`] is the only production estimator seam.  It accepts
+//! neutral square-and-plane evidence, dispatches to the physical surface adapter
+//! internally, and returns either one target-neutral detection or a structured
+//! rejection.  The surface adapters are deliberately private: callers select a
+//! validated target definition and detector tuning, never an estimator class.
 
 use anyhow::{bail, Result};
 use board_cluster_detector::{
@@ -11,7 +12,332 @@ use board_cluster_detector::{
     geometry::{unproject, PlaneModel},
     square_fit::SquareFit,
 };
-use nalgebra::{Point3, UnitVector3, Vector3};
+use calibration_target::{Surface, TargetIdentity, ValidatedTarget};
+use nalgebra::{Isometry3, Point3, UnitVector3, Vector3};
+
+mod perforated;
+mod solid;
+
+pub use perforated::PerforatedIcpConfig;
+pub use solid::SolidRefinementTuning;
+
+/// Reusable, deployment-owned estimator tuning.
+///
+/// This contains no plate dimensions, cutout positions, marker layout, or target
+/// identity.  Those physical facts are read exclusively from [`ValidatedTarget`].
+/// A preset supplies the one field relevant to its selected target; construction
+/// rejects a preset that omits or supplies tuning for the wrong surface.
+#[derive(Debug, Clone, Default)]
+pub struct TargetPoseEstimatorTuning {
+    solid: Option<SolidRefinementTuning>,
+    perforated: Option<PerforatedIcpConfig>,
+}
+
+impl TargetPoseEstimatorTuning {
+    pub fn for_solid(solid: SolidRefinementTuning) -> Self {
+        Self {
+            solid: Some(solid),
+            perforated: None,
+        }
+    }
+
+    pub fn for_perforated(perforated: PerforatedIcpConfig) -> Self {
+        Self {
+            solid: None,
+            perforated: Some(perforated),
+        }
+    }
+}
+
+/// The deep, target-neutral estimator facade.
+#[derive(Debug, Clone)]
+pub struct TargetPoseEstimator {
+    target: ValidatedTarget,
+    tuning: TargetPoseEstimatorTuning,
+}
+
+impl TargetPoseEstimator {
+    /// Bind reusable detector tuning to one immutable physical target.
+    pub fn new(target: &ValidatedTarget, tuning: TargetPoseEstimatorTuning) -> Result<Self> {
+        match (&target.plate().surface, &tuning.solid, &tuning.perforated) {
+            (Surface::Solid, Some(solid), None) => solid::validate_tuning(*solid)?,
+            (Surface::Perforated { .. }, None, Some(perforated)) => perforated.validate()?,
+            (Surface::Solid, _, _) => bail!(
+                "solid target requires exactly solid detector tuning and no perforated tuning"
+            ),
+            (Surface::Perforated { .. }, _, _) => bail!(
+                "perforated target requires exactly perforated detector tuning and no solid tuning"
+            ),
+        }
+        Ok(Self {
+            target: target.clone(),
+            tuning,
+        })
+    }
+
+    pub fn target_identity(&self) -> &TargetIdentity {
+        self.target.identity()
+    }
+
+    /// Estimate one pose from shared square/plane evidence and selected target
+    /// returns.  Rejections are data, not exceptional control flow: observers can
+    /// publish actionable diagnostics without parsing error strings.
+    ///
+    /// This deliberately does not accept raw point clouds.  W4-A owns bbox and
+    /// bbox-free point selection plus background state; accepting raw points here
+    /// would silently choose detector/background policy in the facade.  Both
+    /// selectors instead hand their common observation and selected evidence to
+    /// this entry point.
+    pub fn estimate(
+        &self,
+        observation: TargetSquarePlaneObservation,
+        evidence_points: Vec<Point3<f64>>,
+    ) -> TargetPoseEstimate {
+        match &self.target.plate().surface {
+            Surface::Solid => self.estimate_solid(observation, evidence_points),
+            Surface::Perforated { .. } => self.estimate_perforated(observation, evidence_points),
+        }
+    }
+
+    fn estimate_solid(
+        &self,
+        observation: TargetSquarePlaneObservation,
+        evidence_points: Vec<Point3<f64>>,
+    ) -> TargetPoseEstimate {
+        let tuning = self.tuning.solid.expect("validated solid tuning");
+        match solid::refine_solid_target(&self.target, &observation, &evidence_points, tuning) {
+            Ok(result) => TargetPoseEstimate::Detected(Box::new(TargetDetection {
+                pose: result.pose,
+                target_identity: self.target.identity().clone(),
+                selected_quadrant: result.selected_corner_index,
+                diagnostics: TargetDetectionDiagnostics::Solid(EdgeCoverageEvidence {
+                    edge_point_count: result.diagnostics.edge_point_count,
+                    edge_point_counts: result.diagnostics.edge_point_counts,
+                    covered_edge_count: result.diagnostics.covered_edge_count,
+                    occupied_longitudinal_bins: result.diagnostics.occupied_longitudinal_bins,
+                    weak_in_plane_center: result.diagnostics.weak_in_plane_center,
+                    weak_yaw: result.diagnostics.weak_yaw,
+                    board_up_alignment: result.final_board_up_alignment,
+                    edge_band_m: result.diagnostics.edge_band_m,
+                    minimum_edge_points: result.diagnostics.minimum_edge_points,
+                    minimum_points_per_covered_edge: result
+                        .diagnostics
+                        .minimum_points_per_covered_edge,
+                    minimum_covered_edges: result.diagnostics.minimum_covered_edges,
+                    longitudinal_bins_per_edge: result.diagnostics.longitudinal_bins_per_edge,
+                    minimum_occupied_longitudinal_bins: result
+                        .diagnostics
+                        .minimum_occupied_longitudinal_bins,
+                }),
+            })),
+            Err(error) => TargetPoseEstimate::Rejected(Box::new(TargetRejection {
+                target_identity: self.target.identity().clone(),
+                reason: solid_reject_reason(*error),
+                observation,
+            })),
+        }
+    }
+
+    fn estimate_perforated(
+        &self,
+        observation: TargetSquarePlaneObservation,
+        evidence_points: Vec<Point3<f64>>,
+    ) -> TargetPoseEstimate {
+        let tuning = self.tuning.perforated.expect("validated perforated tuning");
+        match perforated::estimate_perforated_pose(
+            &self.target,
+            &observation,
+            evidence_points,
+            tuning,
+        ) {
+            Ok(result) => TargetPoseEstimate::Detected(Box::new(TargetDetection {
+                pose: result.pose,
+                target_identity: self.target.identity().clone(),
+                selected_quadrant: result.winning_candidate_index,
+                diagnostics: TargetDetectionDiagnostics::CutoutIcp(CutoutIcpEvidence {
+                    best_loss_m: result.best_loss_m,
+                    second_best_loss_m: result.second_best_loss_m,
+                    loss_separation_m: result.loss_separation_m,
+                    cutout_rim_correspondences: result.cutout_rim_correspondences,
+                    iteration_count: result.iteration_count,
+                    total_correspondences: result.total_correspondences,
+                    termination: result.termination,
+                }),
+            })),
+            Err(error) => TargetPoseEstimate::Rejected(Box::new(TargetRejection {
+                target_identity: self.target.identity().clone(),
+                reason: perforated_reject_reason(error),
+                observation,
+            })),
+        }
+    }
+}
+
+fn perforated_reject_reason(error: perforated::PerforatedRejection) -> TargetRejectReason {
+    use perforated::PerforatedRejection;
+    match error {
+        PerforatedRejection::AmbiguousCutoutEvidence {
+            evidence,
+            required_separation_m,
+        } => TargetRejectReason::AmbiguousCutoutEvidence {
+            evidence: cutout_evidence(evidence),
+            required_separation_m,
+        },
+        PerforatedRejection::WeakCutoutEvidence {
+            evidence,
+            required_rim_correspondences,
+        } => TargetRejectReason::WeakCutoutEvidence {
+            evidence: cutout_evidence(evidence),
+            required_rim_correspondences,
+        },
+        PerforatedRejection::IcpFailure { evidence } => TargetRejectReason::PerforatedIcpFailure {
+            evidence: cutout_evidence(evidence),
+        },
+    }
+}
+
+fn cutout_evidence(evidence: perforated::PerforatedEvidence) -> CutoutIcpEvidence {
+    CutoutIcpEvidence {
+        best_loss_m: evidence.best_loss_m,
+        second_best_loss_m: evidence.second_best_loss_m,
+        loss_separation_m: evidence.loss_separation_m,
+        cutout_rim_correspondences: evidence.cutout_rim_correspondences,
+        iteration_count: evidence.iteration_count,
+        total_correspondences: evidence.total_correspondences,
+        termination: evidence.termination,
+    }
+}
+
+/// Successful target-neutral pose output.
+#[derive(Debug, Clone)]
+pub struct TargetDetection {
+    pub pose: Isometry3<f64>,
+    pub target_identity: TargetIdentity,
+    /// The named target corner chosen by physical evidence, in cyclic fitted-corner order.
+    pub selected_quadrant: usize,
+    pub diagnostics: TargetDetectionDiagnostics,
+}
+
+/// Structured acceptance diagnostics without exposing a surface estimator.
+#[derive(Debug, Clone)]
+pub enum TargetDetectionDiagnostics {
+    /// Solid targets report the outer-edge evidence that constrained pose.
+    Solid(EdgeCoverageEvidence),
+    /// Perforated targets report cutout evidence and ICP quality.
+    CutoutIcp(CutoutIcpEvidence),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutoutIcpEvidence {
+    pub best_loss_m: f64,
+    pub second_best_loss_m: f64,
+    pub loss_separation_m: f64,
+    pub cutout_rim_correspondences: usize,
+    pub iteration_count: usize,
+    pub total_correspondences: usize,
+    pub termination: IcpTermination,
+}
+
+/// Structured reason the cutout-aware ICP loop stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IcpTermination {
+    GoodFit,
+    StablePose,
+    MaxIterations,
+    TooFewInliers,
+    TooFewKabschPoints,
+    NoCorrespondences,
+}
+
+/// Target-neutral report of the plate-perimeter evidence used for a pose.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EdgeCoverageEvidence {
+    pub edge_point_count: usize,
+    pub edge_point_counts: [usize; 4],
+    pub covered_edge_count: usize,
+    pub occupied_longitudinal_bins: [usize; 4],
+    pub weak_in_plane_center: bool,
+    pub weak_yaw: bool,
+    pub board_up_alignment: f64,
+    pub edge_band_m: f64,
+    pub minimum_edge_points: usize,
+    pub minimum_points_per_covered_edge: usize,
+    pub minimum_covered_edges: usize,
+    pub longitudinal_bins_per_edge: usize,
+    pub minimum_occupied_longitudinal_bins: usize,
+}
+
+/// Estimate outcome.  A rejected observation carries its common evidence so a
+/// ROS adapter can report/debug it with exactly the same semantics as acceptance.
+#[derive(Debug, Clone)]
+pub enum TargetPoseEstimate {
+    Detected(Box<TargetDetection>),
+    Rejected(Box<TargetRejection>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TargetRejection {
+    pub target_identity: TargetIdentity,
+    pub reason: TargetRejectReason,
+    pub observation: TargetSquarePlaneObservation,
+}
+
+/// Stable rejection categories for logging, metrics and operator diagnosis.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TargetRejectReason {
+    BoardUpAlignment {
+        alignment: f64,
+        required_minimum: f64,
+    },
+    InsufficientOuterEdgeEvidence {
+        evidence: EdgeCoverageEvidence,
+    },
+    AmbiguousCutoutEvidence {
+        evidence: CutoutIcpEvidence,
+        required_separation_m: f64,
+    },
+    WeakCutoutEvidence {
+        evidence: CutoutIcpEvidence,
+        required_rim_correspondences: usize,
+    },
+    PerforatedIcpFailure {
+        evidence: CutoutIcpEvidence,
+    },
+}
+
+fn solid_reject_reason(error: solid::SolidRejection) -> TargetRejectReason {
+    match error {
+        solid::SolidRejection::BoardUpAlignment { evidence } => {
+            TargetRejectReason::BoardUpAlignment {
+                alignment: evidence.board_up_alignment,
+                required_minimum: solid::MIN_FINAL_BOARD_UP_ALIGNMENT,
+            }
+        }
+        solid::SolidRejection::InsufficientOuterEdgeEvidence { evidence } => {
+            TargetRejectReason::InsufficientOuterEdgeEvidence {
+                evidence: edge_evidence(evidence),
+            }
+        }
+    }
+}
+
+fn edge_evidence(evidence: solid::SolidRejectionEvidence) -> EdgeCoverageEvidence {
+    EdgeCoverageEvidence {
+        edge_point_count: evidence.perimeter.point_counts.iter().sum(),
+        edge_point_counts: evidence.perimeter.point_counts,
+        covered_edge_count: evidence.covered_edge_count,
+        occupied_longitudinal_bins: evidence.perimeter.occupied_longitudinal_bins,
+        weak_in_plane_center: evidence.weak_in_plane_center,
+        weak_yaw: evidence.weak_yaw,
+        board_up_alignment: evidence.board_up_alignment,
+        edge_band_m: evidence.tuning.edge_band_m,
+        minimum_edge_points: evidence.tuning.minimum_edge_points,
+        minimum_points_per_covered_edge: evidence.tuning.minimum_points_per_covered_edge,
+        minimum_covered_edges: evidence.tuning.minimum_covered_edges,
+        longitudinal_bins_per_edge: evidence.tuning.longitudinal_bins_per_edge,
+        minimum_occupied_longitudinal_bins: evidence.tuning.minimum_occupied_longitudinal_bins,
+    }
+}
 
 /// Numerical equality used only to report a geometric tie.  Acceptance thresholds
 /// belong to target-specific adapters, not this observation module.

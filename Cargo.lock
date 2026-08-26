@@ -593,6 +593,8 @@ dependencies = [
  "anyhow",
  "approx",
  "board-cluster-detector",
+ "calibration-target",
+ "measurements",
  "nalgebra",
 ]
 
@@ -1604,6 +1606,8 @@ dependencies = [
  "approx",
  "arrsac",
  "aruco-config",
+ "calibration-target",
+ "calibration-target-detector",
  "clap",
  "criterion",
  "dashmap",
