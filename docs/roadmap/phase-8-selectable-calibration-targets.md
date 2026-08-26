@@ -1,9 +1,38 @@
 # Phase 8: Selectable Calibration Targets
 
-- **Status:** Draft implementation plan
-- **Date:** 2026-08-23
+- **Status:** Active implementation
+- **Date:** 2026-08-27
 - **Spec:** [Selectable calibration targets](../superpowers/specs/2026-08-21-selectable-calibration-targets.md)
 - **Decision:** [ADR 0003](../adr/0003-selectable-calibration-targets.md)
+
+## Current implementation state
+
+Updated 2026-08-27. Packet status changes land here with each accepted review gate.
+
+| Packet | State | Evidence / commit |
+|---|---|---|
+| W0-A | Complete | Legacy detector contract tests, `62f8c9d` |
+| W0-B | Complete | Target Identity message, `9a4e6d7` |
+| W1-A | Complete | Target Definition contract, `81abb0d` |
+| W1-B | Complete | Canonical target geometry, `5aa1f73` |
+| W1-C | Complete | Python target reader, `a5f6ce8` |
+| W2-A | Complete | Target-derived fiducial patterns, `e6080b1` |
+| W2-B | Complete | Neutral cluster evidence, `e21aa01` |
+| W2-C | Complete | Archive identity contract, `77a1720` |
+| W3-A | Complete | Neutral square/plane observation, `fd7411e` |
+| W3-B | Complete | Solid evidence refinement and public-facade tests, `ea0eda4` |
+| W3-C | Complete | Perforated ICP adapter and legacy characterization golden, `ea0eda4` |
+| W3-D | Complete | Typed neutral estimator and temporary hollow facade, `ea0eda4` |
+| W4-B | Complete | Target-driven camera/generator adapters, `2ab0944`; binding cache fix, `dcb46e4` |
+| W4-Ea | Complete | v4/v5 export parity, `82eb8a5` |
+| W5-A | Complete | Selectable launch schema parser, `42a7934` |
+| W5-B | Complete | Hollow/solid detector presets, `a0664db` |
+
+Pause point requested after W3/W4-B completion. Consolidated gate passed: `just build` (17 ROS
+packages), `just test` (306 Rust and 272 Python tests), `just lint`, and `git diff --check`.
+
+Next resume point: dispatch W4-A. W4-C/W4-D/W4-Eb/W4-Ec follow observer dependencies. W5-C through
+W6-A remain pending. W7 requires real rosbag evidence and is not headlessly closeable.
 
 ## Outcome
 
@@ -42,16 +71,22 @@ Add `rust/calibration-target` before changing callers. Until cleanup,
 the new `rust/calibration-target-detector` is introduced before the old detector crate disappears.
 There is never a `hole_radius = 0` solid-board sentinel.
 
-The target estimator's intended external interface is:
+The target estimator's implemented external interface is:
 
 ```rust
 let target = ValidatedTarget::parse_json5(bytes)?;
 let estimator = TargetPoseEstimator::new(&target, tuning)?;
-let outcome = estimator.estimate(points, sensor_up);
+let observation = TargetSquarePlaneObservation::from_square_plane(&square_plane, sensor_up)?;
+let outcome = estimator.estimate(observation, selected_points);
 ```
 
 Surface dispatch, quarter-turn hypotheses, evidence ownership and `BoardIcpIterator` stay internal.
 Tests and ROS callers cross the same interface.
+
+This refines the spec's shorthand `estimate(points, sensor_up)`: W4-A's bbox and bbox-free
+selectors own crop/background state and produce the same neutral square/plane evidence. Moving raw
+cloud selection into the estimator would duplicate that stateful observer policy and make the two
+selection modes diverge again.
 
 ### Python
 
@@ -80,40 +115,57 @@ examples atomically, after which cleanup removes the aliases.
 
 ## Dependency graph
 
-```text
-W0-A characterization ─────────────────────────────────────────────┐
-W0-B identity message ───────────────────────────────┐             │
-                                                     │             │
-W1-A Target Definition ──┬─ W1-B surfaces/geometry ──┼─┐           │
-                         └─ W1-C Python target ───────┼─┼─┐         │
-                                                     │ │ │         │
-W2-A fiducial consumers <── W1-A + W1-B              │ │ │         │
-W2-B board-cluster seam <── W1-A                     │ │ │         │
-W2-C archive contract  <── W1-C + W0-B               │ │ │         │
-                                                     │ │ │         │
-W3-A common observation <── W1-B + W2-B              │ │ │         │
-       ├─ W3-B solid adapter                         │ │ │         │
-       └─ W3-C perforated adapter                    │ │ │         │
-               └──────── W3-D estimator facade ──────┘ │ │         │
-                                                       │ │         │
-W4-A LiDAR observer <── W2-A + W3-D + W0-B ────────────┘ │         │
-W4-B camera observers <── W2-A + W0-B ──────────────────┤         │
-W4-C camera solver <── W1-C + W0-B + W4-A + W4-B ────────┤         │
-W4-D LiDAR solver identity <── W0-B + W4-A ───────────────┤         │
-W4-Ea exporter <── W2-C ──────────────────────────────────┤         │
-W4-Eb archive codec <── W2-C + W4-C ──────────────────────┤         │
-W4-Ec migrator <── W4-Eb + W1-C ──────────────────────────┘         │
-                                                                 │
-W5-A parser/schema <── W1-C ──────────────────────────────────────┤
-W5-B target/preset files <── W1-A ────────────────────────────────┤
-W5-C graph routing <── W4-A/B/C/D/Ea/Eb/Ec + W5-A ───────────────┤
-W5-D maintained-example cutover <── W5-B + W5-C ─────────────────┘
-W5-E1 ROS/config compatibility removal <── W5-D
-W5-E2 Rust facade removal/renames <── W5-E1
-W5-E3 zero-reference integration gate <── W5-E2
-W6-A full regression/docs/issues <── W5-E3
-W7-A evidence tooling <── stable diagnostics
-W7-B real-bag reports/preset promotion <── W6-A + W7-A
+```mermaid
+flowchart TD
+    W0A["W0-A<br/>Legacy characterization"]
+    W0B["W0-B<br/>Identity message"]
+    W1A["W1-A<br/>Target Definition"]
+    W1B["W1-B<br/>Surfaces and geometry"]
+    W1C["W1-C<br/>Python target reader"]
+    W2A["W2-A<br/>Fiducial consumers"]
+    W2B["W2-B<br/>Board-cluster seam"]
+    W2C["W2-C<br/>Archive contract"]
+    W3A["W3-A<br/>Common observation"]
+    W3B["W3-B<br/>Solid adapter"]
+    W3C["W3-C<br/>Perforated adapter"]
+    W3D["W3-D<br/>Estimator facade"]
+    W4A["W4-A<br/>LiDAR observer"]
+    W4B["W4-B<br/>Camera observers"]
+    W4C["W4-C<br/>LiDAR-camera solver"]
+    W4D["W4-D<br/>LiDAR-LiDAR identity"]
+    W4EA["W4-Ea<br/>Exporter"]
+    W4EB["W4-Eb<br/>Archive codec"]
+    W4EC["W4-Ec<br/>Migrator"]
+    W5A["W5-A<br/>Parser and schema"]
+    W5B["W5-B<br/>Targets and presets"]
+    W5C["W5-C<br/>Graph routing"]
+    W5D["W5-D<br/>Example cutover"]
+    W5E1["W5-E1<br/>Remove ROS aliases"]
+    W5E2["W5-E2<br/>Remove Rust facades"]
+    W5E3["W5-E3<br/>Zero-reference gate"]
+    W6A["W6-A<br/>Full regression and docs"]
+    W7A["W7-A<br/>Evidence tooling"]
+    W7B["W7-B<br/>Real-bag validation"]
+
+    W1A --> W1B & W1C & W2B & W5B
+    W1B --> W2A & W3A
+    W0B --> W2C & W4A & W4B & W4C & W4D
+    W1C --> W2C & W4C & W4EC & W5A
+    W2A --> W4A & W4B
+    W2B --> W3A
+    W0A --> W3C
+    W3A --> W3B & W3C
+    W3B & W3C --> W3D
+    W3D --> W4A & W7A
+    W4A --> W4C & W4D
+    W4B --> W4C
+    W2C --> W4EA & W4EB
+    W4C --> W4EB
+    W4EB --> W4EC
+    W4A & W4B & W4C & W4D & W4EA & W4EB & W4EC & W5A --> W5C
+    W5B & W5C --> W5D
+    W5D --> W5E1 --> W5E2 --> W5E3 --> W6A
+    W6A & W7A --> W7B
 ```
 
 ## Work packets
