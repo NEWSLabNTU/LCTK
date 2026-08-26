@@ -130,26 +130,35 @@ Explicit cutout centres replace the old `hole_center_shift * sqrt(2)` derivation
 
 ## Architecture
 
-```text
-                            +-------------------+
-                            | Target Definition |
-                            +---------+---------+
-                                      |
-                    +-----------------+------------------+
-                    |                 |                  |
-                    v                 v                  v
-          LiDAR target detector  ArUco locator     ArUco generator
-             detection + ID      detection + ID       printed sign
-                    |                 |
-                    +--------+--------+
-                             v
-                 LiDAR-camera solver
-                   local definition
-                   identity equality
-                   marker geometry
-                             |
-                             v
-                   Detection Archive v5
+```mermaid
+flowchart LR
+    Definition["Target Definition<br/>physical truth + identity"]
+
+    subgraph Domain["Deep domain modules"]
+        RustTarget["calibration-target<br/>Rust geometry and identity"]
+        PythonTarget["lctk_target<br/>Python geometry and identity"]
+    end
+
+    subgraph Observers["Observer adapters"]
+        Lidar["lidar_board_detector<br/>pose + Target Identity"]
+        Camera["aruco_locator_node<br/>corners + Target Identity"]
+        Generator["aruco_generator_node<br/>exact printed sign"]
+    end
+
+    subgraph Solvers["Identity-gated solvers"]
+        CameraSolver["LiDAR-camera solver"]
+        LidarSolver["LiDAR-LiDAR solver"]
+    end
+
+    Archive["Detection Archive v5"]
+    Export["Autoware export"]
+
+    Definition --> RustTarget & PythonTarget
+    RustTarget --> Lidar & Camera & Generator
+    PythonTarget --> CameraSolver
+    Lidar --> CameraSolver & LidarSolver
+    Camera --> CameraSolver
+    CameraSolver --> Archive --> Export
 ```
 
 ### `calibration-target` module
@@ -176,9 +185,23 @@ branch on target kind.
 
 The internal surface seam has two real adapters:
 
-```rust
-SolidSquareSurface
-PerforatedSquareSurface
+```mermaid
+classDiagram
+    class PosedTarget {
+        +closest_points(points) Correspondences
+        +axes() TargetAxes
+        +marker_corners_by_id() MarkerCornerMap
+    }
+    class SurfaceAdapter {
+        <<interface>>
+        +closest_point(point) Point3
+    }
+    class SolidSquareSurface
+    class PerforatedSquareSurface
+
+    PosedTarget --> SurfaceAdapter : delegates projection
+    SurfaceAdapter <|.. SolidSquareSurface
+    SurfaceAdapter <|.. PerforatedSquareSurface
 ```
 
 The solid adapter projects onto the closed diamond plate. The perforated adapter performs the same
@@ -193,15 +216,36 @@ owns pose estimation and rejection:
 ```rust
 let estimator = TargetPoseEstimator::new(target, detector_tuning)?;
 
-estimator.estimate(points, sensor_up)
-    -> Result<TargetDetection, TargetRejectReason>
+let observation = TargetSquarePlaneObservation::from_square_plane(square_plane, sensor_up)?;
+estimator.estimate(observation, selected_points)
+    -> TargetPoseEstimate
 ```
 
-The implementation hides plane fitting, fixed-square coverage fitting, initial pose, orientation
-selection, optional cutout refinement, covariance estimation and acceptance gates.
+The ROS observer owns stateful bbox/bbox-free point selection and background modelling. Both paths
+produce the same neutral square/plane observation. The estimator implementation hides initial pose,
+orientation selection, surface dispatch, optional cutout refinement, observability diagnostics and
+acceptance gates.
 
 The ROS node remains an adapter: PointCloud2 conversion, crop selection, parameters, publication,
 logging and RViz output stay in `lidar_board_detector`.
+
+```mermaid
+flowchart TD
+    Cloud["PointCloud2"] --> Selector{"Observer-owned selector"}
+    Selector -->|bbox| BBox["Selected points + fitted plane/square"]
+    Selector -->|bbox-free| BBoxFree["Selected points + fitted plane/square"]
+    BBox --> Observation["TargetSquarePlaneObservation"]
+    BBoxFree --> Observation
+
+    subgraph Estimator["TargetPoseEstimator implementation"]
+        Observation --> Orientation["Four named board-up candidates"]
+        Orientation --> Dispatch{"Validated surface dispatch"}
+        Dispatch -->|solid| Solid["Edge-evidence refinement<br/>alignment >= 0.90"]
+        Dispatch -->|perforated| Hollow["Cutout-aware BoardIcpIterator<br/>four hypotheses"]
+        Solid --> Outcome["TargetDetection or typed rejection"]
+        Hollow --> Outcome
+    end
+```
 
 ### Python target geometry
 
@@ -386,8 +430,13 @@ publishers or profiles can race there.
 
 A LiDAR-camera solver waits for:
 
-```text
-lidar_identity == camera_identity == locally_loaded_identity
+```mermaid
+flowchart LR
+    LidarIdentity["LiDAR Target Identity"] --> Gate{"Exact equality gate"}
+    CameraIdentity["Camera Target Identity"] --> Gate
+    LocalIdentity["Locally loaded Target Identity"] --> Gate
+    Gate -->|all equal| Buffer["Accept Detection Pair<br/>then mutate buffer"]
+    Gate -->|missing, malformed, or mismatch| Reject["Reject before buffer mutation"]
 ```
 
 A LiDAR-LiDAR solver waits for both LiDAR identities and requires equality. Absence, malformed
