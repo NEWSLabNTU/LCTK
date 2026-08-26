@@ -139,7 +139,7 @@ pub fn voxel_downsample(
     points: &[Point3<f64>],
     voxel_size: f64,
     use_centroid: bool,
-    parallel_threshold: usize,
+    #[cfg_attr(not(feature = "parallel"), allow(unused_variables))] parallel_threshold: usize,
 ) -> Vec<Point3<f64>> {
     #[cfg(feature = "parallel")]
     {
