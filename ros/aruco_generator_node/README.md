@@ -1,10 +1,12 @@
 # aruco_generator_node
 
-A command-line tool for generating ArUco markers from configuration files.
+A command-line tool for generating the exact fiducial paper in a Target Definition.
 
 ## Overview
 
-This tool generates ArUco marker images based on specifications provided in TOML or JSON configuration files. It supports various ArUco dictionary types and allows customization of marker size, border width, and output format.
+This tool derives dictionary, marker IDs, paper size, quiet zone, marker size and layout from a
+validated Target Definition. The target manifest is the physical source of truth; DPI only chooses
+raster resolution.
 
 ## Requirements
 
@@ -14,36 +16,20 @@ This tool generates ArUco marker images based on specifications provided in TOML
 ## Quick Start
 
 ```bash
-# Generate markers from configuration
-aruco_generator_node --config config.toml
+# Generate the solid target's 600 mm paper
+aruco_generator_node \
+  --target-config ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5 \
+  --output solid_600.png --dpi 300
 
 # Generate with preview mode
-aruco_generator_node --config config.toml --preview
-```
-
-## Configuration Format
-
-Create a TOML or JSON configuration file specifying marker parameters:
-
-```toml
-# Example config.toml
-dictionary = "DICT_4X4_50"
-marker_size = 200
-border_bits = 1
-output_dir = "./markers"
-
-[[markers]]
-id = 0
-filename = "marker_0.png"
-
-[[markers]]
-id = 1
-filename = "marker_1.png"
+aruco_generator_node --target-config target.json5 --output target.png --preview
 ```
 
 ## Command Line Options
 
-- `--config, -c`: Path to configuration file (required)
+- `--target-config`: Path to a Target Definition JSON5 file (required)
+- `--output, -o`: Output image path (required)
+- `--dpi`: Raster resolution (default: 300); it does not change physical geometry
 - `--preview`: Display generated markers in preview window
 
 ## License

@@ -11,6 +11,7 @@ serde_json = { workspace = true }
 aruco-locator = { version = "0.1.0", path = "../../rust/aruco-locator" }
 aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
 aruco-detector = { version = "0.1.0", path = "../../rust/aruco-detector" }
+calibration-target = { version = "0.1.0", path = "../../rust/calibration-target" }
 ctrlc = "3.4"
 
 # ROS 2 dependencies
@@ -19,4 +20,5 @@ sensor_msgs.workspace = true
 std_msgs.workspace = true
 geometry_msgs.workspace = true
 vision_msgs.workspace = true
+lctk_interfaces = "*"
 json5.workspace = true

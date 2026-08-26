@@ -22,4 +22,4 @@ serde.workspace = true
 [dependencies.opencv]
 workspace = true
 default-features = false
-features = ["aruco", "highgui", "imgcodecs", "calib3d", "clang-runtime"]
+features = ["aruco", "highgui", "imgcodecs", "imgproc", "calib3d", "clang-runtime"]
