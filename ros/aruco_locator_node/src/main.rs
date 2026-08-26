@@ -3,7 +3,9 @@ use arc_swap::ArcSwap;
 use aruco_config::ArucoDetectorParams;
 use aruco_detector::multi_aruco::ImageMarker;
 use aruco_locator::{ArucoDetector, ArucoDetectorConfig};
+use calibration_target::{TargetIdentity, ValidatedTarget};
 use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion};
+use lctk_interfaces::msg::CalibrationTargetIdentity;
 use opencv::{
     core::{Mat, Scalar, CV_8UC1, CV_8UC3, CV_8UC4},
     imgproc::{self, FONT_HERSHEY_SIMPLEX, LINE_8},
@@ -26,6 +28,43 @@ use vision_msgs::msg::{
 
 // Binary name for logging
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
+
+const LEGACY_HOLLOW_TARGET: &[u8] =
+    include_bytes!("../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
+
+/// The identity topic is deliberately relative: launch namespaces one locator per camera.
+const TARGET_IDENTITY_TOPIC: &str = "target_identity";
+
+/// Build the latched identity publisher options in one testable place.
+fn target_identity_publisher_options() -> PublisherOptions<'static> {
+    let mut options = PublisherOptions::new(TARGET_IDENTITY_TOPIC);
+    options.qos = QoSProfile {
+        history: QoSHistoryPolicy::KeepLast { depth: 1 },
+        ..QoSProfile::default().reliable().transient_local()
+    };
+    options
+}
+
+/// Resolve the temporary parameter bridge. W5-E1 removes `aruco_config_file` after maintained
+/// launch files have moved to `target_config`; the legacy path is deliberately always the known
+/// hollow target, never an attempt to infer physical geometry from a pattern-only file.
+fn select_target_source(
+    target_config: Option<&str>,
+    aruco_config_file: Option<&str>,
+) -> Result<bool> {
+    let target_config = target_config.filter(|value| !value.is_empty());
+    let aruco_config_file = aruco_config_file.filter(|value| !value.is_empty());
+    match (target_config, aruco_config_file) {
+        (Some(_), Some(_)) => {
+            bail!("target_config and legacy aruco_config_file cannot both be set; select one")
+        }
+        (Some(_), None) => Ok(false),
+        (None, Some(_)) => Ok(true),
+        (None, None) => bail!(
+            "target_config is required (or temporary legacy aruco_config_file during migration)"
+        ),
+    }
+}
 
 /// Convert aruco_locator::DetectionResult to Detection2DArray message
 fn convert_detection_result(
@@ -164,6 +203,9 @@ pub struct ArucoLocatorNode {
     _image_subscription: Subscription<ImageMsg>,
     detection_publisher: Publisher<Detection2DArray>,
     overlay_publisher: Option<Publisher<ImageMsg>>,
+    // Latched identity of the Target Definition used to construct this detector.
+    // Keeping the publisher alive retains its sample for solvers that subscribe later.
+    _target_identity_publisher: Publisher<CalibrationTargetIdentity>,
     detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
     aruco_pattern: Arc<aruco_config::MultiArucoPattern>,
     debug_overlay_enabled: bool,
@@ -178,17 +220,36 @@ impl ArucoLocatorNode {
         // duplication is what allowed the image to be rectified twice (C-03).
         let detector_state = Arc::new(ArcSwap::from_pointee(None));
 
-        // Get the aruco_config_file parameter (mandatory - must be set by user)
-        let aruco_config_file = node
+        // Target Definition owns physical marker layout, IDs, paper placement and
+        // dictionary. Detector tuning remains a separate parameter below.
+        let target_config_file = node
+            .declare_parameter::<Arc<str>>("target_config")
+            .optional()?
+            .get();
+        let legacy_aruco_config_file = node
             .declare_parameter::<Arc<str>>("aruco_config_file")
-            .mandatory()?
-            .get()
-            .to_string();
+            .optional()?
+            .get();
+        let use_legacy_hollow = select_target_source(
+            target_config_file.as_deref(),
+            legacy_aruco_config_file.as_deref(),
+        )?;
 
-        log_info!(LOGGER_NAME, "Using ArUco config file: {aruco_config_file}");
-
-        // Load ArUco pattern for use in overlay generation
-        let aruco_pattern = Arc::new(Self::load_aruco_pattern(&aruco_config_file)?);
+        let target = if use_legacy_hollow {
+            log_warn!(
+                LOGGER_NAME,
+                "aruco_config_file is a temporary compatibility parameter and selects the explicit \
+                 hollow_1000_aruco_4 target; migrate to target_config before W5-E1"
+            );
+            Arc::new(Self::load_legacy_hollow_target()?)
+        } else {
+            let target_config_file = target_config_file.expect("validated above");
+            log_info!(LOGGER_NAME, "Using Target Definition: {target_config_file}");
+            Arc::new(Self::load_target(&target_config_file)?)
+        };
+        // The low-level detector and debug overlay still consume this legacy shape,
+        // but it is derived exclusively from the immutable Target Definition.
+        let aruco_pattern = Arc::new(aruco_config::MultiArucoPattern::from_target(&target)?);
 
         // Detector tuning (H-08: sub-pixel corner refinement). Kept in a file separate from the
         // pattern, because the pattern describes the printed board and is also read by
@@ -301,6 +362,19 @@ impl ArucoLocatorNode {
         };
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
 
+        // Calibration identity is state, not a stream: a solver that starts after
+        // this observer must receive the same sample immediately. Keep this topic
+        // relative so each generated observer namespace has its own identity.
+        let target_identity_publisher =
+            node.create_publisher(target_identity_publisher_options())?;
+        target_identity_publisher.publish(Self::identity_message(target.identity()))?;
+        log_info!(
+            LOGGER_NAME,
+            "Publishing target identity {}@{} (latched on {TARGET_IDENTITY_TOPIC})",
+            target.identity().target_id,
+            target.identity().revision
+        );
+
         // Create overlay publisher if debug is enabled (BEST_EFFORT QoS for image streaming)
         let overlay_publisher = if debug_overlay_enabled {
             let mut overlay_pub_opts = PublisherOptions::new("image_with_detections");
@@ -315,7 +389,7 @@ impl ArucoLocatorNode {
 
         // Subscribe to camera_info using derived topic name
         let detector_state_camera_info = Arc::clone(&detector_state);
-        let config_file_for_callback = aruco_config_file.clone();
+        let target_for_callback = Arc::clone(&target);
         let mut camera_info_options = SubscriptionOptions::new(&camera_info_topic);
         camera_info_options.qos = qos_profile;
         let camera_info_subscription =
@@ -323,7 +397,7 @@ impl ArucoLocatorNode {
                 Self::camera_info_callback(
                     msg,
                     Arc::clone(&detector_state_camera_info),
-                    &config_file_for_callback,
+                    Arc::clone(&target_for_callback),
                     detector_params,
                 );
             })?;
@@ -364,6 +438,7 @@ impl ArucoLocatorNode {
             _image_subscription: image_subscription,
             detection_publisher,
             overlay_publisher,
+            _target_identity_publisher: target_identity_publisher,
             detector_state,
             aruco_pattern,
             debug_overlay_enabled,
@@ -376,7 +451,7 @@ impl ArucoLocatorNode {
     fn camera_info_callback(
         camera_info: CameraInfo,
         detector_state: Arc<ArcSwap<Option<Arc<ArucoDetector>>>>,
-        aruco_config_file: &str,
+        target: Arc<ValidatedTarget>,
         detector_params: ArucoDetectorParams,
     ) {
         // Check if detector is already initialized (lock-free read)
@@ -393,18 +468,15 @@ impl ArucoLocatorNode {
             );
         }
 
-        let aruco_pattern = match Self::load_aruco_pattern(aruco_config_file) {
-            Ok(pattern) => pattern,
+        let config = match ArucoDetectorConfig::from_target(camera_info, &target, detector_params) {
+            Ok(config) => config,
             Err(e) => {
-                log_error!(LOGGER_NAME, "Failed to load ArUco pattern: {e}");
+                log_error!(
+                    LOGGER_NAME,
+                    "Failed to derive ArUco detector from target: {e}"
+                );
                 return;
             }
-        };
-
-        let config = ArucoDetectorConfig {
-            camera_info,
-            aruco_pattern,
-            detector_params,
         };
 
         let detector = match ArucoDetector::new(config) {
@@ -431,23 +503,23 @@ impl ArucoLocatorNode {
         Ok(params)
     }
 
-    /// Load ArUco pattern from config file
-    fn load_aruco_pattern(config_file: &str) -> Result<aruco_config::MultiArucoPattern> {
-        let json5_text = std::fs::read_to_string(config_file)?;
-        let pattern: aruco_config::MultiArucoPattern = json5::from_str(&json5_text)?;
+    fn load_target(config_file: &str) -> Result<ValidatedTarget> {
+        let bytes = std::fs::read(config_file)?;
+        ValidatedTarget::parse_json5(&bytes)
+    }
 
-        // Check if expected markers match our test pattern
-        let expected_markers = [696, 64, 306, 195];
-        if pattern.marker_ids != expected_markers {
-            log_warn!(
-                LOGGER_NAME,
-                "ArUco pattern markers {:?} don't match expected {:?}",
-                pattern.marker_ids,
-                expected_markers
-            );
+    fn load_legacy_hollow_target() -> Result<ValidatedTarget> {
+        ValidatedTarget::parse_json5(LEGACY_HOLLOW_TARGET)
+    }
+
+    fn identity_message(identity: &TargetIdentity) -> CalibrationTargetIdentity {
+        CalibrationTargetIdentity {
+            schema_version: identity.schema_version,
+            target_id: identity.target_id.clone(),
+            revision: identity.revision,
+            semantic_sha256: identity.semantic_sha256.clone(),
+            board_frame_convention: identity.board_frame_convention.clone(),
         }
-
-        Ok(pattern)
     }
 
     /// Detect markers in the incoming image.
@@ -944,4 +1016,42 @@ pub fn run_node() -> Result<()> {
 
 fn main() -> Result<()> {
     run_node()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_parameter_bridge_accepts_one_source_only() {
+        assert!(!select_target_source(Some("solid.json5"), None).unwrap());
+        assert!(select_target_source(None, Some("legacy-pattern.json5")).unwrap());
+        assert!(
+            select_target_source(Some("solid.json5"), Some("legacy-pattern.json5"))
+                .unwrap_err()
+                .to_string()
+                .contains("cannot both")
+        );
+        assert!(select_target_source(None, None)
+            .unwrap_err()
+            .to_string()
+            .contains("required"));
+    }
+
+    #[test]
+    fn legacy_path_is_the_explicit_hollow_target() {
+        let target = ArucoLocatorNode::load_legacy_hollow_target().unwrap();
+        assert_eq!(target.target_id(), "hollow_1000_aruco_4");
+        assert_eq!(target.fiducial().marker_ids, vec![696, 64, 306, 195]);
+    }
+
+    #[test]
+    fn identity_publisher_is_relative_reliable_and_latched() {
+        let options = target_identity_publisher_options();
+        assert_eq!(options.topic, TARGET_IDENTITY_TOPIC);
+        assert!(!options.topic.starts_with('/'));
+        assert_eq!(options.qos.history, QoSHistoryPolicy::KeepLast { depth: 1 });
+        assert_eq!(options.qos.reliability, QoSReliabilityPolicy::Reliable);
+        assert_eq!(options.qos.durability, QoSDurabilityPolicy::TransientLocal);
+    }
 }

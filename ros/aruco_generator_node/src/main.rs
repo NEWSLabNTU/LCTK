@@ -1,15 +1,24 @@
 use anyhow::Result;
-use aruco_generator::{ArucoGenerator, Config};
+use aruco_generator::ArucoGenerator;
+use calibration_target::ValidatedTarget;
 use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "aruco_generator_node")]
-#[command(about = "Generate ArUco markers from configuration file")]
+#[command(about = "Generate the fiducial paper specified by a Target Definition")]
 struct Args {
-    /// Path to configuration file (TOML or JSON format)
+    /// Path to a Target Definition JSON5 file.
+    #[arg(long)]
+    pub target_config: PathBuf,
+
+    /// Output image path.
     #[arg(short, long)]
-    pub config: PathBuf,
+    pub output: PathBuf,
+
+    /// Raster resolution. Physical dimensions still come from the target.
+    #[arg(long, default_value_t = 300.0)]
+    pub dpi: f64,
 
     /// Enable preview mode (display the generated markers)
     #[arg(long)]
@@ -19,13 +28,17 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Load configuration from file
-    let config = Config::from_file(&args.config)?;
+    let bytes = std::fs::read(&args.target_config)?;
+    let target = ValidatedTarget::parse_json5(&bytes)?;
 
-    // Generate ArUco markers
-    ArucoGenerator::generate_from_config(&config, args.preview)?;
+    ArucoGenerator::generate_target_image(&target, args.dpi, &args.output, args.preview)?;
 
-    println!("ArUco markers generated successfully!");
+    println!(
+        "Generated target fiducial for {}@{} at {}",
+        target.target_id(),
+        target.revision(),
+        args.output.display()
+    );
 
     Ok(())
 }

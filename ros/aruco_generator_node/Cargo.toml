@@ -6,5 +6,6 @@ edition = "2021"
 
 [dependencies]
 aruco-generator = { version = "0.1.0", path = "../../rust/aruco-generator" }
+calibration-target = { version = "0.1.0", path = "../../rust/calibration-target" }
 anyhow.workspace = true
 clap = { version = "4.0", features = ["derive"] }
