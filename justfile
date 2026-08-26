@@ -38,16 +38,11 @@ build: build-conflux
     # with build/.colcon/bindgen.lock and never re-checks its outputs. After a partial
     # clean (rm -rf build/<pkg>) the lock survives, generation is skipped, and every
     # Rust package fails with "failed to read .../rosidl_cargo/.../Cargo.toml".
-    # Drop the lock whenever any binding path pinned in .cargo/config.toml is missing.
-    if [[ -f build/.colcon/bindgen.lock && -f .cargo/config.toml ]]; then
-        while read -r path; do
-            if [[ ! -f "$path/Cargo.toml" ]]; then
-                echo "bindgen output missing ($path); removing stale bindgen.lock"
-                rm -f build/.colcon/bindgen.lock
-                break
-            fi
-        done < <(grep -oP 'path = "\K[^"]+' .cargo/config.toml)
-    fi
+    # Compare persistent source manifests, not mtimes, so additions, edits and
+    # deletions all invalidate the cached generated wrapper.  The helper accepts
+    # only build/<pkg>/rosidl_cargo/<same-pkg> as a deletion target.
+    ./setup/scripts/guard-rosidl-bindings.sh --check
+
     # L-29 guard: --symlink-install symlinks package data files into build/ and install/
     # instead of copying them. When a source file is later deleted -- a launch file dropped
     # in a rebase, say -- the symlink is left behind pointing at nothing, and the next build
@@ -76,6 +71,7 @@ build: build-conflux
     # root config fails the build with "Unable to update .../install/.../rust"
     # (CLAUDE.md Known Issue 1).
     ./setup/scripts/sync-root-cargo-config.sh
+    ./setup/scripts/guard-rosidl-bindings.sh --record
 
 # Build the conflux packages LCTK needs at runtime.
 # conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
@@ -229,6 +225,7 @@ _check-rust-tests-collectable:
 test: _check-rust-tests-collectable
     #!/usr/bin/env bash
     set -eo pipefail
+    ./setup/scripts/test-guard-rosidl-bindings.sh
     cargo nextest run --workspace --cargo-profile test-release --no-fail-fast
     source install/setup.bash
     # `python3 -m pytest`, not `pytest`: apt's python3-pytest installs the module and a
