@@ -37,10 +37,19 @@ ros2 run aruco_locator_node aruco_locator_node --intrinsics-file config/camera_i
 
 ### Publications
 - `/aruco_detections` (vision_msgs/Detection2DArray): Detected ArUco markers with 2D positions
+- `target_identity` (lctk_interfaces/CalibrationTargetIdentity): Reliable, transient-local target
+  identity. It is relative to the node namespace so a late-starting solver receives the identity
+  for its camera observer.
 
 ## Configuration
 
-The node uses an ArUco pattern configuration file located at `config/aruco_pattern.json5`. This file defines the ArUco dictionary and marker properties.
+Set `target_config` to a Target Definition JSON5 file. It owns dictionary, marker IDs, paper
+layout and target identity; `aruco_detector_config_file` remains the separate detection-tuning
+file.
+
+For temporary compatibility with maintained pre-cutover launch files, `aruco_config_file` alone
+selects the explicit `hollow_1000_aruco_4` Target Definition. Supplying both parameters is an
+error, and this legacy alias is removed in W5-E1; it cannot select or define another target.
 
 ## Command Line Options
 

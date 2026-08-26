@@ -245,6 +245,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "aruco-generator",
+ "calibration-target",
  "clap",
 ]
 
@@ -257,9 +258,11 @@ dependencies = [
  "aruco-config",
  "aruco-detector",
  "aruco-locator",
+ "calibration-target",
  "ctrlc",
  "geometry_msgs",
  "json5",
+ "lctk_interfaces",
  "opencv",
  "rclrs",
  "sensor_msgs",
