@@ -44,6 +44,7 @@ from lidar_to_camera_solver.archive_contract import (
 from lidar_to_camera_solver.board_geometry import (
     BOARD_FRAME_CONVENTION,
     TargetIdentity,
+    ValidatedTarget,
     identity_fields,
     parse_target_identity,
 )
@@ -166,6 +167,92 @@ def migrate_v3_to_v4(data: dict, *, convention: str) -> dict:
     # a later current format must not relabel it as carrying fields it never gained.
     migrated["version"] = 4
     migrated["board_frame_convention"] = convention
+    return migrated
+
+
+def _parse_marker_id(value: object) -> int:
+    """Parse one ``Detection2D.id`` field into a bare integer marker ID.
+
+    ``aruco_locator_node`` writes ``"aruco_<id>"``; a hand-built or older fixture
+    may carry a bare integer or numeric string instead. Anything else raises
+    ``ValueError``: ``detection_buffer._marker_id`` can afford to skip an
+    unparseable id on a live ROS message, because skipping one detection there
+    only loses data, but silently skipping one here would quietly weaken the
+    one check this migration performs.
+    """
+    candidate = value
+    if isinstance(candidate, str) and candidate.startswith("aruco_"):
+        candidate = candidate.removeprefix("aruco_")
+    try:
+        if isinstance(candidate, bool) or not isinstance(candidate, (int, str)):
+            raise TypeError("marker id must be an int or a numeric string")
+        return int(candidate)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"malformed marker id {value!r}") from error
+
+
+def _observed_marker_ids(data: dict) -> set[int]:
+    """Return every marker ID observed across the archive's ArUco detections.
+
+    An archive with no ArUco detections at all still passes vacuously -- there
+    is then nothing to contradict the operator's target selection -- but once a
+    detection exists, its id must parse or this raises naming every offending
+    raw value, rather than silently dropping it from the check.
+    """
+    ids: set[int] = set()
+    malformed: list[object] = []
+    for pair in data.get("detections") or ():
+        if not isinstance(pair, dict):
+            continue
+        aruco = pair.get("aruco")
+        if not isinstance(aruco, dict):
+            continue
+        for detection in aruco.get("detections") or ():
+            if not isinstance(detection, dict):
+                continue
+            raw_id = detection.get("id")
+            try:
+                ids.add(_parse_marker_id(raw_id))
+            except ValueError:
+                malformed.append(raw_id)
+    if malformed:
+        offending = ", ".join(repr(value) for value in malformed)
+        raise ValueError(f"archive has malformed marker id(s): {offending}")
+    return ids
+
+
+def migrate_v4_to_v5(data: dict, *, target: ValidatedTarget) -> dict:
+    """Bind an operator-selected Target Definition to a version-4 archive.
+
+    Binding a target's identity to an archive is an operator claim about where the
+    archive came from, not something this function can prove. What it *can* check
+    is that every marker ID the archive actually observed is one ``target`` defines;
+    an archive that observed a marker ID the selected target does not have is
+    definitely wrong, so that case is rejected. Passing this check is compatibility
+    of IDs, not proof of physical provenance -- the operator's selection remains the
+    real assertion. Every other field is copied through unchanged; only ``version``
+    and the added ``target_identity`` differ from the input.
+    """
+    version = data.get("version", 0)
+    if version != 4:
+        raise ValueError(
+            f"migrate_v4_to_v5 expects a version 4 file, got version {version}"
+        )
+
+    observed = _observed_marker_ids(data)
+    known = set(target.marker_corners_by_id)
+    unknown = sorted(observed - known)
+    if unknown:
+        offending = ", ".join(str(marker_id) for marker_id in unknown)
+        raise ValueError(
+            f"archive observes marker ID(s) {offending} that target "
+            f"'{target.target_id}' does not define (it has marker ID(s) "
+            f"{sorted(known)}); this target does not match the recording"
+        )
+
+    migrated = dict(data)
+    migrated["version"] = 5
+    migrated["target_identity"] = identity_fields(target.identity)
     return migrated
 
 
@@ -563,6 +650,7 @@ __all__ = [
     "encode_detection_archive",
     "format_version_error",
     "migrate_v3_to_v4",
+    "migrate_v4_to_v5",
     "select_loaded_adjustment",
     "serialize_detection2d_array",
     "serialize_detection3d_array",
