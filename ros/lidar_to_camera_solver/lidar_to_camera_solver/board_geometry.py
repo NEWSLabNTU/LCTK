@@ -1,296 +1,287 @@
-"""The calibration board's marker geometry, and the plain-value helpers around it.
+"""Camera-side adapters for the shared calibration-target contract.
 
-This module is the Python half of a **cross-language contract**: the Rust
-`hollow-board-config` crate computes the same marker corner positions for the
-detector, and this module computes them for the camera solver. The published board
-pose is ``T_sensor<-board`` and the solver supplies board-local marker coordinates to
-it, so the frame convention appears on *both* sides of one product. If the two sides
-disagree, the error is partly *silent*: the 2x2 marker grid is symmetric, so an
-in-plane 45-degree disagreement still solves cleanly with a low reprojection error.
-
-Hence two rules for this module:
-
-1. It imports nothing from ``rclpy``, so the arithmetic is testable without a ROS
-   graph. Logging is the caller's business.
-2. Its output is asserted against ``fixtures/board/marker_corners_world.golden.json``, the
-   same fixture the Rust ``marker_layout_golden`` test uses.
+The physical board and marker layout belong to :mod:`lctk_target`.  This module keeps
+the small, ROS-free surface used by the solver and its tests: target loading,
+identity validation/gating, and human-readable geometry diagnostics.  Keeping the
+identity gate here makes its decision table testable without starting a ROS graph.
 """
 
-import math
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
+from lctk_target import TargetIdentity, ValidatedTarget, load_target
 
-#: The board-frame convention this module's coordinates are expressed in, and the one
-#: `lidar_board_detector` publishes (see its `BOARD_FRAME_CONVENTION`). It lives beside
-#: the geometry deliberately: the tag and the coordinates it describes must not be
-#: changeable independently of each other.
+# This is the frame in which both observer adapters publish board poses.  The
+# value remains exported because the archive codec and migration command still
+# use it while archive v5 is being completed in W4-Eb/W4-Ec.
 BOARD_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
 
-#: Absolute topic carrying the tag. Absolute rather than node-relative because the
-#: launch system generates one detector node per sensor-marker pair, so a relative name
-#: would couple every consumer to a generated node name.
-BOARD_FRAME_CONVENTION_TOPIC = "/lctk/board_frame_convention"
+LIDAR_TARGET_IDENTITY_TOPIC = "lidar_target_identity"
+CAMERA_TARGET_IDENTITY_TOPIC = "camera_target_identity"
+
+_IDENTITY_FIELDS = (
+    "schema_version",
+    "target_id",
+    "revision",
+    "semantic_sha256",
+    "board_frame_convention",
+)
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
-def frame_convention_error(received: str | None) -> str | None:
-    """Decide whether a received frame-convention tag is acceptable.
+def load_target_definition(path: str | Path) -> ValidatedTarget:
+    """Load one immutable Target Definition through the shared Python package."""
 
-    Returns ``None`` when it is, or an operator-facing failure message when it is not.
-    Pure over the received string, so the whole decision table — match, mismatch,
-    absent — is testable without a ROS graph.
+    return load_target(path)
 
-    **Absence is failure, not consent.** The tag is published latched
-    (transient-local), but a latched sample only reaches a late joiner while a
-    publisher is alive: a solver started before any detector, or after the bag ended
-    and the detector exited, receives nothing at all.
-    """
-    if received is None:
-        return (
-            f"No board-frame convention announced on {BOARD_FRAME_CONVENTION_TOPIC}. "
-            f"Expected '{BOARD_FRAME_CONVENTION}'. Nothing published there means no "
-            f"detector agreed with this solver about what a board pose means -- which "
-            f"is a failure, not consent. Start lidar_board_detector first, and check "
-            f"with: ros2 topic echo {BOARD_FRAME_CONVENTION_TOPIC} --once"
-        )
 
-    tag = received.strip()
-    if tag == BOARD_FRAME_CONVENTION:
-        return None
+def marker_geometry_summary(target: ValidatedTarget) -> str:
+    """Describe the marker scale derived from a validated target."""
 
+    fiducial = target.fiducial
+    square_um = (
+        fiducial.paper_side_um - 2 * fiducial.outer_border_um
+    ) / fiducial.cells_per_side
+    marker_um = square_um * fiducial.marker_fill_ratio
+    marker_border_um = (square_um - marker_um) / 2.0
     return (
-        f"Board-frame convention mismatch on {BOARD_FRAME_CONVENTION_TOPIC}: "
-        f"received '{tag}', expected '{BOARD_FRAME_CONVENTION}'. The detector and this "
-        f"solver disagree about what a published board pose means. Half of that "
-        f"disagreement is silent -- a 45-degree in-plane rotation still solves with a "
-        f"low reprojection error, because the 2x2 marker grid is symmetric. Rebuild "
-        f"both sides from the same checkout."
+        f"plate_side={target.plate.side_um / 1000:.1f}mm, "
+        f"square_size={square_um / 1000:.1f}mm, "
+        f"marker_size={marker_um / 1000:.1f}mm, "
+        f"marker_border={marker_border_um / 1000:.1f}mm"
     )
-
-
-@dataclass
-class ArUcoMarker:
-    """Represents an ArUco marker detection in image coordinates."""
-
-    id: int
-    corners: list[tuple[float, float]]  # 4 corners in pixel coordinates
-    center: tuple[float, float]  # Center point in pixels
-
-
-def parse_dimension(dim_str: str) -> float:
-    """Parse dimension string like '500mm' or '10mm' to meters."""
-    if dim_str.endswith("mm"):
-        return float(dim_str[:-2]) / 1000.0
-    elif dim_str.endswith("m"):
-        return float(dim_str[:-1])
-    else:
-        return float(dim_str)
-
-
-def load_aruco_pattern_config(config_file_path: str) -> dict:
-    """Load ArUco pattern configuration from a JSON5 file."""
-    if not config_file_path:
-        raise ValueError("aruco_config_file parameter is required")
-
-    import json5
-
-    with open(config_file_path, "r") as f:
-        return json5.load(f)
-
-
-def marker_paper_placement(config: dict) -> tuple[float, float]:
-    """Where the printed sheet is glued on the plate, in metres.
-
-    Returns ``(toward_left_corner, toward_top_corner)``: the offset of the paper's
-    centre from the PLATE's centre, resolved along the plate's two diagonals. It comes
-    from ``paper_placement`` in ``aruco_pattern.json5``, which is a **measurement** of
-    the physical board — the same number the Rust side reads. It is deliberately not
-    derived from the plate width here, so that Python and Rust cannot derive it
-    differently.
-    """
-    placement = config.get("paper_placement")
-    if not placement:
-        raise ValueError(
-            "ArUco config has no 'paper_placement': the marker sheet's position on the "
-            "plate is a measurement of the physical board, not something this code may "
-            "guess. Add it to aruco_pattern.json5 (see the comment there)."
-        )
-    return (
-        parse_dimension(placement["toward_left_corner"]),
-        parse_dimension(placement["toward_top_corner"]),
-    )
-
-
-def marker_paper_point(config: dict, u: float, v: float) -> tuple[float, float, float]:
-    """Map a point in the marker paper's own coordinates into the board frame.
-
-    Paper coordinates run along the paper's edges, which are parallel to the plate's
-    edges and therefore at 45 degrees to the board frame's axes: the origin is the
-    paper corner nearest the plate's bottom corner, ``u`` runs toward the plate's left
-    corner and ``v`` toward its right corner, both spanning
-    ``[0, marker_paper_size]``.
-
-    This is the single place that knows where the paper sits on the plate, and the only
-    place bridging the paper's edge-aligned coordinates and the plate's corner-aligned
-    frame — mirroring Rust's ``BoardModel::marker_paper_point``. The marker layout's own
-    arithmetic therefore never has to learn about the plate's frame.
-
-    The board frame (``corner_aligned_plate_center_v1``): origin at the plate centre,
-    +X from the centre toward the LEFT corner, +Y toward the TOP corner, +Z the board
-    normal.
-    """
-    paper_size = parse_dimension(config["board_size"])
-    toward_left, toward_top = marker_paper_placement(config)
-
-    # The paper's edge directions in the board frame: bisectors of the two diagonals.
-    inv_sqrt2 = 1.0 / math.sqrt(2.0)
-    u_dir = (inv_sqrt2, inv_sqrt2)  # toward the plate's left corner from the bottom one
-    v_dir = (-inv_sqrt2, inv_sqrt2)  # toward the plate's right corner
-
-    half_paper = paper_size / 2.0
-    x = toward_left - (u_dir[0] + v_dir[0]) * half_paper + u_dir[0] * u + v_dir[0] * v
-    y = toward_top - (u_dir[1] + v_dir[1]) * half_paper + u_dir[1] * u + v_dir[1] * v
-    return (x, y, 0.0)
-
-
-def compute_multi_marker_corners(
-    config: dict,
-) -> dict[int, list[tuple[float, float, float]]]:
-    """Compute 3D corner positions for all ArUco markers in the board frame.
-
-    Returns a mapping from ArUco marker id to its four corners in the order
-    ``[right, top, left, bottom]``, matching the Rust
-    ``BoardModel::multi_marker_corners`` contract.
-    """
-    board_size = parse_dimension(config["board_size"])
-    board_border_size = parse_dimension(config["board_border_size"])
-    marker_square_size_ratio = config["marker_square_size_ratio"]
-    num_squares = config["num_squares_per_side"]
-    marker_ids = config["marker_ids"]
-    # M-09: the 2x2 board layout indexes marker_ids[0..3]; fail with a clear
-    # message instead of an IndexError deep inside the solve service.
-    if len(marker_ids) < 4:
-        raise ValueError(
-            f"ArUco config must define at least 4 marker_ids for the 2x2 board, "
-            f"got {len(marker_ids)}: {marker_ids}"
-        )
-
-    square_size = (board_size - 2.0 * board_border_size) / num_squares
-    marker_size = square_size * marker_square_size_ratio
-    marker_border = (square_size - marker_size) / 2.0
-
-    def make_corners(base_u: float, base_v: float) -> list[tuple[float, float, float]]:
-        """The 4 corners of one marker, in the board frame.
-
-        ``(base_u, base_v)`` is the marker's origin corner in the PAPER's coordinates;
-        every point goes through `marker_paper_point`, which is the only code that knows
-        where the paper sits on the plate.
-        """
-        bottom = marker_paper_point(config, base_u, base_v)
-        left = marker_paper_point(config, base_u + marker_size, base_v)
-        right = marker_paper_point(config, base_u, base_v + marker_size)
-        top = marker_paper_point(config, base_u + marker_size, base_v + marker_size)
-        return [right, top, left, bottom]
-
-    origin_u = board_border_size + marker_border
-    origin_v = board_border_size + marker_border
-
-    marker_corners = {}
-    marker_corners[marker_ids[0]] = make_corners(origin_u, origin_v)
-    marker_corners[marker_ids[1]] = make_corners(origin_u + square_size, origin_v)
-    marker_corners[marker_ids[2]] = make_corners(origin_u, origin_v + square_size)
-    marker_corners[marker_ids[3]] = make_corners(
-        origin_u + square_size, origin_v + square_size
-    )
-
-    return marker_corners
-
-
-def detection2d_to_aruco_markers(detection_msg) -> list[ArUcoMarker]:
-    """Convert a ROS ``Detection2DArray`` to ``ArUcoMarker`` objects.
-
-    The real detected marker corners are carried in ``detection.results``
-    (one entry per corner, in detector order TL, TR, BR, BL) by the ArUco
-    locator node; the axis-aligned bounding box is only a fallback.
-    """
-    markers = []
-
-    for detection in detection_msg.detections:
-        bbox = detection.bbox
-        center = (bbox.center.position.x, bbox.center.position.y)
-
-        # C-01: prefer the real per-corner pixel coordinates. Reconstructing
-        # corners from `center +/- size/2` discards rotation and perspective,
-        # biasing the PnP correspondences for any angled view of the board.
-        if len(detection.results) >= 4:
-            corners = [
-                (r.pose.pose.position.x, r.pose.pose.position.y)
-                for r in detection.results[:4]
-            ]
-        else:
-            size_x = bbox.size_x
-            size_y = bbox.size_y
-            cx, cy = center
-            corners = [
-                (cx - size_x / 2.0, cy - size_y / 2.0),  # Top-left
-                (cx + size_x / 2.0, cy - size_y / 2.0),  # Top-right
-                (cx + size_x / 2.0, cy + size_y / 2.0),  # Bottom-right
-                (cx - size_x / 2.0, cy + size_y / 2.0),  # Bottom-left
-            ]
-
-        marker_id = detection.id if hasattr(detection, "id") else 0
-
-        markers.append(ArUcoMarker(id=marker_id, corners=corners, center=center))
-
-    return markers
 
 
 def rotation_matrix_to_quaternion(rotation_matrix: np.ndarray) -> np.ndarray:
-    """Convert a 3x3 rotation matrix to a quaternion ``[x, y, z, w]``."""
-    rvec, _ = cv2.Rodrigues(rotation_matrix)
-    angle = np.linalg.norm(rvec)
+    """Convert a 3x3 rotation matrix to ROS quaternion order ``[x,y,z,w]``."""
 
+    rvec, _ = cv2.Rodrigues(np.asarray(rotation_matrix, dtype=np.float64))
+    angle = np.linalg.norm(rvec)
     if angle < 1e-6:
         return np.array([0.0, 0.0, 0.0, 1.0])
 
     axis = rvec.flatten() / angle
     half_angle = angle / 2.0
-
-    qx = axis[0] * np.sin(half_angle)
-    qy = axis[1] * np.sin(half_angle)
-    qz = axis[2] * np.sin(half_angle)
-    qw = np.cos(half_angle)
-
-    return np.array([qx, qy, qz, qw])
-
-
-def marker_geometry_summary(config: dict) -> str:
-    """One-line description of the derived marker sizes, for a caller to log."""
-    board_size = parse_dimension(config["board_size"])
-    board_border_size = parse_dimension(config["board_border_size"])
-    num_squares = config["num_squares_per_side"]
-    square_size = (board_size - 2.0 * board_border_size) / num_squares
-    marker_size = square_size * config["marker_square_size_ratio"]
-    marker_border = (square_size - marker_size) / 2.0
-    return (
-        f"square_size={square_size * 1000:.1f}mm, "
-        f"marker_size={marker_size * 1000:.1f}mm, "
-        f"marker_border={marker_border * 1000:.1f}mm"
+    return np.array(
+        [
+            axis[0] * np.sin(half_angle),
+            axis[1] * np.sin(half_angle),
+            axis[2] * np.sin(half_angle),
+            np.cos(half_angle),
+        ]
     )
+
+
+def _field(value: object, name: str) -> object:
+    """Read an identity field from either a ROS message or a mapping."""
+
+    if isinstance(value, Mapping):
+        if name not in value:
+            raise ValueError(f"missing field '{name}'")
+        return value[name]
+    try:
+        return getattr(value, name)
+    except AttributeError as error:
+        raise ValueError(f"missing field '{name}'") from error
+
+
+def _positive_uint(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def parse_target_identity(
+    value: object, *, label: str = "Target Identity"
+) -> TargetIdentity:
+    """Validate and detach a wire identity into the shared plain-value type.
+
+    ROS fields are typed, but a default-constructed message is still structurally
+    malformed for this contract.  Validation is deliberately strict so malformed
+    data can never become an equality match merely because all its fields happen to
+    compare equal.
+    """
+
+    if value is None:
+        raise ValueError(f"{label} is missing")
+    if isinstance(value, Mapping):
+        unexpected = set(value) - set(_IDENTITY_FIELDS)
+        if unexpected:
+            raise ValueError(
+                f"{label} is malformed: unexpected field '{min(unexpected)}'"
+            )
+    try:
+        fields = {name: _field(value, name) for name in _IDENTITY_FIELDS}
+    except ValueError as error:
+        raise ValueError(f"{label} is malformed: {error}") from error
+
+    schema_version = _positive_uint(fields["schema_version"], f"{label}.schema_version")
+    target_id = fields["target_id"]
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise ValueError(f"{label}.target_id must be a non-empty string")
+    revision = _positive_uint(fields["revision"], f"{label}.revision")
+    digest = fields["semantic_sha256"]
+    if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
+        raise ValueError(
+            f"{label}.semantic_sha256 must be 64 lowercase hexadecimal characters"
+        )
+    frame = fields["board_frame_convention"]
+    if not isinstance(frame, str) or not frame.strip():
+        raise ValueError(f"{label}.board_frame_convention must be a non-empty string")
+
+    return TargetIdentity(schema_version, target_id, revision, digest, frame)
+
+
+def target_identity_error(
+    value: object, *, label: str = "Target Identity"
+) -> str | None:
+    """Return a structural error, or ``None`` for one valid wire identity."""
+
+    try:
+        parse_target_identity(value, label=label)
+    except ValueError as error:
+        return str(error)
+    return None
+
+
+def identity_gate_error(
+    local_identity: TargetIdentity,
+    lidar_identity: object | None,
+    camera_identity: object | None,
+) -> str | None:
+    """Apply the LiDAR-camera solver's exact three-way identity gate.
+
+    ``None`` means the pair may be admitted.  Missing, malformed, and mismatched
+    identities all return an operator-facing reason and therefore leave the capture
+    buffer untouched.  The local identity is already loaded from a validated target,
+    but it is parsed here too so this function remains safe as a standalone contract.
+    """
+
+    try:
+        expected = parse_target_identity(local_identity, label="local Target Identity")
+    except ValueError as error:
+        return str(error)
+
+    received: list[tuple[str, object | None]] = [
+        ("LiDAR", lidar_identity),
+        ("camera", camera_identity),
+    ]
+    parsed: list[tuple[str, TargetIdentity]] = []
+    for label, value in received:
+        try:
+            parsed.append(
+                (
+                    label,
+                    parse_target_identity(value, label=f"{label} Target Identity"),
+                )
+            )
+        except ValueError as error:
+            return str(error)
+
+    for label, identity in parsed:
+        if identity != expected:
+            return (
+                f"{label} Target Identity does not exactly match the local Target "
+                f"Identity ({identity.target_id}@{identity.revision}, "
+                f"{identity.semantic_sha256})"
+            )
+
+    first_label, first = parsed[0]
+    second_label, second = parsed[1]
+    if first != second:
+        return (
+            f"{first_label} and {second_label} Target Identities disagree; "
+            "no Detection Pair will be accepted"
+        )
+    return None
+
+
+@dataclass
+class TargetIdentityGate:
+    """Stateful identity gate for one solver lifetime.
+
+    Observer identities are immutable for a launched graph.  A source changing its
+    identity after announcing one is treated as a restart/protocol violation and
+    permanently blocks this gate.  Main-node code owns the lock around this object.
+    """
+
+    local_identity: TargetIdentity
+
+    def __post_init__(self) -> None:
+        # Detach and validate even though ``load_target`` already returned a valid
+        # identity; this prevents a caller from mutating a hand-built dataclass into
+        # an accepted local identity.
+        self.local_identity = parse_target_identity(
+            self.local_identity, label="local Target Identity"
+        )
+        self._received: dict[str, TargetIdentity] = {}
+        self._blocked_reason: str | None = None
+
+    @property
+    def ready(self) -> bool:
+        return self.error is None
+
+    @property
+    def error(self) -> str | None:
+        if self._blocked_reason is not None:
+            return self._blocked_reason
+        return identity_gate_error(
+            self.local_identity,
+            self._received.get("lidar"),
+            self._received.get("camera"),
+        )
+
+    def update(self, source: str, value: object) -> str | None:
+        """Record one source message and return the current gate error."""
+
+        if source not in ("lidar", "camera"):
+            raise ValueError(f"unknown Target Identity source '{source}'")
+        if self._blocked_reason is not None:
+            return self._blocked_reason
+        try:
+            identity = parse_target_identity(value, label=f"{source} Target Identity")
+        except ValueError as error:
+            self._blocked_reason = str(error)
+            return self._blocked_reason
+
+        previous = self._received.get(source)
+        if previous is not None and previous != identity:
+            self._blocked_reason = (
+                f"{source} Target Identity changed during this solver session; "
+                "restart the complete calibration graph"
+            )
+            return self._blocked_reason
+        self._received[source] = identity
+        return self.error
+
+
+def identity_fields(identity: TargetIdentity) -> dict[str, Any]:
+    """Return a ROS-message-compatible copy for tests and adapters."""
+
+    parsed = parse_target_identity(identity, label="Target Identity")
+    return {name: getattr(parsed, name) for name in _IDENTITY_FIELDS}
 
 
 __all__ = [
     "BOARD_FRAME_CONVENTION",
-    "BOARD_FRAME_CONVENTION_TOPIC",
-    "ArUcoMarker",
-    "compute_multi_marker_corners",
-    "detection2d_to_aruco_markers",
-    "frame_convention_error",
-    "load_aruco_pattern_config",
+    "CAMERA_TARGET_IDENTITY_TOPIC",
+    "LIDAR_TARGET_IDENTITY_TOPIC",
+    "TargetIdentity",
+    "TargetIdentityGate",
+    "ValidatedTarget",
+    "identity_fields",
+    "identity_gate_error",
+    "load_target",
+    "load_target_definition",
     "marker_geometry_summary",
-    "marker_paper_placement",
-    "marker_paper_point",
-    "parse_dimension",
+    "parse_target_identity",
     "rotation_matrix_to_quaternion",
+    "target_identity_error",
 ]
