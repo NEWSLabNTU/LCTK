@@ -29,6 +29,7 @@ Updated 2026-08-27. Packet status changes land here with each accepted review ga
 | W4-D | Complete | Atomic two-LiDAR identity gate and synchronized-pair admission, `e9acdaf` |
 | W4-Ea | Complete | v4/v5 export parity, `82eb8a5` |
 | W4-Eb | Complete | Codec/runtime, dump identity gate and atomic write, `7782ad0` |
+| W4-Ec | Complete | Version-dispatching migrator with marker-ID gate, `41dd046` |
 | W5-A | Complete | Selectable launch schema parser, `42a7934` |
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
@@ -37,10 +38,16 @@ W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS pa
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W4-Ec migration, then W5-C. W5-C still must route the new
-`target_config`/`detector_config` fields; W4-C only added the identity routes required to keep the
-maintained legacy graph functional while gates activate. W5-D through W6-A remain pending. W7-B
-requires real rosbag evidence and is not headlessly closeable.
+Active dependency path: W5-C graph routing, which is the last packet Wave 4 blocked. W5-C still
+must route the new `target_config`/`detector_config` fields; W4-C only added the identity routes
+required to keep the maintained legacy graph functional while gates activate. W5-D through W6-A
+remain pending. W7-B requires real rosbag evidence and is not headlessly closeable.
+
+Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
+`just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
+operator-selected target after checking every observed marker ID, version 3 is refused a one-command
+path to version 5, and both hops write atomically so no rejection or failed write leaves a file
+behind.
 
 W4-Eb/W7-A gate passed on a migrated machine: `just build` (17 ROS packages), `just test`
 (317 Rust and 337 Python tests), `just lint-py`, and `git diff --check`. The dump path now refuses a
