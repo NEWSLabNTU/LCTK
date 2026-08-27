@@ -21,6 +21,15 @@ def test_paired_archives_keep_the_same_solved_transform():
     )
 
 
+def test_paired_archives_have_equal_content_except_identity_and_version():
+    v4 = fixture("solved_v4.json")
+    v5 = fixture("solved_v5.json")
+    v4.pop("version")
+    v5.pop("version")
+    v5.pop("target_identity")
+    assert v4 == v5
+
+
 def test_v5_restores_only_against_the_exact_local_identity():
     archive = fixture("solved_v5.json")
     assert archive_restore_error(archive, archive["target_identity"]) is None
@@ -56,9 +65,10 @@ def test_v5_restore_rejects_convention_conflicts_with_local_identity():
 
 def test_v4_is_never_restorable_after_target_selection_is_required():
     v5 = fixture("solved_v5.json")
-    assert "cannot be restored" in archive_restore_error(
-        fixture("solved_v4.json"), v5["target_identity"]
-    )
+    error = archive_restore_error(fixture("solved_v4.json"), v5["target_identity"])
+    assert "cannot be restored" in error
+    assert "migrate_detections" in error
+    assert "--target-config" in error
 
 
 @pytest.mark.parametrize("version", [True, False, 4.0, 5.0, "5"])

@@ -1,9 +1,13 @@
 """Public-interface contract for the detection buffer ADR."""
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
 from geometry_msgs.msg import Pose, PoseWithCovariance
+from lctk_target import load_target
+from lidar_to_camera_solver import detection_format
 from lidar_to_camera_solver.detection_buffer import (
     DetectionBuffer,
     DetectionPair,
@@ -29,6 +33,14 @@ from vision_msgs.msg import (
 )
 
 K = np.array([[800.0, 0.0, 640.0], [0.0, 805.0, 360.0], [0.0, 0.0, 1.0]])
+TARGET = load_target(
+    Path(__file__).resolve().parents[2]
+    / "lctk_launch"
+    / "config"
+    / "targets"
+    / "solid_600_aruco_1_v1.json5"
+)
+IDENTITY = TARGET.identity
 MARKERS = {
     1: [
         (-0.22, -0.22, 0.0),
@@ -420,9 +432,11 @@ def test_complete_archive_round_trip_keeps_pairs_quality_and_adjustment():
     archive = decode_detection_archive(
         encode_detection_archive(
             snapshot,
+            local_identity=IDENTITY,
             adjusted_rvec=adjusted_rvec,
             adjusted_tvec=adjusted_tvec,
-        )
+        ),
+        local_identity=IDENTITY,
     )
 
     assert len(archive.pairs) == 2
@@ -439,17 +453,94 @@ def test_complete_archive_round_trip_keeps_pairs_quality_and_adjustment():
     assert np.array_equal(appended.tvec, snapshot.estimate.tvec)
 
 
+def test_archive_round_trip_records_the_exact_target_identity():
+    buffer = make_buffer(minimum=1)
+    snapshot = buffer.capture(make_pair()).snapshot
+
+    encoded = encode_detection_archive(
+        snapshot,
+        local_identity=IDENTITY,
+        adjusted_rvec=None,
+        adjusted_tvec=None,
+    )
+
+    assert encoded["version"] == 5
+    assert encoded["target_identity"] == {
+        "schema_version": IDENTITY.schema_version,
+        "target_id": IDENTITY.target_id,
+        "revision": IDENTITY.revision,
+        "semantic_sha256": IDENTITY.semantic_sha256,
+        "board_frame_convention": IDENTITY.board_frame_convention,
+    }
+    restored = decode_detection_archive(encoded, local_identity=IDENTITY)
+    assert restored.target_identity == IDENTITY
+
+
+def test_identity_mismatch_is_rejected_before_pair_decoding(monkeypatch):
+    buffer = make_buffer(minimum=1)
+    snapshot = buffer.capture(make_pair()).snapshot
+    encoded = encode_detection_archive(
+        snapshot,
+        local_identity=IDENTITY,
+        adjusted_rvec=None,
+        adjusted_tvec=None,
+    )
+    encoded["target_identity"] = dict(encoded["target_identity"])
+    encoded["target_identity"]["revision"] = IDENTITY.revision + 1
+
+    def must_not_decode(_data):
+        raise AssertionError("identity must be checked before pair decoding")
+
+    monkeypatch.setattr(
+        detection_format, "deserialize_detection2d_array", must_not_decode
+    )
+    with pytest.raises(ValueError, match="does not exactly match"):
+        decode_detection_archive(encoded, local_identity=IDENTITY)
+
+
+def test_identity_mismatch_leaves_prior_buffer_snapshot_unchanged():
+    buffer = make_buffer(minimum=1)
+    before = buffer.capture(make_pair()).snapshot
+    encoded = encode_detection_archive(
+        before,
+        local_identity=IDENTITY,
+        adjusted_rvec=None,
+        adjusted_tvec=None,
+    )
+    encoded["target_identity"] = dict(encoded["target_identity"])
+    encoded["target_identity"]["target_id"] = "hollow_1000_aruco_4"
+
+    with pytest.raises(ValueError, match="does not exactly match"):
+        decode_detection_archive(encoded, local_identity=IDENTITY)
+
+    after = buffer.snapshot()
+    assert after.revision == before.revision
+    assert after.frame_count == before.frame_count
+    assert np.array_equal(
+        after.pairs[0].board.detections[0].results[0].pose.pose.position.x,
+        before.pairs[0].board.detections[0].results[0].pose.pose.position.x,
+    )
+
+
 def test_archive_adjustment_is_never_restored_without_current_solve():
     buffer = make_buffer(minimum=2)
     not_ready = buffer.capture(make_pair()).snapshot
     archive = decode_detection_archive(
         {
-            "version": 4,
+            "version": 5,
             "board_frame_convention": "corner_aligned_plate_center_v1",
+            "target_identity": {
+                "schema_version": IDENTITY.schema_version,
+                "target_id": IDENTITY.target_id,
+                "revision": IDENTITY.revision,
+                "semantic_sha256": IDENTITY.semantic_sha256,
+                "board_frame_convention": IDENTITY.board_frame_convention,
+            },
             "num_detections": 0,
             "detections": [],
             "transform": {"rvec": [0.1, 0.2, 0.3], "tvec": [1.0, 2.0, 3.0]},
-        }
+        },
+        local_identity=IDENTITY,
     )
 
     assert select_loaded_adjustment(archive, not_ready, append=False) is None
@@ -459,9 +550,17 @@ def test_malformed_archive_is_rejected_before_any_restore():
     with pytest.raises(ValueError, match="count mismatch"):
         decode_detection_archive(
             {
-                "version": 4,
+                "version": 5,
                 "board_frame_convention": "corner_aligned_plate_center_v1",
+                "target_identity": {
+                    "schema_version": IDENTITY.schema_version,
+                    "target_id": IDENTITY.target_id,
+                    "revision": IDENTITY.revision,
+                    "semantic_sha256": IDENTITY.semantic_sha256,
+                    "board_frame_convention": IDENTITY.board_frame_convention,
+                },
                 "num_detections": 1,
                 "detections": [],
-            }
+            },
+            local_identity=IDENTITY,
         )

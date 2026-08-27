@@ -15,6 +15,7 @@ from typing import Any
 
 ARCHIVE_V4 = 4
 ARCHIVE_V5 = 5
+MIGRATION_COMMAND = "ros2 run lidar_to_camera_solver migrate_detections"
 _IDENTITY_FIELDS = (
     "schema_version",
     "target_id",
@@ -72,10 +73,20 @@ def archive_restore_error(data: object, local_identity: object) -> str | None:
     if version == ARCHIVE_V4:
         return (
             "Detection archive version 4 has no Target Identity and cannot be "
-            "restored; select a target and re-capture or explicitly migrate it."
+            "restored. Explicitly migrate it with: "
+            f"{MIGRATION_COMMAND} --input <file> --output <file> "
+            "--target-config <target-config>"
         )
-    if version != ARCHIVE_V5:
-        return f"Detection archive version {version!r} is not restorable; expected 5"
+    if version < ARCHIVE_V5:
+        return (
+            f"Detection archive version {version!r} is an unsupported past "
+            "version; expected integer 5"
+        )
+    if version > ARCHIVE_V5:
+        return (
+            f"Detection archive version {version!r} is an unsupported future "
+            "version; expected integer 5"
+        )
 
     archived_identity = data.get("target_identity")
     error = target_identity_error(archived_identity)
@@ -122,6 +133,7 @@ def _positive_int(value: object) -> bool:
 __all__ = [
     "ARCHIVE_V4",
     "ARCHIVE_V5",
+    "MIGRATION_COMMAND",
     "archive_restore_error",
     "target_identity_error",
 ]

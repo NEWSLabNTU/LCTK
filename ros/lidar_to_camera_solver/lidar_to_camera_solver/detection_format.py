@@ -1,4 +1,4 @@
-"""The saved-detection file format: serialization, version 4, and its version check.
+"""The saved-detection file format: serialization, version 5, and its version check.
 
 A dump file stores board *poses*, and Phase 1 changed what a board pose means. Version
 3 recorded no convention — board-local marker corners are recomputed at load time from
@@ -6,13 +6,18 @@ A dump file stores board *poses*, and Phase 1 changed what a board pose means. V
 indistinguishable, and either reloads under whatever convention the loading build
 believes in.
 
-Version 4 fixes two things:
+Version 4 fixed two things:
 
 - it records the frame convention that produced it, using the same identifier the
   detector publishes, so there is one vocabulary rather than two;
 - it stores the board pose's 6x6 covariance, which version 3 dropped. Without it a
   reloaded buffer solves with uniform weight 1.0 and quietly differs from the live
   buffer it was saved from (M-13).
+
+Version 5 retains those fields and adds the full Target Identity.  A solver restores
+only a version-5 archive whose identity exactly matches its locally selected target;
+version 4 remains useful to migration and transform-export tooling but is not restored
+implicitly.
 
 Version 3 files are **rejected**, not migrated on load. Automatic migration would make
 a file's meaning depend on which build opened it — the same class of silent difference
@@ -29,14 +34,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lidar_to_camera_solver.board_geometry import BOARD_FRAME_CONVENTION
+from lidar_to_camera_solver.archive_contract import (
+    ARCHIVE_V4,
+    ARCHIVE_V5,
+    MIGRATION_COMMAND,
+    archive_restore_error,
+    target_identity_error,
+)
+from lidar_to_camera_solver.board_geometry import (
+    BOARD_FRAME_CONVENTION,
+    TargetIdentity,
+    identity_fields,
+    parse_target_identity,
+)
 
-#: Bumped from 3 in the same change that altered what a stored pose means, so version
-#: and meaning stay in step.
-FORMAT_VERSION = 4
-
-#: The one-shot conversion command named in the rejection message.
-MIGRATION_COMMAND = "ros2 run lidar_to_camera_solver migrate_detections"
+#: Version 5 binds every captured pair to the exact Target Definition that produced it.
+FORMAT_VERSION = ARCHIVE_V5
 
 
 @dataclass(frozen=True)
@@ -70,22 +83,30 @@ class AdjustedTransform:
 
 @dataclass(frozen=True)
 class DetectionArchive:
+    target_identity: TargetIdentity
     pairs: tuple[object, ...]
     quality: ArchivedQuality | None
     adjusted_transform: AdjustedTransform | None
 
 
 def format_version_error(data: dict) -> str | None:
-    """Decide whether a loaded dump file may be used by this build.
+    """Check archive layout and board-frame metadata.
 
-    Returns ``None`` when it may, or an operator-facing failure message when it may
-    not. Pure over the parsed JSON, so the whole decision table is testable without a
-    ROS graph. The version says how the file is laid out; the convention tag says what
-    the poses in it mean — both must agree with this build.
+    Version 4 remains structurally understood for migration and export, while only
+    version 5 can pass the restore gate.  Target Identity equality is checked by
+    :func:`archive_restore_error`, which has the local target needed for that decision.
     """
-    version = data.get("version", 0)
+    if not isinstance(data, dict):
+        return "Detection archive must be an object"
 
-    if version != FORMAT_VERSION:
+    version = data.get("version", 0)
+    if not isinstance(version, int) or isinstance(version, bool):
+        return (
+            f"Unsupported detection file version {version!r}; expected a literal "
+            "integer 4 or 5"
+        )
+
+    if version not in (ARCHIVE_V4, ARCHIVE_V5):
         detail = ""
         if version == 3:
             detail = (
@@ -98,25 +119,29 @@ def format_version_error(data: dict) -> str | None:
                 f" Version {version} also carries no real ArUco corners, only the "
                 "axis-aligned bounding box (C-01)."
             )
+        elif version < ARCHIVE_V4:
+            detail = " This is an unsupported past archive layout."
+        else:
+            detail = " This is an unsupported future archive layout."
         return (
-            f"Unsupported detection file version {version}; this build reads version "
-            f"{FORMAT_VERSION}.{detail} Convert a file you still trust with: "
-            f"{MIGRATION_COMMAND} --input <file> --output <file> "
+            f"Unsupported detection file version {version}; this build reads archive "
+            f"versions 4 and {FORMAT_VERSION}.{detail} Convert a file you still trust "
+            f"with: {MIGRATION_COMMAND} --input <file> --output <file> "
             f"--assume-convention {BOARD_FRAME_CONVENTION}"
         )
 
     convention = data.get("board_frame_convention")
-    if convention is None:
+    if not isinstance(convention, str) or not convention:
         return (
-            f"Detection file declares version {FORMAT_VERSION} but carries no "
+            f"Detection file declares version {version} but carries no "
             f"'board_frame_convention'. Expected '{BOARD_FRAME_CONVENTION}'."
         )
 
-    if convention.strip() != BOARD_FRAME_CONVENTION:
+    if convention != BOARD_FRAME_CONVENTION:
         return (
-            f"Detection file was produced in board-frame convention "
+            "Detection file was produced in board-frame convention "
             f"'{convention}', but this build works in '{BOARD_FRAME_CONVENTION}'. "
-            f"The stored poses mean something else; re-capture rather than reuse them."
+            "The stored poses mean something else; re-capture rather than reuse them."
         )
 
     return None
@@ -310,13 +335,25 @@ def deserialize_detection3d_array(data: dict):
 def encode_detection_archive(
     snapshot,
     *,
+    local_identity: object,
     adjusted_rvec: np.ndarray | None,
     adjusted_tvec: np.ndarray | None,
 ) -> dict:
-    """Encode one complete version-4 archive from a detached buffer snapshot."""
+    """Encode one complete version-5 archive from a detached buffer snapshot.
+
+    The identity is an explicit input rather than a module default.  This keeps a
+    saved archive bound to the Target Definition selected by the running solver.
+    """
+    identity_error = target_identity_error(
+        local_identity, label="local target identity"
+    )
+    if identity_error is not None:
+        raise ValueError(identity_error)
+    identity = parse_target_identity(local_identity, label="local target identity")
     data = {
         "version": FORMAT_VERSION,
-        "board_frame_convention": BOARD_FRAME_CONVENTION,
+        "board_frame_convention": identity.board_frame_convention,
+        "target_identity": identity_fields(identity),
         "num_detections": snapshot.frame_count,
         "detections": [
             {
@@ -374,11 +411,22 @@ def encode_detection_archive(
     return data
 
 
-def decode_detection_archive(data: dict) -> DetectionArchive:
-    """Validate and decode a complete archive without touching live state."""
+def decode_detection_archive(data: dict, *, local_identity: object) -> DetectionArchive:
+    """Validate and decode a v5 archive without touching live state.
+
+    Target Identity is checked before reading any Capture payload.  The caller can
+    therefore use this function as the precondition for an atomic buffer restore.
+    """
+    error = archive_restore_error(data, local_identity)
+    if error is not None:
+        raise ValueError(error)
     error = format_version_error(data)
     if error is not None:
         raise ValueError(error)
+
+    target_identity = parse_target_identity(
+        data["target_identity"], label="target_identity"
+    )
 
     detections = data.get("detections")
     if not isinstance(detections, list):
@@ -410,13 +458,13 @@ def decode_detection_archive(data: dict) -> DetectionArchive:
 
     quality = _decode_quality(data.get("quality"))
     transform = _decode_transform(data.get("transform"))
-    return DetectionArchive(tuple(pairs), quality, transform)
+    return DetectionArchive(target_identity, tuple(pairs), quality, transform)
 
 
 def select_loaded_adjustment(
     archive: DetectionArchive, snapshot, *, append: bool
 ) -> AdjustedTransform | None:
-    """Apply version-4 adjustment anchoring rules after a successful restore."""
+    """Apply version-5 adjustment anchoring rules after a successful restore."""
     estimate = snapshot.estimate
     if estimate is None:
         return None
