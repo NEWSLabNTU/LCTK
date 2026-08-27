@@ -5,6 +5,12 @@
   <maintainer email="lctk@ntu.edu.tw">NEWSLAB NTU</maintainer>
   <license>MIT</license>
 
+  <!-- ros/* and rust/* share one cargo workspace, so building this package
+       resolves aruco_locator_node's lctk_interfaces dependency as well. The
+       generated bindings must therefore exist before cargo runs here, even
+       though no code in this package uses them. Without this, a clean tree
+       fails with "no matching package named `lctk_interfaces` found". -->
+  <build_depend>lctk_interfaces</build_depend>
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>libopencv-dev</depend>
