@@ -32,9 +32,10 @@ stopped dead when a bag was replayed. See
 """
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from conflux_py import DropPolicy, ROS2Synchronizer, SyncGroup
 
@@ -65,12 +66,25 @@ class PairOutcome:
         return self.messages is not None
 
 
+class ReentrantLock(Protocol):
+    """Lock protocol for a consumer that nests admission and invalidation."""
+
+    def __enter__(self) -> Any: ...
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool | None: ...
+
+
 class DetectionPairSource:
     """Freshest simultaneous pair of detections from two (or more) topics.
 
-    Interface: construct it, optionally register `on_pair` for push consumers, and call
-    `take_fresh_pair()` when you need the newest usable pair. `status_line()` reports
-    what the synchronization is doing. Everything else is internal.
+    Interface: construct it, optionally register `admit_pair` for a pre-cache
+    consumer gate and `on_pair` for push consumers, and call `take_fresh_pair()`
+    when you need the newest usable pair. `admission_lock` can serialize the
+    admission predicate and cache mutation with a consumer's invalidation; the
+    predicate runs while that context manager is held. The lock must be reentrant:
+    consumers may invalidate the source while already holding their state lock.
+    `status_line()` reports what the synchronization is doing. Everything else is
+    internal.
     """
 
     def __init__(
@@ -82,6 +96,8 @@ class DetectionPairSource:
         config: PairSourceConfig | None = None,
         qos=None,
         on_pair: Callable[[tuple[Any, ...]], None] | None = None,
+        admit_pair: Callable[[tuple[Any, ...]], str | None] | None = None,
+        admission_lock: ReentrantLock | None = None,
     ):
         if len(topics) != len(msg_types):
             raise ValueError("topics and msg_types must be the same length")
@@ -90,6 +106,13 @@ class DetectionPairSource:
         self._topics = list(topics)
         self._config = config or PairSourceConfig()
         self._on_pair = on_pair
+        self._admit_pair = admit_pair
+        # Optional consumer-owned lock.  When supplied, admission and cache
+        # mutation are one atomic operation from the consumer's point of view.
+        # The protocol is intentionally structural: Python cannot reliably
+        # determine whether an arbitrary context manager is reentrant at runtime.
+        # Keeping this opt-in preserves the source's generic, lock-free API.
+        self._admission_lock = admission_lock
 
         self._latest: tuple[Any, ...] | None = None
         self._latest_at: float | None = None
@@ -147,17 +170,18 @@ class DetectionPairSource:
         Refuses a pair older than `max_pair_age_s`: playback stops, the cached pair does
         not, and handing it out later buffers detections from an unknown moment.
         """
-        if self._latest is None:
-            return PairOutcome(reason=sync_wait_diagnosis(self._current_summary()))
+        with self._cache_context():
+            if self._latest is None:
+                return PairOutcome(reason=sync_wait_diagnosis(self._current_summary()))
 
-        staleness = sync_pair_staleness_error(
-            age_s=time.monotonic() - (self._latest_at or 0.0),
-            max_age_s=self._config.max_pair_age_s,
-        )
-        if staleness is not None:
-            return PairOutcome(reason=f"{staleness} [{self.status_line()}]")
+            staleness = sync_pair_staleness_error(
+                age_s=time.monotonic() - (self._latest_at or 0.0),
+                max_age_s=self._config.max_pair_age_s,
+            )
+            if staleness is not None:
+                return PairOutcome(reason=f"{staleness} [{self.status_line()}]")
 
-        return PairOutcome(messages=self._latest)
+            return PairOutcome(messages=self._latest)
 
     def status_line(self) -> str:
         """What the synchronization is doing, for a log line or a refusal message."""
@@ -182,8 +206,23 @@ class DetectionPairSource:
         service means "start over", and a pair captured before the clear must not be
         addable after it, even while it is still inside the freshness window.
         """
-        self._latest = None
-        self._latest_at = None
+        with self._cache_context():
+            self._clear_cached_pair()
+
+    def is_cached_pair(self, messages: tuple[Any, ...]) -> bool:
+        """Whether ``messages`` is still the exact cached pair.
+
+        Push consumers receive a pair after the cache critical section.  A consumer
+        that may invalidate its own state while a callback is delayed must call this
+        before restoring the pair: tuple identity distinguishes that callback's
+        admission from a newer pair or a cache that was discarded during a reset.
+        The check shares ``admission_lock`` with cache writes and invalidation when
+        one is supplied, so it is atomic with those operations from the consumer's
+        point of view.  The supplied lock must be reentrant because callers normally
+        perform this check while holding their state lock.
+        """
+        with self._cache_context():
+            return self._latest is messages
 
     @property
     def epoch_resets(self) -> int:
@@ -191,6 +230,20 @@ class DetectionPairSource:
         return self._epoch_resets
 
     # ---- implementation --------------------------------------------------------
+
+    @contextmanager
+    def _cache_context(self) -> Iterator[None]:
+        """Serialize cache access with the optional consumer admission lock."""
+        if self._admission_lock is None:
+            yield
+            return
+        with self._admission_lock:
+            yield
+
+    def _clear_cached_pair(self) -> None:
+        """Clear the latest pair; caller owns the cache context."""
+        self._latest = None
+        self._latest_at = None
 
     @staticmethod
     def _stamp_s(msg) -> float:
@@ -230,8 +283,34 @@ class DetectionPairSource:
                     )
             return
 
-        self._latest = messages
-        self._latest_at = now
+        # An optional consumer-owned admission gate runs in the same critical
+        # section as the latest-pair cache mutation.  The LiDAR-to-LiDAR
+        # solver supplies its state RLock here, so a target-identity update
+        # cannot clear the cache between an accepted predicate and this write.
+        rejection = None
+        with self._cache_context():
+            if self._admit_pair is not None:
+                rejection = self._admit_pair(messages)
+                if rejection is not None:
+                    self._clear_cached_pair()
+                else:
+                    self._latest = messages
+                    self._latest_at = now
+            else:
+                self._latest = messages
+                self._latest_at = now
+
+        if rejection is not None:
+            self._node.get_logger().warn(
+                f"Ignoring sync group before cache admission: {rejection}",
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        # Push callbacks intentionally run after the cache critical section:
+        # solver computation may be expensive.  A callback that can be delayed
+        # must re-check `is_cached_pair` before restoring this tuple, so a reset
+        # or newer pair cannot be interpreted as current-session input.
         if self._on_pair is not None:
             self._on_pair(messages)
 
@@ -274,8 +353,8 @@ class DetectionPairSource:
         self._epoch_resets += 1
         self._last_epoch_reset_at = time.monotonic()
         self._sync.reset()
-        self._latest = None
-        self._latest_at = None
+        with self._cache_context():
+            self._clear_cached_pair()
         self._max_skew_ms = 0.0
         self._node.get_logger().warn(
             f"Nothing has paired while both streams keep arriving: the recording "

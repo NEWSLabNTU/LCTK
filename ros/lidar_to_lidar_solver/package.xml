@@ -13,6 +13,7 @@
   <depend>vision_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>lctk_sync</depend>
+  <depend>lctk_interfaces</depend>
   <depend>python3-numpy</depend>
   <depend>python3-scipy</depend>
 

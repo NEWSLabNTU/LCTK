@@ -24,6 +24,17 @@
          default="/sensing/lidar/front/calibration_board_detections"
          description="Detection3DArray topic from second LiDAR's board detector"/>
 
+    <!-- Target Identity endpoints.  The solver-side names are relative and
+         remappable; detector publishers use their own relative target_identity
+         topic and the generated graph connects each one explicitly. -->
+    <arg name="lidar1_target_identity_topic"
+         default="/sensing/lidar/top/target_identity"
+         description="Latched Target Identity topic from first LiDAR"/>
+
+    <arg name="lidar2_target_identity_topic"
+         default="/sensing/lidar/front/target_identity"
+         description="Latched Target Identity topic from second LiDAR"/>
+
     <!-- Frame arguments -->
     <arg name="lidar1_frame"
          default="lidar_top"
@@ -72,6 +83,10 @@
         <!-- Topics -->
         <param name="lidar1_detections_topic" value="$(var lidar1_detections_topic)"/>
         <param name="lidar2_detections_topic" value="$(var lidar2_detections_topic)"/>
+
+        <!-- Relative solver endpoints, routed to detector identity publishers. -->
+        <remap from="lidar1_target_identity" to="$(var lidar1_target_identity_topic)"/>
+        <remap from="lidar2_target_identity" to="$(var lidar2_target_identity_topic)"/>
 
         <!-- Frames -->
         <param name="lidar1_frame" value="$(var lidar1_frame)"/>
