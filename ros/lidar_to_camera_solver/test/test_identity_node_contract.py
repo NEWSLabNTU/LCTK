@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
@@ -14,12 +15,20 @@ import rclpy
 from lctk_interfaces.msg import CalibrationTargetIdentity
 from lctk_sync import DetectionPairSource, PairSourceConfig
 from lctk_target import load_target
+from lidar_to_camera_solver import main as main_module
 from lidar_to_camera_solver.board_geometry import (
     CAMERA_TARGET_IDENTITY_TOPIC,
     LIDAR_TARGET_IDENTITY_TOPIC,
     TargetIdentityGate,
+    identity_fields,
 )
-from lidar_to_camera_solver.detection_buffer import BufferSnapshot, BufferUpdate, Solved
+from lidar_to_camera_solver.detection_buffer import (
+    BufferSnapshot,
+    BufferUpdate,
+    DetectionPair,
+    Empty,
+    Solved,
+)
 from lidar_to_camera_solver.main import (
     LidarToCameraSolver,
     create_target_identity_subscriptions,
@@ -102,6 +111,7 @@ class _SubscriptionNode:
 def solver_harness(*, ready: bool) -> LidarToCameraSolver:
     solver = object.__new__(LidarToCameraSolver)
     target = load_target(SOLID)
+    solver.target = target
     solver.state_lock = threading.RLock()
     solver.identity_gate = TargetIdentityGate(target.identity)
     solver._identity_generation = 0
@@ -134,6 +144,100 @@ def _solved_update() -> BufferUpdate:
         outcome=Solved(estimate),
     )
     return BufferUpdate(accepted=True, changed=True, snapshot=snapshot)
+
+
+class _DumpBuffer(_Buffer):
+    """Fake buffer exposing a fixed ``snapshot()`` for dump-callback tests."""
+
+    def __init__(self, snapshot: BufferSnapshot):
+        super().__init__()
+        self._fixed_snapshot = snapshot
+
+    def snapshot(self) -> BufferSnapshot:
+        return self._fixed_snapshot
+
+
+def _one_pair_snapshot() -> BufferSnapshot:
+    aruco = Detection2DArray()
+    aruco.header.frame_id = "camera_optical"
+    board = Detection3DArray()
+    board.header.frame_id = "lidar"
+    pair = DetectionPair(aruco=aruco, board=board)
+    return BufferSnapshot(
+        revision=1,
+        pairs=(pair,),
+        placements=(),
+        correspondence_count=4,
+        outcome=Empty(),
+    )
+
+
+def _dump_request_response(destination: Path):
+    request = SimpleNamespace(file_path=str(destination))
+    response = SimpleNamespace(success=None, message=None, num_detections=None)
+    return request, response
+
+
+def test_dump_is_refused_while_identity_gate_is_closed(tmp_path):
+    solver = solver_harness(ready=False)
+    solver.detection_buffer = _DumpBuffer(_one_pair_snapshot())
+    destination = tmp_path / "detections.json"
+    request, response = _dump_request_response(destination)
+
+    result = LidarToCameraSolver.dump_detections_callback(solver, request, response)
+
+    assert result.success is False
+    assert "Target Identity agreement" in result.message
+    assert result.num_detections == 0
+    assert not destination.exists()
+    # This path refuses before any temp file is created; assert the trivial case
+    # to document that no debris lands next to the destination either.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dump_is_refused_when_generation_changes_before_write(tmp_path, monkeypatch):
+    solver = solver_harness(ready=True)
+    solver.detection_buffer = _DumpBuffer(_one_pair_snapshot())
+    destination = tmp_path / "detections.json"
+    request, response = _dump_request_response(destination)
+
+    original_encode = main_module.encode_detection_archive
+
+    def bump_generation_then_encode(*args, **kwargs):
+        # Simulate a target change / camera-intrinsics reset landing between the
+        # consistent snapshot read and the write, through a seam the callback
+        # actually calls, deterministically and without threads or sleeps.
+        solver._identity_generation += 1
+        return original_encode(*args, **kwargs)
+
+    monkeypatch.setattr(
+        main_module, "encode_detection_archive", bump_generation_then_encode
+    )
+
+    result = LidarToCameraSolver.dump_detections_callback(solver, request, response)
+
+    assert result.success is False
+    assert "session changed" in result.message
+    assert result.num_detections == 0
+    assert not destination.exists()
+    # The refused write must leave no orphaned temp file behind either; the
+    # `finally` cleanup is part of the contract, not just the destination check.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dump_succeeds_with_open_gate_and_writes_local_target_identity(tmp_path):
+    solver = solver_harness(ready=True)
+    solver.detection_buffer = _DumpBuffer(_one_pair_snapshot())
+    destination = tmp_path / "detections.json"
+    request, response = _dump_request_response(destination)
+
+    result = LidarToCameraSolver.dump_detections_callback(solver, request, response)
+
+    assert result.success is True
+    assert result.num_detections == 1
+    assert destination.exists()
+    written = json.loads(destination.read_text())
+    assert written["target_identity"] == identity_fields(solver.target.identity)
 
 
 def test_identity_subscriptions_use_relative_latched_contract():

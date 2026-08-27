@@ -79,6 +79,32 @@ def test_restore_rejects_versions_that_are_not_literal_integers(version):
     assert "expected integer 5" in error
 
 
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_restore_rejects_literal_past_versions_as_unsupported(version):
+    archive = fixture("solved_v5.json")
+    archive["version"] = version
+    error = archive_restore_error(archive, fixture("solved_v5.json")["target_identity"])
+    assert "unsupported past version" in error
+    assert "expected integer 5" in error
+
+
+def test_restore_rejects_literal_version_four_with_migration_command():
+    archive = fixture("solved_v5.json")
+    archive["version"] = 4
+    error = archive_restore_error(archive, fixture("solved_v5.json")["target_identity"])
+    assert "cannot be restored" in error
+    assert "migrate_detections" in error
+    assert "--target-config" in error
+
+
+def test_restore_rejects_literal_future_version_as_unsupported():
+    archive = fixture("solved_v5.json")
+    archive["version"] = 6
+    error = archive_restore_error(archive, fixture("solved_v5.json")["target_identity"])
+    assert "unsupported future version" in error
+    assert "expected integer 5" in error
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

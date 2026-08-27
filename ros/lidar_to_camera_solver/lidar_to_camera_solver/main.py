@@ -1,7 +1,9 @@
 """ROS adapter for continuous and manual LiDAR-to-camera calibration."""
 
 import json
+import os
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -701,14 +703,22 @@ class LidarToCameraSolver(Node):
         return response
 
     def dump_detections_callback(self, request, response):
-        snapshot = self._snapshot()
+        # Read the snapshot, adjusted transform, generation and gate error as one
+        # mutually consistent view. Taking them under separate lock acquisitions
+        # (as the pre-fix code did) let a target change or camera-intrinsics reset
+        # land in between and write an archive that mixed a previous session's
+        # captures with the current identity.
         with self.state_lock:
+            snapshot = self._snapshot()
             adjusted_rvec = (
                 None if self.current_rvec is None else self.current_rvec.copy()
             )
             adjusted_tvec = (
                 None if self.current_tvec is None else self.current_tvec.copy()
             )
+            generation = self._identity_generation
+            identity_error = self.identity_gate.error
+            local_identity = self.target.identity
         if snapshot is None or (snapshot.frame_count == 0 and adjusted_rvec is None):
             response.success = False
             response.message = (
@@ -716,20 +726,71 @@ class LidarToCameraSolver(Node):
             )
             response.num_detections = 0
             return response
+        if identity_error is not None:
+            response.success = False
+            response.message = (
+                f"Cannot save before Target Identity agreement: {identity_error}"
+            )
+            response.num_detections = 0
+            return response
         try:
             archive = encode_detection_archive(
                 snapshot,
-                local_identity=self.target.identity,
+                local_identity=local_identity,
                 adjusted_rvec=adjusted_rvec,
                 adjusted_tvec=adjusted_tvec,
             )
-            with open(request.file_path, "w") as file:
+        except (TypeError, ValueError) as error:
+            response.success = False
+            response.message = f"Failed to save detections: {error!s}"
+            response.num_detections = 0
+            return response
+
+        # Serialize to a sibling temp file with NO lock held: this is the
+        # potentially slow part (disk I/O over a possibly multi-hundred-KB
+        # archive), and state_lock is also DetectionPairSource's admission lock
+        # and the publishing timer's lock, so holding it here would block
+        # detection admission and publication for the duration of the write.
+        # Mirrors load_detections_callback, which does its file I/O outside the
+        # lock and only re-checks generation under the lock afterward.
+        destination = Path(request.file_path)
+        temp_path: Path | None = None
+        try:
+            descriptor, temp_name = tempfile.mkstemp(
+                dir=str(destination.parent),
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+            )
+            temp_path = Path(temp_name)
+            with os.fdopen(descriptor, "w") as file:
                 json.dump(archive, file, indent=2)
+            with self.state_lock:
+                # Re-check immediately before the atomic rename: a target change
+                # or camera-intrinsics reset between the snapshot above and here
+                # must not let this archive land as if it were still current.
+                if generation != self._identity_generation:
+                    response.success = False
+                    response.message = (
+                        "Cannot save: calibration session changed while writing; retry"
+                    )
+                    response.num_detections = 0
+                    return response
+                os.replace(temp_path, destination)
+                temp_path = None
         except (OSError, TypeError, ValueError) as error:
             response.success = False
             response.message = f"Failed to save detections: {error!s}"
             response.num_detections = 0
             return response
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except OSError as cleanup_error:
+                    self.get_logger().warn(
+                        "Failed to remove temporary archive file "
+                        f"{temp_path}: {cleanup_error}"
+                    )
         response.success = True
         response.num_detections = snapshot.frame_count
         response.message = (
