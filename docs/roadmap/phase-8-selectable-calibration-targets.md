@@ -23,16 +23,18 @@ Updated 2026-08-27. Packet status changes land here with each accepted review ga
 | W3-B | Complete | Solid evidence refinement and public-facade tests, `ea0eda4` |
 | W3-C | Complete | Perforated ICP adapter and legacy characterization golden, `ea0eda4` |
 | W3-D | Complete | Typed neutral estimator and temporary hollow facade, `ea0eda4` |
+| W4-A | Complete | Selectable LiDAR observer, neutral estimator adapter, and hollow/solid regressions; pending commit |
 | W4-B | Complete | Target-driven camera/generator adapters, `2ab0944`; binding cache fix, `dcb46e4` |
 | W4-Ea | Complete | v4/v5 export parity, `82eb8a5` |
 | W5-A | Complete | Selectable launch schema parser, `42a7934` |
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
 
-Pause point requested after W3/W4-B completion. Consolidated gate passed: `just build` (17 ROS
-packages), `just test` (306 Rust and 272 Python tests), `just lint`, and `git diff --check`.
+W4-A gate passed: Terra review clean, `just build` (17 ROS packages), `just test` (317 Rust and 272
+Python tests), focused strict clippy, preset parser tests (6), and `git diff --check`.
 
-Next resume point: dispatch W4-A. W4-C/W4-D/W4-Eb/W4-Ec follow observer dependencies. W5-C through
-W6-A remain pending. W7 requires real rosbag evidence and is not headlessly closeable.
+Active dependency path: W4-C LiDAR-camera identity/geometry and W4-D LiDAR-LiDAR identity can now
+proceed in parallel. W4-Eb/W4-Ec follow W4-C. W5-C through W6-A remain pending. W7 requires real
+rosbag evidence and is not headlessly closeable.
 
 ## Outcome
 
