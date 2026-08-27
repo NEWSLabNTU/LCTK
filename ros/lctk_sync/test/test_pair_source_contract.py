@@ -1,9 +1,11 @@
 """`DetectionPairSource` contract tests over a real ROS graph."""
 
+import threading
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 import rclpy
@@ -74,7 +76,7 @@ def ros():
 
 @pytest.fixture
 def harness_factory(ros, request):
-    def create_harness(**config_overrides) -> PairSourceHarness:
+    def create_harness(*, admit_pair=None, **config_overrides) -> PairSourceHarness:
         suffix = uuid.uuid4().hex
         aruco_topic = f"/pair_source_contract_{suffix}/aruco"
         board_topic = f"/pair_source_contract_{suffix}/board"
@@ -94,6 +96,7 @@ def harness_factory(ros, request):
             msg_types=[Detection2DArray, Detection3DArray],
             config=PairSourceConfig(**config_values),
             on_pair=pairs.append,
+            admit_pair=admit_pair,
         )
         result = PairSourceHarness(
             source_node=source_node,
@@ -129,6 +132,8 @@ def test_within_window_pair_reaches_callback_and_take_fresh_pair(harness_factory
     outcome = harness.source.take_fresh_pair()
     assert outcome.ok
     assert outcome.messages == harness.pairs[0]
+    assert harness.source.is_cached_pair(harness.pairs[0])
+    assert not harness.source.is_cached_pair((harness.pairs[0][0], harness.pairs[0][1]))
 
 
 def test_discarded_pair_is_not_handed_out_again(harness_factory):
@@ -138,7 +143,101 @@ def test_discarded_pair_is_not_handed_out_again(harness_factory):
 
     harness.source.discard_cached_pair()
 
+    assert not harness.source.is_cached_pair(harness.pairs[0])
     assert not harness.source.take_fresh_pair().ok
+
+
+def test_rejected_pair_is_not_cached_or_handed_out(harness_factory):
+    rejected = []
+
+    def reject_pair(messages):
+        rejected.append(messages)
+        return "Target Identity values do not match"
+
+    harness = harness_factory(admit_pair=reject_pair)
+    harness.publish(aruco_stamp=10.000, board_stamp=10.030)
+
+    assert harness.spin_until(harness.received_both)
+    harness.spin_for(0.05)
+    assert rejected
+    assert not harness.pairs
+    assert not harness.source.take_fresh_pair().ok
+
+
+def test_admission_lock_serializes_identity_clear_with_cache_write():
+    """An invalidation cannot be overtaken by an already-admitted pair."""
+
+    lock = threading.RLock()
+    admission_started = threading.Event()
+    release_admission = threading.Event()
+    invalidation_finished = threading.Event()
+    callbacks = []
+
+    class Logger:
+        def warn(self, *_args, **_kwargs):
+            pass
+
+    class Group:
+        def __init__(self, messages):
+            self.messages = messages
+
+        def get(self, topic):
+            return self.messages[topic]
+
+        def topics(self):
+            return tuple(self.messages)
+
+    def message(stamp):
+        return SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=SimpleNamespace(sec=stamp, nanosec=0),
+            ),
+            detections=[object()],
+        )
+
+    source = object.__new__(DetectionPairSource)
+    source._node = SimpleNamespace(get_logger=lambda: Logger())
+    source._topics = ["lidar1", "lidar2"]
+    source._config = SimpleNamespace(require_non_empty=True)
+    source._admit_pair = lambda _messages: (
+        admission_started.set(),
+        release_admission.wait(timeout=2.0),
+        None,
+    )[-1]
+    source._on_pair = callbacks.append
+    source._admission_lock = lock
+    source._latest = None
+    source._latest_at = None
+    source._last_group = None
+    source._last_group_at = None
+    source._last_skew_ms = None
+    source._max_skew_ms = 0.0
+
+    pair = Group({"lidar1": message(10), "lidar2": message(10)})
+    producer = threading.Thread(target=source._handle_group, args=(pair,))
+    producer.start()
+    assert admission_started.wait(timeout=2.0)
+
+    def invalidate():
+        with lock:
+            source.discard_cached_pair()
+            invalidation_finished.set()
+
+    invalidator = threading.Thread(target=invalidate)
+    invalidator.start()
+    # The source owns the same lock while running admission, so invalidation
+    # cannot clear state and then be overtaken by the cache write.
+    assert not invalidation_finished.wait(timeout=0.05)
+
+    release_admission.set()
+    producer.join(timeout=2.0)
+    invalidator.join(timeout=2.0)
+
+    assert not producer.is_alive()
+    assert not invalidator.is_alive()
+    assert invalidation_finished.is_set()
+    assert callbacks
+    assert not source.take_fresh_pair().ok
 
 
 def test_outside_window_pair_is_not_delivered(harness_factory):
