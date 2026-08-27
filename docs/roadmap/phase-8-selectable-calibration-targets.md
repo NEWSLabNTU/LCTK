@@ -28,24 +28,33 @@ Updated 2026-08-27. Packet status changes land here with each accepted review ga
 | W4-C | Complete | Shared target geometry, exact three-way identity gate, and legacy graph identity routing, `f97156e` |
 | W4-D | Complete | Atomic two-LiDAR identity gate and synchronized-pair admission, `e9acdaf` |
 | W4-Ea | Complete | v4/v5 export parity, `82eb8a5` |
-| W4-Eb | In progress | Codec/runtime implemented; review found dump identity-generation race requiring fix |
+| W4-Eb | Complete | Codec/runtime, dump identity gate and atomic write, `7782ad0` |
 | W5-A | Complete | Selectable launch schema parser, `42a7934` |
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
-| W7-A | In progress | Evidence schema/collector and tests implemented; review pending |
+| W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: fix and re-review W4-Eb archive dump atomicity, then W4-Ec migration. W5-C still must route the new
+Active dependency path: W4-Ec migration, then W5-C. W5-C still must route the new
 `target_config`/`detector_config` fields; W4-C only added the identity routes required to keep the
-maintained legacy graph functional while gates activate. W5-D through W6-A remain pending. W7
+maintained legacy graph functional while gates activate. W5-D through W6-A remain pending. W7-B
 requires real rosbag evidence and is not headlessly closeable.
 
-Checkpoint note: W4-Eb decoder/restore review passed, but dump must reject a closed identity gate
-and recheck gate generation before publishing the archive. Deterministic blocked-gate and race tests,
-plus direct past/future restore-version tests, remain required. W7-A implementation is unreviewed;
-ROS bag extraction remains deferred until diagnostic topic/message mappings stabilize.
+W4-Eb/W7-A gate passed on a migrated machine: `just build` (17 ROS packages), `just test`
+(317 Rust and 337 Python tests), `just lint-py`, and `git diff --check`. The dump path now refuses a
+closed identity gate, rechecks the gate generation immediately before an atomic `os.replace`, and
+leaves no temp-file debris behind a refusal; gating stays identity-only so a one-Capture result
+remains savable per the accepted spec. W7-A's collector needed no production change; its fixtures
+now declare `test_only` provenance and cover the previously untested schema negatives. ROS bag
+extraction remains deferred until diagnostic topic/message mappings stabilize.
+
+Fresh-clone build note: a clean tree could not build until `sync-root-cargo-config.sh` learned to
+synthesise the root `[patch.crates-io]` block as the union of every per-package block (`0df4f48`).
+The generated golden fixtures under `rust/board-cluster-detector/tests/fixtures/` are gitignored and
+must be regenerated with `experiments/board-detection-2d/tools/export_golden.py` before the Rust
+suite is complete on a new machine.
 
 ## Outcome
 
