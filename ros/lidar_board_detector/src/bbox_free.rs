@@ -4,10 +4,12 @@
 //! board config into these types and threads them through the processing
 //! thread; the ROS wiring stays thin.
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use board_cluster_detector::{
     background::BackgroundModel,
-    config::{BoardConfig, ForegroundMethod},
+    config::{DetectorTuning, ForegroundMethod},
     detector::RejectReason,
 };
 use nalgebra::Point3;
@@ -66,12 +68,10 @@ impl DetectionMode {
     }
 }
 
-/// The whole board_detector.json5 deserialized flat. The crop-box-free
-/// detector's parameters are top-level here (no nested `bbox_free` object) and
-/// the board sub-config is `#[serde(flatten)]`ed in, so its keys sit at the top
-/// level too. Legacy (bbox-mode) keys in the same file are read by a separate
-/// deserializer and ignored here. Every field defaults, so a bbox-mode file
-/// with none of these keys still parses.
+/// The detector tuning deserialized flat. Crop-box-free parameters are
+/// top-level, while physical target geometry is supplied independently at the
+/// `detect_for_target` boundary. Legacy `side_m`/board-shape keys are ignored
+/// by serde while the compatibility launch path is being retired.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DetectionConfig {
     #[serde(default)]
@@ -85,7 +85,7 @@ pub struct DetectionConfig {
     #[serde(default = "default_warmup_frames")]
     pub bg_warmup_frames: usize,
     #[serde(flatten)]
-    pub board: BoardConfig,
+    pub board: DetectorTuning,
 }
 
 fn default_foreground_method() -> ForegroundMethod {
@@ -122,7 +122,7 @@ pub struct BboxFreeRaw {
     /// Validated at parse time by serde — no post-parse re-validation needed.
     pub method: ForegroundMethod,
     pub voxel: f64,
-    pub board: BoardConfig,
+    pub board: DetectorTuning,
     pub background: BackgroundParams,
 }
 

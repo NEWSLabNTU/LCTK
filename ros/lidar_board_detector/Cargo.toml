@@ -8,19 +8,17 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = "1.7"
-aruco-config = { version = "0.1.0", path = "../../rust/aruco-config" }
 board-cluster-detector = { version = "0.1.0", path = "../../rust/board-cluster-detector" }
+calibration-target = { version = "0.1.0", path = "../../rust/calibration-target" }
+calibration-target-detector = { version = "0.1.0", path = "../../rust/calibration-target-detector" }
 env_logger = "0.11"
 geometry_msgs.workspace = true
-hollow-board-config = { version = "0.1.0", path = "../../rust/hollow-board-config", features = ["parallel"] }
-hollow-board-detector = { version = "0.1.0", path = "../../rust/hollow-board-detector", features = ["parallel"] }
 json5 = { workspace = true }
 lctk_interfaces = "*"
 ndarray = "0.16"
 once_cell = { workspace = true }
 pcd-rs = { workspace = true }
 petal-decomposition = { version = "0.8", features = ["openblas-system"] }
-plane-estimator = { version = "0.1.0", path = "../../rust/plane-estimator" }
 rclrs.workspace = true
 sensor_msgs.workspace = true
 serde = { workspace = true }
