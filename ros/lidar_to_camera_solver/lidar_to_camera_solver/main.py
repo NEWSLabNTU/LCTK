@@ -719,6 +719,7 @@ class LidarToCameraSolver(Node):
         try:
             archive = encode_detection_archive(
                 snapshot,
+                local_identity=self.target.identity,
                 adjusted_rvec=adjusted_rvec,
                 adjusted_tvec=adjusted_tvec,
             )
@@ -757,7 +758,9 @@ class LidarToCameraSolver(Node):
             return response
         try:
             with open(request.file_path) as file:
-                archive = decode_detection_archive(json.load(file))
+                archive = decode_detection_archive(
+                    json.load(file), local_identity=self.target.identity
+                )
         except FileNotFoundError:
             response.success = False
             response.message = f"File not found: {request.file_path}"

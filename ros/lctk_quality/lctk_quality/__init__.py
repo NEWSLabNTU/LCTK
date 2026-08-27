@@ -29,24 +29,58 @@ Nothing here rejects a calibration. It reports, and it warns.
 
 from .conditioning import Conditioning, compute_conditioning
 from .diversity import Diversity, compute_diversity
+from .evidence import (
+    MANIFEST_SCHEMA_VERSION,
+    REPORT_SCHEMA_VERSION,
+    ArtifactRef,
+    ArucoObservation,
+    BagFingerprint,
+    EvidenceCollector,
+    EvidenceInterval,
+    EvidenceManifest,
+    EvidenceReport,
+    EvidenceSample,
+    EvidenceSchemaError,
+    PoseRecord,
+    RejectionReason,
+    TargetIdentityRecord,
+    labels_at,
+    sha256_file,
+)
 from .placements import Placement, distinct_placements, representative_frames
 from .report import QualityReport, build_report, solve_pnp
 from .resampling import Spread, compute_spread
 from .residuals import Residuals, compute_residuals
 
 __all__ = [
+    "MANIFEST_SCHEMA_VERSION",
+    "REPORT_SCHEMA_VERSION",
+    "ArtifactRef",
+    "ArucoObservation",
+    "BagFingerprint",
     "Conditioning",
     "Diversity",
+    "EvidenceCollector",
+    "EvidenceInterval",
+    "EvidenceManifest",
+    "EvidenceReport",
+    "EvidenceSample",
+    "EvidenceSchemaError",
     "Placement",
+    "PoseRecord",
     "QualityReport",
+    "RejectionReason",
     "Residuals",
     "Spread",
+    "TargetIdentityRecord",
     "build_report",
     "compute_conditioning",
     "compute_diversity",
     "compute_residuals",
     "compute_spread",
     "distinct_placements",
+    "labels_at",
     "representative_frames",
+    "sha256_file",
     "solve_pnp",
 ]

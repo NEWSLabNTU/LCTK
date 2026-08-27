@@ -1,10 +1,12 @@
-"""The saved-detection file format, version 4.
+"""The saved-detection file format, version 5.
 
 A saved calibration is a stored *pose*, and Phase 1 changed what a board pose means.
 Version 3 files record no convention at all — the board-local corners are recomputed at
 load time from `aruco_pattern.json5` — so a file written before the change and one
 written after are indistinguishable, and either reloads under whatever convention the
-loading build believes in. Version 4 records the convention that produced it.
+loading build believes in. Version 4 records the convention that produced it;
+version 5 also records the exact Target Identity and is the only format the
+solver restores.
 
 Version 3 is therefore **rejected** rather than migrated on load: automatic migration
 would make a file's meaning depend on which build opened it, which is the same class of
@@ -15,9 +17,12 @@ it a reloaded buffer solves with uniform weight 1.0 and quietly differs from the
 buffer it was saved from.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from geometry_msgs.msg import Pose, PoseWithCovariance
+from lctk_target import load_target
 from lidar_to_camera_solver.board_geometry import BOARD_FRAME_CONVENTION
 from lidar_to_camera_solver.detection_format import (
     FORMAT_VERSION,
@@ -27,6 +32,24 @@ from lidar_to_camera_solver.detection_format import (
     serialize_detection3d_array,
 )
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
+
+SOLID = load_target(
+    Path(__file__).resolve().parents[2]
+    / "lctk_launch"
+    / "config"
+    / "targets"
+    / "solid_600_aruco_1_v1.json5"
+)
+IDENTITY = {
+    field: getattr(SOLID.identity, field)
+    for field in (
+        "schema_version",
+        "target_id",
+        "revision",
+        "semantic_sha256",
+        "board_frame_convention",
+    )
+}
 
 
 def board_msg(covariance):
@@ -49,12 +72,15 @@ def board_msg(covariance):
     return msg
 
 
-def test_the_format_version_is_four():
-    assert FORMAT_VERSION == 4
+def test_the_format_version_is_five():
+    assert FORMAT_VERSION == 5
 
 
-def test_a_version_4_file_is_accepted():
-    data = {"version": 4, "board_frame_convention": BOARD_FRAME_CONVENTION}
+@pytest.mark.parametrize("version", [4, 5])
+def test_structurally_known_archive_versions_are_accepted(version):
+    data = {"version": version, "board_frame_convention": BOARD_FRAME_CONVENTION}
+    if version == 5:
+        data["target_identity"] = IDENTITY
     assert format_version_error(data) is None
 
 
@@ -68,16 +94,20 @@ def test_a_version_3_file_is_rejected_and_points_at_the_conversion_command():
     assert "migrate_detections" in message, "the message must name the way out"
 
 
-@pytest.mark.parametrize("version", [0, 1, 2, 5])
+@pytest.mark.parametrize("version", [0, 1, 2, 3, 6])
 def test_other_versions_are_rejected(version):
     assert format_version_error({"version": version}) is not None
 
 
-def test_a_version_4_file_carrying_the_wrong_convention_is_rejected():
+def test_a_version_5_file_carrying_the_wrong_convention_is_rejected():
     """The version says how the file is laid out; the tag says what the poses mean.
     Both have to agree with this build."""
     message = format_version_error(
-        {"version": 4, "board_frame_convention": "edge_aligned_corner_origin_v0"}
+        {
+            "version": 5,
+            "board_frame_convention": "edge_aligned_corner_origin_v0",
+            "target_identity": IDENTITY,
+        }
     )
 
     assert message is not None
@@ -85,8 +115,8 @@ def test_a_version_4_file_carrying_the_wrong_convention_is_rejected():
     assert BOARD_FRAME_CONVENTION in message
 
 
-def test_a_version_4_file_without_a_convention_tag_is_rejected():
-    assert format_version_error({"version": 4}) is not None
+def test_a_version_5_file_without_a_convention_tag_is_rejected():
+    assert format_version_error({"version": 5, "target_identity": IDENTITY}) is not None
 
 
 def test_the_board_pose_covariance_survives_a_round_trip():
