@@ -40,6 +40,14 @@
   "voxel_parallel_threshold": 50000,
   "sensor_up_axis": "z",
   "initial_inplane_rotation_deg": 0.0,
+  // Experimental solid-edge starting values. These fixture-derived values
+  // await W7 real-bag tuning; they are not field-validated thresholds.
+  "solid_edge_band_m": 0.015,
+  "solid_minimum_edge_points": 8,
+  "solid_minimum_points_per_covered_edge": 1,
+  "solid_minimum_covered_edges": 3,
+  "solid_longitudinal_bins_per_edge": 4,
+  "solid_minimum_occupied_longitudinal_bins": 2,
   "max_icp_iterations": 100,
   "icp_pose_weight_threshold": 1e-4,
   "icp_rejection_threshold": 0.005,

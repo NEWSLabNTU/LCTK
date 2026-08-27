@@ -4,24 +4,24 @@ mod bbox_free;
 use crate::bbox::BBox;
 use anyhow::{anyhow, Result};
 use arc_swap::ArcSwap;
-use aruco_config::MultiArucoPattern;
-use geometry_msgs::msg::{
-    Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Vector3 as GeomVector3,
+use board_cluster_detector::{
+    config::{DetectorTuning, ForegroundMethod, TargetSide},
+    detector::detect_for_target,
+    geometry::{project_to_plane, PlaneModel},
+    square_fit::fit_fixed_square,
 };
-use hollow_board_config::{BoardModel, BoardShape, MarkerPaperPlacement};
-use hollow_board_detector::{
-    algo::{fit_plane_ransac, voxel_downsample, BoardIcpIterator},
-    config::SensorUpAxis,
-    detection::{BoardIcpState, BoardModelParams, IcpStatistics, PlaneRansacData},
-    init_logging, Config as BoardDetectorConfig, Detection as BoardDetection,
-    Detector as BoardDetector,
+use calibration_target::{Surface, TargetIdentity, ValidatedTarget};
+use calibration_target_detector::{
+    PerforatedIcpConfig, SolidRefinementTuning, TargetDetection, TargetDetectionDiagnostics,
+    TargetPoseEstimate, TargetPoseEstimator, TargetPoseEstimatorTuning, TargetRejectReason,
+    TargetSquarePlaneObservation,
 };
+use geometry_msgs::msg::{Point, Pose, PoseWithCovariance, Quaternion, Vector3 as GeomVector3};
+use lctk_interfaces::msg::CalibrationTargetIdentity;
 use nalgebra as na;
-use plane_estimator::PlaneModel;
 use rclrs::{MandatoryParameter, ParameterRange, PublisherOptions, SubscriptionOptions, *};
 use sensor_msgs::msg::{PointCloud2, PointField};
 use std::{
-    f64::consts::FRAC_PI_2,
     fs,
     path::PathBuf,
     sync::{
@@ -31,20 +31,360 @@ use std::{
     thread::JoinHandle,
     time::Instant,
 };
-use std_msgs::msg::{ColorRGBA, Float64, Header, String as StringMsg};
+use std_msgs::msg::{ColorRGBA, Header};
 use vision_msgs::msg::{BoundingBox3D, Detection3D, Detection3DArray, ObjectHypothesisWithPose};
 use visualization_msgs::msg::{Marker, MarkerArray};
 
+#[cfg(test)]
+use board_cluster_detector::detector::SquarePlaneObservation;
+#[cfg(test)]
+use calibration_target_detector::{CutoutIcpEvidence, EdgeCoverageEvidence, IcpTermination};
+
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
-/// Debug publishers for ICP iteration debugging
-#[derive(Clone)]
-struct IcpDebugPublishers {
-    iteration_pose: Arc<Publisher<PoseStamped>>,
-    board_points: Arc<Publisher<PointCloud2>>,
-    correspondences: Arc<Publisher<MarkerArray>>,
-    loss: Arc<Publisher<Float64>>,
-    stats: Arc<Publisher<StringMsg>>,
+const LEGACY_HOLLOW_TARGET: &[u8] =
+    include_bytes!("../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
+
+/// Every generated detector has one identity in its own namespace.  The
+/// publisher is latched below so a solver may join after node startup.
+const TARGET_IDENTITY_TOPIC: &str = "target_identity";
+
+/// Sensor axis used by the physical mounting-up orientation reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+enum SensorUpAxis {
+    X,
+    Y,
+    #[default]
+    Z,
+}
+
+impl SensorUpAxis {
+    fn as_vector(self) -> na::Vector3<f64> {
+        match self {
+            Self::X => na::Vector3::x(),
+            Self::Y => na::Vector3::y(),
+            Self::Z => na::Vector3::z(),
+        }
+    }
+}
+
+fn default_max_icp_iterations() -> usize {
+    50
+}
+
+fn default_foreground_method() -> ForegroundMethod {
+    ForegroundMethod::BackgroundSubtraction
+}
+
+fn default_bbf_voxel() -> f64 {
+    0.05
+}
+
+fn default_dilation_radius() -> i64 {
+    1
+}
+
+fn default_warmup_frames() -> usize {
+    20
+}
+
+fn default_icp_pose_weight_threshold() -> f64 {
+    1e-4
+}
+
+fn default_icp_rejection_threshold() -> f64 {
+    0.008
+}
+
+fn default_icp_good_fit_threshold() -> f64 {
+    0.035
+}
+
+fn default_icp_outlier_threshold() -> f64 {
+    0.05
+}
+
+fn default_icp_damping_factor() -> f64 {
+    0.5
+}
+
+fn default_icp_min_inlier_points() -> usize {
+    100
+}
+
+fn default_plane_ransac_max_iterations() -> usize {
+    2_000
+}
+
+fn default_plane_ransac_inlier_threshold() -> f64 {
+    0.05
+}
+
+fn default_voxel_downsample_size() -> f64 {
+    0.015
+}
+
+fn default_voxel_parallel_threshold() -> usize {
+    50_000
+}
+
+fn default_perforated_min_hypothesis_loss_separation_m() -> f64 {
+    0.0001
+}
+
+fn default_perforated_min_cutout_rim_correspondences() -> usize {
+    1
+}
+
+fn default_perforated_cutout_rim_tolerance_m() -> f64 {
+    0.03
+}
+
+/// Detector Tuning plus the deployment-owned processing stages.  Target
+/// geometry is intentionally absent: `target_config` supplies it separately.
+/// The old `board_detector_file` remains readable through the same shape while
+/// the launch graph migrates; its board dimensions are ignored.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct DetectorConfig {
+    #[serde(default)]
+    detection_mode: bbox_free::DetectionMode,
+    #[serde(default = "default_foreground_method")]
+    foreground_method: ForegroundMethod,
+    #[serde(default = "default_bbf_voxel")]
+    bbf_voxel: f64,
+    #[serde(default = "default_dilation_radius")]
+    bg_dilation_radius: i64,
+    #[serde(default = "default_warmup_frames")]
+    bg_warmup_frames: usize,
+
+    #[serde(default)]
+    skip_ransac: bool,
+    #[serde(default = "default_plane_ransac_max_iterations")]
+    plane_ransac_max_iterations: usize,
+    #[serde(default = "default_plane_ransac_inlier_threshold")]
+    plane_ransac_inlier_threshold: f64,
+
+    #[serde(default)]
+    voxel_downsample_enabled: bool,
+    #[serde(default = "default_voxel_downsample_size")]
+    voxel_downsample_size: f64,
+    #[serde(default)]
+    voxel_downsample_use_centroid: bool,
+    #[serde(default = "default_voxel_parallel_threshold")]
+    voxel_parallel_threshold: usize,
+
+    #[serde(default)]
+    sensor_up_axis: SensorUpAxis,
+    #[serde(default = "default_max_icp_iterations")]
+    max_icp_iterations: usize,
+    #[serde(default = "default_icp_pose_weight_threshold")]
+    icp_pose_weight_threshold: f64,
+    #[serde(default = "default_icp_rejection_threshold")]
+    icp_rejection_threshold: f64,
+    #[serde(default = "default_icp_good_fit_threshold")]
+    icp_good_fit_threshold: f64,
+    #[serde(default = "default_icp_outlier_threshold")]
+    icp_outlier_threshold: f64,
+    #[serde(default = "default_icp_damping_factor")]
+    icp_damping_factor: f64,
+    #[serde(default = "default_icp_min_inlier_points")]
+    icp_min_inlier_points: usize,
+
+    // Solid adapter tuning.  Aliases make the flat deployment config readable
+    // without creating a second target-specific parser.
+    #[serde(alias = "edge_band_m")]
+    solid_edge_band_m: Option<f64>,
+    #[serde(alias = "minimum_edge_points")]
+    solid_minimum_edge_points: Option<usize>,
+    #[serde(alias = "minimum_points_per_covered_edge")]
+    solid_minimum_points_per_covered_edge: Option<usize>,
+    #[serde(alias = "minimum_covered_edges")]
+    solid_minimum_covered_edges: Option<usize>,
+    #[serde(alias = "longitudinal_bins_per_edge")]
+    solid_longitudinal_bins_per_edge: Option<usize>,
+    #[serde(alias = "minimum_occupied_longitudinal_bins")]
+    solid_minimum_occupied_longitudinal_bins: Option<usize>,
+
+    #[serde(default = "default_perforated_min_hypothesis_loss_separation_m")]
+    min_hypothesis_loss_separation_m: f64,
+    #[serde(default = "default_perforated_min_cutout_rim_correspondences")]
+    min_cutout_rim_correspondences: usize,
+    #[serde(default = "default_perforated_cutout_rim_tolerance_m")]
+    cutout_rim_tolerance_m: f64,
+
+    #[serde(flatten)]
+    tuning: DetectorTuning,
+}
+
+impl DetectorConfig {
+    fn target_side(&self, target: &ValidatedTarget) -> Result<TargetSide> {
+        TargetSide::metres(target.plate().side_um as f64 / 1_000_000.0)
+    }
+
+    fn estimator_tuning(&self, target: &ValidatedTarget) -> Result<TargetPoseEstimatorTuning> {
+        match target.plate().surface {
+            Surface::Solid => Ok(TargetPoseEstimatorTuning::for_solid(
+                SolidRefinementTuning::new(
+                    required_config("solid_edge_band_m", self.solid_edge_band_m)?,
+                    required_config("solid_minimum_edge_points", self.solid_minimum_edge_points)?,
+                    required_config(
+                        "solid_minimum_points_per_covered_edge",
+                        self.solid_minimum_points_per_covered_edge,
+                    )?,
+                    required_config(
+                        "solid_minimum_covered_edges",
+                        self.solid_minimum_covered_edges,
+                    )?,
+                    required_config(
+                        "solid_longitudinal_bins_per_edge",
+                        self.solid_longitudinal_bins_per_edge,
+                    )?,
+                    required_config(
+                        "solid_minimum_occupied_longitudinal_bins",
+                        self.solid_minimum_occupied_longitudinal_bins,
+                    )?,
+                ),
+            )),
+            Surface::Perforated { .. } => Ok(TargetPoseEstimatorTuning::for_perforated(
+                PerforatedIcpConfig::new(
+                    self.max_icp_iterations,
+                    self.icp_outlier_threshold,
+                    self.icp_damping_factor,
+                    self.icp_pose_weight_threshold,
+                    self.icp_rejection_threshold,
+                    self.icp_good_fit_threshold,
+                    self.icp_min_inlier_points,
+                    self.min_hypothesis_loss_separation_m,
+                    self.min_cutout_rim_correspondences,
+                    self.cutout_rim_tolerance_m,
+                ),
+            )),
+        }
+    }
+
+    fn bbox_free_config(&self) -> bbox_free::BboxFreeRaw {
+        bbox_free::BboxFreeRaw {
+            method: self.foreground_method,
+            voxel: self.bbf_voxel,
+            board: self.tuning.clone(),
+            background: bbox_free::BackgroundParams {
+                dilation_radius: self.bg_dilation_radius,
+                warmup_frames: self.bg_warmup_frames,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigSourceKind {
+    New,
+    Legacy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfigSource {
+    kind: ConfigSourceKind,
+    target_config: Option<String>,
+    detector_config: String,
+}
+
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.trim().is_empty())
+}
+
+/// Keep candidate extraction pose-neutral.  In particular, the old stance
+/// floor is not allowed to reject bbox-free evidence before the target-aware
+/// estimator applies its own board-up gate.
+fn neutral_detector_tuning(tuning: &DetectorTuning) -> DetectorTuning {
+    let mut neutral = tuning.clone();
+    neutral.stance_floor = 0.0;
+    neutral
+}
+
+fn required_config<T>(name: &str, value: Option<T>) -> Result<T> {
+    value
+        .ok_or_else(|| anyhow!("Detector Tuning must explicitly provide {name} for a solid target"))
+}
+
+/// Select exactly one configuration contract.  A legacy source always binds
+/// the explicit hollow Target Definition; a legacy pattern file is only a
+/// migration marker and never determines physical geometry.
+fn select_config_source(
+    target_config: Option<&str>,
+    detector_config: Option<&str>,
+    legacy_board_detector_file: Option<&str>,
+    legacy_aruco_pattern_file: Option<&str>,
+) -> Result<ConfigSource> {
+    let target_config = nonempty(target_config);
+    let detector_config = nonempty(detector_config);
+    let legacy_board_detector_file = nonempty(legacy_board_detector_file);
+    let legacy_aruco_pattern_file = nonempty(legacy_aruco_pattern_file);
+    let new_any = target_config.is_some() || detector_config.is_some();
+    let legacy_any = legacy_board_detector_file.is_some() || legacy_aruco_pattern_file.is_some();
+    let new_complete = target_config.is_some() && detector_config.is_some();
+    let legacy_complete =
+        legacy_board_detector_file.is_some() && legacy_aruco_pattern_file.is_some();
+
+    if new_any && legacy_any {
+        return Err(anyhow!(
+            "target_config/detector_config and legacy board_detector_file/aruco_pattern_file cannot be mixed; select one source"
+        ));
+    }
+    if new_any {
+        if !new_complete {
+            return Err(anyhow!(
+                "target_config and detector_config must be supplied together"
+            ));
+        }
+        return Ok(ConfigSource {
+            kind: ConfigSourceKind::New,
+            target_config: Some(
+                target_config
+                    .ok_or_else(|| anyhow!("target_config is required with detector_config"))?
+                    .to_owned(),
+            ),
+            detector_config: detector_config
+                .ok_or_else(|| anyhow!("detector_config is required with target_config"))?
+                .to_owned(),
+        });
+    }
+    if legacy_any {
+        if !legacy_complete {
+            return Err(anyhow!(
+                "board_detector_file and aruco_pattern_file must be supplied together"
+            ));
+        }
+        return Ok(ConfigSource {
+            kind: ConfigSourceKind::Legacy,
+            target_config: None,
+            detector_config: legacy_board_detector_file
+                .ok_or_else(|| anyhow!("board_detector_file is required with aruco_pattern_file"))?
+                .to_owned(),
+        });
+    }
+    Err(anyhow!(
+        "target_config and detector_config are required (or the temporary legacy board_detector_file and aruco_pattern_file pair)"
+    ))
+}
+
+fn target_identity_publisher_options() -> PublisherOptions<'static> {
+    let mut options = PublisherOptions::new(TARGET_IDENTITY_TOPIC);
+    options.qos = QoSProfile {
+        history: QoSHistoryPolicy::KeepLast { depth: 1 },
+        ..QoSProfile::default().reliable().transient_local()
+    };
+    options
+}
+
+fn identity_message(identity: &TargetIdentity) -> CalibrationTargetIdentity {
+    CalibrationTargetIdentity {
+        schema_version: identity.schema_version,
+        target_id: identity.target_id.clone(),
+        revision: identity.revision,
+        semantic_sha256: identity.semantic_sha256.clone(),
+        board_frame_convention: identity.board_frame_convention.clone(),
+    }
 }
 
 /// Debug publishers for board detection debugging
@@ -68,9 +408,6 @@ struct BoardDebugPublishers {
     plane_marker: Arc<Publisher<MarkerArray>>,
     bbox_marker: Arc<Publisher<MarkerArray>>,
     board_marker: Arc<Publisher<MarkerArray>>,
-    board_marker_icp: Arc<Publisher<MarkerArray>>,
-    initial_board_marker: Arc<Publisher<MarkerArray>>,
-    icp_stats: Arc<Publisher<StringMsg>>,
     #[allow(dead_code)]
     pca_eigenvectors: Arc<Publisher<MarkerArray>>,
 }
@@ -81,13 +418,25 @@ struct BoardDebugPublishers {
 /// processing thread, so this is a plain bundle of shared references.
 #[derive(Clone, Copy)]
 struct CallbackContext<'a> {
-    detector: &'a Arc<BoardDetector>,
+    target: &'a Arc<ValidatedTarget>,
+    estimator: &'a Arc<TargetPoseEstimator>,
+    detector_config: &'a DetectorConfig,
     publisher: &'a Publisher<Detection3DArray>,
-    bbox_params: &'a BBoxParameters,
+    bbox_params: &'a Option<BBoxParameters>,
     board_debug_publishers: &'a Option<BoardDebugPublishers>,
-    icp_debug_publishers: &'a Option<IcpDebugPublishers>,
     bbox_free_cfg: &'a Option<Arc<bbox_free::BboxFreeRaw>>,
     background_state: &'a Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
+}
+
+/// Common evidence handoff for bbox and bbox-free selection.
+///
+/// Selection owns which returns are admitted; the estimator owns every pose
+/// interpretation.  Keeping the fitted observation and the raw selected
+/// returns together makes both paths use the same estimator call.
+#[derive(Debug, Clone)]
+struct SelectedEvidence {
+    observation: TargetSquarePlaneObservation,
+    points: Vec<na::Point3<f64>>,
 }
 
 /// ROS parameters for bounding box filter configuration.
@@ -312,41 +661,14 @@ impl BBoxParameters {
     }
 }
 
-/// Identifier for the board-frame convention this node publishes poses in.
-///
-/// The published board pose is the transform from board coordinates to sensor
-/// coordinates, and a camera solver supplies board-local marker coordinates to it — so
-/// the convention appears on BOTH sides of that product. A consumer still using the old
-/// edge-aligned convention produces an in-plane 45-degree error that is undetectable:
-/// the symmetric 2x2 marker grid still solves cleanly with a low reprojection error.
-/// Half of that failure is silent, which is why this is a runtime tag and not a note in
-/// the documentation.
-///
-/// Bump this string only when the meaning of a published board pose changes. The same
-/// identifier is the tag in the saved-detection file format.
-const BOARD_FRAME_CONVENTION: &str = "corner_aligned_plate_center_v1";
-
-/// Topic carrying [`BOARD_FRAME_CONVENTION`].
-///
-/// Deliberately a fixed, absolute topic rather than a node-relative one: the launch
-/// system generates one detector node per sensor-marker pair, so a node-relative name
-/// would couple every consumer to a generated node name. It is published once, latched
-/// (transient-local), so a solver that starts later still receives it.
-///
-/// ABSENCE OF THIS TOPIC MUST BE TREATED AS FAILURE, NOT CONSENT. A solver that starts
-/// before any detector must not read silence as agreement.
-const BOARD_FRAME_CONVENTION_TOPIC: &str = "/lctk/board_frame_convention";
-
 pub struct CalibrationBoardLocatorNode {
     _node: Node,
     _detection_publisher: Publisher<Detection3DArray>,
     _pointcloud_subscription: Subscription<PointCloud2>,
     // Board debug publishers - grouped into a single struct
     _board_debug_publishers: Option<BoardDebugPublishers>,
-    // ICP iteration debug publishers - grouped into a single struct
-    _icp_debug_publishers: Option<IcpDebugPublishers>,
     // BBox parameters (dynamically reconfigurable via ROS parameters)
-    _bbox_params: BBoxParameters,
+    _bbox_params: Option<BBoxParameters>,
     // Processing thread that handles point cloud processing
     _processing_thread: JoinHandle<()>,
     // Shared Method-E background state (kept alive for the processing thread; mutated by
@@ -356,41 +678,77 @@ pub struct CalibrationBoardLocatorNode {
     // Only created (Some) when the bbox_free background-subtraction path is active;
     // `None` in default bbox mode so the service isn't registered unnecessarily.
     _reset_service: Option<rclrs::Service<std_srvs::srv::Empty>>,
-    // Latched board-frame convention tag. Held so the publisher outlives `new()` —
-    // dropping it would drop the transient-local sample with it, and a late-joining
-    // solver would see nothing.
-    _frame_convention_publisher: Publisher<StringMsg>,
+    // Latched Target Identity. Held so the publisher outlives `new()` — dropping
+    // it would drop the transient-local sample and a late solver would see nothing.
+    _target_identity_publisher: Publisher<CalibrationTargetIdentity>,
 }
 
 impl CalibrationBoardLocatorNode {
     pub fn new(node: Node) -> Result<Self> {
-        // Declare parameters with defaults
-        let board_detector_file_param: Arc<str> = node
+        // W5-E1 removes the four compatibility parameters. Until then, exactly
+        // one pair is accepted: target_config + detector_config, or the old
+        // board_detector_file + aruco_pattern_file pair. The latter always means
+        // the explicit hollow target below.
+        let target_config_param: Option<Arc<str>> =
+            node.declare_parameter("target_config").optional()?.get();
+        let detector_config_param: Option<Arc<str>> =
+            node.declare_parameter("detector_config").optional()?.get();
+        let board_detector_file_param: Option<Arc<str>> = node
             .declare_parameter("board_detector_file")
-            .mandatory()?
+            .optional()?
             .get();
-        let aruco_pattern_file_param: Arc<str> = node
+        let aruco_pattern_file_param: Option<Arc<str>> = node
             .declare_parameter("aruco_pattern_file")
-            .mandatory()?
+            .optional()?
             .get();
-        let bbox_file_param: Arc<str> = node.declare_parameter("bbox_file").mandatory()?.get();
+        let source = select_config_source(
+            target_config_param.as_deref(),
+            detector_config_param.as_deref(),
+            board_detector_file_param.as_deref(),
+            aruco_pattern_file_param.as_deref(),
+        )?;
+        // Bbox-free mode has no crop-box input.  Keep the parameter optional so
+        // a target/detector pair can run without an otherwise meaningless file.
+        let bbox_file_param: Option<Arc<str>> =
+            node.declare_parameter("bbox_file").optional()?.get();
 
-        // Load initial bbox config from file
-        log_info!(LOGGER_NAME, "Loading bbox config from: {}", bbox_file_param);
-        let initial_bbox = Self::load_bbox_config(&bbox_file_param)?;
+        let target = Arc::new(match source.kind {
+            ConfigSourceKind::New => {
+                let path = source
+                    .target_config
+                    .as_deref()
+                    .expect("new source always carries target_config");
+                log_info!(LOGGER_NAME, "Loading Target Definition from: {path}");
+                Self::load_target(path)?
+            }
+            ConfigSourceKind::Legacy => {
+                log_warn!(
+                    LOGGER_NAME,
+                    "legacy board_detector_file/aruco_pattern_file is temporary and selects the explicit hollow_1000_aruco_4 target; migrate to target_config/detector_config"
+                );
+                Self::load_legacy_hollow_target()?
+            }
+        });
 
-        // Declare bbox parameters with defaults from the config file
-        // These can be changed at runtime via `ros2 param set`
-        let bbox_params = BBoxParameters::declare(&node, &initial_bbox)?;
-        bbox_params.log_values();
-        log_info!(
-            LOGGER_NAME,
-            "Dynamic bbox params available: bbox_center_x, bbox_center_y, bbox_center_z, bbox_rotation_w, bbox_rotation_x, bbox_rotation_y, bbox_rotation_z, bbox_size_x, bbox_size_y, bbox_size_z"
-        );
-        log_info!(
-            LOGGER_NAME,
-            "Change at runtime with: ros2 param set /lidar_board_detector bbox_size_x <value>"
-        );
+        // Load and declare bbox parameters only when a crop-box file was
+        // supplied. Bbox-free mode remains independent of this state.
+        let bbox_params = if let Some(file_path) = bbox_file_param.as_deref() {
+            log_info!(LOGGER_NAME, "Loading bbox config from: {file_path}");
+            let initial_bbox = Self::load_bbox_config(file_path)?;
+            let params = BBoxParameters::declare(&node, &initial_bbox)?;
+            params.log_values();
+            log_info!(
+                LOGGER_NAME,
+                "Dynamic bbox params available: bbox_center_x, bbox_center_y, bbox_center_z, bbox_rotation_w, bbox_rotation_x, bbox_rotation_y, bbox_rotation_z, bbox_size_x, bbox_size_y, bbox_size_z"
+            );
+            log_info!(
+                LOGGER_NAME,
+                "Change at runtime with: ros2 param set /lidar_board_detector bbox_size_x <value>"
+            );
+            Some(params)
+        } else {
+            None
+        };
 
         // Debug mode parameter (optional, defaults to false)
         let debug_param = node
@@ -423,30 +781,32 @@ impl CalibrationBoardLocatorNode {
             }
         );
 
-        // Load configurations
+        // Load Detector Tuning independently from the Target Definition.
         log_info!(
             LOGGER_NAME,
-            "Loading board detector config from: {}",
-            board_detector_file_param
+            "Loading Detector Tuning from: {}",
+            source.detector_config
         );
-        let board_detector_config = Self::load_board_detector_config(&board_detector_file_param)?;
+        let detector_config = Arc::new(Self::load_detector_config(&source.detector_config)?);
         log_info!(
             LOGGER_NAME,
-            "Loaded board detector config: skip_ransac={}, ransac_threshold={:.3}m, ransac_iterations={}, icp_iterations={}",
-            board_detector_config.skip_ransac,
-            board_detector_config.plane_ransac_inlier_threshold,
-            board_detector_config.plane_ransac_max_iterations,
-            board_detector_config.max_icp_iterations
+            "Loaded Detector Tuning: target={}@{}, skip_ransac={}, ransac_threshold={:.3}m, ransac_iterations={}, detection_mode={}",
+            target.identity().target_id,
+            target.identity().revision,
+            detector_config.skip_ransac,
+            detector_config.plane_ransac_inlier_threshold,
+            detector_config.plane_ransac_max_iterations,
+            detector_config.detection_mode.as_str()
         );
 
         // Log voxel downsampling configuration
-        if board_detector_config.voxel_downsample_enabled {
+        if detector_config.voxel_downsample_enabled {
             log_info!(
                 LOGGER_NAME,
                 "Voxel downsampling ENABLED: size={:.3}m, use_centroid={}, parallel_threshold={}",
-                board_detector_config.voxel_downsample_size,
-                board_detector_config.voxel_downsample_use_centroid,
-                board_detector_config.voxel_parallel_threshold
+                detector_config.voxel_downsample_size,
+                detector_config.voxel_downsample_use_centroid,
+                detector_config.voxel_parallel_threshold
             );
         } else {
             log_info!(
@@ -455,15 +815,17 @@ impl CalibrationBoardLocatorNode {
             );
         }
 
-        // Crop-box-free detection config (same file, separate typed view).
-        let detection_text = fs::read_to_string(PathBuf::from(&*board_detector_file_param))?;
-        let detection_cfg = bbox_free::parse_detection_config(&detection_text)?;
-        let detection_mode = detection_cfg.detection_mode;
+        // Crop-box-free selection uses the same Detector Tuning values, but owns
+        // its foreground/background lifecycle in this ROS adapter.
+        let detection_mode = detector_config.detection_mode;
+        if detection_mode == bbox_free::DetectionMode::Bbox && bbox_params.is_none() {
+            return Err(anyhow!(
+                "bbox_file is required when detector_config selects detection_mode=bbox"
+            ));
+        }
         let bbox_free_cfg: Option<Arc<bbox_free::BboxFreeRaw>> = match detection_mode {
             bbox_free::DetectionMode::BboxFree => {
-                // Detector params are flat in the config; bundle them.
-                // foreground_method was validated by serde at parse time.
-                Some(Arc::new(detection_cfg.into_bbox_free()))
+                Some(Arc::new(detector_config.bbox_free_config()))
             }
             bbox_free::DetectionMode::Bbox => None,
         };
@@ -509,18 +871,10 @@ impl CalibrationBoardLocatorNode {
             None
         };
 
-        log_info!(
-            LOGGER_NAME,
-            "Loading ArUco pattern config from: {}",
-            aruco_pattern_file_param
-        );
-        let aruco_pattern_config = Self::load_aruco_pattern_config(&aruco_pattern_file_param)?;
-
-        // Create detector
-        let detector = Arc::new(BoardDetector::new(
-            board_detector_config,
-            aruco_pattern_config,
-        ));
+        let estimator = Arc::new(TargetPoseEstimator::new(
+            &target,
+            detector_config.estimator_tuning(&target)?,
+        )?);
 
         // Create publisher for detections with QoS matching the mode
         // - BEST_EFFORT (realtime): Low latency, may drop messages
@@ -540,22 +894,17 @@ impl CalibrationBoardLocatorNode {
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
 
-        // Announce which board-frame convention these detections are expressed in.
-        // Latched and published once: the value never changes for a running node.
-        let mut frame_convention_opts = PublisherOptions::new(BOARD_FRAME_CONVENTION_TOPIC);
-        frame_convention_opts.qos = QoSProfile {
-            history: QoSHistoryPolicy::KeepLast { depth: 1 },
-            ..QoSProfile::default().transient_local()
-        };
-        let frame_convention_publisher: Publisher<StringMsg> =
-            node.create_publisher(frame_convention_opts)?;
-        frame_convention_publisher.publish(StringMsg {
-            data: BOARD_FRAME_CONVENTION.to_string(),
-        })?;
+        // Announce the complete Target Identity, not a process-global frame
+        // convention. Relative routing lets each generated observer have one
+        // unambiguous identity topic.
+        let target_identity_publisher =
+            node.create_publisher(target_identity_publisher_options())?;
+        target_identity_publisher.publish(identity_message(target.identity()))?;
         log_info!(
             LOGGER_NAME,
-            "Publishing board poses in frame convention '{BOARD_FRAME_CONVENTION}' \
-             (latched on {BOARD_FRAME_CONVENTION_TOPIC})"
+            "Publishing target identity {}@{} (latched on {TARGET_IDENTITY_TOPIC})",
+            target.identity().target_id,
+            target.identity().revision
         );
 
         // Create board debug publishers if debug mode is enabled
@@ -599,15 +948,6 @@ impl CalibrationBoardLocatorNode {
             let mut board_marker_opts = PublisherOptions::new("debug/final_board_pose");
             board_marker_opts.qos = debug_qos;
 
-            let mut board_marker_icp_opts = PublisherOptions::new("debug/icp_iterations");
-            board_marker_icp_opts.qos = debug_qos;
-
-            let mut initial_board_marker_opts = PublisherOptions::new("debug/initial_board_marker");
-            initial_board_marker_opts.qos = debug_qos;
-
-            let mut icp_stats_opts = PublisherOptions::new("debug/icp_stats");
-            icp_stats_opts.qos = debug_qos;
-
             let mut pca_eigenvectors_opts = PublisherOptions::new("debug/pca_eigenvectors");
             pca_eigenvectors_opts.qos = debug_qos;
 
@@ -622,9 +962,6 @@ impl CalibrationBoardLocatorNode {
                 plane_marker: Arc::new(node.create_publisher(plane_marker_opts)?),
                 bbox_marker: Arc::new(node.create_publisher(bbox_marker_opts)?),
                 board_marker: Arc::new(node.create_publisher(board_marker_opts)?),
-                board_marker_icp: Arc::new(node.create_publisher(board_marker_icp_opts)?),
-                initial_board_marker: Arc::new(node.create_publisher(initial_board_marker_opts)?),
-                icp_stats: Arc::new(node.create_publisher(icp_stats_opts)?),
                 pca_eigenvectors: Arc::new(node.create_publisher(pca_eigenvectors_opts)?),
             })
         } else {
@@ -632,46 +969,12 @@ impl CalibrationBoardLocatorNode {
         };
         let board_debug_shared = board_debug_publishers.clone();
 
-        // ICP iteration debug publishers - grouped into single struct
-        let icp_debug_publishers = if enable_icp_iteration_debug {
-            log_info!(
+        if enable_icp_iteration_debug {
+            log_warn!(
                 LOGGER_NAME,
-                "ICP iteration debug mode enabled - creating iteration debug publishers with best-effort QoS"
+                "enable_icp_iteration_debug is ignored: target pose diagnostics are owned by the neutral estimator"
             );
-
-            // Create best-effort QoS profile with depth=1 (latest only, no queue buildup)
-            let mut icp_debug_qos = QoSProfile::sensor_data_default();
-            icp_debug_qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 };
-
-            let mut iteration_pose_opts =
-                PublisherOptions::new("/calibration/icp_debug/iteration_pose");
-            iteration_pose_opts.qos = icp_debug_qos;
-
-            let mut board_points_opts =
-                PublisherOptions::new("/calibration/icp_debug/board_points");
-            board_points_opts.qos = icp_debug_qos;
-
-            let mut correspondences_opts =
-                PublisherOptions::new("/calibration/icp_debug/correspondences");
-            correspondences_opts.qos = icp_debug_qos;
-
-            let mut loss_opts = PublisherOptions::new("/calibration/icp_debug/loss");
-            loss_opts.qos = icp_debug_qos;
-
-            let mut stats_opts = PublisherOptions::new("/calibration/icp_debug/stats");
-            stats_opts.qos = icp_debug_qos;
-
-            Some(IcpDebugPublishers {
-                iteration_pose: Arc::new(node.create_publisher(iteration_pose_opts)?),
-                board_points: Arc::new(node.create_publisher(board_points_opts)?),
-                correspondences: Arc::new(node.create_publisher(correspondences_opts)?),
-                loss: Arc::new(node.create_publisher(loss_opts)?),
-                stats: Arc::new(node.create_publisher(stats_opts)?),
-            })
-        } else {
-            None
-        };
-        let icp_debug_shared = icp_debug_publishers.clone();
+        }
 
         // Configure QoS for sensor input topics
         let qos_profile = if use_best_effort_qos {
@@ -688,6 +991,9 @@ impl CalibrationBoardLocatorNode {
 
         // Clone bbox params for processing thread
         let bbox_params_for_callback = bbox_params.clone();
+        let target_for_thread = Arc::clone(&target);
+        let estimator_for_thread = Arc::clone(&estimator);
+        let detector_config_for_thread = Arc::clone(&detector_config);
 
         // Clone crop-box-free config/state for processing thread
         let bbox_free_for_thread = bbox_free_cfg.clone();
@@ -721,11 +1027,12 @@ impl CalibrationBoardLocatorNode {
         let processing_thread = std::thread::spawn(move || {
             let mut processed_count: u64 = 0;
             let ctx = CallbackContext {
-                detector: &detector,
+                target: &target_for_thread,
+                estimator: &estimator_for_thread,
+                detector_config: &detector_config_for_thread,
                 publisher: &detection_publisher_shared,
                 bbox_params: &bbox_params_for_callback,
                 board_debug_publishers: &board_debug_shared,
-                icp_debug_publishers: &icp_debug_shared,
                 bbox_free_cfg: &bbox_free_for_thread,
                 background_state: &background_for_thread,
             };
@@ -786,14 +1093,7 @@ impl CalibrationBoardLocatorNode {
             );
             log_info!(
                 LOGGER_NAME,
-                "Debug topics: debug/all_points, debug/filtered_points, debug/foreground_points (bbox_free), debug/background_voxels (bbox_free), debug/rejected_cluster (bbox_free), debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/icp_iterations, debug/initial_board_marker, debug/icp_stats, debug/pca_eigenvectors"
-            );
-        }
-
-        if enable_icp_iteration_debug {
-            log_info!(
-                LOGGER_NAME,
-                "ICP iteration debug topics: /calibration/icp_debug/iteration_pose, /calibration/icp_debug/board_points, /calibration/icp_debug/correspondences, /calibration/icp_debug/loss, /calibration/icp_debug/stats"
+                "Debug topics: debug/all_points, debug/filtered_points, debug/foreground_points (bbox_free), debug/background_voxels (bbox_free), debug/rejected_cluster (bbox_free), debug/plane_inliers, debug/plane_marker, debug/bbox_marker, debug/final_board_pose, debug/pca_eigenvectors"
             );
         }
 
@@ -802,19 +1102,18 @@ impl CalibrationBoardLocatorNode {
             _detection_publisher: detection_publisher,
             _pointcloud_subscription: pointcloud_subscription,
             _board_debug_publishers: board_debug_publishers,
-            _icp_debug_publishers: icp_debug_publishers,
             _bbox_params: bbox_params,
             _processing_thread: processing_thread,
             _background_state: background_state,
             _reset_service: reset_service,
-            _frame_convention_publisher: frame_convention_publisher,
+            _target_identity_publisher: target_identity_publisher,
         })
     }
 
-    fn load_board_detector_config(file_path: &str) -> Result<BoardDetectorConfig> {
+    fn load_detector_config(file_path: &str) -> Result<DetectorConfig> {
         if file_path.is_empty() {
             return Err(anyhow!(
-                "board_detector_file parameter is required but was empty"
+                "detector_config (or legacy board_detector_file) was empty"
             ));
         }
 
@@ -822,15 +1121,16 @@ impl CalibrationBoardLocatorNode {
         Self::load_json5_file(&path)
     }
 
-    fn load_aruco_pattern_config(file_path: &str) -> Result<MultiArucoPattern> {
+    fn load_target(file_path: &str) -> Result<ValidatedTarget> {
         if file_path.is_empty() {
-            return Err(anyhow!(
-                "aruco_pattern_file parameter is required but was empty"
-            ));
+            return Err(anyhow!("target_config parameter was empty"));
         }
+        let bytes = fs::read(file_path)?;
+        ValidatedTarget::parse_json5(&bytes)
+    }
 
-        let path = PathBuf::from(file_path);
-        Self::load_json5_file(&path)
+    fn load_legacy_hollow_target() -> Result<ValidatedTarget> {
+        ValidatedTarget::parse_json5(LEGACY_HOLLOW_TARGET)
     }
 
     fn load_bbox_config(file_path: &str) -> Result<BBox> {
@@ -853,11 +1153,12 @@ impl CalibrationBoardLocatorNode {
 
     fn pointcloud_callback(msg: PointCloud2, ctx: &CallbackContext<'_>) {
         let CallbackContext {
-            detector,
+            target,
+            estimator,
+            detector_config,
             publisher,
             bbox_params,
             board_debug_publishers,
-            icp_debug_publishers,
             bbox_free_cfg,
             background_state,
         } = *ctx;
@@ -889,10 +1190,11 @@ impl CalibrationBoardLocatorNode {
 
         let result = Self::process_pointcloud(
             &msg,
-            detector,
+            target,
+            estimator,
+            detector_config,
             bbox_params,
             board_debug_publishers,
-            icp_debug_publishers,
             bbox_free_cfg,
             background_state,
         );
@@ -917,331 +1219,152 @@ impl CalibrationBoardLocatorNode {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_pointcloud(
         msg: &PointCloud2,
-        detector: &Arc<BoardDetector>,
-        bbox_params: &BBoxParameters,
+        target: &Arc<ValidatedTarget>,
+        estimator: &Arc<TargetPoseEstimator>,
+        detector_config: &DetectorConfig,
+        bbox_params: &Option<BBoxParameters>,
         board_debug_publishers: &Option<BoardDebugPublishers>,
-        icp_debug_publishers: &Option<IcpDebugPublishers>,
         bbox_free_cfg: &Option<Arc<bbox_free::BboxFreeRaw>>,
         background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
     ) -> Result<Detection3DArray> {
-        // Convert PointCloud2 to nalgebra points
-        let points = {
-            let points = match Self::convert_pointcloud2_to_points(msg) {
-                Ok(pts) => pts,
-                Err(e) => {
-                    log_warn!(LOGGER_NAME, "Failed to convert point cloud: {e}");
-                    return Err(e);
-                }
-            };
+        let points = Self::convert_pointcloud2_to_points(msg)?;
+        log_debug!(
+            LOGGER_NAME,
+            "Converted {} points from PointCloud2",
+            points.len()
+        );
 
-            log_debug!(
-                LOGGER_NAME,
-                "Converted {} points from PointCloud2",
-                points.len()
-            );
+        if let Some(debug_pubs) = board_debug_publishers {
+            Self::publish_debug_cloud(&debug_pubs.all_points, &points, &msg.header, "all points");
+        }
 
-            // Publish debug all points if enabled
-            if let Some(debug_pubs) = board_debug_publishers {
-                log_debug!(
-                    LOGGER_NAME,
-                    "Publishing {} points to debug/all_points",
-                    points.len()
-                );
-                let debug_cloud = Self::create_debug_pointcloud(&points, &msg.header)?;
-                if let Err(e) = debug_pubs.all_points.publish(debug_cloud) {
-                    log_warn!(LOGGER_NAME, "Failed to publish debug all points: {e}");
-                }
-            }
-
-            points
-        };
-
-        // Stage 1: select the board cluster — bbox crop (default) or crop-box-free detector.
-        let active_points = match bbox_free_cfg {
+        // Both selectors now hand the estimator one neutral square/plane
+        // observation. The bbox path performs the same known-size square fit
+        // explicitly; bbox-free obtains it from detect_for_target.
+        let selected = match bbox_free_cfg {
             None => {
-                // Existing bounding-box path, unchanged.
-                Self::filter_points_by_bbox(
+                let bbox = bbox_params
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("bbox_file is required for bbox detection mode"))?;
+                let active_points = Self::filter_points_by_bbox(
                     &points,
-                    bbox_params,
+                    bbox,
+                    &msg.header,
+                    board_debug_publishers,
+                )?;
+                Self::select_bbox_evidence(
+                    &active_points,
+                    target,
+                    detector_config,
                     &msg.header,
                     board_debug_publishers,
                 )?
             }
-            Some(bf) => {
-                match Self::select_board_cluster(
-                    &points,
-                    bf,
-                    background_state,
-                    &msg.header,
-                    board_debug_publishers,
-                )? {
-                    Some(pts) => pts,
-                    None => {
-                        return Ok(Detection3DArray {
-                            header: msg.header.clone(),
-                            detections: Vec::new(),
-                        });
-                    }
-                }
-            }
+            Some(bf) => Self::select_board_cluster(
+                &points,
+                target,
+                bf,
+                background_state,
+                detector_config.sensor_up_axis.as_vector(),
+                &msg.header,
+                board_debug_publishers,
+            )?,
+        };
+        let Some(selected) = selected else {
+            return Ok(Detection3DArray {
+                header: msg.header.clone(),
+                detections: Vec::new(),
+            });
         };
 
-        if active_points.is_empty() {
-            log_debug!(
-                LOGGER_NAME,
-                "Stage 1 produced no points - continuing with empty detection"
+        let evidence_points = if detector_config.voxel_downsample_enabled {
+            let downsampled = Self::voxel_downsample(
+                &selected.points,
+                detector_config.voxel_downsample_size,
+                detector_config.voxel_downsample_use_centroid,
             );
+            if let Some(debug_pubs) = board_debug_publishers {
+                Self::publish_debug_cloud(
+                    &debug_pubs.downsampled_points,
+                    &downsampled,
+                    &msg.header,
+                    "downsampled points",
+                );
+            }
+            downsampled
+        } else {
+            selected.points
+        };
+
+        if evidence_points.is_empty() {
             return Ok(Detection3DArray {
                 header: msg.header.clone(),
                 detections: Vec::new(),
             });
         }
 
-        // Stage 2: RANSAC plane detection (or skip if configured)
-        let (plane_model, plane_inlier_points) = if detector.config().skip_ransac {
-            // Skip RANSAC and use all bbox-filtered points directly
-            log_debug!(
-                LOGGER_NAME,
-                "RANSAC skipped (skip_ransac=true), using all {} bbox-filtered points for ICP",
-                active_points.len()
-            );
-
-            // Create a simple plane model using PCA on all points
-            let plane_model = Self::compute_plane_from_points(&active_points)?;
-
-            // Publish debug info showing we're using all points
-            if let Some(debug_pubs) = board_debug_publishers {
-                log_debug!(
+        let estimate = estimator.estimate(selected.observation, evidence_points.clone());
+        let detection = match estimate {
+            TargetPoseEstimate::Detected(detection) => {
+                log_info!(
                     LOGGER_NAME,
-                    "Publishing {} bbox-filtered points to debug/plane_inliers (RANSAC skipped)",
-                    active_points.len()
+                    "Target detection successful: target={}@{}, pose=({:.6}, {:.6}, {:.6})",
+                    detection.target_identity.target_id,
+                    detection.target_identity.revision,
+                    detection.pose.translation.x,
+                    detection.pose.translation.y,
+                    detection.pose.translation.z
                 );
-                let debug_cloud = Self::create_debug_pointcloud(&active_points, &msg.header)?;
-                if let Err(e) = debug_pubs.plane_inliers.publish(debug_cloud) {
-                    log_warn!(LOGGER_NAME, "Failed to publish debug plane inliers: {e}");
+                if let Some(debug_pubs) = board_debug_publishers {
+                    let markers =
+                        Self::create_target_markers(target, detection.pose, &msg.header, "", 0)?;
+                    debug_pubs.board_marker.publish(markers)?;
                 }
+                Some(Self::convert_target_detection_to_detection3d(
+                    target,
+                    &detection,
+                    &evidence_points,
+                    &msg.header,
+                )?)
             }
-
-            (plane_model, active_points.clone())
-        } else {
-            // Normal RANSAC plane detection
-            match Self::detect_plane_ransac(
-                detector,
-                &active_points,
-                &msg.header,
-                board_debug_publishers,
-            )? {
-                Some(result) => result,
-                None => {
-                    log_debug!(
-                        LOGGER_NAME,
-                        "RANSAC plane detection failed - no valid plane found"
-                    );
-                    return Ok(Detection3DArray {
-                        header: msg.header.clone(),
-                        detections: Vec::new(),
-                    });
+            TargetPoseEstimate::Rejected(rejection) => {
+                Self::log_rejection(&rejection.reason, &rejection.target_identity);
+                if let Some(debug_pubs) = board_debug_publishers {
+                    debug_pubs.board_marker.publish(MarkerArray::default())?;
                 }
+                None
             }
         };
 
-        // Stage 3a: Voxel downsampling (optional preprocessing)
-        log_debug!(
-            LOGGER_NAME,
-            "Plane inlier points before voxel downsampling: {} points",
-            plane_inlier_points.len()
-        );
-
-        let config = detector.config();
-        let downsampled_points = if config.voxel_downsample_enabled {
-            let downsampled = voxel_downsample(
-                &plane_inlier_points,
-                config.voxel_downsample_size,
-                config.voxel_downsample_use_centroid,
-                config.voxel_parallel_threshold,
-            );
-
-            let reduction_pct =
-                (1.0 - downsampled.len() as f64 / plane_inlier_points.len() as f64) * 100.0;
-            log_debug!(
-                LOGGER_NAME,
-                "Voxel downsampling: {} → {} points ({:.1}% reduction)",
-                plane_inlier_points.len(),
-                downsampled.len(),
-                reduction_pct
-            );
-
-            // Publish downsampled points for visualization
-            if let Some(debug_pubs) = board_debug_publishers {
-                match Self::create_debug_pointcloud(&downsampled, &msg.header) {
-                    Ok(downsampled_cloud) => {
-                        if let Err(e) = debug_pubs.downsampled_points.publish(downsampled_cloud) {
-                            log_warn!(LOGGER_NAME, "Failed to publish downsampled points: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        log_warn!(LOGGER_NAME, "Failed to create downsampled pointcloud: {e}");
-                    }
-                }
-            }
-
-            downsampled
-        } else {
-            log_debug!(
-                LOGGER_NAME,
-                "Voxel downsampling disabled - using all {} plane inlier points",
-                plane_inlier_points.len()
-            );
-            plane_inlier_points.clone()
-        };
-
-        log_debug!(
-            LOGGER_NAME,
-            "Points for ICP: {} points",
-            downsampled_points.len()
-        );
-
-        // Stage 3b: ICP board pose refinement
-        log_debug!(
-            LOGGER_NAME,
-            "Starting ICP board detection with {} points",
-            downsampled_points.len()
-        );
-
-        let detection: Option<BoardDetection> = Self::detect_icp(
-            detector,
-            &plane_model,
-            &downsampled_points,
-            PlaneRansacData {
-                plane_model: plane_model.clone(),
-                inlier_points: downsampled_points.clone(),
-            },
-            &msg.header,
-            icp_debug_publishers,
-            board_debug_publishers,
-        );
-
-        let mut detections = Vec::new();
-        if let Some(det) = detection {
-            // Log ICP result to service logs
-            let final_loss = det
-                .icp_losses
-                .iter()
-                .copied()
-                .min_by(|a, b| a.total_cmp(b))
-                .unwrap_or(0.0);
-
-            log_info!(
-                LOGGER_NAME,
-                "FINAL ICP RESULT: pose=({:.6}, {:.6}, {:.6}, {:.6}, {:.6}, {:.6}), loss={:.6}",
-                det.board_model.pose.translation.x,
-                det.board_model.pose.translation.y,
-                det.board_model.pose.translation.z,
-                det.board_model.pose.rotation.i,
-                det.board_model.pose.rotation.j,
-                det.board_model.pose.rotation.k,
-                final_loss
-            );
-
-            // Publish initial board pose markers if enabled
-            if let Some(debug_pubs) = board_debug_publishers {
-                // Create board markers using the initial pose before ICP refinement
-                let initial_board_model = hollow_board_config::BoardModel {
-                    pose: det.initial_pose,
-                    board_shape: det.board_model.board_shape.clone(),
-                    marker_paper_size: det.board_model.marker_paper_size,
-                    marker_paper_placement: det.board_model.marker_paper_placement,
-                };
-                if let Ok(initial_markers) =
-                    Self::create_board_markers_from_model(&initial_board_model, &msg.header)
-                {
-                    let _ = debug_pubs.initial_board_marker.publish(initial_markers);
-                    log_debug!(LOGGER_NAME, "Published initial board pose markers");
-                }
-            }
-
-            // Publish ICP statistics if enabled
-            if let Some(debug_pubs) = board_debug_publishers {
-                let stats_msg = StringMsg {
-                        data: format!(
-                            "ICP Stats - Iterations: {}, Initial Loss: {:.6}, Final Loss: {:.6}, Min Loss: {:.6}, Successful: {}, Convergence: {}",
-                            det.icp_stats.iterations,
-                            det.icp_stats.initial_loss,
-                            det.icp_stats.final_loss,
-                            det.icp_stats.min_loss,
-                            det.icp_stats.successful,
-                            det.icp_stats.convergence_reason
-                        ),
-                    };
-                let _ = debug_pubs.icp_stats.publish(stats_msg);
-                log_debug!(
-                    LOGGER_NAME,
-                    "Published ICP statistics: {} iterations, final loss: {:.6}",
-                    det.icp_stats.iterations,
-                    det.icp_stats.final_loss
-                );
-            }
-
-            // Create board markers (cube + axes) using the pose returned by algo.rs and publish them if enabled
-            if let Some(debug_pubs) = board_debug_publishers {
-                let marker_array = Self::create_board_markers(&det, &msg.header)?;
-                let marker_count = marker_array.markers.len();
-                if let Err(e) = debug_pubs.board_marker.publish(marker_array) {
-                    log_warn!(LOGGER_NAME, "Failed to publish board marker array: {e}");
-                } else {
-                    log_debug!(
-                        LOGGER_NAME,
-                        "Published final board pose markers with {} markers",
-                        marker_count
-                    );
-                }
-            }
-
-            let detection_3d = Self::convert_board_detection_to_detection3d(&det, &msg.header)?;
-            detections.push(detection_3d);
-        } else {
-            log_debug!(LOGGER_NAME, "Detection returned None - board not found");
-
-            // Publish empty marker array to ensure topic is active for debugging
-            if let Some(debug_pubs) = board_debug_publishers {
-                let marker_array = MarkerArray::default();
-                if let Err(e) = debug_pubs.board_marker.publish(marker_array) {
-                    log_warn!(
-                        LOGGER_NAME,
-                        "Failed to publish empty board marker array: {e}"
-                    );
-                }
-            }
-        }
-
-        let num_detections = detections.len();
-        let detection_array = Detection3DArray {
+        Ok(Detection3DArray {
             header: msg.header.clone(),
-            detections,
-        };
-
-        log_debug!(
-            LOGGER_NAME,
-            "Completed processing with {} detections",
-            num_detections
-        );
-        Ok(detection_array)
+            detections: detection.into_iter().collect(),
+        })
     }
 
-    /// Crop-box-free Stage 1: returns the detector's selected board-cluster points,
-    /// or `None` to publish an empty detection (still warming, or nothing selected).
+    /// Crop-box-free Stage 1: return one target-neutral square/plane
+    /// observation, or `None` while warming/no candidate was selected.
     fn select_board_cluster(
         points: &[na::Point3<f64>],
+        target: &ValidatedTarget,
         bf: &bbox_free::BboxFreeRaw,
         background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
+        sensor_up: na::Vector3<f64>,
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
-    ) -> Result<Option<Vec<na::Point3<f64>>>> {
-        use board_cluster_detector::{config::ForegroundMethod, detector::detect};
-
+    ) -> Result<Option<SelectedEvidence>> {
         let method = bf.method;
+        let target_side = TargetSide::metres(target.plate().side_um as f64 / 1_000_000.0)?;
+
+        // `detect_for_target` must return neutral square/plane evidence.  A
+        // stance threshold is a legacy pose gate and belongs to
+        // `TargetPoseEstimator`, where the selected target's board-up
+        // convention is available; it must not make bbox-free selection differ
+        // from bbox selection.
+        let neutral_tuning = neutral_detector_tuning(&bf.board);
 
         // Cell centers of the finalized background model, captured under the lock
         // for debug publishing once the guard is released. None for plane_strip.
@@ -1263,18 +1386,23 @@ impl CalibrationBoardLocatorNode {
                 bbox_free::WarmupOutcome::Ready => {
                     let model = state.model().expect("Ready implies a finalized model");
                     background_centers = Some(model.voxel_centers());
-                    detect(points, &bf.board, method, bf.voxel, Some(model))
+                    detect_for_target(
+                        points,
+                        target_side,
+                        &neutral_tuning,
+                        method,
+                        bf.voxel,
+                        Some(model),
+                    )
                 }
             }
         } else {
             // Method B (plane_strip): no background.
-            detect(points, &bf.board, method, bf.voxel, None)
+            detect_for_target(points, target_side, &neutral_tuning, method, bf.voxel, None)
         };
 
         // Publish the finalized background voxel centers so the "static scene"
-        // baked in during warmup is visible in RViz (diagnoses a warmup that
-        // absorbed the board). Static once Ready; republished each frame so the
-        // display is populated whenever the operator adds it.
+        // baked in during warmup is visible in RViz.
         if let (Some(debug_pubs), Some(centers)) = (board_debug_publishers, &background_centers) {
             Self::publish_debug_cloud(
                 &debug_pubs.background_voxels,
@@ -1285,17 +1413,12 @@ impl CalibrationBoardLocatorNode {
         }
 
         if let Some(debug_pubs) = board_debug_publishers {
-            // The RAW foreground (points before clustering/merge/gate), visible
-            // independently of the downstream RANSAC plane_inliers, which only
-            // appears AFTER a board is selected.
             Self::publish_debug_cloud(
                 &debug_pubs.foreground_points,
                 &outcome.foreground_points,
                 header,
                 "foreground points",
             );
-            // The furthest-progressed rejected candidate (empty on a successful
-            // frame) — lets the operator see the cluster that failed the gates.
             Self::publish_debug_cloud(
                 &debug_pubs.rejected_cluster,
                 &outcome.rejected_cluster,
@@ -1304,36 +1427,49 @@ impl CalibrationBoardLocatorNode {
             );
         }
 
-        match outcome.selected_points {
-            Some(pts) if !pts.is_empty() => Ok(Some(pts)),
-            _ => {
-                match &outcome.reject {
-                    // Include the measured value, the threshold it missed, and the unit,
-                    // so tuning is data-driven instead of trial-and-error.
-                    Some(reason) => match outcome.reject_detail {
-                        Some(d) => log_info!(
-                            LOGGER_NAME,
-                            "bbox_free: no board selected — {}; measured={:.4} vs threshold={:.4} [{}]; candidates={}, foreground_pts={}",
-                            bbox_free::describe_reject(reason),
-                            d.measured,
-                            d.threshold,
-                            bbox_free::reject_unit(reason),
-                            outcome.n_candidates,
-                            outcome.foreground_points.len()
-                        ),
-                        None => log_info!(
-                            LOGGER_NAME,
-                            "bbox_free: no board selected — {}; candidates={}, foreground_pts={}",
-                            bbox_free::describe_reject(reason),
-                            outcome.n_candidates,
-                            outcome.foreground_points.len()
-                        ),
-                    },
-                    None => log_info!(LOGGER_NAME, "bbox_free: no board selected (no reject reason)"),
-                }
-                Ok(None)
+        let Some(square_plane) = outcome.observation else {
+            match &outcome.reject {
+                Some(reason) => match outcome.reject_detail {
+                    Some(d) => log_info!(
+                        LOGGER_NAME,
+                        "bbox_free: no board selected — {}; measured={:.4} vs threshold={:.4} [{}]; candidates={}, foreground_pts={}",
+                        bbox_free::describe_reject(reason),
+                        d.measured,
+                        d.threshold,
+                        bbox_free::reject_unit(reason),
+                        outcome.n_candidates,
+                        outcome.foreground_points.len()
+                    ),
+                    None => log_info!(
+                        LOGGER_NAME,
+                        "bbox_free: no board selected — {}; candidates={}, foreground_pts={}",
+                        bbox_free::describe_reject(reason),
+                        outcome.n_candidates,
+                        outcome.foreground_points.len()
+                    ),
+                },
+                None => log_info!(LOGGER_NAME, "bbox_free: no board selected (no reject reason)"),
             }
+            return Ok(None);
+        };
+
+        if square_plane.points.is_empty() {
+            return Ok(None);
         }
+        let observation =
+            TargetSquarePlaneObservation::from_square_plane(&square_plane, sensor_up)?;
+        if let Some(debug_pubs) = board_debug_publishers {
+            Self::publish_debug_cloud(
+                &debug_pubs.plane_inliers,
+                &square_plane.points,
+                header,
+                "plane inliers",
+            );
+        }
+        Ok(Some(SelectedEvidence {
+            points: square_plane.points.clone(),
+            observation,
+        }))
     }
 
     // Stage 1: Bounding box filter
@@ -1420,511 +1556,184 @@ impl CalibrationBoardLocatorNode {
         Ok(active_points)
     }
 
-    // Stage 2: RANSAC plane detection
-    fn detect_plane_ransac(
-        detector: &Arc<BoardDetector>,
+    /// Bbox-selected Stage 1 after the crop-box selector.  Bbox filtering is
+    /// only a selector; this adapter must still produce the same fixed-size
+    /// square/plane observation as the bbox-free detector before entering the
+    /// estimator seam.  Keeping this pure over already-selected points also
+    /// makes the legacy hollow point-cloud handoff regression-testable without
+    /// constructing a ROS node just to hold dynamic bbox parameters.
+    fn select_bbox_evidence(
         active_points: &[na::Point3<f64>],
+        target: &ValidatedTarget,
+        detector_config: &DetectorConfig,
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
-    ) -> Result<Option<(PlaneModel, Vec<na::Point3<f64>>)>> {
-        let config = detector.config();
-
-        // Fit plane using RANSAC
-        let plane_fit = match fit_plane_ransac(config, active_points) {
-            Ok(Some(fit)) => fit,
-            Ok(None) => {
-                log_warn!(LOGGER_NAME, "Plane fitting failed - no valid plane found");
-                return Ok(None);
-            }
-            Err(e) => {
-                log_warn!(LOGGER_NAME, "Plane fitting error: {e}");
-                return Err(e);
-            }
-        };
-
-        let plane_model = plane_fit.plane_model;
-        let plane_inlier_points: Vec<na::Point3<f64>> =
-            plane_fit.inlier_points.iter().map(|p| **p).collect();
-
-        log_debug!(
-            LOGGER_NAME,
-            "RANSAC plane detection successful: {} inlier points found",
-            plane_inlier_points.len()
-        );
-
-        // Publish debug plane inliers immediately after RANSAC success
-        if let Some(debug_pubs) = board_debug_publishers {
-            match Self::create_debug_pointcloud(&plane_inlier_points, header) {
-                Ok(plane_inliers_msg) => {
-                    let _ = debug_pubs.plane_inliers.publish(plane_inliers_msg);
-                    log_debug!(
-                        LOGGER_NAME,
-                        "Published {} plane inlier points to debug/plane_inliers after RANSAC",
-                        plane_inlier_points.len()
-                    );
-                }
-                Err(e) => {
-                    log_warn!(LOGGER_NAME, "Failed to create plane inliers message: {e}");
-                }
-            }
-        }
-
-        Ok(Some((plane_model, plane_inlier_points)))
-    }
-
-    // Stage 3: ICP board pose refinement
-    fn detect_icp(
-        detector: &Arc<BoardDetector>,
-        plane_model: &PlaneModel,
-        plane_inlier_points: &[na::Point3<f64>],
-        ransac_data: PlaneRansacData,
-        header: &Header,
-        icp_debug_publishers: &Option<IcpDebugPublishers>,
-        board_debug_publishers: &Option<BoardDebugPublishers>,
-    ) -> Option<BoardDetection> {
-        log_debug!(LOGGER_NAME, "Starting ICP board pose refinement");
-
-        // Check if we have enough inlier points
-        if plane_inlier_points.is_empty() {
-            log_warn!(LOGGER_NAME, "No plane inlier points available for ICP");
-            return None;
-        }
-
-        // Extract detector configuration and aruco pattern
-        let config = detector.config();
-        let aruco_pattern = detector.aruco_pattern();
-
-        // Extract board shape and marker paper size
-        let BoardDetectorConfig {
-            board_shape:
-                BoardShape {
-                    board_width,
-                    hole_radius,
-                    hole_center_shift,
-                },
-            ..
-        } = *config;
-        let marker_paper_size = aruco_pattern.paper_size();
-
-        // Create BoardModelParams
-        let board_model_params = BoardModelParams {
-            board_shape: BoardShape {
-                board_width,
-                hole_radius,
-                hole_center_shift,
-            },
-            marker_paper_size,
-            // The paper's placement is a measurement of the physical board, so it comes
-            // from the ArUco pattern config. Configs that predate the field fall back to
-            // the placement this code has always implied.
-            marker_paper_placement: aruco_pattern.paper_placement.unwrap_or_else(|| {
-                MarkerPaperPlacement::flush_with_bottom_corner(board_width, marker_paper_size)
-            }),
-        };
-
-        // Step 3: Create initial pose using plane normal-based alignment
-        let initial_pose = Self::compute_initial_pose_from_plane(
-            plane_model,
-            plane_inlier_points,
-            &config.sensor_up_axis,
-            config.initial_inplane_rotation_deg,
-            header,
-            board_debug_publishers,
-        )?;
-
-        // Publish initial board pose for debugging (if debug publishers available)
-        if let Some(debug_pubs) = board_debug_publishers {
-            let initial_board_model = BoardModel {
-                pose: initial_pose,
-                board_shape: board_model_params.board_shape.clone(),
-                marker_paper_size: board_model_params.marker_paper_size,
-                marker_paper_placement: board_model_params.marker_paper_placement,
-            };
-            if let Ok(initial_markers) =
-                Self::create_board_markers_from_model(&initial_board_model, header)
-            {
-                let _ = debug_pubs.initial_board_marker.publish(initial_markers);
-                log_debug!(LOGGER_NAME, "Published initial board pose markers from PCA");
-            }
-
-            // Publish RANSAC plane visualization
-            if let Ok(plane_markers) =
-                Self::create_plane_marker(plane_model, plane_inlier_points, header)
-            {
-                let _ = debug_pubs.plane_marker.publish(plane_markers);
-                log_debug!(LOGGER_NAME, "Published RANSAC plane marker");
-
-                // Debug: Compare RANSAC plane normal with PCA board pose z-axis
-                let ransac_normal = plane_model.normal;
-                let board_z_axis = initial_pose.rotation * na::Vector3::z();
-                let alignment = ransac_normal.dot(&board_z_axis);
-                log_debug!(
-                    LOGGER_NAME,
-                    "RANSAC normal: ({:.3}, {:.3}, {:.3}), Board Z-axis: ({:.3}, {:.3}, {:.3}), Alignment: {:.3}",
-                    ransac_normal.x, ransac_normal.y, ransac_normal.z,
-                    board_z_axis.x, board_z_axis.y, board_z_axis.z,
-                    alignment
-                );
-            }
-        }
-
-        // Note: plane_inlier_points are already downsampled (if enabled) in process_pointcloud()
-        let icp_points: Vec<na::Point3<f64>> = plane_inlier_points.to_vec();
-
-        log_debug!(LOGGER_NAME, "Starting ICP with {} points", icp_points.len());
-
-        // Step 4: Create BoardIcpIterator
-        let mut iterator = BoardIcpIterator::new(
-            config,
-            board_model_params.clone(),
-            None, // No progress callback as we handle debug publishing ourselves
-        );
-
-        // Step 5: Create initial ICP state
-        let mut state = iterator.initial_state(initial_pose, icp_points);
-
-        log_debug!(
-            LOGGER_NAME,
-            "Starting ICP iterations with initial pose: {:?}",
-            state.board_pose
-        );
-
-        // Step 7: Iterate with optional debug publishing
-        loop {
-            // Perform one ICP iteration step FIRST
-            state = iterator.step(&state);
-
-            log_debug!(
-                LOGGER_NAME,
-                "ICP iteration {}: avg_loss={:.6}, good_correspondences={}/{}",
-                state.iteration,
-                state.avg_loss,
-                state.good_correspondences,
-                state.total_correspondences
-            );
-
-            // Publish debug information if debug publishers are available
-            if let Some(debug_pubs) = icp_debug_publishers {
-                Self::publish_icp_iteration(&state, &board_model_params, header, debug_pubs);
-            }
-
-            // Publish board model visualization
-            if let Some(debug_pubs) = board_debug_publishers {
-                let board_model = BoardModel {
-                    pose: state.board_pose,
-                    board_shape: board_model_params.board_shape.clone(),
-                    marker_paper_size: board_model_params.marker_paper_size,
-                    marker_paper_placement: board_model_params.marker_paper_placement,
-                };
-                if let Ok(arr) = Self::create_board_markers_from_model(&board_model, header) {
-                    let _ = debug_pubs.board_marker_icp.publish(arr);
-                }
-            }
-
-            // Note: Removed 50ms sleep between ICP iterations as it caused severe lag.
-            // The ICP debug visualization now updates at full speed.
-
-            // Check termination condition AFTER the step
-            if iterator.should_terminate(&state) {
-                let reason = iterator.termination_reason(&state);
-                log_debug!(LOGGER_NAME, "ICP iteration terminated: {}", reason);
-                break;
-            }
-        }
-
-        // Step 7: Check if result is successful
-        if state.avg_loss < config.icp_good_fit_threshold
-            && state.inlier_points.len() >= config.icp_min_inlier_points
-        {
+    ) -> Result<Option<SelectedEvidence>> {
+        if active_points.len() < 3 {
             log_info!(
                 LOGGER_NAME,
-                "Board detection successful: final_loss={:.6}, inliers={}",
-                state.avg_loss,
-                state.inlier_points.len()
+                "bbox: no board selected — only {} finite points in the configured box",
+                active_points.len()
             );
+            return Ok(None);
+        }
 
-            // Post-ICP fixup: relabel which physical corner the model calls "bottom".
-            //
-            // ICP recovers the plate's position and its plane, but the plate is a square
-            // and so is symmetric under four 90-degree turns about its normal. This picks
-            // the labelling that agrees with gravity. It is a pure rotation about the
-            // plate centre: the pose's origin is already the plate centre and the plate
-            // centre does not move under an in-plane rotation, so no physical point is
-            // displaced by this step. Only the labelling changes.
-            let corrected_pose = {
-                // Create temporary board model to evaluate corners
-                let temp_board_model = BoardModel {
-                    pose: state.board_pose,
-                    board_shape: board_model_params.board_shape.clone(),
-                    marker_paper_size: board_model_params.marker_paper_size,
-                    marker_paper_placement: board_model_params.marker_paper_placement,
-                };
-
-                let board_normal = temp_board_model.board_z_axis();
-
-                let corners = [
-                    temp_board_model.bottom_corner(),
-                    temp_board_model.left_corner(),
-                    temp_board_model.top_corner(),
-                    temp_board_model.right_corner(),
-                ];
-
-                // Find the vertically lowest corner along the configured sensor "up"
-                // axis (Seyond: X=up, so gravity-down is -X, not -Z). Projecting onto
-                // up_vector generalizes the old hardcoded ".z" comparison. total_cmp is
-                // NaN-safe; partial_cmp().unwrap() would panic on a NaN corner.
-                let up_vector = config.sensor_up_axis.as_vector();
-                let height = |c: &na::Point3<f64>| c.coords.dot(&up_vector);
-                let (lowest_index, lowest_corner) = corners
-                    .iter()
-                    .enumerate()
-                    .min_by(|a, b| height(a.1).total_cmp(&height(b.1)))
-                    .unwrap();
-
-                // M-14: the corner labelling is disambiguated purely by "lowest height
-                // along the sensor up axis", which assumes exactly one corner is clearly
-                // lowest. When the two lowest corners are nearly tied the wrong one can
-                // win, turning the board frame 90 degrees and silently biasing the
-                // extrinsic for this pose.
-                //
-                // The marginal case is an EDGE-ALIGNED board — one hung square-on, whose
-                // bottom two corners sit at the same height. A diamond-mounted board, the
-                // way every board in this repository is actually hung, is the WELL-
-                // conditioned case: its corners are at -R, 0, 0 and +R along the up axis,
-                // so the lowest is clear by half the height spread. (An earlier comment
-                // here claimed the opposite and named the diamond as the risky case; it
-                // was wrong, which is why this warning has never fired in practice.) The
-                // stance gate upstream already rejects edge-aligned boards, so this
-                // warning is a backstop for a board that slips past it.
-                {
-                    let mut hs: Vec<f64> = corners.iter().map(height).collect();
-                    hs.sort_by(|a, b| a.total_cmp(b));
-                    let h_spread = hs[3] - hs[0];
-                    if h_spread > 1e-9 && (hs[1] - hs[0]) < 0.15 * h_spread {
-                        log_warn!(
-                            LOGGER_NAME,
-                            "Board origin corner is ambiguous: the two lowest corners are \
-                             within {:.0}% of the corner height-spread. The board may be near a \
-                             45deg roll or the LiDAR frame may not be gravity-aligned; the \
-                             extrinsic could be off by a 90deg in-plane rotation for this pose.",
-                            100.0 * (hs[1] - hs[0]) / h_spread
-                        );
-                    }
-                }
-
-                log_debug!(
-                    LOGGER_NAME,
-                    "Post-fixup: lowest corner index={}, position=({:.3}, {:.3}, {:.3})",
-                    lowest_index,
-                    lowest_corner.x,
-                    lowest_corner.y,
-                    lowest_corner.z
-                );
-
-                // Rotate by 90° × index around the board normal to bring lowest corner to "bottom" position
-                let fixup_rotation = {
-                    let angle = FRAC_PI_2 * lowest_index as f64;
-                    na::UnitQuaternion::from_axis_angle(&board_normal, angle)
-                };
-
-                // Keep the origin where it is — it is the plate centre, and the plate
-                // centre is the fixed point of an in-plane rotation.
-                let corrected = na::Isometry3::from_parts(
-                    state.board_pose.translation,
-                    fixup_rotation * state.board_pose.rotation,
-                );
-
+        // A frame without a valid plane is a normal selector miss, not a
+        // callback failure.  The callback must publish its stable empty array
+        // for that frame, preserving the old observer behavior.
+        let (plane, plane_points) = match Self::fit_bbox_plane(active_points, detector_config) {
+            Ok(result) => result,
+            Err(error) => {
                 log_info!(
                     LOGGER_NAME,
-                    "Post-fixup applied: rotation_angle={:.1}°, plate centre unmoved at ({:.3}, {:.3}, {:.3})",
-                    (FRAC_PI_2 * lowest_index as f64).to_degrees(),
-                    corrected.translation.x,
-                    corrected.translation.y,
-                    corrected.translation.z
+                    "bbox: no board selected — plane fit failed: {error}"
                 );
+                return Ok(None);
+            }
+        };
+        if let Some(debug_pubs) = board_debug_publishers {
+            Self::publish_debug_cloud(
+                &debug_pubs.plane_inliers,
+                &plane_points,
+                header,
+                "plane inliers",
+            );
+            if let Ok(markers) = Self::create_plane_marker(&plane, &plane_points, header) {
+                let _ = debug_pubs.plane_marker.publish(markers);
+            }
+        }
 
-                corrected
-            };
-
-            // Create final board model and detection
-            let board_model = BoardModel {
-                pose: corrected_pose,
-                board_shape: board_model_params.board_shape,
-                marker_paper_size: board_model_params.marker_paper_size,
-                marker_paper_placement: board_model_params.marker_paper_placement,
-            };
-
-            // Create Detection with all required fields
-            Some(BoardDetection {
-                board_model: board_model.clone(),
-                plane_ransac_data: ransac_data,
-                icp_data: hollow_board_detector::detection::IcpData {
-                    correspondences: state.correspondences.clone(),
-                    board_model,
-                },
-                icp_losses: vec![state.avg_loss], // Single final loss value
-                initial_pose,
-                icp_stats: IcpStatistics {
-                    iterations: state.iteration,
-                    final_loss: state.avg_loss,
-                    min_loss: state.avg_loss, // In our implementation, final loss is the minimum we reached
-                    successful: true, // We only reach this point if detection was successful
-                    initial_loss: f64::INFINITY, // We don't track initial loss in this implementation
-                    convergence_reason: iterator.termination_reason(&state),
-                },
-            })
-        } else {
-            // INFO, not debug: this is the actual reject reason once a board has
-            // reached the ICP stage (initial pose published, no final result). At
-            // debug level it was invisible at the default log_level, so the only
-            // visible reject was the unrelated bbox_free "no candidate clusters"
-            // from sparser frames — misleading. Name which gate failed.
-            let why = if state.inlier_points.len() < config.icp_min_inlier_points {
-                "inliers < icp_min_inlier_points"
-            } else {
-                "final_loss > icp_good_fit_threshold"
-            };
+        let target_side = detector_config.target_side(target)?.as_metres();
+        let coords = project_to_plane(&plane_points, &plane);
+        let Some(square_fit) = fit_fixed_square(&coords, target_side, None, None) else {
             log_info!(
                 LOGGER_NAME,
-                "Board detection failed at ICP ({why}): final_loss={:.6}, inliers={}, icp_good_fit_threshold={:.6}, icp_min_inlier_points={}",
-                state.avg_loss,
-                state.inlier_points.len(),
-                config.icp_good_fit_threshold,
-                config.icp_min_inlier_points
+                "bbox: no board selected — fixed square fit requires at least 20 points, got {}",
+                coords.len()
             );
-            None
+            return Ok(None);
+        };
+        if square_fit.residual > detector_config.tuning.square_icp_residual_max {
+            log_info!(
+                LOGGER_NAME,
+                "bbox: no board selected — square residual {:.4} exceeds {:.4}",
+                square_fit.residual,
+                detector_config.tuning.square_icp_residual_max
+            );
+            return Ok(None);
         }
+
+        let observation = TargetSquarePlaneObservation::from_fitted_square(
+            &plane,
+            &square_fit,
+            detector_config.sensor_up_axis.as_vector(),
+        )?;
+        Ok(Some(SelectedEvidence {
+            observation,
+            points: plane_points,
+        }))
     }
 
-    /// Compute initial board pose using plane normal alignment (from wayside-portal)
-    /// Build the initial board pose from the fitted plane.
-    ///
-    /// The board's local frame: Z = board normal (toward sensor), Y ≈ world "up" projected
-    /// onto the board plane, X = cross(Y, Z). `sensor_up_axis` selects which world axis
-    /// is "up" — must match the LiDAR's coordinate convention (Seyond: X=up, Z=forward).
-    fn compute_initial_pose_from_plane(
-        plane_model: &PlaneModel,
-        plane_inlier_points: &[na::Point3<f64>],
-        sensor_up_axis: &SensorUpAxis,
-        initial_inplane_rotation_deg: f64,
-        _header: &Header,
-        _debug_publishers: &Option<BoardDebugPublishers>,
-    ) -> Option<na::Isometry3<f64>> {
-        if plane_inlier_points.is_empty() {
-            log_warn!(
-                LOGGER_NAME,
-                "Cannot compute initial pose with empty point set"
-            );
-            return None;
+    /// Deterministic voxel reduction for estimator evidence.  The board-cluster
+    /// crate owns the bbox-free selector's voxel stage; bbox mode uses this
+    /// small adapter so both paths apply the same deployment tuning.
+    fn voxel_downsample(
+        points: &[na::Point3<f64>],
+        voxel: f64,
+        use_centroid: bool,
+    ) -> Vec<na::Point3<f64>> {
+        if !voxel.is_finite() || voxel <= 0.0 {
+            return points.to_vec();
         }
-
-        // Step 1: Compute centroid of plane inlier points
-        let inlier_centroid = plane_inlier_points
-            .iter()
-            .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
-            / (plane_inlier_points.len() as f64);
-
-        log_debug!(
-            LOGGER_NAME,
-            "Initial pose from plane: centroid=({:.3}, {:.3}, {:.3}), {} points",
-            inlier_centroid.x,
-            inlier_centroid.y,
-            inlier_centroid.z,
-            plane_inlier_points.len()
-        );
-
-        // Step 2: Obtain the plane normal vector that points towards the origin
-        let plane_normal = {
-            let normal = plane_model.normal.into_inner();
-            if (na::Point3::origin().coords - inlier_centroid).dot(&normal) < 0.0 {
-                -normal
-            } else {
-                normal
-            }
-        };
-
-        log_debug!(
-            LOGGER_NAME,
-            "Plane normal (toward origin): ({:.3}, {:.3}, {:.3})",
-            plane_normal.x,
-            plane_normal.y,
-            plane_normal.z
-        );
-
-        // Step 3: Build initial rotation from plane geometry.
-        //
-        // Board local frame: Z → plane_normal (toward sensor),
-        //                    Y → world "up" projected onto board plane,
-        //                    X → cross(Y, Z)
-        //
-        // This avoids the hardcoded XY projection that breaks when the sensor's
-        // up axis is not Z (e.g. Seyond LiDAR: X=up, Z=forward).
-        let rotation = {
-            let board_z = plane_normal;
-            let up = sensor_up_axis.as_vector();
-
-            // Project world "up" onto the board plane (remove component along board_z)
-            let up_projected = up - up.dot(&board_z) * board_z;
-
-            let board_y = if up_projected.norm() > 1e-6 {
-                up_projected.normalize()
-            } else {
-                // "up" is parallel to the board normal — pick an arbitrary perpendicular
-                let alt = if board_z.x.abs() < 0.9 {
-                    na::Vector3::x()
-                } else {
-                    na::Vector3::y()
-                };
-                (alt - alt.dot(&board_z) * board_z).normalize()
-            };
-
-            let board_x = board_y.cross(&board_z);
-
-            log_debug!(
-                LOGGER_NAME,
-                "Board axes — X: ({:.3},{:.3},{:.3}), Y: ({:.3},{:.3},{:.3}), Z: ({:.3},{:.3},{:.3})",
-                board_x.x, board_x.y, board_x.z,
-                board_y.x, board_y.y, board_y.z,
-                board_z.x, board_z.y, board_z.z,
+        type VoxelCell = (na::Vector3<f64>, usize, na::Point3<f64>);
+        let mut cells: std::collections::BTreeMap<(i64, i64, i64), VoxelCell> =
+            std::collections::BTreeMap::new();
+        for point in points {
+            let key = (
+                (point.x / voxel).floor() as i64,
+                (point.y / voxel).floor() as i64,
+                (point.z / voxel).floor() as i64,
             );
+            cells
+                .entry(key)
+                .and_modify(|(sum, count, _first)| {
+                    *sum += point.coords;
+                    *count += 1;
+                })
+                .or_insert((point.coords, 1, *point));
+        }
+        cells
+            .into_values()
+            .map(|(sum, count, first)| {
+                if use_centroid {
+                    na::Point3::from(sum / count as f64)
+                } else {
+                    first
+                }
+            })
+            .collect()
+    }
 
-            let base_rotation = na::UnitQuaternion::from_matrix(&na::Matrix3::from_columns(&[
-                board_x, board_y, board_z,
-            ]));
-
-            // Apply configurable in-plane rotation offset around the board normal.
-            // Corrects a fixed rotational bias visible in RViz (set via initial_inplane_rotation_deg).
-            if initial_inplane_rotation_deg.abs() > 1e-6 {
-                let angle_rad = initial_inplane_rotation_deg.to_radians();
-                let offset = na::UnitQuaternion::from_axis_angle(
-                    &na::Unit::new_normalize(board_z),
-                    angle_rad,
-                );
-                offset * base_rotation
-            } else {
-                base_rotation
-            }
-        };
-
-        // Step 4: The board frame's origin IS the plate centre, so the initial pose's
-        // translation is the inlier centroid directly — no corner offset to subtract.
-        // This is what removed the board width from this function's arguments: nothing
-        // here needs the plate's size any more.
-        let pose = na::Isometry3::from_parts(na::Translation3::from(inlier_centroid), rotation);
-
-        log_debug!(
-            LOGGER_NAME,
-            "Initial pose from plane: plate centre=({:.3}, {:.3}, {:.3}), rotation=({:.3}, {:.3}, {:.3}, {:.3})",
-            pose.translation.x,
-            pose.translation.y,
-            pose.translation.z,
-            rotation.w,
-            rotation.i,
-            rotation.j,
-            rotation.k
-        );
-
-        Some(pose)
+    fn log_rejection(reason: &TargetRejectReason, identity: &TargetIdentity) {
+        match reason {
+            TargetRejectReason::BoardUpAlignment {
+                alignment,
+                required_minimum,
+            } => log_info!(
+                LOGGER_NAME,
+                "target rejected: target={}@{} reason=board_up_alignment alignment={:.4} required_minimum={:.4}",
+                identity.target_id,
+                identity.revision,
+                alignment,
+                required_minimum
+            ),
+            TargetRejectReason::InsufficientOuterEdgeEvidence { evidence } => log_info!(
+                LOGGER_NAME,
+                "target rejected: target={}@{} reason=insufficient_outer_edge_evidence edge_points={} edge_counts={:?} covered_edges={} required_edges={} occupied_bins={:?}",
+                identity.target_id,
+                identity.revision,
+                evidence.edge_point_count,
+                evidence.edge_point_counts,
+                evidence.covered_edge_count,
+                evidence.minimum_covered_edges,
+                evidence.occupied_longitudinal_bins
+            ),
+            TargetRejectReason::AmbiguousCutoutEvidence {
+                evidence,
+                required_separation_m,
+            } => log_info!(
+                LOGGER_NAME,
+                "target rejected: target={}@{} reason=ambiguous_cutout_evidence best_loss_m={:.6} second_best_loss_m={:.6} separation_m={:.6} required_separation_m={:.6}",
+                identity.target_id,
+                identity.revision,
+                evidence.best_loss_m,
+                evidence.second_best_loss_m,
+                evidence.loss_separation_m,
+                required_separation_m
+            ),
+            TargetRejectReason::WeakCutoutEvidence {
+                evidence,
+                required_rim_correspondences,
+            } => log_info!(
+                LOGGER_NAME,
+                "target rejected: target={}@{} reason=weak_cutout_evidence rim_correspondences={} required_rim_correspondences={} best_loss_m={:.6}",
+                identity.target_id,
+                identity.revision,
+                evidence.cutout_rim_correspondences,
+                required_rim_correspondences,
+                evidence.best_loss_m
+            ),
+            TargetRejectReason::PerforatedIcpFailure { evidence } => log_info!(
+                LOGGER_NAME,
+                "target rejected: target={}@{} reason=perforated_icp_failure rim_correspondences={} iterations={} total_correspondences={} best_loss_m={:.6}",
+                identity.target_id,
+                identity.revision,
+                evidence.cutout_rim_correspondences,
+                evidence.iteration_count,
+                evidence.total_correspondences,
+                evidence.best_loss_m
+            ),
+        }
     }
 
     fn convert_pointcloud2_to_points(msg: &PointCloud2) -> Result<Vec<na::Point3<f64>>> {
@@ -2028,6 +1837,112 @@ impl CalibrationBoardLocatorNode {
     }
 
     /// Compute a plane model from points using PCA (for skip_ransac mode)
+    /// Preserve the legacy bbox contract: callers may opt into RANSAC and its
+    /// configured inlier threshold, otherwise all bbox-selected points are
+    /// retained for the shared plane fit.
+    fn fit_bbox_plane(
+        points: &[na::Point3<f64>],
+        detector_config: &DetectorConfig,
+    ) -> Result<(PlaneModel, Vec<na::Point3<f64>>)> {
+        if detector_config.skip_ransac {
+            return Ok((Self::compute_plane_from_points(points)?, points.to_vec()));
+        }
+        Self::fit_plane_ransac(
+            points,
+            detector_config.plane_ransac_max_iterations,
+            detector_config.plane_ransac_inlier_threshold,
+        )
+    }
+
+    /// Deterministic three-point RANSAC for the bbox adapter.  The previous
+    /// observer used a plane RANSAC before its hollow ICP stage; retaining that
+    /// boundary avoids letting crop-box clutter bias the common square fit.
+    fn fit_plane_ransac(
+        points: &[na::Point3<f64>],
+        max_iterations: usize,
+        inlier_threshold: f64,
+    ) -> Result<(PlaneModel, Vec<na::Point3<f64>>)> {
+        if points.len() < 3 {
+            return Err(anyhow!(
+                "RANSAC needs at least 3 points, got {}",
+                points.len()
+            ));
+        }
+        if max_iterations == 0 {
+            return Err(anyhow!(
+                "plane_ransac_max_iterations must be greater than zero"
+            ));
+        }
+        if !inlier_threshold.is_finite() || inlier_threshold <= 0.0 {
+            return Err(anyhow!(
+                "plane_ransac_inlier_threshold must be finite and greater than zero"
+            ));
+        }
+
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut best_indices: Vec<usize> = Vec::new();
+        let mut best_error = f64::INFINITY;
+        for _ in 0..max_iterations {
+            let next_index = |state: &mut u64| {
+                // xorshift64* keeps this adapter deterministic across runs and
+                // avoids making a global RNG part of the ROS callback state.
+                *state ^= *state >> 12;
+                *state ^= *state << 25;
+                *state ^= *state >> 27;
+                ((*state).wrapping_mul(0x2545_f491_4f6c_dd1d) as usize) % points.len()
+            };
+            let a = next_index(&mut state);
+            let mut b = next_index(&mut state);
+            let mut c = next_index(&mut state);
+            if b == a {
+                b = (b + 1) % points.len();
+            }
+            if c == a || c == b {
+                c = (c + 1) % points.len();
+                if c == a || c == b {
+                    c = (c + 1) % points.len();
+                }
+            }
+
+            let ab = points[b] - points[a];
+            let ac = points[c] - points[a];
+            let cross = ab.cross(&ac);
+            let norm = cross.norm();
+            if !norm.is_finite() || norm <= 1e-12 {
+                continue;
+            }
+            let normal = cross / norm;
+            let origin = points[a];
+            let mut indices = Vec::new();
+            let mut error = 0.0;
+            for (index, point) in points.iter().enumerate() {
+                let residual = (point - origin).dot(&normal).abs();
+                if residual <= inlier_threshold {
+                    indices.push(index);
+                    error += residual;
+                }
+            }
+            if indices.len() > best_indices.len()
+                || (indices.len() == best_indices.len() && error < best_error)
+            {
+                best_indices = indices;
+                best_error = error;
+            }
+        }
+
+        if best_indices.len() < 3 {
+            return Err(anyhow!(
+                "RANSAC failed to find a plane with three inliers (threshold={inlier_threshold:.6}m)"
+            ));
+        }
+        let inliers: Vec<_> = best_indices
+            .into_iter()
+            .map(|index| points[index])
+            .collect();
+        Ok((Self::compute_plane_from_points(&inliers)?, inliers))
+    }
+
+    /// Fit the common board-cluster plane representation for bbox evidence.
     fn compute_plane_from_points(points: &[na::Point3<f64>]) -> Result<PlaneModel> {
         if points.len() < 3 {
             return Err(anyhow!(
@@ -2035,68 +1950,9 @@ impl CalibrationBoardLocatorNode {
                 points.len()
             ));
         }
-
-        // Compute centroid
-        let centroid = points
-            .iter()
-            .fold(na::Vector3::zeros(), |acc, point| acc + point.coords)
-            / (points.len() as f64);
-
-        // Compute covariance matrix
-        let mut covariance = na::Matrix3::<f64>::zeros();
-        for point in points {
-            let diff = point.coords - centroid;
-            covariance += diff * diff.transpose();
-        }
-        covariance /= points.len() as f64;
-
-        // Compute eigendecomposition to find plane normal
-        let eigen = covariance.symmetric_eigen();
-
-        // The eigenvector with the smallest eigenvalue is the plane normal
-        let mut eigenvalues_indexed: Vec<(usize, f64)> =
-            (0..3).map(|i| (i, eigen.eigenvalues[i])).collect();
-        eigenvalues_indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
-
-        let normal_idx = eigenvalues_indexed[0].0; // Smallest eigenvalue
-        let normal_vec = eigen.eigenvectors.column(normal_idx).into_owned();
-
-        // An eigenvector's sign is arbitrary, so pin it down deterministically by
-        // forcing a non-negative X component. This is NOT a claim that +X points at
-        // the sensor — that only ever held for the Seyond mounting; the Velodyne
-        // preset is Z-up (see `sensor_up_axis`). Nothing downstream depends on the
-        // choice for pose construction: `compute_initial_pose_from_plane` re-flips
-        // the normal toward the origin itself. The sign is observable only in debug
-        // output (`create_plane_marker` and the RANSAC-normal alignment log), so the
-        // branch stays to keep that output stable.
-        let normal = if normal_vec.x >= 0.0 {
-            na::Unit::new_normalize(normal_vec)
-        } else {
-            na::Unit::new_normalize(-normal_vec)
-        };
-
-        let plane_model = PlaneModel {
-            center: na::Point3::from(centroid),
-            normal,
-        };
-
-        log_debug!(
-            LOGGER_NAME,
-            "Computed plane from {} points using PCA: normal=[{:.3}, {:.3}, {:.3}], center=[{:.3}, {:.3}, {:.3}]",
-            points.len(),
-            plane_model.normal.x,
-            plane_model.normal.y,
-            plane_model.normal.z,
-            plane_model.center.x,
-            plane_model.center.y,
-            plane_model.center.z
-        );
-
-        Ok(plane_model)
+        Ok(board_cluster_detector::geometry::fit_plane(points))
     }
 
-    /// Build and publish a debug point cloud, warning (never failing the frame)
-    /// if either step errors. `what` names the cloud in those warnings.
     fn publish_debug_cloud(
         publisher: &Publisher<PointCloud2>,
         points: &[na::Point3<f64>],
@@ -2290,59 +2146,65 @@ impl CalibrationBoardLocatorNode {
         out
     }
 
-    fn convert_board_detection_to_detection3d(
-        board_detection: &BoardDetection,
+    fn convert_target_detection_to_detection3d(
+        target: &ValidatedTarget,
+        detection: &TargetDetection,
+        evidence_points: &[na::Point3<f64>],
         header: &std_msgs::msg::Header,
     ) -> Result<Detection3D> {
-        // Extract pose information from board detection
-        let board_model = &board_detection.board_model;
-
-        // Create pose from board model pose
         let pose = Pose {
             position: Point {
-                x: board_model.pose.translation.x,
-                y: board_model.pose.translation.y,
-                z: board_model.pose.translation.z,
+                x: detection.pose.translation.x,
+                y: detection.pose.translation.y,
+                z: detection.pose.translation.z,
             },
             orientation: Quaternion {
-                x: board_model.pose.rotation.i,
-                y: board_model.pose.rotation.j,
-                z: board_model.pose.rotation.k,
-                w: board_model.pose.rotation.w,
+                x: detection.pose.rotation.i,
+                y: detection.pose.rotation.j,
+                z: detection.pose.rotation.k,
+                w: detection.pose.rotation.w,
             },
         };
 
-        // Create bounding box
-        // Note: You may need to adjust these dimensions based on your board specifications
+        // Detection3D's oriented box follows the target pose and uses the
+        // physical plate side from the selected Target Definition.  The old
+        // observer hard-coded 1 m for every target.
+        let side_m = target.plate().side_um as f64 / 1_000_000.0;
         let bbox = BoundingBox3D {
             center: pose.clone(),
             size: GeomVector3 {
-                x: 1.0, // Width in meters - adjust based on your board
-                y: 1.0, // Height in meters - adjust based on your board
-                z: 0.1, // Depth in meters - adjust based on your board
+                x: side_m,
+                y: side_m,
+                // Target Definition describes the face, not its backing
+                // thickness; keep a small finite depth for RViz consumers.
+                z: 0.01,
             },
         };
 
-        // Create object hypothesis
-        // M-13: publish the REAL board-pose covariance, computed from the converged ICP
-        // correspondences about the published pose origin. It used to be `[0.0; 36]` -- which the
-        // solver read as "this pose is exact", so every board pose was weighted equally and the
-        // errors-in-variables bias went unmodelled.
+        let posed = target.posed(detection.pose);
+        let correspondences: Vec<(na::Point3<f64>, na::Point3<f64>)> = posed
+            .closest_points(evidence_points.iter())
+            .into_iter()
+            .map(|correspondence| (*correspondence.input, correspondence.closest))
+            .collect();
+        let pose_origin = na::Point3::from(detection.pose.translation.vector);
         let covariance = Self::compute_pose_covariance(
-            &board_detection.icp_data.correspondences,
-            &board_model.pose.translation.vector.into(),
-            &board_model.board_z_axis(),
+            &correspondences,
+            &pose_origin,
+            &posed.z_axis().into_inner(),
         );
 
-        // The score used to be a hardcoded 1.0. Report the inlier ratio instead -- a quantity the
-        // detector actually measured.
-        let stats = &board_detection.icp_stats;
-        let score = if stats.final_loss.is_finite() && stats.final_loss > 0.0 {
-            // Bounded, monotonically decreasing in the fit error. `icp_good_fit_threshold` is the
-            // acceptance bar (C-04), so a fit exactly at the bar scores 0.5.
-            (1.0 / (1.0 + stats.final_loss / 0.035)).clamp(0.0, 1.0)
-        } else {
-            0.0
+        let score = match &detection.diagnostics {
+            TargetDetectionDiagnostics::Solid(evidence) => {
+                (evidence.covered_edge_count as f64 / 4.0).clamp(0.0, 1.0)
+            }
+            TargetDetectionDiagnostics::CutoutIcp(evidence) => {
+                if evidence.best_loss_m.is_finite() && evidence.best_loss_m >= 0.0 {
+                    (1.0 / (1.0 + evidence.best_loss_m / 0.035)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            }
         };
 
         let hypothesis = ObjectHypothesisWithPose {
@@ -2357,20 +2219,19 @@ impl CalibrationBoardLocatorNode {
             header: header.clone(),
             results: vec![hypothesis],
             bbox,
-            id: "calibration_board".to_string(),
+            id: target.identity().target_id.clone(),
         })
     }
 
     fn create_bbox_marker(bbox: &BBox, header: &Header) -> Result<Marker> {
         let q = bbox.pose.rotation.quaternion();
-
-        let marker = Marker {
+        Ok(Marker {
             header: header.clone(),
             ns: "bbox".to_string(),
             id: 0,
-            type_: 1,  // CUBE
-            action: 0, // ADD
-            pose: geometry_msgs::msg::Pose {
+            type_: 1, // CUBE
+            action: 0,
+            pose: Pose {
                 position: Point {
                     x: bbox.pose.translation.x,
                     y: bbox.pose.translation.y,
@@ -2395,95 +2256,135 @@ impl CalibrationBoardLocatorNode {
                 a: 0.2,
             },
             ..Default::default()
-        };
-
-        Ok(marker)
+        })
     }
 
-    /// Create board visualization markers with customizable colors and namespaces
-    #[allow(clippy::too_many_arguments)]
-    fn create_board_visualization(
-        board_model: &hollow_board_config::BoardModel,
+    /// Create target-sized RViz markers from the neutral estimator pose.
+    ///
+    /// Points are transformed exactly once into the cloud frame and the marker
+    /// pose is identity.  A solid Target Definition therefore cannot acquire
+    /// hollow-board cutout markers by accident.
+    fn create_target_markers(
+        target: &ValidatedTarget,
+        pose: na::Isometry3<f64>,
         header: &Header,
         namespace_suffix: &str,
         id_offset: i32,
-        board_color: ColorRGBA,
-        axes_alpha: f32,
-        marker_area_alpha: f32,
-        hole_alpha: f32,
     ) -> Result<MarkerArray> {
-        let base_translation = &board_model.pose.translation;
-        let base_rotation = &board_model.pose.rotation;
+        let posed = target.posed(pose);
+        let as_point = |point: na::Point3<f64>| Point {
+            x: point.x,
+            y: point.y,
+            z: point.z,
+        };
+        let outline = [
+            posed.top_corner(),
+            posed.left_corner(),
+            posed.bottom_corner(),
+            posed.right_corner(),
+            posed.top_corner(),
+        ];
+        let mut markers = vec![Marker {
+            header: header.clone(),
+            ns: format!("target_plate{namespace_suffix}"),
+            id: id_offset,
+            type_: 4, // LINE_STRIP
+            action: 0,
+            points: outline.into_iter().map(as_point).collect(),
+            scale: GeomVector3 {
+                x: target.plate().side_um as f64 / 1_000_000.0 * 0.015,
+                y: 0.0,
+                z: 0.0,
+            },
+            color: ColorRGBA {
+                r: 0.0,
+                g: 1.0,
+                b: 0.0,
+                a: 0.9,
+            },
+            ..Default::default()
+        }];
 
-        // Board outline: a closed line strip through the four corner accessors.
-        //
-        // This used to be a CUBE primitive sized from board_width and posed from the
-        // model's rotation, which drew an edge-aligned square. The plate is hung as a
-        // diamond, so that picture disagreed with the maths by 45 degrees and there was
-        // no way to see it. Tracing the accessors instead means the outline cannot drift
-        // from the model: if a corner accessor is ever wrong, RViz shows it immediately.
-        let board_outline = {
-            let corner = |p: na::Point3<f64>| Point {
-                x: p.x,
-                y: p.y,
-                z: p.z,
-            };
-            Marker {
+        let axis_len = target.plate().side_um as f64 / 2_000_000.0;
+        for (axis_id, axis, (r, g, b)) in [
+            (1, na::Vector3::x(), (1.0, 0.0, 0.0)),
+            (2, na::Vector3::y(), (0.0, 1.0, 0.0)),
+            (3, na::Vector3::z(), (0.0, 0.0, 1.0)),
+        ] {
+            let world_axis = pose.rotation * axis;
+            let axis_rotation =
+                na::UnitQuaternion::rotation_between(&na::Vector3::x(), &world_axis)
+                    .unwrap_or_else(na::UnitQuaternion::identity);
+            let axis_q = axis_rotation.quaternion();
+            markers.push(Marker {
                 header: header.clone(),
-                ns: format!("board{namespace_suffix}"),
-                id: id_offset,
-                type_: 4,  // LINE_STRIP
-                action: 0, // ADD
-                // Closed loop: the first corner repeats at the end.
-                points: vec![
-                    corner(board_model.top_corner()),
-                    corner(board_model.left_corner()),
-                    corner(board_model.bottom_corner()),
-                    corner(board_model.right_corner()),
-                    corner(board_model.top_corner()),
-                ],
+                ns: format!("target_axes{namespace_suffix}"),
+                id: id_offset + axis_id,
+                type_: 0, // ARROW; local +X follows target pose rotation.
+                action: 0,
+                pose: Pose {
+                    position: as_point(posed.center()),
+                    orientation: Quaternion {
+                        x: axis_q.i,
+                        y: axis_q.j,
+                        z: axis_q.k,
+                        w: axis_q.w,
+                    },
+                },
                 scale: GeomVector3 {
-                    x: 0.01, // Line width; LINE_STRIP uses x only.
+                    x: axis_len,
+                    y: 0.02,
+                    z: 0.04,
+                },
+                color: ColorRGBA { r, g, b, a: 1.0 },
+                ..Default::default()
+            });
+        }
+
+        for (index, (_marker_id, corners)) in posed.marker_corners_by_id().into_iter().enumerate() {
+            let mut points = Vec::with_capacity(8);
+            for edge in 0..4 {
+                points.push(as_point(corners[edge]));
+                points.push(as_point(corners[(edge + 1) % 4]));
+            }
+            markers.push(Marker {
+                header: header.clone(),
+                ns: format!("target_fiducials{namespace_suffix}"),
+                id: id_offset + 10 + index as i32,
+                type_: 5, // LINE_LIST
+                action: 0,
+                points,
+                scale: GeomVector3 {
+                    x: 0.008,
                     y: 0.0,
                     z: 0.0,
                 },
                 color: ColorRGBA {
-                    a: 1.0, // Opaque: an outline has nothing to see through.
-                    ..board_color
+                    r: 1.0,
+                    g: 0.7,
+                    b: 0.0,
+                    a: 1.0,
                 },
-                // The points are already in the header's frame, so the marker's own pose
-                // must be identity. Anything else would apply the board rotation twice.
                 ..Default::default()
-            }
-        };
+            });
+        }
 
-        // Helper to build axis arrow markers.
-        //
-        // These are drawn from `pose.translation`, which IS the plate centre in the
-        // board frame — so the arrows sit where the pose actually is, and the green +Y
-        // arrow points at the physically up-most corner of the diamond. That is the
-        // two-second visual check that the frame convention is right; if +Y points at
-        // the bottom corner instead, the in-plane rotation is off by 180 degrees. Do not
-        // "correct" this to board_center(): the two are the same point, and going via
-        // the accessor only invites someone to add an offset back in.
-        let make_axis_arrow =
-            |id: i32, rot_after_x: na::UnitQuaternion<f64>, r: f32, g: f32, b: f32| -> Marker {
-                let rot = base_rotation * rot_after_x;
-                let q = rot.quaternion();
-                let len = board_model.board_shape.board_width.as_meters() * 0.5;
-
-                Marker {
+        if let Surface::Perforated { circular_cutouts } = &target.plate().surface {
+            let q = pose.rotation.quaternion();
+            for (index, cutout) in circular_cutouts.iter().enumerate() {
+                let center = pose.transform_point(&na::Point3::new(
+                    cutout.x_um as f64 / 1_000_000.0,
+                    cutout.y_um as f64 / 1_000_000.0,
+                    0.0,
+                ));
+                markers.push(Marker {
                     header: header.clone(),
-                    ns: format!("board_axes{}", namespace_suffix),
-                    id,
-                    type_: 0,  // ARROW
-                    action: 0, // ADD
-                    pose: geometry_msgs::msg::Pose {
-                        position: Point {
-                            x: base_translation.x,
-                            y: base_translation.y,
-                            z: base_translation.z,
-                        },
+                    ns: format!("target_cutouts{namespace_suffix}"),
+                    id: id_offset + 100 + index as i32,
+                    type_: 3, // CYLINDER
+                    action: 0,
+                    pose: Pose {
+                        position: as_point(center),
                         orientation: Quaternion {
                             x: q.i,
                             y: q.j,
@@ -2492,178 +2393,24 @@ impl CalibrationBoardLocatorNode {
                         },
                     },
                     scale: GeomVector3 {
-                        x: len,
-                        y: 0.02,
-                        z: 0.04,
+                        x: 2.0 * cutout.radius_um as f64 / 1_000_000.0,
+                        y: 2.0 * cutout.radius_um as f64 / 1_000_000.0,
+                        z: 0.005,
                     },
                     color: ColorRGBA {
-                        r,
-                        g,
-                        b,
-                        a: axes_alpha,
+                        r: 0.3,
+                        g: 0.3,
+                        b: 0.3,
+                        a: 0.8,
                     },
                     ..Default::default()
-                }
-            };
-
-        let rot_x = na::UnitQuaternion::identity();
-        let rot_y = na::UnitQuaternion::from_axis_angle(&na::Vector3::z_axis(), FRAC_PI_2);
-        let rot_z = na::UnitQuaternion::from_axis_angle(&na::Vector3::y_axis(), -FRAC_PI_2);
-
-        let x_arrow = make_axis_arrow(id_offset + 1, rot_x, 1.0, 0.0, 0.0);
-        let y_arrow = make_axis_arrow(id_offset + 2, rot_y, 0.0, 1.0, 0.0);
-        let z_arrow = make_axis_arrow(id_offset + 3, rot_z, 0.0, 0.0, 1.0);
-
-        // ArUco marker area border
-        let marker_border = {
-            let marker_top = board_model.marker_top_corner();
-            let marker_bottom = board_model.marker_bottom_corner();
-            let marker_left = board_model.marker_left_corner();
-            let marker_right = board_model.marker_right_corner();
-
-            Marker {
-                header: header.clone(),
-                ns: format!("board_marker_area{}", namespace_suffix),
-                id: id_offset + 4,
-                type_: 5,  // LINE_LIST
-                action: 0, // ADD
-                pose: geometry_msgs::msg::Pose::default(),
-                points: vec![
-                    Point {
-                        x: marker_bottom.x,
-                        y: marker_bottom.y,
-                        z: marker_bottom.z,
-                    },
-                    Point {
-                        x: marker_left.x,
-                        y: marker_left.y,
-                        z: marker_left.z,
-                    },
-                    Point {
-                        x: marker_left.x,
-                        y: marker_left.y,
-                        z: marker_left.z,
-                    },
-                    Point {
-                        x: marker_top.x,
-                        y: marker_top.y,
-                        z: marker_top.z,
-                    },
-                    Point {
-                        x: marker_top.x,
-                        y: marker_top.y,
-                        z: marker_top.z,
-                    },
-                    Point {
-                        x: marker_right.x,
-                        y: marker_right.y,
-                        z: marker_right.z,
-                    },
-                    Point {
-                        x: marker_right.x,
-                        y: marker_right.y,
-                        z: marker_right.z,
-                    },
-                    Point {
-                        x: marker_bottom.x,
-                        y: marker_bottom.y,
-                        z: marker_bottom.z,
-                    },
-                ],
-                scale: GeomVector3 {
-                    x: 0.01,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                color: ColorRGBA {
-                    r: 1.0,
-                    g: 0.7,
-                    b: 0.0,
-                    a: marker_area_alpha,
-                },
-                ..Default::default()
+                });
             }
-        };
+        }
 
-        // Three circular holes
-        let hole_radius = board_model.board_shape.hole_radius.as_meters();
-
-        let make_hole = |id: i32, center: na::Point3<f64>| -> Marker {
-            let q = base_rotation.quaternion();
-            Marker {
-                header: header.clone(),
-                ns: format!("board_holes{}", namespace_suffix),
-                id,
-                type_: 3,  // CYLINDER
-                action: 0, // ADD
-                pose: geometry_msgs::msg::Pose {
-                    position: Point {
-                        x: center.x,
-                        y: center.y,
-                        z: center.z,
-                    },
-                    orientation: Quaternion {
-                        x: q.i,
-                        y: q.j,
-                        z: q.k,
-                        w: q.w,
-                    },
-                },
-                scale: GeomVector3 {
-                    x: hole_radius * 2.0,
-                    y: hole_radius * 2.0,
-                    z: 0.005,
-                },
-                color: ColorRGBA {
-                    r: 0.3,
-                    g: 0.3,
-                    b: 0.3,
-                    a: hole_alpha,
-                },
-                ..Default::default()
-            }
-        };
-
-        let left_hole = make_hole(id_offset + 5, board_model.left_circle_center());
-        let right_hole = make_hole(id_offset + 6, board_model.right_circle_center());
-        let top_hole = make_hole(id_offset + 7, board_model.top_circle_center());
-
-        Ok(MarkerArray {
-            markers: vec![
-                board_outline,
-                x_arrow,
-                y_arrow,
-                z_arrow,
-                marker_border,
-                left_hole,
-                right_hole,
-                top_hole,
-            ],
-        })
+        Ok(MarkerArray { markers })
     }
 
-    fn create_board_markers(
-        board_detection: &BoardDetection,
-        header: &Header,
-    ) -> Result<MarkerArray> {
-        Self::create_board_visualization(
-            &board_detection.board_model,
-            header,
-            "", // No namespace suffix for final board
-            0,  // ID offset 0
-            ColorRGBA {
-                r: 0.0,
-                g: 1.0,
-                b: 0.0,
-                a: 0.6,
-            }, // Green board
-            1.0, // Full opacity for axes
-            1.0, // Full opacity for marker area
-            0.8, // Semi-transparent holes
-        )
-    }
-
-    /// Create a circular plane marker to visualize the RANSAC-detected plane
     fn create_plane_marker(
         plane_model: &PlaneModel,
         plane_inlier_points: &[na::Point3<f64>],
@@ -2732,222 +2479,12 @@ impl CalibrationBoardLocatorNode {
             markers: vec![marker],
         })
     }
-
-    fn create_board_markers_from_model(
-        board_model: &hollow_board_config::BoardModel,
-        header: &Header,
-    ) -> Result<MarkerArray> {
-        Self::create_board_visualization(
-            board_model,
-            header,
-            "_icp", // "_icp" namespace suffix for ICP iterations
-            1000,   // ID offset 1000
-            ColorRGBA {
-                r: 1.0,
-                g: 0.5,
-                b: 0.0,
-                a: 0.3,
-            }, // Orange board for ICP
-            0.9,    // Slightly transparent axes
-            0.8,    // Slightly transparent marker area
-            0.6,    // More transparent holes for ICP
-        )
-    }
-
-    // Helper functions for ICP iteration debug publishing debug
-    // publishing function using IcpDebugPublishers struct
-    fn publish_icp_iteration(
-        state: &BoardIcpState,
-        board_model_params: &BoardModelParams,
-        header: &Header,
-        debug_publishers: &IcpDebugPublishers,
-    ) {
-        // Publish iteration pose
-        if let Ok(pose_msg) = Self::board_state_to_pose(state, header) {
-            let _ = debug_publishers.iteration_pose.publish(pose_msg);
-        }
-
-        // Publish board model points
-        if let Ok(points_msg) = Self::board_state_to_pointcloud(state, board_model_params, header) {
-            let _ = debug_publishers.board_points.publish(points_msg);
-        }
-
-        // Publish correspondences as line markers
-        if let Ok(markers_msg) = Self::correspondences_to_markers(state, header) {
-            let _ = debug_publishers.correspondences.publish(markers_msg);
-        }
-
-        // Publish current loss value
-        let loss_msg = Float64 {
-            data: state.avg_loss,
-        };
-        let _ = debug_publishers.loss.publish(loss_msg);
-
-        // Publish iteration statistics
-        let stats_text = format!(
-            "Iteration: {}, Loss: {:.6}, Correspondences: {}/{}",
-            state.iteration,
-            state.avg_loss,
-            state.good_correspondences,
-            state.total_correspondences
-        );
-        let stats_msg = StringMsg { data: stats_text };
-        let _ = debug_publishers.stats.publish(stats_msg);
-    }
-
-    fn board_state_to_pose(state: &BoardIcpState, header: &Header) -> Result<PoseStamped> {
-        let pose = Pose {
-            position: Point {
-                x: state.board_pose.translation.x,
-                y: state.board_pose.translation.y,
-                z: state.board_pose.translation.z,
-            },
-            orientation: Quaternion {
-                x: state.board_pose.rotation.i,
-                y: state.board_pose.rotation.j,
-                z: state.board_pose.rotation.k,
-                w: state.board_pose.rotation.w,
-            },
-        };
-
-        Ok(PoseStamped {
-            header: header.clone(),
-            pose,
-        })
-    }
-
-    fn board_state_to_pointcloud(
-        state: &BoardIcpState,
-        board_model_params: &BoardModelParams,
-        header: &Header,
-    ) -> Result<PointCloud2> {
-        // Create board model using current pose
-        let board_model = BoardModel {
-            pose: state.board_pose,
-            board_shape: board_model_params.board_shape.clone(),
-            marker_paper_size: board_model_params.marker_paper_size,
-            marker_paper_placement: board_model_params.marker_paper_placement,
-        };
-
-        // Generate board model points (corners and hole centers for visualization)
-        let points = vec![
-            // Board corners
-            board_model.top_corner(),
-            board_model.bottom_corner(),
-            board_model.left_corner(),
-            board_model.right_corner(),
-            // Hole centers
-            board_model.left_circle_center(),
-            board_model.right_circle_center(),
-            board_model.top_circle_center(),
-            // Marker corners for more detail
-            board_model.marker_bottom_corner(),
-            board_model.marker_top_corner(),
-            board_model.marker_left_corner(),
-            board_model.marker_right_corner(),
-            board_model.marker_center(),
-        ];
-
-        Self::create_debug_pointcloud(&points, header)
-    }
-
-    fn correspondences_to_markers(state: &BoardIcpState, header: &Header) -> Result<MarkerArray> {
-        let mut markers = Vec::new();
-
-        // Collect source (data) and target (model) points
-        let mut source_points = Vec::new();
-        let mut target_points = Vec::new();
-
-        for (data_point, model_point) in state.correspondences.iter() {
-            source_points.push(Point {
-                x: data_point.x,
-                y: data_point.y,
-                z: data_point.z,
-            });
-            target_points.push(Point {
-                x: model_point.x,
-                y: model_point.y,
-                z: model_point.z,
-            });
-        }
-
-        // Create source points marker (red spheres)
-        markers.push(Marker {
-            header: header.clone(),
-            ns: "correspondence_source".to_string(),
-            id: 0,
-            type_: 7,  // SPHERE_LIST
-            action: 0, // ADD
-            points: source_points.clone(),
-            scale: GeomVector3 {
-                x: 0.015, // Sphere diameter
-                y: 0.015,
-                z: 0.015,
-            },
-            color: ColorRGBA {
-                r: 1.0, // Red
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
-            ..Default::default()
-        });
-
-        // Create target points marker (green spheres)
-        markers.push(Marker {
-            header: header.clone(),
-            ns: "correspondence_target".to_string(),
-            id: 0,
-            type_: 7,  // SPHERE_LIST
-            action: 0, // ADD
-            points: target_points.clone(),
-            scale: GeomVector3 {
-                x: 0.015, // Sphere diameter
-                y: 0.015,
-                z: 0.015,
-            },
-            color: ColorRGBA {
-                r: 0.0,
-                g: 1.0, // Green
-                b: 0.0,
-                a: 1.0,
-            },
-            ..Default::default()
-        });
-
-        // Create line markers connecting each correspondence pair (yellow lines)
-        for (i, (source, target)) in source_points.iter().zip(target_points.iter()).enumerate() {
-            let marker = Marker {
-                header: header.clone(),
-                ns: "correspondence_lines".to_string(),
-                id: i as i32,
-                type_: 4,  // LINE_STRIP
-                action: 0, // ADD
-                points: vec![source.clone(), target.clone()],
-                scale: GeomVector3 {
-                    x: 0.003, // Line width
-                    y: 0.0,
-                    z: 0.0,
-                },
-                color: ColorRGBA {
-                    r: 1.0, // Yellow
-                    g: 1.0,
-                    b: 0.0,
-                    a: 0.6, // Semi-transparent
-                },
-                ..Default::default()
-            };
-
-            markers.push(marker);
-        }
-
-        Ok(MarkerArray { markers })
-    }
 }
 
 fn main() -> Result<()> {
-    // Initialize logging for the hollow-board-detector library
-    init_logging();
+    env_logger::Builder::from_default_env()
+        .format_timestamp_millis()
+        .init();
 
     let mut executor = Context::default_from_env()?.create_basic_executor();
     let node = executor.create_node("lidar_board_detector")?;
@@ -3106,5 +2643,405 @@ mod covariance_tests {
         let text = include_str!("../../lctk_launch/config/board/board_detector.json5");
         let cfg = crate::bbox_free::parse_detection_config(text).unwrap();
         assert_eq!(cfg.detection_mode, crate::bbox_free::DetectionMode::Bbox);
+    }
+
+    #[test]
+    fn config_source_requires_exactly_one_complete_pair() {
+        let new_source =
+            select_config_source(Some("target.json5"), Some("tuning.json5"), None, None).unwrap();
+        assert_eq!(new_source.kind, ConfigSourceKind::New);
+        assert_eq!(new_source.target_config.as_deref(), Some("target.json5"));
+        assert_eq!(new_source.detector_config, "tuning.json5");
+
+        let legacy_source =
+            select_config_source(None, None, Some("board.json5"), Some("aruco.json5")).unwrap();
+        assert_eq!(legacy_source.kind, ConfigSourceKind::Legacy);
+        assert_eq!(legacy_source.target_config, None);
+        assert_eq!(legacy_source.detector_config, "board.json5");
+
+        for args in [
+            (Some("target.json5"), None, None, None),
+            (None, Some("tuning.json5"), None, None),
+            (None, None, Some("board.json5"), None),
+            (None, None, None, Some("aruco.json5")),
+            (
+                Some("target.json5"),
+                Some("tuning.json5"),
+                Some("board.json5"),
+                Some("aruco.json5"),
+            ),
+        ] {
+            assert!(
+                select_config_source(args.0, args.1, args.2, args.3).is_err(),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn neutral_selector_tuning_does_not_apply_pose_stance_gate() {
+        let tuning: DetectorTuning =
+            json5::from_str(r#"{ "stance_floor": 0.9, "up_axis": [1.0, 0.0, 0.0] }"#).unwrap();
+        let neutral = neutral_detector_tuning(&tuning);
+        assert_eq!(neutral.stance_floor, 0.0);
+        assert_eq!(neutral.up_axis, tuning.up_axis);
+    }
+
+    #[test]
+    fn solid_estimator_tuning_must_be_explicit_in_detector_config() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/solid_600_aruco_1_v1.json5"
+        ))
+        .unwrap();
+        let missing: DetectorConfig = json5::from_str("{}").unwrap();
+        let error = missing.estimator_tuning(&target).unwrap_err().to_string();
+        assert!(error.contains("solid_edge_band_m"));
+
+        let explicit: DetectorConfig = json5::from_str(
+            r#"{
+                solid_edge_band_m: 0.015,
+                solid_minimum_edge_points: 8,
+                solid_minimum_points_per_covered_edge: 1,
+                solid_minimum_covered_edges: 3,
+                solid_longitudinal_bins_per_edge: 4,
+                solid_minimum_occupied_longitudinal_bins: 2
+            }"#,
+        )
+        .unwrap();
+        assert!(explicit.estimator_tuning(&target).is_ok());
+    }
+
+    #[test]
+    fn bbox_ransac_preserves_plane_inliers_and_rejects_clutter() {
+        let mut points = Vec::new();
+        for i in 0..120 {
+            let x = -0.5 + (i % 12) as f64 * 0.08;
+            let y = -0.5 + (i / 12) as f64 * 0.08;
+            points.push(na::Point3::new(x, y, 2.0));
+        }
+        for i in 0..20 {
+            points.push(na::Point3::new(i as f64, -i as f64, 4.0));
+        }
+        let (plane, inliers) =
+            CalibrationBoardLocatorNode::fit_plane_ransac(&points, 500, 0.01).unwrap();
+        assert!(
+            inliers.len() >= 110,
+            "expected most plane points, got {}",
+            inliers.len()
+        );
+        assert!(inliers.iter().all(|point| (point.z - 2.0).abs() <= 1e-12));
+        assert!(plane.center.z.is_finite());
+        assert!(plane.normal.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn identity_publisher_is_relative_reliable_latched_depth_one() {
+        let options = target_identity_publisher_options();
+        assert_eq!(options.topic, TARGET_IDENTITY_TOPIC);
+        assert!(!options.topic.starts_with('/'));
+        assert_eq!(options.qos.history, QoSHistoryPolicy::KeepLast { depth: 1 });
+        assert_eq!(options.qos.reliability, QoSReliabilityPolicy::Reliable);
+        assert_eq!(options.qos.durability, QoSDurabilityPolicy::TransientLocal);
+    }
+
+    #[test]
+    fn bbox_and_bbox_free_adapters_have_identical_observation_semantics() {
+        let plane = PlaneModel {
+            center: na::Point3::new(0.0, 0.0, 2.0),
+            normal: na::Vector3::z(),
+            u: na::Vector3::x(),
+            v: na::Vector3::y(),
+        };
+        let square_fit = board_cluster_detector::square_fit::SquareFit {
+            center: [0.0, 0.0],
+            theta: 0.0,
+            residual: 0.01,
+            corners_2d: [[0.3, 0.3], [-0.3, 0.3], [-0.3, -0.3], [0.3, -0.3]],
+        };
+        let bbox_observation =
+            TargetSquarePlaneObservation::from_fitted_square(&plane, &square_fit, na::Vector3::z())
+                .unwrap();
+        let square_plane = SquarePlaneObservation {
+            points: vec![na::Point3::new(0.0, 0.0, 2.0)],
+            plane,
+            square_fit,
+        };
+        let bbox_free_observation =
+            TargetSquarePlaneObservation::from_square_plane(&square_plane, na::Vector3::z())
+                .unwrap();
+
+        assert_eq!(bbox_observation.center, bbox_free_observation.center);
+        assert_eq!(
+            bbox_observation.fitted_corners,
+            bbox_free_observation.fitted_corners
+        );
+        assert_eq!(
+            bbox_observation.orientation,
+            bbox_free_observation.orientation
+        );
+        assert_eq!(
+            bbox_observation.sensor_facing_normal,
+            bbox_free_observation.sensor_facing_normal
+        );
+    }
+
+    #[test]
+    fn solid_target_output_uses_target_size_and_no_cutout_markers() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/solid_600_aruco_1_v1.json5"
+        ))
+        .unwrap();
+        let pose = na::Isometry3::translation(0.0, 0.0, 2.0);
+        let header = Header::default();
+        let markers =
+            CalibrationBoardLocatorNode::create_target_markers(&target, pose, &header, "", 0)
+                .unwrap();
+        assert!(markers
+            .markers
+            .iter()
+            .all(|marker| !marker.ns.contains("cutout")));
+
+        let detection = TargetDetection {
+            pose,
+            target_identity: target.identity().clone(),
+            selected_quadrant: 0,
+            diagnostics: TargetDetectionDiagnostics::Solid(EdgeCoverageEvidence {
+                edge_point_count: 32,
+                edge_point_counts: [8; 4],
+                covered_edge_count: 4,
+                occupied_longitudinal_bins: [2; 4],
+                weak_in_plane_center: false,
+                weak_yaw: false,
+                board_up_alignment: 1.0,
+                edge_band_m: 0.02,
+                minimum_edge_points: 8,
+                minimum_points_per_covered_edge: 1,
+                minimum_covered_edges: 3,
+                longitudinal_bins_per_edge: 4,
+                minimum_occupied_longitudinal_bins: 2,
+            }),
+        };
+        let ros_detection = CalibrationBoardLocatorNode::convert_target_detection_to_detection3d(
+            &target,
+            &detection,
+            &[],
+            &header,
+        )
+        .unwrap();
+        assert!((ros_detection.bbox.size.x - 0.6).abs() < 1e-12);
+        assert!((ros_detection.bbox.size.y - 0.6).abs() < 1e-12);
+        assert_eq!(ros_detection.id, "solid_600_aruco_1");
+    }
+
+    #[test]
+    fn legacy_hollow_source_keeps_identity_and_one_metre_output_geometry() {
+        let source = select_config_source(
+            None,
+            None,
+            Some("legacy-board.json5"),
+            Some("legacy-aruco.json5"),
+        )
+        .unwrap();
+        assert_eq!(source.kind, ConfigSourceKind::Legacy);
+
+        let target = CalibrationBoardLocatorNode::load_legacy_hollow_target().unwrap();
+        assert_eq!(target.identity().target_id, "hollow_1000_aruco_4");
+        assert_eq!(target.identity().revision, 1);
+        assert_eq!(target.plate().side_um, 1_000_000);
+        assert_eq!(target.identity().semantic_sha256.len(), 64);
+        assert!(target
+            .identity()
+            .semantic_sha256
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()));
+
+        let pose = na::Isometry3::translation(0.0, 0.0, 2.0);
+        let detection = TargetDetection {
+            pose,
+            target_identity: target.identity().clone(),
+            selected_quadrant: 0,
+            diagnostics: TargetDetectionDiagnostics::CutoutIcp(CutoutIcpEvidence {
+                best_loss_m: 0.001,
+                second_best_loss_m: 0.01,
+                loss_separation_m: 0.009,
+                cutout_rim_correspondences: 12,
+                iteration_count: 3,
+                total_correspondences: 20,
+                termination: IcpTermination::GoodFit,
+            }),
+        };
+        let ros_detection = CalibrationBoardLocatorNode::convert_target_detection_to_detection3d(
+            &target,
+            &detection,
+            &[],
+            &Header::default(),
+        )
+        .unwrap();
+        assert!((ros_detection.bbox.size.x - 1.0).abs() < 1e-12);
+        assert!((ros_detection.bbox.size.y - 1.0).abs() < 1e-12);
+        assert_eq!(ros_detection.id, "hollow_1000_aruco_4");
+    }
+
+    #[test]
+    fn legacy_hollow_point_cloud_runs_bbox_adapter_and_estimator() {
+        let source = select_config_source(
+            None,
+            None,
+            Some("legacy-board.json5"),
+            Some("legacy-aruco.json5"),
+        )
+        .unwrap();
+        let target = CalibrationBoardLocatorNode::load_legacy_hollow_target().unwrap();
+        assert_eq!(source.kind, ConfigSourceKind::Legacy);
+
+        // This is the representative hollow sample used by the perforated
+        // estimator facade: a diamond plate surface plus every cutout rim,
+        // translated into the sensor frame at z=2 m.  Keeping it as a point
+        // cloud exercises the observer adapter's plane/square handoff rather
+        // than fabricating a TargetDetection for the regression.
+        let Surface::Perforated { circular_cutouts } = &target.plate().surface else {
+            panic!("legacy compatibility target must be perforated");
+        };
+        let mut points = Vec::new();
+        for xi in -16..=16 {
+            for yi in -16..=16 {
+                let x = xi as f64 * 0.04;
+                let y = yi as f64 * 0.04;
+                if x.abs() + y.abs() > target.half_diagonal_m() - 0.01 {
+                    continue;
+                }
+                if circular_cutouts.iter().any(|cutout| {
+                    let dx = x - cutout.x_um as f64 / 1_000_000.0;
+                    let dy = y - cutout.y_um as f64 / 1_000_000.0;
+                    dx.hypot(dy) < cutout.radius_um as f64 / 1_000_000.0 + 0.002
+                }) {
+                    continue;
+                }
+                points.push(na::Point3::new(x, y, 2.0));
+            }
+        }
+        for cutout in circular_cutouts {
+            let center_x = cutout.x_um as f64 / 1_000_000.0;
+            let center_y = cutout.y_um as f64 / 1_000_000.0;
+            let radius = cutout.radius_um as f64 / 1_000_000.0;
+            for sample in 0..32 {
+                let angle = sample as f64 * std::f64::consts::TAU / 32.0;
+                points.push(na::Point3::new(
+                    center_x + radius * angle.cos(),
+                    center_y + radius * angle.sin(),
+                    2.0,
+                ));
+            }
+        }
+
+        let detector_config: DetectorConfig = json5::from_str(include_str!(
+            "../../lctk_launch/config/board/board_detector.json5"
+        ))
+        .unwrap();
+        let selected = CalibrationBoardLocatorNode::select_bbox_evidence(
+            &points,
+            &target,
+            &detector_config,
+            &Header::default(),
+            &None,
+        )
+        .unwrap()
+        .expect("representative hollow cloud should produce bbox evidence");
+        assert!((selected.observation.center.z - 2.0).abs() < 1e-9);
+
+        let evidence_points = selected.points.clone();
+        let estimator =
+            TargetPoseEstimator::new(&target, detector_config.estimator_tuning(&target).unwrap())
+                .unwrap();
+        let TargetPoseEstimate::Detected(detection) =
+            estimator.estimate(selected.observation, selected.points)
+        else {
+            panic!("representative hollow cloud should be detected");
+        };
+        assert_eq!(detection.target_identity.target_id, "hollow_1000_aruco_4");
+        assert!(matches!(
+            detection.diagnostics,
+            TargetDetectionDiagnostics::CutoutIcp(_)
+        ));
+        let ros_detection = CalibrationBoardLocatorNode::convert_target_detection_to_detection3d(
+            &target,
+            &detection,
+            &evidence_points,
+            &Header::default(),
+        )
+        .unwrap();
+        assert!((ros_detection.bbox.size.x - 1.0).abs() < 1e-12);
+        assert!((ros_detection.bbox.size.y - 1.0).abs() < 1e-12);
+        assert_eq!(ros_detection.id, "hollow_1000_aruco_4");
+    }
+
+    #[test]
+    fn bbox_ransac_plane_miss_is_an_empty_selection() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5"
+        ))
+        .unwrap();
+        let detector_config: DetectorConfig = json5::from_str(
+            r#"{
+                skip_ransac: false,
+                plane_ransac_max_iterations: 100,
+                plane_ransac_inlier_threshold: 0.01
+            }"#,
+        )
+        .unwrap();
+        let collinear_points = vec![
+            na::Point3::new(-0.2, 0.0, 2.0),
+            na::Point3::new(0.0, 0.0, 2.0),
+            na::Point3::new(0.2, 0.0, 2.0),
+        ];
+        assert!(CalibrationBoardLocatorNode::select_bbox_evidence(
+            &collinear_points,
+            &target,
+            &detector_config,
+            &Header::default(),
+            &None,
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn solid_estimator_rejects_with_structured_reason() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/solid_600_aruco_1_v1.json5"
+        ))
+        .unwrap();
+        let estimator = TargetPoseEstimator::new(
+            &target,
+            TargetPoseEstimatorTuning::for_solid(SolidRefinementTuning::new(0.02, 8, 1, 3, 4, 2)),
+        )
+        .unwrap();
+        let plane = PlaneModel {
+            center: na::Point3::new(0.0, 0.0, 2.0),
+            normal: na::Vector3::z(),
+            u: na::Vector3::x(),
+            v: na::Vector3::y(),
+        };
+        let square_fit = board_cluster_detector::square_fit::SquareFit {
+            center: [0.0, 0.0],
+            theta: 0.0,
+            residual: 0.0,
+            corners_2d: [[0.3, 0.3], [-0.3, 0.3], [-0.3, -0.3], [0.3, -0.3]],
+        };
+        let observation =
+            TargetSquarePlaneObservation::from_fitted_square(&plane, &square_fit, na::Vector3::z())
+                .unwrap();
+        let result = estimator.estimate(observation, Vec::new());
+        match result {
+            TargetPoseEstimate::Rejected(rejection) => {
+                assert_eq!(rejection.target_identity, *target.identity());
+                assert!(matches!(
+                    rejection.reason,
+                    TargetRejectReason::InsufficientOuterEdgeEvidence { .. }
+                        | TargetRejectReason::BoardUpAlignment { .. }
+                ));
+            }
+            TargetPoseEstimate::Detected(_) => panic!("empty edge evidence must reject"),
+        }
     }
 }
