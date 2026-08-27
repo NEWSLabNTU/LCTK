@@ -1,78 +1,99 @@
-"""`board_geometry` is the camera side of a cross-language contract.
-
-The Rust `hollow-board-config` crate and this module both answer "where are the ArUco
-marker corners on the board?", and the published board pose (`T_sensor<-board`) puts
-that answer on both sides of one product. A disagreement is therefore partly *silent*:
-the 2x2 grid is symmetric, so an in-plane 45-degree error still solves cleanly with a
-low reprojection error.
-
-These tests pin the properties that make the contract checkable at all. The contract
-itself — the world positions — is asserted in `test_marker_corners_world_golden.py`.
-"""
+"""Camera-side tests for the shared Target Definition and identity gate."""
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+from lctk_target import load_target
+from lidar_to_camera_solver.board_geometry import (
+    CAMERA_TARGET_IDENTITY_TOPIC,
+    LIDAR_TARGET_IDENTITY_TOPIC,
+    TargetIdentityGate,
+    identity_fields,
+    identity_gate_error,
+    marker_geometry_summary,
+    parse_target_identity,
+)
 
-BOARD_SIZE_MM = "500mm"
+TARGETS = Path(__file__).resolve().parents[2] / "lctk_launch" / "config" / "targets"
+SOLID = TARGETS / "solid_600_aruco_1_v1.json5"
+HOLLOW = TARGETS / "hollow_1000_aruco_4_v1.json5"
+
+
+def wire_identity(target):
+    return identity_fields(target.identity)
 
 
 def test_module_imports_without_rclpy():
-    """The geometry must be testable without a ROS graph.
+    """The shared geometry/gate stays testable without a ROS graph."""
 
-    If `board_geometry` ever grows an `rclpy` import, every assertion about the board's
-    frame convention starts requiring a running node, and in practice stops being run.
-    """
-    # A fresh interpreter: a sibling test in this same session imports the node, which
-    # would leave `rclpy` in this process's `sys.modules` regardless.
     probe = (
         "import sys;"
-        "import lidar_to_camera_solver.board_geometry as g;"
+        "import lidar_to_camera_solver.board_geometry;"
         "print(f'LCTK_BOARD_GEOMETRY_RCLPY={\"rclpy\" in sys.modules}')"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
-    sentinel_lines = [
-        line
-        for line in result.stdout.splitlines()
-        if line.startswith("LCTK_BOARD_GEOMETRY_RCLPY=")
-    ]
-    assert sentinel_lines == ["LCTK_BOARD_GEOMETRY_RCLPY=False"], (
-        "importing board_geometry pulled in rclpy"
+    assert "LCTK_BOARD_GEOMETRY_RCLPY=False" in result.stdout
+
+
+def test_target_geometry_comes_from_shared_reader():
+    solid = load_target(SOLID)
+    hollow = load_target(HOLLOW)
+
+    assert solid.plate.side_um == 600_000
+    assert solid.fiducial.marker_ids == (1,)
+    assert len(solid.marker_corners_by_id[1]) == 4
+    assert hollow.plate.side_um == 1_000_000
+    assert len(hollow.marker_corners_by_id) == 4
+    assert "marker_size=480.0mm" in marker_geometry_summary(solid)
+
+
+def test_identity_topics_are_relative_for_launch_routing():
+    assert not LIDAR_TARGET_IDENTITY_TOPIC.startswith("/")
+    assert not CAMERA_TARGET_IDENTITY_TOPIC.startswith("/")
+
+
+@pytest.fixture
+def solid_identity():
+    return wire_identity(load_target(SOLID))
+
+
+def test_identity_gate_decision_table(solid_identity):
+    different = dict(solid_identity, target_id="hollow_1000_aruco_4")
+
+    assert "missing" in identity_gate_error(
+        parse_target_identity(solid_identity), None, solid_identity
+    )
+    assert "malformed" in identity_gate_error(
+        parse_target_identity(solid_identity), solid_identity, {}
+    )
+    assert "does not exactly match" in identity_gate_error(
+        parse_target_identity(solid_identity), different, solid_identity
+    )
+    assert (
+        identity_gate_error(
+            parse_target_identity(solid_identity), solid_identity, solid_identity
+        )
+        is None
     )
 
 
-@pytest.mark.parametrize(
-    "text,meters",
-    [
-        ("500mm", 0.5),
-        ("10mm", 0.01),
-        ("1.5m", 1.5),
-        ("-353.5533905932738mm", -0.3535533905932738),
-        ("0.25", 0.25),
-    ],
-)
-def test_parse_dimension_reads_the_configs_units(text, meters):
-    """`aruco_pattern.json5` states lengths as strings; a mis-parse silently rescales
-    the whole board. Negative values matter: `paper_placement` uses one."""
-    from lidar_to_camera_solver.board_geometry import parse_dimension
+def test_identity_gate_allows_late_join_and_rejects_restart(solid_identity):
+    local = parse_target_identity(solid_identity)
+    gate = TargetIdentityGate(local)
 
-    assert parse_dimension(text) == pytest.approx(meters, abs=1e-12)
+    assert not gate.ready
+    assert gate.update("lidar", solid_identity) is not None
+    assert not gate.ready
+    assert gate.update("camera", solid_identity) is None
+    assert gate.ready
 
-
-def test_fewer_than_four_marker_ids_is_a_clear_error():
-    """M-09: the 2x2 layout indexes marker_ids[0..3]."""
-    from lidar_to_camera_solver.board_geometry import compute_multi_marker_corners
-
-    config = {
-        "board_size": BOARD_SIZE_MM,
-        "board_border_size": "10mm",
-        "marker_square_size_ratio": 0.8,
-        "num_squares_per_side": 2,
-        "marker_ids": [1, 2, 3],
-    }
-    with pytest.raises(ValueError, match="at least 4 marker_ids"):
-        compute_multi_marker_corners(config)
+    changed = dict(solid_identity, revision=2)
+    reason = gate.update("camera", changed)
+    assert reason is not None
+    assert "changed during this solver session" in reason
+    assert not gate.ready

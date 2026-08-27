@@ -3,12 +3,13 @@
 import json
 import sys
 import threading
-import time
+from pathlib import Path
 
 import cv2
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
+from lctk_interfaces.msg import CalibrationTargetIdentity
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
     AdjustTransform,
@@ -26,16 +27,16 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import ColorRGBA, Header, String
+from std_msgs.msg import ColorRGBA, Header
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
 
 from lidar_to_camera_solver.board_geometry import (
-    BOARD_FRAME_CONVENTION,
-    BOARD_FRAME_CONVENTION_TOPIC,
-    compute_multi_marker_corners,
-    frame_convention_error,
-    load_aruco_pattern_config,
+    CAMERA_TARGET_IDENTITY_TOPIC,
+    LIDAR_TARGET_IDENTITY_TOPIC,
+    TargetIdentityGate,
+    ValidatedTarget,
+    load_target_definition,
     marker_geometry_summary,
     rotation_matrix_to_quaternion,
 )
@@ -58,6 +59,42 @@ from lidar_to_camera_solver.detection_format import (
 )
 
 SOLVER_MODES = ("continuous", "manual")
+
+
+def target_identity_qos_profile() -> QoSProfile:
+    """QoS contract for late-joining Target Identity consumers."""
+
+    return QoSProfile(
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        history=HistoryPolicy.KEEP_LAST,
+        depth=1,
+    )
+
+
+def create_target_identity_subscriptions(
+    node,
+    callback,
+    *,
+    lidar_topic: str = LIDAR_TARGET_IDENTITY_TOPIC,
+    camera_topic: str = CAMERA_TARGET_IDENTITY_TOPIC,
+) -> tuple[object, object]:
+    """Subscribe to both relative, latched observer identity endpoints."""
+
+    qos = target_identity_qos_profile()
+    lidar_subscription = node.create_subscription(
+        CalibrationTargetIdentity,
+        lidar_topic,
+        lambda message: callback("lidar", message),
+        qos,
+    )
+    camera_subscription = node.create_subscription(
+        CalibrationTargetIdentity,
+        camera_topic,
+        lambda message: callback("camera", message),
+        qos,
+    )
+    return lidar_subscription, camera_subscription
 
 
 def parse_solver_mode(value: str) -> str:
@@ -85,6 +122,7 @@ class LidarToCameraSolver(Node):
         self.parent_frame = self._string_parameter("parent_frame")
         self.child_frame = self._string_parameter("child_frame")
         camera_topic = self._string_parameter("camera_topic")
+        target_config_file = self._string_parameter("target_config")
         aruco_config_file = self._string_parameter("aruco_config_file")
         publishing_rate = self._double_parameter("publishing_rate")
         self.min_frames_required = self._integer_parameter("min_frames_required")
@@ -108,15 +146,13 @@ class LidarToCameraSolver(Node):
             epoch_check_interval_s=self._double_parameter("epoch_check_interval_s"),
         )
 
-        self._await_board_frame_convention(
-            self._double_parameter("frame_convention_timeout_s")
+        self.target = self._load_target_definition(
+            target_config_file, aruco_config_file
         )
-        self.aruco_pattern_config = self._load_aruco_pattern_config(aruco_config_file)
-        self.marker_corners_by_id = compute_multi_marker_corners(
-            self.aruco_pattern_config
-        )
+        self.marker_corners_by_id = self.target.marker_corners_by_id
+        self.identity_gate = TargetIdentityGate(self.target.identity)
         self.get_logger().debug(
-            f"Board geometry: {marker_geometry_summary(self.aruco_pattern_config)}"
+            f"Board geometry: {marker_geometry_summary(self.target)}"
         )
 
         # Buffer owns captures, solve state, quality, and its own lock. This lock owns
@@ -130,6 +166,23 @@ class LidarToCameraSolver(Node):
         self.publishing_enabled = False
         self._continuous_solve_count = 0
         self.state_lock = threading.RLock()
+        # Bump whenever a solver-state reset invalidates an in-flight mutation.
+        # Continuous solves capture this token before doing work and must match it
+        # again before rebasing or publishing their result.
+        self._identity_generation = 0
+
+        # Observer identities are relative and latched by both detectors.  Their
+        # QoS is independent of detection QoS so a late-starting solver receives
+        # the selected target even in a realtime (best-effort) graph.
+        (
+            self.lidar_identity_subscription,
+            self.camera_identity_subscription,
+        ) = create_target_identity_subscriptions(
+            self,
+            self._target_identity_callback,
+            lidar_topic=self._string_parameter("lidar_target_identity_topic"),
+            camera_topic=self._string_parameter("camera_target_identity_topic"),
+        )
 
         reliability = (
             ReliabilityPolicy.BEST_EFFORT
@@ -165,6 +218,8 @@ class LidarToCameraSolver(Node):
                 if self.solver_mode == "continuous"
                 else None
             ),
+            admit_pair=self._admit_detection_pair,
+            admission_lock=self.state_lock,
         )
 
         if camera_topic and "/" in camera_topic:
@@ -183,6 +238,7 @@ class LidarToCameraSolver(Node):
             f"Solver mode: {self.solver_mode}\n"
             f"Minimum frames before solving: {self.solve_min_frames}\n"
             f"Camera info: {camera_info_topic}\n"
+            f"Target: {self.target.target_id}@{self.target.revision}\n"
             f"Transform: {self.parent_frame} -> {self.child_frame}"
         )
 
@@ -192,6 +248,7 @@ class LidarToCameraSolver(Node):
             ("parent_frame", "lidar"),
             ("child_frame", "camera"),
             ("camera_topic", ""),
+            ("target_config", ""),
             ("aruco_config_file", ""),
             ("debug_mode", True),
             ("publishing_rate", 10.0),
@@ -208,7 +265,8 @@ class LidarToCameraSolver(Node):
             ("max_pair_age_s", 2.0),
             ("sync_stats_interval_s", 10.0),
             ("epoch_check_interval_s", 1.0),
-            ("frame_convention_timeout_s", 10.0),
+            ("lidar_target_identity_topic", LIDAR_TARGET_IDENTITY_TOPIC),
+            ("camera_target_identity_topic", CAMERA_TARGET_IDENTITY_TOPIC),
         )
         for name, default in parameters:
             self.declare_parameter(name, default)
@@ -272,6 +330,9 @@ class LidarToCameraSolver(Node):
             self._camera_matrix = camera_matrix.copy()
             self.detection_buffer = replacement
             self._clear_adjustment_locked()
+            if changed:
+                self._identity_generation += 1
+                self.pair_source.discard_cached_pair()
         if changed:
             self.get_logger().warn(
                 "Camera intrinsic matrix changed; started a new calibration session"
@@ -279,28 +340,53 @@ class LidarToCameraSolver(Node):
         else:
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
 
-    def _publishing_timer_callback(self):
+    def _publishing_timer_callback(self, expected_generation: int | None = None):
         with self.state_lock:
+            if expected_generation is not None and (
+                expected_generation != self._identity_generation
+            ):
+                return False
+            if self.identity_gate.error is not None:
+                return False
             if not self.publishing_enabled or self.last_transform is None:
-                return
+                return False
             self.last_transform.header.stamp = self.get_clock().now().to_msg()
             self.transform_publisher.publish(self.last_transform)
             self._publish_axis_markers()
+            return True
 
     def _continuous_pair_callback(self, messages: tuple[object, ...]) -> None:
         """Replace the latest capture, solve it, and publish without operator action."""
-        buffer = self.detection_buffer
-        if buffer is None:
-            self.get_logger().warn(
-                "Ignoring synchronized detection pair: no camera info available",
-                throttle_duration_sec=5.0,
-            )
-            return
-
         aruco, board = messages
-        update = buffer.restore(
-            (DetectionPair(aruco=aruco, board=board),), append=False
-        )
+        # Keep the identity check and the buffer mutation under one node lock.  An
+        # identity callback may arrive on another executor thread; it must not be
+        # able to change the accepted target between these two operations.
+        with self.state_lock:
+            if not self.pair_source.is_cached_pair(messages):
+                self.get_logger().warn(
+                    "Ignoring synchronized detection pair: cache entry was "
+                    "discarded or superseded before continuous restore",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            generation = self._identity_generation
+            error = self.identity_gate.error
+            buffer = self.detection_buffer
+            if error is not None:
+                self.get_logger().warn(
+                    f"Ignoring synchronized detection pair: {error}",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            if buffer is None:
+                self.get_logger().warn(
+                    "Ignoring synchronized detection pair: no camera info available",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            update = buffer.restore(
+                (DetectionPair(aruco=aruco, board=board),), append=False
+            )
         if not update.accepted:
             self.get_logger().error(
                 f"Continuous solve rejected detection pair: {self._rejection_text(update)}",
@@ -309,10 +395,17 @@ class LidarToCameraSolver(Node):
             return
 
         self._continuous_solve_count += 1
-        self._apply_update(
+        applied = self._apply_update(
             update,
             log_quality_warnings=self._continuous_solve_count % 30 == 1,
+            expected_generation=generation,
         )
+        if not applied:
+            self.get_logger().warn(
+                "Continuous solve result invalidated by a target or session reset",
+                throttle_duration_sec=5.0,
+            )
+            return
         if not isinstance(update.snapshot.outcome, Solved):
             self.get_logger().warn(
                 f"Continuous solve unavailable: {self._status_text(update.snapshot)}",
@@ -323,7 +416,17 @@ class LidarToCameraSolver(Node):
         # Match the superseded continuous solver's observable behaviour: each
         # synchronized pair produces a publication immediately. The normal timer
         # continues refreshing the latest transform for late subscribers.
-        self._publishing_timer_callback()
+        self._publishing_timer_callback(expected_generation=generation)
+
+    def _admit_detection_pair(self, _messages: tuple[object, ...]) -> str | None:
+        """Reject a pair before :class:`DetectionPairSource` mutates its cache.
+
+        ``DetectionPairSource`` calls this while holding ``admission_lock``.  The
+        camera solver supplies ``state_lock`` as that lock, so acquiring it here
+        again would couple this callback to a reentrant-lock implementation.
+        """
+
+        return self.identity_gate.error
 
     def _publish_axis_markers(self):
         if self.last_transform is None:
@@ -416,13 +519,26 @@ class LidarToCameraSolver(Node):
         return f"{messages[rejection.code]}{detail}"
 
     def _apply_update(
-        self, update: BufferUpdate, *, log_quality_warnings: bool = True
-    ) -> None:
+        self,
+        update: BufferUpdate,
+        *,
+        log_quality_warnings: bool = True,
+        expected_generation: int | None = None,
+    ) -> bool:
         """Rebase or clear adjustment after one accepted buffer revision."""
         if not update.accepted:
-            return
+            return False
         outcome = update.snapshot.outcome
         with self.state_lock:
+            if expected_generation is not None and (
+                expected_generation != self._identity_generation
+            ):
+                return False
+            # A solved outcome is calibration-target-bound.  Never restore one
+            # after the sticky identity gate has closed, even if the caller did
+            # not have a generation token (for example, a legacy service path).
+            if isinstance(outcome, Solved) and self.identity_gate.error is not None:
+                return False
             if isinstance(outcome, Solved):
                 estimate = outcome.estimate
                 self.current_rvec = np.array(estimate.rvec, copy=True)
@@ -437,6 +553,7 @@ class LidarToCameraSolver(Node):
             warnings = outcome.estimate.quality.warnings()
             if warnings:
                 self.get_logger().warn("\n".join(warnings))
+        return True
 
     def _clear_adjustment_locked(self) -> None:
         self.current_rvec = None
@@ -445,7 +562,17 @@ class LidarToCameraSolver(Node):
         self.publishing_enabled = False
 
     def add_detection_callback(self, request, response):
-        buffer = self.detection_buffer
+        with self.state_lock:
+            buffer = self.detection_buffer
+            identity_error = self.identity_gate.error
+            generation = self._identity_generation
+        if identity_error is not None:
+            response.success = False
+            response.message = (
+                f"Cannot capture before Target Identity agreement: {identity_error}"
+            )
+            response.buffer_size = buffer.snapshot().frame_count if buffer else 0
+            return response
         if buffer is None:
             response.success = False
             response.message = "No camera info available"
@@ -458,14 +585,38 @@ class LidarToCameraSolver(Node):
             response.buffer_size = buffer.snapshot().frame_count
             return response
         aruco, board = pair_outcome.messages
-        update = buffer.capture(DetectionPair(aruco=aruco, board=board))
+        with self.state_lock:
+            # Re-check after waiting for the pair.  A clear, camera reset, or
+            # identity update while waiting invalidates the cached pair.
+            if generation != self._identity_generation:
+                response.success = False
+                response.message = (
+                    "Cannot capture: calibration session changed while waiting; retry"
+                )
+                response.buffer_size = buffer.snapshot().frame_count
+                return response
+            identity_error = self.identity_gate.error
+            if identity_error is not None:
+                response.success = False
+                response.message = (
+                    f"Cannot capture before Target Identity agreement: {identity_error}"
+                )
+                response.buffer_size = buffer.snapshot().frame_count
+                return response
+            update = buffer.capture(DetectionPair(aruco=aruco, board=board))
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
             response.success = False
             response.message = self._rejection_text(update)
             self.get_logger().error(response.message)
             return response
-        self._apply_update(update)
+        if not self._apply_update(update, expected_generation=generation):
+            response.success = False
+            response.message = "Capture invalidated by a target or session reset; retry"
+            response.buffer_size = (
+                self._snapshot().frame_count if self._snapshot() else 0
+            )
+            return response
         response.success = True
         placement = "new" if update.added_new_placement else "duplicate"
         response.message = (
@@ -481,13 +632,14 @@ class LidarToCameraSolver(Node):
     def clear_buffer_callback(self, request, response):
         snapshot = self._snapshot()
         old_size = snapshot.frame_count if snapshot is not None else 0
-        if self.detection_buffer is not None:
-            update = self.detection_buffer.clear()
-            self._apply_update(update)
-        else:
-            with self.state_lock:
+        with self.state_lock:
+            self._identity_generation += 1
+            if self.detection_buffer is not None:
+                self.detection_buffer.clear()
                 self._clear_adjustment_locked()
-        self.pair_source.discard_cached_pair()
+            else:
+                self._clear_adjustment_locked()
+            self.pair_source.discard_cached_pair()
         response.success = True
         response.message = f"Cleared {old_size} detection pairs from buffer"
         return response
@@ -521,13 +673,15 @@ class LidarToCameraSolver(Node):
         return response
 
     def remove_detection_callback(self, request, response):
-        buffer = self.detection_buffer
-        if buffer is None:
-            response.success = False
-            response.message = "No camera info available"
-            response.buffer_size = 0
-            return response
-        update = buffer.remove(request.index)
+        with self.state_lock:
+            buffer = self.detection_buffer
+            generation = self._identity_generation
+            if buffer is None:
+                response.success = False
+                response.message = "No camera info available"
+                response.buffer_size = 0
+                return response
+            update = buffer.remove(request.index)
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
             response.success = False
@@ -535,7 +689,10 @@ class LidarToCameraSolver(Node):
                 f"Invalid index {request.index}. Buffer size is {response.buffer_size}"
             )
             return response
-        self._apply_update(update)
+        if not self._apply_update(update, expected_generation=generation):
+            response.success = False
+            response.message = "Removal invalidated by a target or session reset; retry"
+            return response
         response.success = True
         response.message = (
             f"Removed detection at index {request.index}. "
@@ -580,12 +737,23 @@ class LidarToCameraSolver(Node):
         return response
 
     def load_detections_callback(self, request, response):
-        buffer = self.detection_buffer
+        with self.state_lock:
+            buffer = self.detection_buffer
+            generation = self._identity_generation
+            identity_error = self.identity_gate.error
         if buffer is None:
             response.success = False
             response.message = "No camera info available"
             response.num_detections = 0
             response.buffer_size = 0
+            return response
+        if identity_error is not None:
+            response.success = False
+            response.message = (
+                f"Cannot load before Target Identity agreement: {identity_error}"
+            )
+            response.num_detections = 0
+            response.buffer_size = buffer.snapshot().frame_count
             return response
         try:
             with open(request.file_path) as file:
@@ -608,7 +776,28 @@ class LidarToCameraSolver(Node):
             response.num_detections = 0
             response.buffer_size = buffer.snapshot().frame_count
             return response
-        update = buffer.restore(archive.pairs, append=request.append)
+        # Keep the generation check and restore under the same node lock.  If
+        # identity/session invalidation wins first, the archive must not refill
+        # the buffer that the invalidation just cleared.
+        with self.state_lock:
+            if generation != self._identity_generation:
+                response.success = False
+                response.message = (
+                    "Cannot load: calibration session changed while reading; retry"
+                )
+                response.num_detections = 0
+                response.buffer_size = buffer.snapshot().frame_count
+                return response
+            identity_error = self.identity_gate.error
+            if identity_error is not None:
+                response.success = False
+                response.message = (
+                    f"Cannot load before Target Identity agreement: {identity_error}"
+                )
+                response.num_detections = 0
+                response.buffer_size = buffer.snapshot().frame_count
+                return response
+            update = buffer.restore(archive.pairs, append=request.append)
         response.num_detections = len(archive.pairs)
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
@@ -617,12 +806,28 @@ class LidarToCameraSolver(Node):
                 f"Failed to load detections: {self._rejection_text(update)}"
             )
             return response
-        self._apply_update(update)
+        if not self._apply_update(update, expected_generation=generation):
+            response.success = False
+            response.message = "Load invalidated by a target or session reset; retry"
+            response.buffer_size = (
+                self._snapshot().frame_count if self._snapshot() else 0
+            )
+            return response
         selected_adjustment = select_loaded_adjustment(
             archive, update.snapshot, append=request.append
         )
         if selected_adjustment is not None:
             with self.state_lock:
+                if (
+                    generation != self._identity_generation
+                    or self.identity_gate.error is not None
+                ):
+                    response.success = False
+                    response.message = (
+                        "Load invalidated by a target or session reset; retry"
+                    )
+                    response.buffer_size = buffer.snapshot().frame_count
+                    return response
                 self.current_rvec = np.array(selected_adjustment.rvec, copy=True)
                 self.current_tvec = np.array(selected_adjustment.tvec, copy=True)
                 self.last_transform = self._create_transform_message(
@@ -674,12 +879,27 @@ class LidarToCameraSolver(Node):
         return response
 
     def reset_transform_callback(self, request, response):
-        snapshot = self._snapshot()
-        if snapshot is None or snapshot.estimate is None:
-            response.success = False
-            response.message = "Cannot reset: current buffer has no solved estimate"
-            return response
         with self.state_lock:
+            generation = self._identity_generation
+            buffer = self.detection_buffer
+            snapshot = buffer.snapshot() if buffer is not None else None
+            if snapshot is None or snapshot.estimate is None:
+                response.success = False
+                response.message = "Cannot reset: current buffer has no solved estimate"
+                return response
+            if self.identity_gate.error is not None:
+                response.success = False
+                response.message = (
+                    "Cannot reset before Target Identity agreement: "
+                    f"{self.identity_gate.error}"
+                )
+                return response
+            if generation != self._identity_generation:
+                response.success = False
+                response.message = (
+                    "Reset invalidated by a target or session reset; retry"
+                )
+                return response
             self.current_rvec = np.array(snapshot.estimate.rvec, copy=True)
             self.current_tvec = np.array(snapshot.estimate.tvec, copy=True)
             self.last_transform = self._create_transform_message(
@@ -726,46 +946,90 @@ class LidarToCameraSolver(Node):
         response.adjust_yaw = response.current_yaw - response.solved_yaw
         return response
 
-    def _await_board_frame_convention(self, timeout_s: float) -> None:
-        received: list[str] = []
-        qos = QoSProfile(
-            depth=1,
-            history=HistoryPolicy.KEEP_LAST,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-        )
+    def _target_identity_callback(
+        self, source: str, message: CalibrationTargetIdentity
+    ) -> None:
+        """Record one latched observer identity and update the admission gate."""
 
-        def on_tag(msg: String) -> None:
-            received.append(msg.data)
-            error = frame_convention_error(msg.data)
-            if error is not None and self._frame_convention_ok:
-                self.get_logger().fatal(error)
-                raise SystemExit(1)
+        with self.state_lock:
+            was_ready = self.identity_gate.ready
+            error = self.identity_gate.update(source, message)
+            if error is not None and was_ready:
+                # A source restart must not leave a previously solved transform
+                # publishing under a different target binding.
+                self._identity_generation += 1
+                buffer = self.detection_buffer
+                if buffer is not None:
+                    buffer.clear()
+                self.pair_source.discard_cached_pair()
+                self._clear_adjustment_locked()
 
-        self._frame_convention_ok = False
-        self._frame_convention_subscription = self.create_subscription(
-            String, BOARD_FRAME_CONVENTION_TOPIC, on_tag, qos
-        )
-        deadline = time.monotonic() + timeout_s
-        while not received and time.monotonic() < deadline:
-            rclpy.spin_once(self, timeout_sec=0.1)
-        error = frame_convention_error(received[-1] if received else None)
-        if error is not None:
-            self.get_logger().fatal(error)
-            raise RuntimeError(error)
-        self._frame_convention_ok = True
+        if error is None and not was_ready:
+            self.get_logger().info(
+                "LiDAR, camera, and local Target Identities agree; "
+                "Detection Pair admission enabled"
+            )
+        elif error is not None:
+            self.get_logger().error(
+                f"Target Identity gate closed after {source} update: {error}",
+                throttle_duration_sec=5.0,
+            )
+
+    @staticmethod
+    def _legacy_hollow_target_path() -> Path:
+        """Locate the explicit hollow manifest for the temporary old parameter."""
+
+        try:
+            from ament_index_python.packages import get_package_share_directory
+
+            return (
+                Path(get_package_share_directory("lctk_launch"))
+                / "config"
+                / "targets"
+                / "hollow_1000_aruco_4_v1.json5"
+            )
+        except (ImportError, LookupError):
+            # Source-tree tests can run before ament has indexed the package.
+            return (
+                Path(__file__).resolve().parents[2]
+                / "lctk_launch"
+                / "config"
+                / "targets"
+                / "hollow_1000_aruco_4_v1.json5"
+            )
+
+    def _load_target_definition(
+        self, target_config_file: str, legacy_aruco_config_file: str
+    ) -> ValidatedTarget:
+        """Load the selected target, with the temporary explicit-hollow bridge."""
+
+        target_config_file = target_config_file.strip()
+        legacy_aruco_config_file = legacy_aruco_config_file.strip()
+        if target_config_file and legacy_aruco_config_file:
+            raise ValueError(
+                "target_config and legacy aruco_config_file cannot both be set; "
+                "select one"
+            )
+        if not target_config_file:
+            if not legacy_aruco_config_file:
+                raise ValueError(
+                    "target_config is required (or temporary legacy "
+                    "aruco_config_file during migration)"
+                )
+            target_path = self._legacy_hollow_target_path()
+            self.get_logger().warn(
+                "legacy aruco_config_file selects the explicit hollow_1000_aruco_4 "
+                "Target Definition; migrate to target_config before W5-E1"
+            )
+        else:
+            target_path = Path(target_config_file)
+        self.get_logger().info(f"Loading Target Definition from: {target_path}")
+        target = load_target_definition(target_path)
         self.get_logger().info(
-            f"Board-frame convention confirmed: '{BOARD_FRAME_CONVENTION}'"
+            f"Loaded Target Definition: {target.target_id}@{target.revision} "
+            f"({target.identity.semantic_sha256})"
         )
-
-    def _load_aruco_pattern_config(self, config_file_path: str) -> dict:
-        self.get_logger().info(f"Loading ArUco pattern config from: {config_file_path}")
-        config = load_aruco_pattern_config(config_file_path)
-        self.get_logger().info(
-            f"Loaded ArUco config: {config['num_squares_per_side']}x"
-            f"{config['num_squares_per_side']} grid, marker IDs={config['marker_ids']}"
-        )
-        return config
+        return target
 
     def _create_transform_message(
         self, rvec: np.ndarray, tvec: np.ndarray

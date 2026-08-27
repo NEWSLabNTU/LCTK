@@ -35,6 +35,21 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
+def _identity_topic_for_detection(detection_topic: str) -> str:
+    """Return the observer identity sibling for a detection topic.
+
+    Observer nodes publish ``target_identity`` relative to the namespace that
+    already owns their detection output.  Deriving the sibling from the
+    parser-provided detection topic keeps launch routing coupled to the
+    existing graph contract instead of duplicating namespace construction.
+    """
+
+    prefix, separator, _leaf = detection_topic.rpartition("/")
+    if not separator:
+        return "target_identity"
+    return f"{prefix}/target_identity"
+
+
 def generate_nodes(context, *args, **kwargs) -> list:
     """Generate nodes based on the configuration file."""
     from lctk_launch.config_parser import parse_config
@@ -210,6 +225,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "child_frame": solver.child_frame,
                         "camera_topic": solver.camera_topic,
                         "aruco_config_file": solver.aruco_config,
+                        # Keep the solver-side identity endpoints relative and
+                        # remap each one to its corresponding observer below.
+                        "lidar_target_identity_topic": "lidar_target_identity",
+                        "camera_target_identity_topic": "camera_target_identity",
                         "debug_mode": debug_mode == "true",
                         "publishing_rate": 10.0,
                         "use_best_effort_qos": use_best_effort_qos,
@@ -221,6 +240,14 @@ def generate_nodes(context, *args, **kwargs) -> list:
                 remappings=[
                     ("aruco_detections", solver.aruco_detections_topic),
                     ("calibration_board_detections", solver.board_detections_topic),
+                    (
+                        "lidar_target_identity",
+                        _identity_topic_for_detection(solver.board_detections_topic),
+                    ),
+                    (
+                        "camera_target_identity",
+                        _identity_topic_for_detection(solver.aruco_detections_topic),
+                    ),
                     ("extrinsic_transform", solver.output_topic),
                 ],
             )
@@ -261,6 +288,16 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "use_best_effort_qos": use_best_effort_qos,
                         "max_message_age_ms": 0.0,
                     }
+                ],
+                remappings=[
+                    (
+                        "lidar1_target_identity",
+                        _identity_topic_for_detection(solver.lidar1_detections_topic),
+                    ),
+                    (
+                        "lidar2_target_identity",
+                        _identity_topic_for_detection(solver.lidar2_detections_topic),
+                    ),
                 ],
             )
         )

@@ -15,6 +15,7 @@
   <!-- The synchronized detection pair (conflux ownership, window policy, epoch reset,
        staleness) lives here now; this node no longer imports conflux_py itself. -->
   <depend>lctk_sync</depend>
+  <depend>lctk_target</depend>
   <!-- L-22: the node imports ten service types from lctk_interfaces.srv; the package it
        was migrated from never declared it. -->
   <depend>lctk_interfaces</depend>

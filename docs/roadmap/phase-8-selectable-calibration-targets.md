@@ -25,8 +25,8 @@ Updated 2026-08-27. Packet status changes land here with each accepted review ga
 | W3-D | Complete | Typed neutral estimator and temporary hollow facade, `ea0eda4` |
 | W4-A | Complete | Selectable LiDAR observer, neutral estimator adapter, and hollow/solid regressions, `d6a37ca` |
 | W4-B | Complete | Target-driven camera/generator adapters, `2ab0944`; binding cache fix, `dcb46e4` |
-| W4-C | In progress | Implementation and final review complete; commit follows W4-D shared admission seam |
-| W4-D | Complete | Atomic two-LiDAR identity gate and synchronized-pair admission; pending commit |
+| W4-C | Complete | Shared target geometry, exact three-way identity gate, and legacy graph identity routing; pending commit |
+| W4-D | Complete | Atomic two-LiDAR identity gate and synchronized-pair admission, `e9acdaf` |
 | W4-Ea | Complete | v4/v5 export parity, `82eb8a5` |
 | W5-A | Complete | Selectable launch schema parser, `42a7934` |
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
