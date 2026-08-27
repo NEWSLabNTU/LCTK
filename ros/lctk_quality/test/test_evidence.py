@@ -31,7 +31,7 @@ IDENTITY = TargetIdentityRecord(
 )
 
 
-def manifest(*, provenance="field"):
+def manifest(*, provenance="test_only"):
     return EvidenceManifest(
         bag=BagFingerprint(
             sha256="b" * 64,
@@ -193,6 +193,10 @@ def test_accepted_identity_is_exactly_bound_to_manifest():
     ("kwargs", "message"),
     [
         ({"accepted": True}, "accepted sample needs target identity"),
+        (
+            {"accepted": True, "target_identity": IDENTITY},
+            "accepted sample needs pose",
+        ),
         ({"accepted": False}, "rejected sample needs structured reason"),
         (
             {
@@ -260,3 +264,38 @@ def test_bag_fingerprint_from_file_records_checksum_and_size(tmp_path):
     assert fingerprint.sha256 == hashlib.sha256(b"field-bag").hexdigest()
     assert fingerprint.sha256 == sha256_file(bag)
     assert fingerprint.size_bytes == len(b"field-bag")
+
+
+def test_duplicate_timestamps_are_rejected_after_merge():
+    with pytest.raises(EvidenceSchemaError, match="must be unique"):
+        EvidenceCollector(manifest()).collect([accepted(150), rejected(150)])
+
+
+def test_bag_relative_path_must_be_relative():
+    with pytest.raises(EvidenceSchemaError, match="relative path"):
+        BagFingerprint(sha256="b" * 64, relative_path="/abs/bag.db3")
+
+
+def test_interval_rejects_unknown_label():
+    with pytest.raises(EvidenceSchemaError, match="expected one of"):
+        EvidenceInterval("bogus", 0, 100)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_pose_rejects_nan_and_infinite_values(value):
+    with pytest.raises(EvidenceSchemaError, match="finite number"):
+        PoseRecord(position=(value, 0.0, 0.0), orientation=(0.0, 0.0, 0.0, 1.0))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_rejection_evidence_rejects_nan_and_infinite_values(value):
+    with pytest.raises(EvidenceSchemaError, match="NaN or infinity"):
+        RejectionReason("code", evidence={"score": value})
+
+
+def test_field_provenance_is_not_reported_as_synthetic():
+    # Exercises the "field" branch of the schema explicitly; every other
+    # fixture in this file is synthetic and must stay marked "test_only".
+    report = EvidenceCollector(manifest(provenance="field")).collect([accepted(150)])
+    assert report.provenance == "field"
+    assert report.summary["synthetic_test_only"] is False
