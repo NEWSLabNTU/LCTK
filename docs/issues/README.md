@@ -46,6 +46,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-19](./M-19-debug-assertions-compiled-out.md) | Medium | Every `debug_assert!` compiled out of `just build` and `just test`; the 51 in `hollow-board-config` are also rotation-invariant | 🔴 |
 | [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) | Medium | Board model's axes run along edges while every accessor names a diamond → `initial_inplane_rotation_deg: 45.0` mandatory | 🟢 |
 | [M-21](./M-21-icp-stable-pose-exit-unreachable.md) | Medium | ICP's "stable pose" exit needs ~5× more iterations than any preset allows → `icp_pose_weight_threshold` is inert | 🔴 |
+| [M-22](./archive/M-22-root-cargo-patch-block-single-source.md) | Medium | Root `.cargo/config.toml` copied from one package → clean clone cannot build at all | 🟢 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -70,6 +71,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) | Low | `advanced_extrinsic_solver` imports `lctk_interfaces` without declaring the dependency | 🔴 |
 | [L-23](./L-23-debug-mode-parameter-never-read.md) | Low | `debug_mode` declared by both solvers, read by neither | 🔴 |
 | [L-24](./archive/L-24-board-geometry-import-test-egl-stdout.md) | Low | Board-geometry import test rejects unrelated Jetson EGL stdout | 🟢 |
+| [L-25](./L-25-fresh-machine-bringup-deps-missing.md) | Low | `setup.sh` installs none of the tools `just test` and `just lint` need | 🔴 |
 
 ## Three headline gaps
 
