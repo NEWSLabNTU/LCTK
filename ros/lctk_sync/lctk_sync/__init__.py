@@ -14,13 +14,14 @@ from lctk_sync.diagnosis import (
     sync_pair_staleness_error,
     sync_wait_diagnosis,
 )
-from lctk_sync.pair_source import DetectionPairSource, PairOutcome
+from lctk_sync.pair_source import DetectionPairSource, PairOutcome, ReentrantLock
 
 __all__ = [
     "DROP_POLICIES",
     "DetectionPairSource",
     "PairOutcome",
     "PairSourceConfig",
+    "ReentrantLock",
     "SyncGroupSummary",
     "format_sync_stats",
     "should_reset_for_new_epoch",

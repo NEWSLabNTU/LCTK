@@ -16,6 +16,7 @@ Where pose1 and pose2 are the board poses as seen from LiDAR 1 and LiDAR 2
 respectively.
 """
 
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,13 @@ from scipy.spatial.transform import Rotation
 from tf2_ros import TransformBroadcaster
 from vision_msgs.msg import Detection3DArray
 
+from lidar_to_lidar_solver.identity_gate import (
+    IdentityComparison,
+    IdentityStatus,
+    TargetIdentityGate,
+    TargetIdentitySubscriptions,
+)
+
 
 @dataclass
 class SyncStatistics:
@@ -39,6 +47,7 @@ class SyncStatistics:
     last_timestamp_diff_ms: float = 0.0
     last_translation: tuple[float, float, float] | None = None
     last_rotation_rpy_deg: tuple[float, float, float] | None = None
+    identity_rejections: int = 0
 
 
 class LidarToLidarSolver(Node):
@@ -94,6 +103,9 @@ class LidarToLidarSolver(Node):
         # State
         self.current_transform: TransformStamped | None = None
         self.stats = SyncStatistics()
+        self.target_identity_gate = TargetIdentityGate()
+        self.state_lock = threading.RLock()
+        self._identity_generation = 0
 
         # QoS profile configuration based on mode:
         # - BEST_EFFORT (realtime): Low latency, may drop messages
@@ -127,6 +139,18 @@ class LidarToLidarSolver(Node):
             ),
             qos=qos,
             on_pair=self._handle_sync_group,
+            admit_pair=self._admit_sync_group,
+            admission_lock=self.state_lock,
+        )
+
+        # Detector identities are latched and use dedicated relative endpoints.
+        # Keeping these subscriptions alive is essential for late solver joins;
+        # launch remaps each endpoint to the corresponding detector namespace.
+        self.target_identity_subscriptions = TargetIdentitySubscriptions(
+            self,
+            self.target_identity_gate,
+            on_update=self._handle_target_identity_update,
+            update_lock=self.state_lock,
         )
 
         # TF broadcaster
@@ -158,6 +182,13 @@ class LidarToLidarSolver(Node):
         Empty detection arrays never reach here: `require_non_empty` drops those groups
         in `DetectionPairSource`, which reports them.
         """
+        with self.state_lock:
+            identity = self.target_identity_gate.compare()
+            identity_generation = self._identity_generation
+            if not identity.accepted:
+                self._reject_identity_pair(identity)
+                return
+
         msg1: Detection3DArray = messages[0]
         msg2: Detection3DArray = messages[1]
 
@@ -178,9 +209,10 @@ class LidarToLidarSolver(Node):
             )
             return
 
-        # Calculate timestamp difference for statistics
+        # Calculate timestamp difference for statistics after admission. Keep
+        # this local until the generation is checked again below.
         time_diff_ns = abs(msg1_time.nanoseconds - msg2_time.nanoseconds)
-        self.stats.last_timestamp_diff_ms = time_diff_ns / 1e6
+        timestamp_diff_ms = time_diff_ns / 1e6
 
         # Extract poses from detections (take first detection from each)
         det1 = msg1.detections[0]
@@ -196,41 +228,89 @@ class LidarToLidarSolver(Node):
             self.get_logger().warn("Failed to compute transform")
             return
 
-        # Create TransformStamped message
-        transform_stamped = TransformStamped()
-        transform_stamped.header.stamp = self.get_clock().now().to_msg()
-        transform_stamped.header.frame_id = self.lidar1_frame
-        transform_stamped.child_frame_id = self.lidar2_frame
-        transform_stamped.transform = transform
+        with self.state_lock:
+            # An identity update may have invalidated this pair while its
+            # transform was being computed. Do not resurrect old output.
+            identity = self.target_identity_gate.compare()
+            if (
+                identity_generation != self._identity_generation
+                or not identity.accepted
+            ):
+                self._reject_identity_pair(identity)
+                return
 
-        # Update state
-        self.current_transform = transform_stamped
-        self.stats.synced_pairs += 1
+            self.stats.last_timestamp_diff_ms = timestamp_diff_ms
 
-        # Store for logging
-        t = transform.translation
-        self.stats.last_translation = (t.x, t.y, t.z)
+            # Create TransformStamped message
+            transform_stamped = TransformStamped()
+            transform_stamped.header.stamp = self.get_clock().now().to_msg()
+            transform_stamped.header.frame_id = self.lidar1_frame
+            transform_stamped.child_frame_id = self.lidar2_frame
+            transform_stamped.transform = transform
 
-        # Convert quaternion to RPY for logging
-        q = transform.rotation
-        r = Rotation.from_quat([q.x, q.y, q.z, q.w])
-        rpy = r.as_euler("xyz", degrees=True)
-        self.stats.last_rotation_rpy_deg = tuple(rpy)
+            # Update state
+            self.current_transform = transform_stamped
+            self.stats.synced_pairs += 1
 
-        # Publish transform message
-        self.transform_pub.publish(transform_stamped)
+            # Store for logging
+            t = transform.translation
+            self.stats.last_translation = (t.x, t.y, t.z)
 
-        # Publish to TF if enabled
-        if self.publish_tf:
-            self.tf_broadcaster.sendTransform(transform_stamped)
+            # Convert quaternion to RPY for logging
+            q = transform.rotation
+            r = Rotation.from_quat([q.x, q.y, q.z, q.w])
+            rpy = r.as_euler("xyz", degrees=True)
+            self.stats.last_rotation_rpy_deg = tuple(rpy)
 
-        # Log
-        self.get_logger().info(
-            f"Calibration #{self.stats.synced_pairs}: "
-            f"t=[{t.x:.4f}, {t.y:.4f}, {t.z:.4f}] "
-            f"rpy=[{rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}] deg "
-            f"(dt={self.stats.last_timestamp_diff_ms:.1f}ms)"
+            # Publish transform message
+            self.transform_pub.publish(transform_stamped)
+
+            # Publish to TF if enabled
+            if self.publish_tf:
+                self.tf_broadcaster.sendTransform(transform_stamped)
+
+            # Log
+            self.get_logger().info(
+                f"Calibration #{self.stats.synced_pairs}: "
+                f"t=[{t.x:.4f}, {t.y:.4f}, {t.z:.4f}] "
+                f"rpy=[{rpy[0]:.2f}, {rpy[1]:.2f}, {rpy[2]:.2f}] deg "
+                f"(dt={self.stats.last_timestamp_diff_ms:.1f}ms)"
+            )
+
+    def _admit_sync_group(self, _messages: tuple[Any, ...]) -> str | None:
+        """Gate a pair before ``DetectionPairSource`` caches it."""
+        # DetectionPairSource invokes this callback while holding ``state_lock``
+        # (its ``admission_lock``).  Do not acquire it again here: the public
+        # source contract accepts any context-manager lock, not only RLock.
+        identity = self.target_identity_gate.compare()
+        if identity.accepted:
+            return None
+        self.stats.identity_rejections += 1
+        return f"target identity {identity.status.value}: {identity.reason}"
+
+    def _reject_identity_pair(self, identity: IdentityComparison) -> None:
+        """Reject a raced pair without changing transform state."""
+        self.stats.identity_rejections += 1
+        self.pair_source.discard_cached_pair()
+        self.get_logger().warn(
+            f"Rejected synchronized pair before solver-state mutation: "
+            f"target identity {identity.status.value}: {identity.reason}"
         )
+
+    def _handle_target_identity_update(
+        self, _lidar_index: int, comparison: IdentityComparison
+    ) -> None:
+        """Invalidate all solved/cached output after a protocol violation."""
+        if comparison.status not in (IdentityStatus.MALFORMED, IdentityStatus.MISMATCH):
+            return
+        with self.state_lock:
+            self._identity_generation += 1
+            self.current_transform = None
+            self.pair_source.discard_cached_pair()
+            self.get_logger().warn(
+                "Cleared cached LiDAR-to-LiDAR output after Target Identity "
+                f"rejection: {comparison.reason}"
+            )
 
     def compute_transform(self, pose1, pose2) -> Transform | None:
         """
@@ -311,14 +391,15 @@ class LidarToLidarSolver(Node):
 
     def publish_timer_callback(self):
         """Periodically publish the current transform to TF."""
-        if self.current_transform is None:
-            return
+        with self.state_lock:
+            if self.current_transform is None:
+                return
 
-        # Update timestamp
-        self.current_transform.header.stamp = self.get_clock().now().to_msg()
+            # Update timestamp
+            self.current_transform.header.stamp = self.get_clock().now().to_msg()
 
-        # Publish to TF
-        self.tf_broadcaster.sendTransform(self.current_transform)
+            # Publish to TF
+            self.tf_broadcaster.sendTransform(self.current_transform)
 
 
 def main(args=None):
