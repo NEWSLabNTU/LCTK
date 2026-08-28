@@ -536,11 +536,17 @@ class CalibrationConfigParser:
                     f"Marker '{marker_name}' (used by lidar '{lidar_name}') is missing "
                     "'aruco_config', which the lidar_board_detector requires."
                 )
-            if not marker.bbox_config:
-                raise ValueError(
-                    f"Marker '{marker_name}' (used by lidar '{lidar_name}') is missing "
-                    "'bbox_config', which the lidar_board_detector requires."
-                )
+            # bbox_config is NOT unconditionally required here: it is read
+            # only when the detector tuning file selects detection_mode=bbox,
+            # and that file is an opaque path to this parser. Both cases are
+            # live -- sample_data.yaml's board_detector.json5 is bbox mode and
+            # genuinely needs its crop box, while the hollow_1000, solid_600
+            # and board_detector_{velodyne,seyond} presets are bbox_free and
+            # never read it. Only the node parses detector tuning, so only the
+            # node can tell the two apart; it owns the rule and reports it as
+            # "bbox_file is required when detector_config selects
+            # detection_mode=bbox" (ros/lidar_board_detector/src/main.rs).
+            # Enforcement therefore moved from launch parse to node startup.
 
             node_name = f"board_detector_{lidar_name}_{marker_name}"
             namespace = f"calibration/{lidar_name}_{marker_name}"
