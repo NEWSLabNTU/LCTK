@@ -314,9 +314,9 @@ def test_two_lidar_per_lidar_detector_config_override_reaches_the_right_node():
     )
 
 
-def test_hollow_board_missing_bbox_config_parses(tmp_path):
-    """A hollow_board marker used by a lidar no longer requires bbox_config
-    at parse time.
+def test_bbox_config_omitted_at_marker_level_parses(tmp_path):
+    """A marker used by a lidar no longer requires bbox_config at parse
+    time.
 
     bbox_config is only read by lidar_board_detector when its detector
     tuning file selects detection_mode=bbox; under bbox_free (what every
@@ -328,7 +328,8 @@ def test_hollow_board_missing_bbox_config_parses(tmp_path):
     node-specific error when detection_mode=bbox and no bbox_file was
     supplied.
     """
-    config_text = """
+    targets = Path(__file__).parent.parent / "config" / "targets"
+    config_text = f"""
 devices:
   lidars:
     top_lidar:
@@ -341,9 +342,8 @@ devices:
 
 markers:
   calibration_board:
-    type: hollow_board
-    board_config: /tmp/board.json5
-    aruco_config: /tmp/aruco.json5
+    target_config: {targets / "hollow_1000_aruco_4_v1.json5"}
+    detector_config: /tmp/detector.json5
     # bbox_config intentionally omitted
     pairs:
       - [top_lidar, front_center]
@@ -425,7 +425,6 @@ def test_new_target_schema_parses_without_ros_startup(tmp_path):
         == "solid_600_aruco_1"
     )
     assert pipeline.lidar_board_detectors[0].detector_config == "/tmp/detector-a.json5"
-    assert pipeline.aruco_locators[0].aruco_config is None
     assert pipeline.aruco_locators[0].target_config.endswith(
         "solid_600_aruco_1_v1.json5"
     )
@@ -484,7 +483,12 @@ def test_different_target_identities_on_one_sensor_reject(tmp_path):
         CalibrationConfigParser(str(config_path)).parse()
 
 
-def test_legacy_schema_translates_to_explicit_hollow_target(tmp_path):
+def test_legacy_marker_schema_rejected(tmp_path):
+    """W5-E1: the marker-level legacy schema (type/board_config/aruco_config)
+    that W5-D used to silently translate into an explicit hollow target is
+    now rejected outright, with migration guidance. There is no automatic
+    translation left in the parser -- see `_parse_markers`.
+    """
     config_path = tmp_path / "legacy.yaml"
     config_path.write_text(
         """
@@ -509,15 +513,8 @@ sync:
 """
     )
 
-    pipeline = CalibrationConfigParser(str(config_path)).parse()
-
-    assert (
-        pipeline.lidar_board_detectors[0].target_identity.target_id
-        == "hollow_1000_aruco_4"
-    )
-    assert pipeline.lidar_board_detectors[0].target_config.endswith(
-        "hollow_1000_aruco_4_v1.json5"
-    )
+    with pytest.raises(ValueError, match="Marker 'board' sets retired schema key"):
+        CalibrationConfigParser(str(config_path)).parse()
 
 
 def test_marker_rejects_mixed_legacy_and_new_schema(tmp_path):
@@ -540,7 +537,7 @@ markers:
 """
     )
 
-    with pytest.raises(ValueError, match="mixes legacy"):
+    with pytest.raises(ValueError, match="Marker 'board' sets retired schema key"):
         CalibrationConfigParser(str(config_path)).parse()
 
 
@@ -560,32 +557,75 @@ markers: {}
     )
 
     with pytest.raises(
-        ValueError, match="both legacy 'board_config' and new 'detector_config'"
+        ValueError, match="LiDAR 'lidar' sets retired schema key 'board_config'"
+    ):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+def test_lidar_device_board_config_alone_rejected(tmp_path):
+    """A LiDAR device carrying only 'board_config' (no 'detector_config') is
+    refused.
+
+    This is the most dangerous silent-acceptance case: with no
+    detector_config present to collide with, the device would otherwise
+    parse cleanly and only diverge from the marker's tuning at runtime,
+    against the wrong detector config, with no error anywhere.
+    """
+    config_path = tmp_path / "device_only_legacy.yaml"
+    config_path.write_text(
+        """
+devices:
+  lidars:
+    lidar:
+      pointcloud_topic: /lidar
+      frame_id: lidar_frame
+      board_config: /tmp/legacy-board.json5
+markers: {}
+"""
+    )
+
+    with pytest.raises(
+        ValueError, match="LiDAR 'lidar' sets retired schema key 'board_config'"
     ):
         CalibrationConfigParser(str(config_path)).parse()
 
 
 @pytest.mark.parametrize(
-    ("device_override", "marker_fields", "expected_fields"),
+    ("device_override", "marker_fields", "expected_match"),
     [
         (
             "board_config: /tmp/device-legacy-board.json5",
             """target_config: {solid_target}
     detector_config: /tmp/marker-detector.json5""",
-            ("board_config", "target_config", "detector_config"),
+            "LiDAR 'lidar' sets retired schema key 'board_config'",
         ),
         (
             "detector_config: /tmp/device-detector.json5",
             """type: hollow_board
     board_config: /tmp/marker-legacy-board.json5
     aruco_config: /tmp/marker-legacy-aruco.json5""",
-            ("detector_config", "type", "board_config", "aruco_config"),
+            "Marker 'board' sets retired schema key",
         ),
     ],
 )
-def test_lidar_rejects_cross_level_schema_mix(
-    tmp_path, device_override, marker_fields, expected_fields
+def test_device_and_marker_schema_mismatch_rejected(
+    tmp_path, device_override, marker_fields, expected_match
 ):
+    """A LiDAR device and the marker it pairs with choose the legacy or new
+    schema independently -- whichever side uses the retired schema is
+    refused, regardless of what the other side uses.
+
+    This used to be guarded by a dedicated cross-level `marker_type` check
+    that compared the device's and marker's schema choice against each
+    other and raised a single "Sensor '...' ... marker '...'" message
+    naming both. That guard, and the fields it used to name (`marker_type`
+    among them), no longer exist -- `_parse_devices` and `_parse_markers`
+    each now independently refuse retired keys on their own level. Rewritten
+    (not folded into the two single-level rejection tests above) to keep
+    the coverage that a device/marker disagreement -- one side legacy, the
+    other new -- is refused, not merely that each side is refused in
+    isolation.
+    """
     config_path = tmp_path / "cross_level_mixed.yaml"
     config_path.write_text(
         f"""
@@ -609,12 +649,8 @@ sync:
 """
     )
 
-    with pytest.raises(ValueError) as error:
+    with pytest.raises(ValueError, match=expected_match):
         CalibrationConfigParser(str(config_path)).parse()
-    message = str(error.value)
-    assert "Sensor 'lidar'" in message
-    assert "marker 'board'" in message
-    assert all(field in message for field in expected_fields)
 
 
 def _write_sync_only_config(tmp_path: Path, sync_yaml: str) -> Path:
@@ -743,7 +779,7 @@ def test_sync_section_valid_parses(tmp_path):
     """
     config_path = tmp_path / "sync_valid.yaml"
     config_path.write_text(
-        """
+        f"""
 devices:
   lidars:
     lidar:
@@ -751,9 +787,8 @@ devices:
       frame_id: lidar_frame
 markers:
   board:
-    type: hollow_board
-    board_config: /tmp/legacy-board.json5
-    aruco_config: /tmp/legacy-aruco.json5
+    target_config: {TARGETS / "hollow_1000_aruco_4_v1.json5"}
+    detector_config: /tmp/detector.json5
     bbox_config: /tmp/bbox.json5
     pairs:
       - [lidar, lidar]

@@ -13,7 +13,6 @@ from lctk_launch.config_parser import (
     DeviceType,
     LidarDevice,
     Marker,
-    MarkerType,
     PipelineConfig,
     parse_config,
 )
@@ -27,7 +26,6 @@ __all__ = [
     "DeviceType",
     "LidarDevice",
     "Marker",
-    "MarkerType",
     "PipelineConfig",
     "compute_plan",
     "format_plan",
