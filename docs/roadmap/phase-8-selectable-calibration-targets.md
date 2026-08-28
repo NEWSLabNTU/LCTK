@@ -1,7 +1,7 @@
 # Phase 8: Selectable Calibration Targets
 
-- **Status:** Active implementation
-- **Date:** 2026-08-27
+- **Status:** Headless implementation complete; field validation (W7-B) outstanding
+- **Date:** 2026-08-28
 - **Spec:** [Selectable calibration targets](../superpowers/specs/2026-08-21-selectable-calibration-targets.md)
 - **Decision:** [ADR 0003](../adr/0003-selectable-calibration-targets.md)
 
@@ -37,16 +37,17 @@ Updated 2026-08-28. Packet status changes land here with each accepted review ga
 | W5-E1 | Complete | Legacy schema removed from nodes, parser, launch and config, `fc512e8` |
 | W5-E2 | Complete | Facade crates deleted, coverage migrated, `21142ac`; H-15 ICP sign fix, `fcf9f06` |
 | W5-E3 | Complete | Zero-reference sweep, dead config removed, `aab0125` |
+| W6-A | Complete | Docs/issue reconciliation and full release gate, `6a8578a` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W6-A (full headless release gate), which W5-E3 has now unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
+Active dependency path: W7-B (tune and evaluate each solid preset), which requires real bags and an operator and is not headlessly closeable. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
 fields through the generated launch graph for every node that carries them (W4-C only added the
 identity routes required to keep the maintained legacy graph functional while gates activate), and
-W5-D has now put every maintained example on those fields. W6-A is the last packet before W7-B. W7-B requires real rosbag evidence and is not headlessly closeable.
+W5-D has now put every maintained example on those fields. Every headless packet in this phase is now complete. W7-B requires real rosbag evidence and is not headlessly closeable.
 
 Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
 `just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
@@ -280,6 +281,47 @@ than a reference repair, so it is filed as L-31 rather than actioned here.
 W5-E3's gate passed with `just build` (17 ROS packages), `just test` (276 Rust and 397 Python
 tests), `just lint` including clippy, `git diff --check`, and a relative-link check over `docs/`
 reporting zero broken links.
+
+W6-A closed the headless release gate, and with it every packet in this phase that can be closed
+without real sensor data.
+
+The correction that mattered most was CLAUDE.md's detection-archive section, which documented
+version 4 while the code writes and requires version 5 and refuses to restore a v4 archive. An
+operator following its example produced a file the current build rejects. It now describes v5's
+Target Identity block, what v4 remains good for (export, not restore), and the two-hop migration
+path -- each hop naming a different operator claim, and a direct v3-to-v5 hop being refused by the
+tool. Several other pages described interfaces that never existed or no longer do: a
+`--intrinsics-file` flag, a `make build_interface` step, a `multi_wayside_node` workflow whose
+config W5-E3 deleted, pre-namespacing topic names in the quickstart, and an RViz fixed frame that
+did not match the sample config.
+
+Issue reconciliation followed the packet's rule literally: close only where exact acceptance
+evidence exists. Three closed -- L-17 (the duplicated defaults are gone now that `production_tuning`
+calls the serde default fns for every field but three documented overrides), L-20 (the dead w-first
+quaternion parser was deleted and both named configs carry a w-last identity rotation) and L-22 (the
+dependency is declared). Two of those had been fixed before Phase 8 and simply never reflected in
+the tracker, which is what a reconciliation pass is for. L-23 and M-01 were considered and left
+open: each still exhibits its exact defect at the file's new location, so only the pointer moved.
+M-16, H-12, H-13, M-21 and solid-preset validation were out of scope by the packet's own text and
+were not touched beyond pointer repair.
+
+The gate itself named a "docs relative-link checker" that did not exist -- it had only ever been a
+snippet retyped by hand, which is a poor foundation for a rule CLAUDE.md enforces about links
+crossing an archive move. `setup/scripts/check-doc-links.py` and `just check-docs` now provide it,
+and it immediately found two broken links the ad-hoc version could not see, because that one
+resolved only `.md` targets: a plan doc linking `pose.py` one directory level too shallow, and an
+ADR template whose status placeholder was shaped like a link and so emitted a dead one.
+
+W6-A's gate passed with `just build` (17 ROS packages), `just test` (276 Rust and 397 Python tests),
+`just lint-py`, `just lint` including clippy, `just check-docs`, and `git diff --check`. Each
+surface the packet names was additionally run on its own rather than inferred from a green total:
+cross-language target goldens (22 tests), v4/v5 archive and export xacro e2e (53), launch graph
+(105), both target interfaces through the detector crates (86), and the Python-parity hollow
+regressions over the recorded fixtures.
+
+**What remains is not headless.** W7-B needs real bags and an operator. Nothing in this phase has
+been run against real sensor data, and H-15 is the standing evidence that this matters: a shipped
+defect that survived every gate above and would have appeared on the first replay.
 
 ## Outstanding items no packet owns
 
