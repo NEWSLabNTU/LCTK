@@ -240,15 +240,20 @@ def test_two_lidar_node_parity():
     assert len(pipeline.lidar_camera_solvers) == 0
 
 
-def test_hollow_board_missing_bbox_config_raises(tmp_path):
-    """H-04: a hollow_board marker used by a lidar must have bbox_config.
+def test_hollow_board_missing_bbox_config_parses(tmp_path):
+    """A hollow_board marker used by a lidar no longer requires bbox_config
+    at parse time.
 
-    The lidar_board_detector declares bbox_file/aruco_pattern_file as mandatory
-    ROS parameters, so the config parser must reject a marker that omits them
-    (with a clear message) rather than letting the node crash at startup.
+    bbox_config is only read by lidar_board_detector when its detector
+    tuning file selects detection_mode=bbox; under bbox_free (what every
+    maintained board config ships) it is loaded and discarded. The parser
+    treats detector_config as an opaque path and does not read
+    detection_mode out of it, so it cannot know which mode applies -- the
+    rule now lives solely in lidar_board_detector
+    (ros/lidar_board_detector/src/main.rs), which raises a clear,
+    node-specific error when detection_mode=bbox and no bbox_file was
+    supplied.
     """
-    import pytest
-
     config_text = """
 devices:
   lidars:
@@ -273,8 +278,10 @@ markers:
     config_path.write_text(config_text)
 
     parser = CalibrationConfigParser(str(config_path))
-    with pytest.raises(ValueError, match="bbox_config"):
-        parser.parse()
+    pipeline = parser.parse()
+
+    assert len(pipeline.lidar_board_detectors) == 1
+    assert pipeline.lidar_board_detectors[0].bbox_config is None
 
 
 TARGETS = Path(__file__).parent.parent / "config" / "targets"

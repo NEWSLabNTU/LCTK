@@ -188,14 +188,20 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
         node_args = ["--ros-args", "--log-level", log_level]
 
-        # bbox_config is guaranteed present by config_parser validation for
-        # both schemas (mandatory for the lidar_board_detector either way).
         params = {
             "enable_debug": debug_mode == "true",
             "enable_icp_iteration_debug": debug_mode == "true",
             "use_best_effort_qos": use_best_effort_qos,
-            "bbox_file": detector.bbox_config,
         }
+
+        # bbox_config is optional (config_parser no longer requires it: it is
+        # only read when detector tuning selects detection_mode=bbox). Omit
+        # the key entirely when absent -- launch_ros's Node() normalizes
+        # parameters eagerly at construction time and raises on a `None`
+        # value, same failure mode as commit eb58770 fixed for the
+        # camera-side nodes.
+        if detector.bbox_config:
+            params["bbox_file"] = detector.bbox_config
 
         uses_target_definition = _uses_target_definition(detector)
         if uses_target_definition != (detector.detector_config is not None):
