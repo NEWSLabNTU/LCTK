@@ -20,7 +20,7 @@ An ADR is not a design doc and not a review. Those live elsewhere:
 # NNNN. <the decision, as a sentence>
 
 - **Date:** YYYY-MM-DD
-- **Status:** proposed | accepted | superseded by [NNNN](...)
+- **Status:** proposed | accepted | superseded by ADR-NNNN
 
 ## Context
 What forced the decision. Prefer measurements and file references over adjectives.

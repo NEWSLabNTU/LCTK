@@ -42,12 +42,13 @@ In another terminal, check the calibration output:
 ```bash
 source install/setup.bash
 
-# Watch for calibration transform
-ros2 topic echo /calibration/extrinsic_solver/extrinsic_transform
+# Watch for calibration transform (namespace is "<lidar>_<camera>" from the config's
+# device names; `just demo` uses sample_data.yaml's top_lidar + front_center)
+ros2 topic echo /calibration/top_lidar_front_center/extrinsic_transform
 
 # Check detection rates (should be >1 Hz)
-ros2 topic hz /calibration/aruco_locator/aruco_detections
-ros2 topic hz /calibration/lidar_board_detector/calibration_board_detections
+ros2 topic hz /calibration/front_center/aruco_detections
+ros2 topic hz /calibration/top_lidar_calibration_board/calibration_board_detections
 ```
 
 When calibration succeeds, you'll see a `TransformStamped` message with the LiDAR-to-camera transformation.
@@ -67,9 +68,9 @@ just demo rviz_enabled=true
 ```
 
 In RViz:
-1. Set **Fixed Frame** to `velodyne`
+1. Set **Fixed Frame** to `velodyne_top`
 2. Add PointCloud2: `/sensing/lidar/top/pointcloud_raw`
-3. Add MarkerArray: `/calibration/lidar_board_detector/debug/final_board_pose`
+3. Add MarkerArray: `/calibration/top_lidar_calibration_board/debug/final_board_pose`
 
 ## What Happened?
 

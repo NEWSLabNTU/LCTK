@@ -15,45 +15,51 @@ This node subscribes to camera images and publishes detected ArUco marker positi
 
 ## Quick Start
 
+Always build via `just build` from the repo root (never a raw `cargo build`/`colcon build`
+invocation — see the repo root `CLAUDE.md`).
+
 ```bash
-# Build the node
-source /opt/ros/humble/setup.bash
-make build_interface
+just build
 source install/setup.bash
-cargo build --release --manifest-path src/bin/aruco_locator_node/Cargo.toml
 
-# Run the node
-ros2 run aruco_locator_node aruco_locator_node
-
-# Run with custom intrinsics file
-ros2 run aruco_locator_node aruco_locator_node --intrinsics-file config/camera_intrinsics.yaml
+# Run directly (normally launched by lctk_launch's calibrate.launch.py instead)
+ros2 run aruco_locator_node aruco_locator_node \
+    --ros-args \
+    -p target_config:=/path/to/config/targets/hollow_1000_aruco_4_v1.json5 \
+    -p aruco_detector_config_file:=/path/to/config/aruco/aruco_detector.json5
 ```
+
+There is no `--intrinsics-file` CLI flag: intrinsics come from the `camera_info` topic, derived
+from the resolved `image` topic's namespace (`<ns>/image` -> `<ns>/camera_info`), the
+image_pipeline convention.
 
 ## ROS Topics
 
-### Subscriptions
-- `/image` (sensor_msgs/Image): Input camera images
-- `/camera_info` (sensor_msgs/CameraInfo): Camera calibration information
+### Subscriptions (relative; remapped by the launch file)
+- `image` (sensor_msgs/Image): Input camera images
+- `<image topic's namespace>/camera_info` (sensor_msgs/CameraInfo): Derived automatically from
+  the resolved `image` topic, not a separate parameter
 
 ### Publications
-- `/aruco_detections` (vision_msgs/Detection2DArray): Detected ArUco markers with 2D positions
+- `aruco_detections` (vision_msgs/Detection2DArray): Detected ArUco markers with 2D positions
 - `target_identity` (lctk_interfaces/CalibrationTargetIdentity): Reliable, transient-local target
   identity. It is relative to the node namespace so a late-starting solver receives the identity
   for its camera observer.
+- `image_with_detections` (sensor_msgs/Image): Debug overlay, published only when
+  `debug_overlay_enabled:=true`
 
-## Configuration
+## ROS Parameters
 
-Set `target_config` to a Target Definition JSON5 file. It owns dictionary, marker IDs, paper
-layout and target identity; `aruco_detector_config_file` remains the separate detection-tuning
-file.
+- `target_config` (required): Path to a Target Definition JSON5 file. It owns dictionary, marker
+  IDs, paper layout and target identity.
+- `aruco_detector_config_file` (required): Path to the separate detector-tuning JSON5 (corner
+  refinement, adaptive threshold) — no board geometry belongs here.
+- `debug_overlay_enabled` (default: `false`): Publish `image_with_detections`.
+- `use_best_effort_qos` (default: `true`): BEST_EFFORT for live sensors, RELIABLE for rosbag
+  playback (mirrors the pipeline's `mode` parameter).
 
-For temporary compatibility with maintained pre-cutover launch files, `aruco_config_file` alone
-selects the explicit `hollow_1000_aruco_4` Target Definition. Supplying both parameters is an
-error, and this legacy alias is removed in W5-E1; it cannot select or define another target.
-
-## Command Line Options
-
-- `--intrinsics-file`: Path to camera intrinsics YAML file (optional, uses camera_info topic if not provided)
+There is no legacy `aruco_config_file` alias any more — `target_config` is the sole, required
+source of the printed pattern.
 
 ## License
 

@@ -5,7 +5,7 @@
 - **Status:** Fixed
 - **Verified:** Reproduced 2026-08-27 on a freshly cloned tree — `just build` fails during the first Rust package with `error: no matching package named 'lctk_interfaces' found`
 - **Fixed:** 2026-08-27 — `0df4f48`; root patch block is now the union of every per-package block, and `aruco_generator_node` declares the interface build dependency
-- **Related:** [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md), [L-16](./L-16-bindgen-lock-stale-skip.md), [L-22](../L-22-advanced-solver-undeclared-lctk-interfaces-dep.md)
+- **Related:** [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md), [L-16](./L-16-bindgen-lock-stale-skip.md), [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md)
 
 ## Problem
 
@@ -51,7 +51,7 @@ patch the whole time.
 
 A second, independent ordering hazard sits behind the same failure: `colcon` had no declared edge
 from `aruco_generator_node` to `lctk_interfaces`, so it scheduled them in parallel and the bindings
-could still be absent when cargo ran. This is the same class as [L-22](../L-22-advanced-solver-undeclared-lctk-interfaces-dep.md),
+could still be absent when cargo ran. This is the same class as [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md),
 but here the dependency is on the *cargo workspace resolution*, not on an import in the package's
 own code.
 

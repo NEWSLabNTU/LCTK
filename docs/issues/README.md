@@ -66,12 +66,12 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-14](./archive/L-14-lint-red-on-main.md) | Low | `just lint` is red on an untouched main checkout | 🟢 |
 | [L-15](./archive/L-15-build-dirties-worktree.md) | Low | Every build dirties Cargo.lock + the conflux submodule | 🟢 |
 | [L-16](./archive/L-16-bindgen-lock-stale-skip.md) | Low | `bindgen.lock` silently skips rosidl regeneration after partial cleanup | 🟢 |
-| [L-17](./L-17-boardconfig-defaults-duplicated.md) | Low | `BoardConfig` defaults defined twice — serde fns and `production_config` will drift | 🔴 |
+| [L-17](./archive/L-17-boardconfig-defaults-duplicated.md) | Low | `BoardConfig` defaults defined twice — serde fns and `production_config` will drift | 🟢 |
 | [L-18](./L-18-overlay-node-commented-extrinsic-override.md) | Low | Overlay node ships commented-out hardcoded extrinsic overrides | 🔴 |
 | [L-19](./archive/L-19-aruco-config-required-but-unused-for-lidar.md) | Low | `aruco_config` mandatory for LiDAR-only markers but never affects the LiDAR fit | 🟢 |
-| [L-20](./L-20-dead-bbox-parser-quaternion-order.md) | Low | Dead `BBox` JSON5 parser reads the quaternion w-first; two configs still carry `[1,0,0,0]` | 🔴 |
+| [L-20](./archive/L-20-dead-bbox-parser-quaternion-order.md) | Low | Dead `BBox` JSON5 parser reads the quaternion w-first; two configs still carry `[1,0,0,0]` | 🟢 |
 | [L-21](./archive/L-21-find-correspondences-duplicated-tests-wrong-body.md) | Low | `find_correspondences` duplicated; inline tests exercise the serial copy the node never runs | 🟢 |
-| [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) | Low | `advanced_extrinsic_solver` imports `lctk_interfaces` without declaring the dependency | 🔴 |
+| [L-22](./archive/L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) | Low | `advanced_extrinsic_solver` imports `lctk_interfaces` without declaring the dependency | 🟢 |
 | [L-23](./L-23-debug-mode-parameter-never-read.md) | Low | `debug_mode` declared by both solvers, read by neither | 🔴 |
 | [L-24](./archive/L-24-board-geometry-import-test-egl-stdout.md) | Low | Board-geometry import test rejects unrelated Jetson EGL stdout | 🟢 |
 | [L-25](./L-25-fresh-machine-bringup-deps-missing.md) | Low | `setup.sh` installs none of the tools `just test` and `just lint` need | 🔴 |

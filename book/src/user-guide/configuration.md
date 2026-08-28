@@ -310,8 +310,9 @@ just calibrate /path/to/your_config.yaml
 > multi-LiDAR / LiDAR-to-LiDAR configuration surface is under active revision in a parallel
 > work item as of this writing (see `docs/issues/` for the current M-1x/M-2x tracker entries on
 > `lidar_to_lidar_solver`). Not corrected further here to avoid documenting a moving target —
-> check `ros/lidar_to_lidar_solver/README.md` and `ros/lctk_launch/launch/calibrate.launch.py`
-> for the current state.
+> check `ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py` (the package has no README of
+> its own yet) and `ros/lctk_launch/launch/calibrate.launch.py` for the current state. See also
+> [Multi-LiDAR Calibration](./multi-lidar.md), corrected against the current code.
 
 `same_face_mode` (both LiDARs see the same side of the board vs. opposite sides, applying a 180°
 correction) is a `lidar_to_lidar_solver` ROS parameter, not a standalone config file.
