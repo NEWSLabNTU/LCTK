@@ -36,16 +36,17 @@ Updated 2026-08-28. Packet status changes land here with each accepted review ga
 | W5-D | Complete | Maintained-example cutover and first solid example, `24224c8` |
 | W5-E1 | Complete | Legacy schema removed from nodes, parser, launch and config, `fc512e8` |
 | W5-E2 | Complete | Facade crates deleted, coverage migrated, `21142ac`; H-15 ICP sign fix, `fcf9f06` |
+| W5-E3 | Complete | Zero-reference sweep, dead config removed, `aab0125` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W5-E3 (zero-reference integration gate), which W5-E2 has now unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
+Active dependency path: W6-A (full headless release gate), which W5-E3 has now unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
 fields through the generated launch graph for every node that carries them (W4-C only added the
 identity routes required to keep the maintained legacy graph functional while gates activate), and
-W5-D has now put every maintained example on those fields. W6-A remains pending behind W5-E3. W7-B requires real rosbag evidence and is not headlessly closeable.
+W5-D has now put every maintained example on those fields. W6-A is the last packet before W7-B. W7-B requires real rosbag evidence and is not headlessly closeable.
 
 Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
 `just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
@@ -243,6 +244,42 @@ tests), `just lint` including clippy, and `git diff --check`. The Rust count fal
 the deleted crates took ~60 tests with them, 20 having been migrated or newly written first; the
 remainder were superseded suites and tests of dead code. `rust/plane-estimator` is now fully
 orphaned -- its only dependent was `hollow-board-detector` -- and is a candidate for W5-E3's sweep.
+
+W5-E3 closed the zero-reference gate. Nine dead config files went: the four `multi_wayside.json5`
+under `config/lidar_to_lidar{,_ntu}/`, the four under `config/multi_wayside/`, and
+`lidar_to_camera_solver`'s `extrinsic_solver_node.launch.xml`. The multi_wayside family belonged to
+a node that no longer exists, its relative paths had dangled since an earlier reorg, and
+`multi_wayside/detector.json5` was the last live file duplicating `board_width`/`hole_radius`/
+`hole_center_shift` -- so the packet's physical-geometry-duplication check is clean. The launch file
+was never installed at all: that package's `setup.py` globs only `launch/*.py`.
+
+Docs were repaired rather than renamed where a passage explained a real concept through a deleted
+file -- the board-frame contract's test home, the pre-split config surface, and a structure section
+still describing an `src/lib/`-era layout whose links predated this phase. Three of the fixes were
+pre-existing errors rather than fallout: a documented `bbox.json5` schema matching no real bbox
+file, a book example whose ICP values did not match the preset it named, and commands invoking
+launch files that no longer exist.
+
+Issue pointers in M-21, M-14, H-11 and M-17 were repointed without altering their claims. M-21
+gained a note that the migrated convergence suite re-measured its stable-pose finding on the 1 m
+manifest at roughly 1809 iterations -- the same order as the ~639 measured on the old 0.5 m board,
+so the finding holds on the new geometry and the post-H-15 code.
+
+**Issue-ID collision with `origin/main`.** This branch is 20 commits behind `origin/main`, which had
+already allocated H-14, M-23, M-24, L-26 and L-27 to unrelated conflux work. All five IDs filed
+during this session collided and were renumbered before merge: H-14 to H-15, M-23 to M-26, M-24 to
+M-27, L-26 to L-30, L-27 to L-31. Commit `fcf9f06` still names H-14 in its message, which cannot be
+rewritten; H-15 carries a note saying so. The wider point for whoever merges: this branch has
+diverged far enough that a rebase onto current `main` is a real operation, not a formality, and it
+was left as the maintainer's call.
+
+`rust/plane-estimator` now has zero consumers -- its only dependent was a crate W5-E2 deleted, and
+`lidar_board_detector` has its own RANSAC plane fit. Deleting a crate is a scope decision rather
+than a reference repair, so it is filed as L-31 rather than actioned here.
+
+W5-E3's gate passed with `just build` (17 ROS packages), `just test` (276 Rust and 397 Python
+tests), `just lint` including clippy, `git diff --check`, and a relative-link check over `docs/`
+reporting zero broken links.
 
 ## Outstanding items no packet owns
 
