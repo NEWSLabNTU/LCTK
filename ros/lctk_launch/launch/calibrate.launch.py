@@ -250,6 +250,27 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
         node_args = ["--ros-args", "--log-level", log_level]
 
+        # aruco_detector_config_file is mandatory under both schemas: it tunes
+        # the detector (corner refinement, adaptive threshold) independently
+        # of which schema supplies the physical marker layout below.
+        params = {
+            "aruco_detector_config_file": locator.aruco_detector_config,
+            "debug_mode": debug_mode == "true",
+            "debug_overlay_enabled": debug_mode == "true",
+            "use_best_effort_qos": use_best_effort_qos,
+        }
+
+        if _uses_target_definition(locator):
+            # New Target Definition schema: omit the legacy key entirely.
+            # aruco_locator_node declares both `target_config` and
+            # `aruco_config_file` `.optional()` and reads a missing key as
+            # "not supplied" -- a `None` parameter value is not the same
+            # thing and would still trip select_target_source's mixed-source
+            # refusal (ros/aruco_locator_node/src/main.rs).
+            params["target_config"] = locator.target_config
+        else:
+            params["aruco_config_file"] = locator.aruco_config
+
         nodes.append(
             Node(
                 package="aruco_locator_node",
@@ -258,15 +279,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                 namespace=locator.namespace,
                 output="screen",
                 arguments=node_args,
-                parameters=[
-                    {
-                        "aruco_config_file": locator.aruco_config,
-                        "aruco_detector_config_file": locator.aruco_detector_config,
-                        "debug_mode": debug_mode == "true",
-                        "debug_overlay_enabled": debug_mode == "true",
-                        "use_best_effort_qos": use_best_effort_qos,
-                    }
-                ],
+                parameters=[params],
                 remappings=[
                     ("image", locator.image_topic),
                     ("aruco_detections", locator.output_topic),
@@ -283,6 +296,37 @@ def generate_nodes(context, *args, **kwargs) -> list:
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
+
+        params = {
+            "solver_mode": solver_mode,
+            "parent_frame": solver.parent_frame,
+            "child_frame": solver.child_frame,
+            "camera_topic": solver.camera_topic,
+            # Keep the solver-side identity endpoints relative and
+            # remap each one to its corresponding observer below.
+            "lidar_target_identity_topic": "lidar_target_identity",
+            "camera_target_identity_topic": "camera_target_identity",
+            "debug_mode": debug_mode == "true",
+            "publishing_rate": 10.0,
+            "use_best_effort_qos": use_best_effort_qos,
+            "sync_tolerance_ms": sync_tolerance_ms,
+            "sync_queue_size": sync_queue_size,
+            "sync_drop_policy": sync_drop_policy,
+        }
+
+        if _uses_target_definition(solver):
+            # New Target Definition schema: omit the legacy key entirely.
+            # lidar_to_camera_solver reads both `target_config` and
+            # `aruco_config_file` as string parameters defaulting to "" and
+            # refuses to start if both are non-empty
+            # (_load_target_definition in
+            # ros/lidar_to_camera_solver/lidar_to_camera_solver/main.py) --
+            # a `None` parameter value would still fail earlier, inside
+            # launch_ros's `normalize_parameters` at Node construction time.
+            params["target_config"] = solver.target_config
+        else:
+            params["aruco_config_file"] = solver.aruco_config
+
         nodes.append(
             Node(
                 package="lidar_to_camera_solver",
@@ -291,25 +335,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
                 namespace=solver.namespace,
                 output="screen",
                 arguments=node_args,
-                parameters=[
-                    {
-                        "solver_mode": solver_mode,
-                        "parent_frame": solver.parent_frame,
-                        "child_frame": solver.child_frame,
-                        "camera_topic": solver.camera_topic,
-                        "aruco_config_file": solver.aruco_config,
-                        # Keep the solver-side identity endpoints relative and
-                        # remap each one to its corresponding observer below.
-                        "lidar_target_identity_topic": "lidar_target_identity",
-                        "camera_target_identity_topic": "camera_target_identity",
-                        "debug_mode": debug_mode == "true",
-                        "publishing_rate": 10.0,
-                        "use_best_effort_qos": use_best_effort_qos,
-                        "sync_tolerance_ms": sync_tolerance_ms,
-                        "sync_queue_size": sync_queue_size,
-                        "sync_drop_policy": sync_drop_policy,
-                    }
-                ],
+                parameters=[params],
                 remappings=[
                     ("aruco_detections", solver.aruco_detections_topic),
                     ("calibration_board_detections", solver.board_detections_topic),
