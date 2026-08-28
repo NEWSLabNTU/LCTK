@@ -112,6 +112,48 @@ markers:
     return config_path
 
 
+def _write_new_schema_shared_camera_config(tmp_path: Path) -> Path:
+    """Write a new-schema config where one camera is paired with two
+    different LiDARs against the same marker.
+
+    Exercises the graph-level "one locator per camera" invariant:
+    `config_parser.py` dedupes `cameras_needed` by name (~line 570), so two
+    calibration pairs that share a camera must still yield exactly one
+    `aruco_locator_node`, not two.
+    """
+
+    target_config = TARGETS_ROOT / "solid_600_aruco_1_v1.json5"
+    detector_config = tmp_path / "not-a-real-file-detector-tuning.json5"
+    bbox_config = tmp_path / "not-a-real-file-bbox.json5"
+    config_path = tmp_path / "shared_camera.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
+      frame_id: velodyne_top
+    front_lidar:
+      pointcloud_topic: /sensing/lidar/front/pointcloud_raw
+      frame_id: velodyne_front
+  cameras:
+    front_center:
+      image_topic: /sensing/camera/front_center/image_raw
+      frame_id: camera_front_center
+
+markers:
+  calibration_target:
+    target_config: {target_config}
+    detector_config: {detector_config}
+    bbox_config: {bbox_config}
+    pairs:
+      - [top_lidar, front_center]
+      - [front_lidar, front_center]
+"""
+    )
+    return config_path
+
+
 class _LaunchContext:
     """Minimal launch context for evaluating LaunchConfiguration values."""
 
@@ -176,6 +218,17 @@ def _remappings(node: Node) -> dict[str, str]:
         _resolve(source): _resolve(destination)
         for source, destination in vars(node)["_Node__remappings"]
     }
+
+
+def _namespace(node: Node) -> str:
+    """Return the namespace a generated Node was constructed with.
+
+    This is the same string `generate_nodes` built (e.g.
+    ``calibration/{lidar_name}_{marker_name}``), not a launch substitution,
+    so it needs no `_resolve`.
+    """
+
+    return vars(node)["_Node__node_namespace"]
 
 
 def test_legacy_lidar_camera_graph_routes_each_identity(
@@ -372,3 +425,215 @@ def test_legacy_camera_nodes_keep_aruco_config_file_and_omit_target_config(
     assert solver_params["aruco_config_file"].endswith("aruco_pattern.json5")
     assert "target_config" not in solver_params
     assert None not in solver_params.values()
+
+
+def test_one_locator_per_camera_shared_across_pairs(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """A camera observed by two different LiDARs against the same marker
+    still yields exactly one aruco_locator_node.
+
+    `config_parser.py` dedupes `cameras_needed` by camera name (~line 570)
+    before building locator nodes, so the two calibration pairs below
+    (top_lidar, front_center) and (front_lidar, front_center) must collapse
+    into a single locator even though they generate two board detectors and
+    two solvers. This asserts the generated graph, not the parser's
+    internal dedup set.
+    """
+
+    config_path = _write_new_schema_shared_camera_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    detectors = _nodes_for_package(nodes, "lidar_board_detector")
+    locators = _nodes_for_package(nodes, "aruco_locator_node")
+    solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+
+    # One detector per LiDAR that observes the shared marker.
+    assert len(detectors) == 2
+    # One locator per camera -- deduped even though two pairs name it.
+    assert len(locators) == 1
+    # One solver per (lidar, camera) pair.
+    assert len(solvers) == 2
+
+    assert _parameters(locators[0])["target_config"].endswith(
+        "solid_600_aruco_1_v1.json5"
+    )
+
+
+def test_one_selected_target_per_sensor(calibrate_launch: ModuleType, tmp_path: Path):
+    """Every node belonging to a given sensor names the same target.
+
+    `config_parser._validate` (config_parser.py:483-497) refuses a *device*
+    that would be assigned two different Calibration Target Identities, and
+    `compute_plan` separately refuses a disconnected sensor graph -- between
+    them, two genuinely different Target Definitions cannot coexist in one
+    connected session (any bridging pair would itself assign an identity to
+    both its endpoints). So the graph-level property left to prove here is
+    not cross-target isolation -- it's that routing doesn't silently
+    diverge which value it hands to which node for the same sensor.
+
+    Reuses the shared-camera config from
+    `test_one_locator_per_camera_shared_across_pairs`: front_center pairs
+    with two different LiDARs, producing TWO separate
+    lidar_to_camera_solver nodes that both mention front_center. A routing
+    bug that read the wrong marker's target for one of those solvers, or
+    let the locator disagree with either solver, would show up as more than
+    one target_config value in front_center's group below -- grouped by the
+    namespace `generate_nodes` actually assigned each node, not by
+    re-reading the YAML config.
+    """
+
+    config_path = _write_new_schema_shared_camera_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    detectors = {
+        _namespace(n): _parameters(n)
+        for n in _nodes_for_package(nodes, "lidar_board_detector")
+    }
+    locators = {
+        _namespace(n): _parameters(n)
+        for n in _nodes_for_package(nodes, "aruco_locator_node")
+    }
+    solvers = {
+        _namespace(n): _parameters(n)
+        for n in _nodes_for_package(nodes, "lidar_to_camera_solver")
+    }
+
+    assert set(detectors) == {
+        "calibration/top_lidar_calibration_target",
+        "calibration/front_lidar_calibration_target",
+    }
+    assert set(locators) == {"calibration/front_center"}
+    assert set(solvers) == {
+        "calibration/top_lidar_front_center",
+        "calibration/front_lidar_front_center",
+    }
+
+    top_lidar_group = {
+        detectors["calibration/top_lidar_calibration_target"]["target_config"],
+        solvers["calibration/top_lidar_front_center"]["target_config"],
+    }
+    front_lidar_group = {
+        detectors["calibration/front_lidar_calibration_target"]["target_config"],
+        solvers["calibration/front_lidar_front_center"]["target_config"],
+    }
+    # front_center is the shared sensor: it appears via the ONE locator and
+    # via BOTH solvers, so this is the group where a divergence would most
+    # plausibly slip in.
+    front_center_group = {
+        locators["calibration/front_center"]["target_config"],
+        solvers["calibration/top_lidar_front_center"]["target_config"],
+        solvers["calibration/front_lidar_front_center"]["target_config"],
+    }
+
+    assert len(top_lidar_group) == 1
+    assert len(front_lidar_group) == 1
+    assert len(front_center_group) == 1
+    assert next(iter(front_center_group)).endswith("solid_600_aruco_1_v1.json5")
+
+
+def test_new_schema_lidar_camera_graph_routes_each_identity(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """New-schema LiDAR-camera graph routes both identity remaps exactly,
+    mirroring `test_legacy_lidar_camera_graph_routes_each_identity` for the
+    new schema.
+
+    The expected values are derived from the *actual* generated detector
+    and locator nodes' namespaces, not recomputed independently, so this
+    checks that the solver's remaps resolve to its real observers' siblings
+    rather than merely matching `_identity_topic_for_detection`'s own logic
+    against itself.
+    """
+
+    config_path = _write_new_schema_camera_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    detectors = _nodes_for_package(nodes, "lidar_board_detector")
+    locators = _nodes_for_package(nodes, "aruco_locator_node")
+    solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+    assert len(detectors) == 1
+    assert len(locators) == 1
+    assert len(solvers) == 1
+
+    detector_namespace = _namespace(detectors[0])
+    locator_namespace = _namespace(locators[0])
+
+    remappings = _remappings(solvers[0])
+    assert (
+        remappings["lidar_target_identity"] == f"/{detector_namespace}/target_identity"
+    )
+    assert (
+        remappings["camera_target_identity"] == f"/{locator_namespace}/target_identity"
+    )
+
+
+_EXAMPLE_CONFIGS = sorted(CONFIG_ROOT.glob("*.yaml"))
+
+# An empty parametrization is collected as no test at all, so a glob that stops
+# matching would remove this coverage while the suite still reported green --
+# the same vacuous-pass failure the Rust collection guard in the justfile exists
+# to prevent. Fail at import instead.
+assert _EXAMPLE_CONFIGS, f"no maintained example configs found under {CONFIG_ROOT}"
+
+
+@pytest.mark.parametrize(
+    "config_path", _EXAMPLE_CONFIGS, ids=[p.stem for p in _EXAMPLE_CONFIGS]
+)
+def test_maintained_examples_use_only_the_legacy_compatibility_path(
+    calibrate_launch: ModuleType, config_path: Path
+):
+    """Every maintained example under config/examples/ generates a graph
+    whose nodes carry only legacy configuration keys -- never
+    target_config/detector_config -- because the cutover to the new schema
+    for these examples is W5-D, not this packet.
+
+    Parametrized over the files discovered on disk so an example added
+    later is covered automatically. two_lidar.yaml has no camera
+    (0 locators, 0 lidar-camera solvers); the assertions below don't fold
+    those empty lists into an `all(...)` that would pass vacuously -- every
+    branch first asserts there is at least one node of a type that must
+    exist in every example (a board detector), and only then checks the
+    optional node types when the example actually produced any.
+    """
+
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    detectors = _nodes_for_package(nodes, "lidar_board_detector")
+    locators = _nodes_for_package(nodes, "aruco_locator_node")
+    solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+
+    # Every maintained example pairs at least one lidar with a marker, so a
+    # config that produced zero detectors would itself be a finding, not a
+    # silently-passing empty parametrization.
+    assert detectors, f"{config_path.name} produced no lidar_board_detector nodes"
+
+    for detector in detectors:
+        params = _parameters(detector)
+        assert "target_config" not in params
+        assert "detector_config" not in params
+        assert params["board_detector_file"]
+        assert params["aruco_pattern_file"]
+
+    # two_lidar.yaml legitimately has no camera, so it produces zero
+    # locators and zero lidar-camera solvers -- the loops below then check
+    # nothing for it, which would silently pass even if camera-side routing
+    # were broken for every OTHER example. Name the one example allowed to
+    # take that empty path so a future example with a camera that
+    # unexpectedly produced no camera-side nodes fails loudly instead of
+    # being read as "just another two_lidar.yaml".
+    if not locators and not solvers:
+        assert config_path.name == "two_lidar.yaml", (
+            f"{config_path.name} unexpectedly produced no camera-side nodes "
+            "(zero aruco_locator_node and zero lidar_to_camera_solver)"
+        )
+
+    for locator in locators:
+        params = _parameters(locator)
+        assert "target_config" not in params
+        assert params["aruco_config_file"]
+
+    for solver in solvers:
+        params = _parameters(solver)
+        assert "target_config" not in params
+        assert params["aruco_config_file"]
