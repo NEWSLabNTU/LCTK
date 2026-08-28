@@ -273,6 +273,11 @@ markers:
     # bbox_config intentionally omitted
     pairs:
       - [top_lidar, front_center]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     config_path = tmp_path / "missing_bbox.yaml"
     config_path.write_text(config_text)
@@ -324,6 +329,11 @@ markers:
     pairs:
       - [lidar_a, camera]
 {second_marker}
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
     return config_path
@@ -417,6 +427,11 @@ markers:
     bbox_config: /tmp/bbox.json5
     pairs:
       - [lidar, lidar]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
 
@@ -512,6 +527,11 @@ markers:
     bbox_config: /tmp/bbox.json5
     pairs:
       - [lidar, lidar]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
 
@@ -521,6 +541,162 @@ markers:
     assert "Sensor 'lidar'" in message
     assert "marker 'board'" in message
     assert all(field in message for field in expected_fields)
+
+
+def _write_sync_only_config(tmp_path: Path, sync_yaml: str) -> Path:
+    """Write a config with empty devices/markers, isolating `sync:` validation.
+
+    `_parse_sync` runs before the reference_frame/planner checks that would
+    otherwise require a real device+pair setup (a config with no pairs makes
+    `compute_plan` raise "No calibration pairs defined"), so a config with
+    empty devices/markers reaches sync validation directly and nothing else.
+    `sync_yaml` is substituted verbatim -- pass `""` to omit the `sync:` key
+    entirely, for the "missing section" refusal.
+    """
+    config_path = tmp_path / "sync_only.yaml"
+    config_path.write_text(
+        f"""
+devices: {{}}
+markers: {{}}
+{sync_yaml}
+"""
+    )
+    return config_path
+
+
+def test_sync_section_missing_rejected(tmp_path):
+    """A config with no `sync:` key at all is refused, naming the section
+    and the three required keys -- there is no mode-derived fallback.
+    """
+    config_path = _write_sync_only_config(tmp_path, "")
+
+    with pytest.raises(ValueError, match="Missing required 'sync' section"):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+@pytest.mark.parametrize(
+    ("sync_yaml", "expected_missing"),
+    [
+        ("sync:\n  queue_size: 100\n  drop_policy: reject_new\n", "tolerance_ms"),
+        ("sync:\n  tolerance_ms: 100\n  drop_policy: reject_new\n", "queue_size"),
+        ("sync:\n  tolerance_ms: 100\n  queue_size: 100\n", "drop_policy"),
+        ("sync: {}\n", "tolerance_ms"),
+    ],
+)
+def test_sync_section_missing_individual_key_rejected(
+    tmp_path, sync_yaml, expected_missing
+):
+    """A `sync:` section present but missing one (or all) of its three
+    required keys is refused, naming the missing key(s).
+    """
+    config_path = _write_sync_only_config(tmp_path, sync_yaml)
+
+    with pytest.raises(ValueError) as error:
+        CalibrationConfigParser(str(config_path)).parse()
+    message = str(error.value)
+    assert "missing required key" in message
+    assert expected_missing in message
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    ["0", "-5", "inf", "Infinity", "1e400", "nan", "banana"],
+)
+def test_sync_tolerance_ms_rejects_invalid_values(tmp_path, raw_value):
+    """`sync.tolerance_ms` refuses 0, negatives, and anything that is not a
+    finite positive number.
+
+    "inf", "Infinity", "1e400" and "nan" are all written unquoted here on
+    purpose: PyYAML's safe loader does not recognize any of them as a float
+    literal (it requires a leading `.` for infinity/nan, and a signed
+    exponent with a decimal point for scientific notation), so each reaches
+    the parser as a plain Python `str`. `float()` still turns every one of
+    them into a real `inf`/`nan` -- which is exactly the case
+    `math.isfinite` exists to catch, since a bare `value <= 0` comparison
+    would let `inf` through (it is `> 0`) and `nan` fails every comparison.
+    """
+    config_path = _write_sync_only_config(
+        tmp_path,
+        f"sync:\n  tolerance_ms: {raw_value}\n  queue_size: 100\n  drop_policy: reject_new\n",
+    )
+
+    with pytest.raises(
+        ValueError, match="sync.tolerance_ms must be a finite, strictly positive"
+    ):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    ["0", "-3", "true", "10.5"],
+)
+def test_sync_queue_size_rejects_invalid_values(tmp_path, raw_value):
+    """`sync.queue_size` refuses 0, negatives, non-integers, and `bool`
+    (Python's `bool` is an `int` subclass, so `True` would otherwise pass as
+    a queue size of 1 without an explicit guard).
+    """
+    config_path = _write_sync_only_config(
+        tmp_path,
+        f"sync:\n  tolerance_ms: 100\n  queue_size: {raw_value}\n  drop_policy: reject_new\n",
+    )
+
+    with pytest.raises(ValueError, match="sync.queue_size must be a positive integer"):
+        CalibrationConfigParser(str(config_path)).parse()
+
+
+def test_sync_drop_policy_rejects_unknown_value(tmp_path):
+    """`sync.drop_policy` accepts only 'reject_new' or 'drop_oldest', naming
+    both the bad value and the two valid ones.
+    """
+    config_path = _write_sync_only_config(
+        tmp_path,
+        "sync:\n  tolerance_ms: 100\n  queue_size: 100\n  drop_policy: drop_everything\n",
+    )
+
+    with pytest.raises(ValueError) as error:
+        CalibrationConfigParser(str(config_path)).parse()
+    message = str(error.value)
+    assert "sync.drop_policy must be one of" in message
+    assert "reject_new" in message
+    assert "drop_oldest" in message
+    assert "drop_everything" in message
+
+
+def test_sync_section_valid_parses(tmp_path):
+    """A valid, non-default `sync:` section is carried through onto
+    `PipelineConfig.sync` unchanged -- not replaced by any mode-derived
+    preset (there is no such preset left in the parser to replace it with).
+    """
+    config_path = tmp_path / "sync_valid.yaml"
+    config_path.write_text(
+        """
+devices:
+  lidars:
+    lidar:
+      pointcloud_topic: /lidar
+      frame_id: lidar_frame
+markers:
+  board:
+    type: hollow_board
+    board_config: /tmp/legacy-board.json5
+    aruco_config: /tmp/legacy-aruco.json5
+    bbox_config: /tmp/bbox.json5
+    pairs:
+      - [lidar, lidar]
+
+sync:
+  tolerance_ms: 250
+  queue_size: 5
+  drop_policy: drop_oldest
+"""
+    )
+
+    pipeline = CalibrationConfigParser(str(config_path)).parse()
+
+    assert pipeline.sync is not None
+    assert pipeline.sync.tolerance_ms == 250.0
+    assert pipeline.sync.queue_size == 5
+    assert pipeline.sync.drop_policy == "drop_oldest"
 
 
 if __name__ == "__main__":
