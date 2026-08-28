@@ -41,6 +41,11 @@ just
   - `lctk_autoware_export/` - Exports a solved extrinsic into Autoware `sensor_kit_calibration.yaml`
   - `lctk_sample_data/` - Sample data playback (pcap + avi), plus gitignored recorded
     `bags/TWO_LIDAR_*` (two-LiDAR: VLP-32C + solid-state Falcon; see `bags/README.md`)
+  - `lctk_target/` - ROS-free validated Target Definition loader and board-local ArUco
+    geometry (`load_target`, `TargetIdentity`), shared by the solvers, `lctk_launch` and
+    `aruco_generator_node`
+  - `lctk_sync/` - `DetectionPairSource`: owns Conflux, finite-window validation, replay
+    recovery, freshness/skew checks and operator diagnosis for the maintained solvers
   - `conflux/` - Git submodule (jerry73204/conflux): message synchronizer used by all solvers
     (`conflux_cpp` builds `libconflux_ffi.so`, `conflux_py` wraps it via ctypes)
 - **`setup/`**: Development environment setup scripts
@@ -58,6 +63,7 @@ just
   ```bash
   colcon build \
       --base-paths ros \
+      --packages-ignore conflux conflux_cpp conflux_py \
       --symlink-install \
       --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       --cargo-args --profile=test-release
@@ -85,7 +91,7 @@ just lint       # Full lint (rustfmt + clippy + ruff; clippy takes minutes)
 just lint-py    # Fast ruff-only lint
 just audit      # cargo-audit for RUSTSEC advisories (runs in the sourced build env)
 
-just lidar-camera   # Launch calibration (legacy XML launch)
+just lidar-camera   # Launch config-driven calibration (default config: seyond_left.yaml)
 just demo           # Launch demo (sample data + calibration pipeline)
 just sample-data    # Launch sample data playback
 just rviz           # Launch RViz
@@ -285,7 +291,12 @@ just demo mode=realtime   # For live sensors
 
 ### Performance Profiling Results
 
-Profiling conducted on sample data (2026-01-18):
+Profiling conducted on sample data (2026-01-18). These numbers predate the Phase 8 selectable-target
+detector path (Target Definition / Detector Tuning split); the new path has not yet been re-profiled
+against real data — see "Outstanding items no packet owns" in
+`docs/roadmap/phase-8-selectable-calibration-targets.md`. The numbers below were real when measured
+and are kept rather than deleted, but treat them as a baseline from the prior implementation, not a
+claim about the current one.
 
 **Throughput Comparison:**
 | Metric | Offline | Realtime | Notes |
@@ -369,8 +380,11 @@ how two differently-sampled LiDARs (a spinning VLP-32C and a solid-state Falcon,
 target while each keeps its own sensor-specific tuning; `config/examples/two_lidar.yaml` does
 exactly this.
 
-The legacy `type`/`board_config`/`aruco_config` marker keys still parse, but are scheduled for
-removal and no maintained example uses them any more.
+The legacy `type`/`board_config`/`aruco_config` marker keys (and a lidar device's `board_config`
+key) are now **retired**: `config_parser.py` raises a `ValueError` naming the offending key rather
+than parsing it, pointing at `target_config`/`detector_config` as the replacement. There is no
+automatic migration for launch YAML — replace the retired keys by hand, the same reasoning
+`detection_format.py` applies to a saved detection archive.
 
 **Physical layout and detector tuning are separate files:**
 
@@ -473,11 +487,18 @@ demo`), then `just manual-solver-controller`.
 - `reset_transform` - Reset manual adjustments (re-solve from buffer)
 - `get_pose_info` - Get solved pose, current pose, and adjustment delta
 
-**Detection File Format** (version 4):
+**Detection File Format** (version 5):
 ```json
 {
-  "version": 4,
+  "version": 5,
   "board_frame_convention": "corner_aligned_plate_center_v1",
+  "target_identity": {
+    "schema_version": 1,
+    "target_id": "hollow_1000_aruco_4",
+    "revision": 1,
+    "semantic_sha256": "<64 lowercase hex chars>",
+    "board_frame_convention": "corner_aligned_plate_center_v1"
+  },
   "num_detections": 5,
   "detections": [...],
   "transform": {
@@ -486,22 +507,46 @@ demo`), then `just manual-solver-controller`.
   }
 }
 ```
+Version 5 adds the full **Target Identity** — `schema_version`, `target_id`, `revision`,
+`semantic_sha256` and `board_frame_convention` — binding the archive to the exact Target
+Definition it was captured against. A solver restores a version-5 archive only when every
+identity field exactly matches its locally selected target; a mismatch is refused, not
+silently reinterpreted.
+
 Version 4 (H-11) records the board-frame convention that produced the file and keeps the
 board pose's 6x6 covariance (v3 dropped it, so a reloaded buffer silently solved with
-uniform weight). Version 3 (H-10) persists the real ArUco corner pixels inside each 2D
-detection's `results`. `transform` is the raw solver output (`T_optical←lidar`), the input
-the Autoware exporter consumes. A saved calibration also carries its own quality record (H-09).
+uniform weight). It has no Target Identity and **cannot be restored** into a running
+solver's buffer — it remains useful only for migration and for `lctk_autoware_export`,
+which needs the solved transform's provenance, not a target match. Version 3 (H-10)
+persists the real ArUco corner pixels inside each 2D detection's `results`. `transform` is
+the raw solver output (`T_optical←lidar`), the input the Autoware exporter consumes. A
+saved calibration also carries its own quality record (H-09).
 
-**Versions below 4 are rejected, not migrated on load** — a v3 file cannot say which board
-frame produced it, and reinterpreting it would make its meaning depend on the build that
-opened it. Convert one you still trust:
+**Versions below the current one are rejected, not migrated on load** — a v3 file cannot
+say which board frame produced it, and a v4 file cannot say which target it was captured
+against; reinterpreting either would make the file's meaning depend on the build that
+opened it. Reaching version 5 from a version-3 file takes two explicit hops, each naming a
+different operator claim:
 ```bash
+# 1. version 3 -> 4: name the board-frame convention the file was CAPTURED in
 ros2 run lidar_to_camera_solver migrate_detections \
-    --input ~/detections.json --output ~/detections-v4.json \
+    --input ~/detections-v3.json --output ~/detections-v4.json \
     --assume-convention corner_aligned_plate_center_v1
+
+# 2. version 4 -> 5: bind the Target Definition the file was CAPTURED against
+ros2 run lidar_to_camera_solver migrate_detections \
+    --input ~/detections-v4.json --output ~/detections-v5.json \
+    --target-config /path/to/config/targets/<target>.json5
 ```
-`lctk_autoware_export` enforces the same check, because it writes into a file that reaches
-a vehicle.
+A file already at version 4 needs only the second hop. Migrating straight from version 3 to
+5 in one invocation is refused — each hop is a distinct claim the operator must make
+explicitly. Step 2 checks that every marker ID the archive actually observed belongs to the
+selected target (catching an obviously wrong selection), but it cannot prove which physical
+target produced the recording; that remains the operator's assertion.
+
+`lctk_autoware_export` accepts both version 4 and version 5 archives — it needs the solved
+transform, not a target match — and enforces the same board-frame-convention gate, because
+it writes into a file that reaches a vehicle.
 
 ### Interactive Solver Controller
 

@@ -1,7 +1,8 @@
 # L-23 · `debug_mode` is declared by both solvers and read by neither
 
 - **Severity:** Low
-- **Area:** extrinsic_solver_node, advanced_extrinsic_solver
+- **Area:** extrinsic_solver_node, advanced_extrinsic_solver (renamed `lidar_to_camera_solver` in
+  `ecba23c` — see the 2026-08-28 note at the bottom of this file)
 - **Status:** Open
 - **Verified:** By code trace (2026-08-14) while scoping Phase 2 of the corner-aligned board frame
 
@@ -40,4 +41,21 @@ entirely, so any effort spent wiring it up is discarded.
 ## Related
 
 - [H-11](./H-11-camera-solvers-stale-board-frame.md) — the Phase 2 work that replaces both packages
-- [L-22](./L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) — the other dead-metadata finding from the same trace
+- [L-22](./archive/L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) — the other dead-metadata finding from the same trace
+
+## Update (2026-08-28) — pointer repaired; finding unchanged and confirmed on the renamed package
+
+`ros/advanced_extrinsic_solver` no longer exists — it was renamed to `ros/lidar_to_camera_solver` in
+`ecba23c`. Unlike L-22 (fixed by the rename), this finding survives it unchanged:
+`debug_mode` is still declared and still never read.
+
+- `ros/lidar_to_camera_solver/lidar_to_camera_solver/main.py:251` — `("debug_mode", True)` in the
+  parameter declaration list; `grep -rn debug_mode ros/lidar_to_camera_solver/` finds no other
+  occurrence in the package.
+- `ros/extrinsic_solver_node/extrinsic_solver_node/main.py:102` — `self.declare_parameter("debug_mode",
+  True)`, also still unread. That package is superseded and pending deletion per the diamond-frame
+  plan (unchanged from this issue's existing "prefer deletion" note), so this half needs no separate
+  action beyond the eventual package deletion.
+
+Status and severity unchanged; only the `advanced_extrinsic_solver` → `lidar_to_camera_solver`
+pointer needed repair.

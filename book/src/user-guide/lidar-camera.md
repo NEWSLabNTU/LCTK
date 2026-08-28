@@ -79,16 +79,19 @@ just lidar-camera
 
 Open `http://localhost:8000` to see the web UI.
 
-Check detection rates (should be >1 Hz):
+Check detection rates (should be >1 Hz). Topics are namespaced `<lidar>_<marker>` / `<camera>` /
+`<lidar>_<camera>` from your config's device and marker names; the sample-data config
+(`config/examples/sample_data.yaml`) names them `top_lidar`, `calibration_board` and
+`front_center`:
 ```bash
 source install/setup.bash
-ros2 topic hz /calibration/aruco_locator/aruco_detections
-ros2 topic hz /calibration/lidar_board_detector/calibration_board_detections
+ros2 topic hz /calibration/front_center/aruco_detections
+ros2 topic hz /calibration/top_lidar_calibration_board/calibration_board_detections
 ```
 
 View the calibration result:
 ```bash
-ros2 topic echo /calibration/extrinsic_solver/extrinsic_transform
+ros2 topic echo /calibration/top_lidar_front_center/extrinsic_transform
 ```
 
 ### 4. Validate Results

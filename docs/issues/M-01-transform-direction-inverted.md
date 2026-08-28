@@ -6,7 +6,10 @@
 - **Verified:** Static review
 - **Location:**
   - `ros/extrinsic_solver_node/extrinsic_solver_node/main.py:753-768`
-  - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1357-1370`
+  - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1357-1370` — this package no
+    longer exists at this path; renamed to `ros/lidar_to_camera_solver` in `ecba23c`. The equivalent
+    construction is now `ros/lidar_to_camera_solver/lidar_to_camera_solver/main.py:1053-1071`
+    (`_create_transform_message`) — see the 2026-08-28 note at the bottom of this file
   - `ros/lctk_launch/lctk_launch/tf_tree_broadcaster.py`
 
 ## Problem
@@ -41,3 +44,16 @@ Recommended fix, to be done with sample data + the overlay:
 
 Until then this is the one blocker between the solver output and a correct
 Autoware `sensor_kit_calibration.yaml` (see [gap-autoware-export.md](./archive/gap-autoware-export.md)).
+
+## Update (2026-08-28) — pointer repaired; finding confirmed unchanged on the renamed package
+
+`ros/advanced_extrinsic_solver` was renamed to `ros/lidar_to_camera_solver` in `ecba23c`, ahead of
+this phase. Reading the renamed package's current `main.py`, the same pattern this issue describes
+is still present: `_create_transform_message` (`lidar_to_camera_solver/main.py:1053-1071`) builds a
+`TransformStamped` directly from the raw solver `rvec`/`tvec` — `message.header.frame_id =
+self.parent_frame` (the lidar), `message.child_frame_id = self.child_frame` (the camera), with no
+inversion — the same labeling this issue calls backwards against ROS TF semantics.
+
+This is a pointer repair only, per this packet's scope (owned by in-progress work elsewhere, per the
+W6-A packet brief). Status remains **Deferred**; nothing here changes the verification blocker (a
+visual overlay check) or the recommended fix.
