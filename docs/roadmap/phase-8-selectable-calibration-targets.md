@@ -34,18 +34,19 @@ Updated 2026-08-28. Packet status changes land here with each accepted review ga
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
 | W5-C | Complete | Generated graph and identity routing (`1884b3d`, `eb58770`), graph invariants, `7839cf1` |
 | W5-D | Complete | Maintained-example cutover and first solid example, `24224c8` |
+| W5-E1 | Complete | Legacy schema removed from nodes, parser, launch and config, `fc512e8` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W5-E1 (remove the ROS/config compatibility aliases), which W5-D has now
-unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
+Active dependency path: W5-E2 (remove the Rust facade crates and finish the neutral renames), which
+W5-E1 has now unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
 fields through the generated launch graph for every node that carries them (W4-C only added the
 identity routes required to keep the maintained legacy graph functional while gates activate), and
-W5-D has now put every maintained example on those fields. W5-E2 through W6-A remain pending behind
-W5-E1. W7-B requires real rosbag evidence and is not headlessly closeable.
+W5-D has now put every maintained example on those fields. W5-E3 through W6-A remain pending behind
+W5-E2. W7-B requires real rosbag evidence and is not headlessly closeable.
 
 Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
 `just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
@@ -156,6 +157,141 @@ synthesise the root `[patch.crates-io]` block as the union of every per-package 
 The generated golden fixtures under `rust/board-cluster-detector/tests/fixtures/` are gitignored and
 must be regenerated with `experiments/board-detection-2d/tools/export_golden.py` before the Rust
 suite is complete on a new machine.
+
+W5-E1 deleted the compatibility path W5-D left without callers: the four legacy node parameters
+(`board_detector_file`/`aruco_pattern_file` on the detector, `aruco_config_file` on the locator and
+the LiDAR-camera solver), `_parse_legacy_marker` and its hollow translation, the launch file's
+`_uses_target_definition` branching, and the four config files only the old schema read
+(`config/aruco/aruco_pattern.json5` and `config/board/board_detector{,_velodyne,_seyond}.json5`).
+Net −592 lines before the deletions themselves.
+
+An old config is now refused rather than translated, at two entry points: a marker carrying
+`type`/`board_config`/`aruco_config`, and a lidar device carrying `board_config`. The device case is
+the one that had to be a refusal rather than a deletion — `config_parser` read that key with
+`config.get()`, so simply removing the legacy path would have let an old config parse and then run
+against the wrong detector tuning with nothing reported. Both messages follow the detection-archive
+refusals in `detection_format.py`, on the same reasoning those state: automatic translation would
+make a config's meaning depend on the build that opened it, and the retired board/ArUco files carry
+split, non-authoritative geometry that no rule can turn into detector tuning.
+
+Coverage moved rather than evaporated wherever the claim outlived the schema. The two-LiDAR graph
+test kept both its identity remaps and its per-LiDAR override assertion, restated against
+`detector_config`; it remains the only launch-graph proof that an override reaches the right node,
+since the parser-level test checks dataclasses rather than generated `Node` parameters. The hollow
+point-cloud regression — the only exercise of the perforated observer adapter's plane/square handoff
+— now parses the manifest directly instead of reaching it through the legacy source. One test was
+retired deliberately; see "A preservation test was deliberately retired, not lost" below.
+
+W5-E1's gate passed with `just build` (17 ROS packages), `just test` (316 Rust and 397 Python tests;
+317 and 400 before this packet, the difference being deleted legacy tests net of added rejection
+tests), `just lint-py`, and `git diff --check`. The dangling-symlink build failure W5-D recorded
+recurred exactly as predicted after deleting four config files, and cleared the same way.
+
+L-19 closed as a side effect: the parser guard that made `aruco_config` mandatory for LiDAR-only
+markers is gone along with the field. Three findings surfaced during the packet were filed as M-23,
+M-24 and L-26, and M-16 gained an update recording that later evidence contradicts its "never run
+end-to-end" text without settling it. One documentation debt is left for W5-E3/W6-A:
+`ros/lctk_launch/README.md`, `ros/lctk_launch/config/README.md` and
+`ros/lidar_board_detector/README.md` still document a retired XML launch interface and now point at
+deleted files.
+
+## Outstanding items no packet owns
+
+These are gaps and hazards that surfaced while implementing Phase 8 but that no packet's scope
+covers. They are recorded here so they live in the plan rather than only in conversation.
+
+**The new schema has never been run against data.** Every Phase 8 packet gate is `just build`,
+`just test`, `just lint-py` and `git diff --check` — all headless. The launch graph is proven by
+`ros/lctk_launch/test/test_calibrate_launch_graph.py`; nothing proves the runtime. No packet owns
+"launch the pipeline on a real recording and confirm a solved extrinsic": W7-B is specifically
+about tuning and promoting the solid presets, and it depends on W6-A, so it does not cover the
+maintained hollow examples either. The first person to run any maintained example on real data
+after this phase is performing an experiment, not a regression check, and that gap is recorded
+here on purpose rather than left implicit. `config/examples/sample_data.yaml` is the only
+maintained example with matching data already in the repo (`ros/lctk_sample_data/data/3/`, pcap +
+avi, driven by `just sample-data`), so it is the cheapest way to close this gap; every other
+maintained example is either illustrative only (`vehicle.yaml`'s placeholder topics), names a
+rosbag that ships nowhere in the repo (`seyond_left.yaml`, `seyond_right.yaml`), depends on the
+gitignored `bags/TWO_LIDAR_*` (`two_lidar.yaml`), or by design has no recording at all
+(`solid_600_handheld.yaml`).
+
+**`sample_data.yaml` sits on the detection path M-17 says is unverified.** W5-D deliberately kept
+it in `bbox` mode, via `config/board/hollow_1000/velodyne_bbox.json5` (see "Current implementation
+state" above for why), rather than retuning it onto the bbox-free preset. That means the one
+runnable example a first real-data check would reach for exercises exactly the Stage-1 path
+[M-17](../issues/M-17-initial-pose-rewrite-unverified-bbox-path.md) records as never measured
+against the pre-rewrite construction. Preserving the shipped operating point over the untested one
+was the right call for W5-D's own scope — a launch cutover is not the place to also silently
+change what a shared initial-pose call site does — but it means the cheapest runtime check
+available today runs over the least-verified detector path in the repo. Both halves are true at
+once; neither cancels the other.
+
+**A config file can be compiled into a binary, and W5-E1 already ran into it.**
+`config/board/board_detector.json5` was `include_str!`'d into the `lidar_board_detector` binary at
+three call sites — one in `bbox_free.rs`, two in `main.rs` — so deleting it would have broken
+`just build`, not merely `just test`. Commit `fc512e8` (W5-E1) caught this and repointed all three
+at `config/board/hollow_1000/velodyne_bbox.json5`, W5-D's geometry-free copy of the same template,
+before removing the file; its own commit message records the same reasoning. The general hazard
+remains for W5-E2 and W5-E3, which delete more files: a grep for a *parameter name* will not
+surface an `include_str!`/`include_bytes!` coupling, so those packets must also grep for the file
+name itself. As of that commit, the config files still compiled into a Rust binary this way are:
+every `bbox*.json5` file under `config/board/` (eight sites, all in
+`ros/lidar_board_detector/src/bbox.rs`); `config/board/hollow_1000/velodyne_bbox.json5` (three
+sites, `bbox_free.rs` and `main.rs`); and the two target manifests
+`config/targets/hollow_1000_aruco_4_v1.json5` and `config/targets/solid_600_aruco_1_v1.json5`
+(seven `include_bytes!` sites total across `ros/lidar_board_detector/src/main.rs` and
+`ros/aruco_locator_node/src/main.rs` — four for the hollow manifest, three for the solid one).
+
+**A preservation test was deliberately retired, not lost.**
+`test_hollow_presets_preserve_the_current_sensor_operating_values` (added in `a0664db`, extended in
+`24224c8`) compared `config/board/hollow_1000/{velodyne,seyond}.json5` against the legacy
+`board_detector_velodyne.json5`/`board_detector_seyond.json5` key by key, and
+`hollow_1000/velodyne_bbox.json5` against `board_detector.json5` — it was the one-time proof that
+the Phase 8 cutover did not silently retune a shipped operating point. `fc512e8` removed the test
+along with the legacy files it compared against, because once those files are gone the comparison
+has no other side left to diff. This was a decision, recorded in that commit and in
+`ros/lctk_launch/test/test_target_presets.py`'s trailing comment, not an oversight. Its evidence is
+now historical (`a0664db`, `24224c8`, `fc512e8`); going forward, the only protection against an
+unintended hollow retune is code review of a preset diff, not a test.
+
+**`extrinsic_solver_node` is now permanently unstartable, on purpose.**
+`ros/extrinsic_solver_node/extrinsic_solver_node/main.py` reads `config["num_squares_per_side"]`
+and `config["board_size"]` (`_load_aruco_pattern_config`), keys that existed only in
+`config/aruco/aruco_pattern.json5`; `fc512e8` deletes that file as part of W5-E1's scope ("delete
+the standalone physical ArUco config"). Nothing regresses: the node was already unreachable from
+config-driven launch, and neither of its own launch files
+(`ros/extrinsic_solver_node/launch/extrinsic_solver_node.launch.xml`,
+`ros/lidar_to_camera_solver/launch/extrinsic_solver_node.launch.xml`) ever sets
+`aruco_config_file` — it defaults to `""`, which `_load_aruco_pattern_config` already refuses with
+`ValueError("aruco_config_file parameter is required")` before it would ever reach the missing
+file. So the node was unstartable through its own shipped launch files before this phase touched
+anything; Phase 8 only removes the one config that would have let an operator start it by hand with
+an explicit `aruco_config_file` override. Recording this explicitly is so a later reader does not
+mistake an already-inert deletion for an accidental breakage. CLAUDE.md already notes the package
+is "pending deletion" by the diamond-frame plan.
+
+**Dead configuration awaiting W5-E3.**
+`ros/lctk_launch/config/lidar_to_lidar/{wayside1_to_2,wayside2_to_3}/multi_wayside.json5`,
+`config/lidar_to_lidar_ntu/{wayside1_to_2,wayside1_to_3}/multi_wayside.json5`, and the four files
+under `config/multi_wayside/` all belong to the deleted `multi_wayside_node`; no package by that
+name exists under `ros/` any more. Nothing in the repo reads any of these paths — no launch file,
+no node, no justfile recipe — and even if something did, all four `multi_wayside.json5` files'
+`board_detector: '../../board_detector.json5'` and `aruco_pattern: '../../aruco_pattern.json5'`
+relative paths already resolve to `config/board_detector.json5` and `config/aruco_pattern.json5`,
+neither of which exists (the real files, now deleted by W5-E1, lived a directory level deeper,
+under `config/board/` and `config/aruco/`). `ros/lidar_to_camera_solver/launch/
+extrinsic_solver_node.launch.xml` is in the same state: nothing in the repo references that
+filename either. These belong to W5-E3's zero-reference sweep. The issue tracker may separately
+carry an entry for that orphaned launch file; that is a parallel finding, not one to duplicate
+here.
+
+**CLAUDE.md is stale on the detection archive format.** It documents "Detection File Format
+(version 4)" with a `"version": 4` example. `ros/lidar_to_camera_solver/lidar_to_camera_solver/
+detection_format.py` sets `FORMAT_VERSION = ARCHIVE_V5` and refuses to restore a v4 archive,
+requiring the explicit `migrate_detections` migration command instead. This is in scope for W6-A
+("update CLAUDE.md, package READMEs and book workflow/migration pages"), but it is worth flagging
+as actively wrong today, not merely outdated: an operator following CLAUDE.md's own example would
+write a file the current code refuses to load.
 
 ## Outcome
 
