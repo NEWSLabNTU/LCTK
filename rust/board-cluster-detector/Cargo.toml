@@ -24,3 +24,6 @@ rand = { workspace = true }
 [dev-dependencies]
 approx = { workspace = true }
 serde_json = { workspace = true }
+# Pinned directly (not a workspace.dependencies entry) -- matches the pin
+# used by rust/hollow-board-detector's now-deleted proptest suite.
+proptest = "1.5"

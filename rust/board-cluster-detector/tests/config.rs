@@ -1,14 +1,15 @@
-#![allow(deprecated)] // Exercises the migration facade intentionally.
-
-use board_cluster_detector::config::{
-    production_config, production_tuning, DetectorTuning, ForegroundMethod,
-};
+use board_cluster_detector::config::{production_tuning, DetectorTuning, ForegroundMethod};
 use std::str::FromStr;
 
 #[test]
-fn production_config_matches_python_preset() {
-    let c = production_config(1.0, [0.0, 0.0, 1.0], 30);
-    assert_eq!(c.side_m(), 1.0);
+fn production_tuning_matches_python_preset() {
+    // Absolute preset values, as distinct from
+    // `production_tuning_reuses_serde_defaults_except_documented_overrides`
+    // below, which only checks which knobs differ from the serde defaults.
+    // The physical side is no longer part of this: W5-E2 removed the
+    // `side_m`-carrying adapter, so geometry reaches detection as a
+    // `TargetSide` argument instead of riding along with tuning.
+    let c = production_tuning([0.0, 0.0, 1.0], 30);
     assert_eq!(c.up_axis, [0.0, 0.0, 1.0]);
     assert_eq!(c.cluster_min_points, 30);
     assert_eq!(c.stance_floor, 0.9);
