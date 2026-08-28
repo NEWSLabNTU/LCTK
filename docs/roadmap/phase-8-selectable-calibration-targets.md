@@ -35,18 +35,17 @@ Updated 2026-08-28. Packet status changes land here with each accepted review ga
 | W5-C | Complete | Generated graph and identity routing (`1884b3d`, `eb58770`), graph invariants, `7839cf1` |
 | W5-D | Complete | Maintained-example cutover and first solid example, `24224c8` |
 | W5-E1 | Complete | Legacy schema removed from nodes, parser, launch and config, `fc512e8` |
+| W5-E2 | Complete | Facade crates deleted, coverage migrated, `21142ac`; H-14 ICP sign fix, `fcf9f06` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W5-E2 (remove the Rust facade crates and finish the neutral renames), which
-W5-E1 has now unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
+Active dependency path: W5-E3 (zero-reference integration gate), which W5-E2 has now unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
 fields through the generated launch graph for every node that carries them (W4-C only added the
 identity routes required to keep the maintained legacy graph functional while gates activate), and
-W5-D has now put every maintained example on those fields. W5-E3 through W6-A remain pending behind
-W5-E2. W7-B requires real rosbag evidence and is not headlessly closeable.
+W5-D has now put every maintained example on those fields. W6-A remains pending behind W5-E3. W7-B requires real rosbag evidence and is not headlessly closeable.
 
 Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
 `just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
@@ -194,6 +193,56 @@ end-to-end" text without settling it. One documentation debt is left for W5-E3/W
 `ros/lctk_launch/README.md`, `ros/lctk_launch/config/README.md` and
 `ros/lidar_board_detector/README.md` still document a retired XML launch interface and now point at
 deleted files.
+
+W5-E2 deleted `rust/hollow-board-config` and `rust/hollow-board-detector`, `fixtures/board/`, and
+the `side_m` compatibility adapter. The lockfile shed both crates and their exclusive transitive
+dependencies. "Finish neutral crate/directory names" required no renames -- the two deletions
+complete it -- and `members = ["rust/*"]` is a glob, so no manifest edit was needed.
+
+The adapter was removed without removing the function it wrapped. `detect()` is not a thin shim:
+beyond delegating to `detect_for_target` it owns pose construction, the legacy
+stance-before-isolation gate order and lowest-residual selection, and the Python-parity goldens over
+~50 MB of recorded fixtures compare against its pose output, which neutral evidence cannot produce.
+`BoardConfig`, its private `side_m` and the `d_side_m() -> 1.0` hollow assumption are gone; the
+physical side now enters as a `TargetSide` argument. All three parity goldens still pass.
+
+Coverage moved before the crates did. The ICP convergence suite went to
+`calibration-target-detector`, the voxel tests to `board-cluster-detector` and the node, and the
+paper-placement test to `calibration-target`. The voxel move was a net gain rather than a
+preservation: those tests described a dead triplicate, while the node's live implementation had no
+tests at all despite owning the `use_centroid = false` branch. `fixtures/board`'s generator was
+ported to `fixtures/targets/`, which held a golden with three consumers and no generator -- its
+standing instruction not to re-baseline from implementation output previously had no way to be
+obeyed. The ported generator reproduces the committed golden to 5.8e-16 m from stdlib and json5
+alone.
+
+**Migrating the ICP suite exposed [H-14](../issues/H-14-perforated-icp-applies-correction-backwards.md),
+a shipped defect: the perforated ICP applied its Kabsch correction backwards, so every iteration
+moved the board pose away from the observed points.** It dated from W3-C and came from a naming trap
+-- the old crate's correspondence tuples were `(sensor, model)` but its unzipped variables were
+named the other way round, so the migration swapped the argument order while keeping an `.inverse()`
+that the swap had already performed. The code carried a comment asserting the inversion matched the
+legacy ordering exactly; it did not.
+
+Nothing could have caught it before this packet. Every prior ICP test seeded at or beside the true
+pose, where the correction is the identity and the identity is its own inverse; the characterization
+golden pins per-step metrics computed *before* the pose update and so is blind to its direction,
+passing unchanged across the fix. The one property that could catch it -- convergence from a
+perturbed seed -- was the one property no test had. This is a concrete instance of the first
+outstanding item below: the defect survived every headless gate and would have been found on the
+first real replay.
+
+One deliberate loss, recorded as a decision rather than an oversight: `old_frame_projection` and its
+reparameterisation test, the last executable statement of the pre-diamond board convention. That
+convention is unreachable (archives below version 4 are refused) and the bug class it guarded is
+structurally gone, the neutral frame being hard-coded constants rather than a computation that could
+be relabelled by 45 degrees.
+
+W5-E2's gate passed with `just build` (17 ROS packages), `just test` (276 Rust and 397 Python
+tests), `just lint` including clippy, and `git diff --check`. The Rust count falls from 316 because
+the deleted crates took ~60 tests with them, 20 having been migrated or newly written first; the
+remainder were superseded suites and tests of dead code. `rust/plane-estimator` is now fully
+orphaned -- its only dependent was `hollow-board-detector` -- and is a candidate for W5-E3's sweep.
 
 ## Outstanding items no packet owns
 
