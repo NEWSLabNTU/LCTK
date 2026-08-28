@@ -1950,7 +1950,7 @@ impl CalibrationBoardLocatorNode {
     ///
     /// The solver used to treat every board pose as exact and equally trustworthy. It is neither.
     /// The error is strongly **anisotropic**, and that falls straight out of the correspondence
-    /// model (`hollow-board-config`):
+    /// model (`calibration-target`'s posed-surface closest-point query):
     ///
     /// - an **interior** point's model correspondence is its own projection onto the board plane,
     ///   so its residual is purely along the plane normal. It says nothing at all about where the
@@ -2938,5 +2938,105 @@ mod covariance_tests {
             }
             TargetPoseEstimate::Detected(_) => panic!("empty edge evidence must reject"),
         }
+    }
+}
+
+// Ported from the now-deleted `rust/hollow-board-detector/tests/test_voxel_downsample.rs`
+// (Phase 8 packet W5-E2). `CalibrationBoardLocatorNode::voxel_downsample` is the live
+// implementation backing the bbox detection path and previously had zero direct tests;
+// the old crate's `algo::voxel_downsample` these tests originally targeted is dead.
+#[cfg(test)]
+mod voxel_downsample_tests {
+    use super::*;
+
+    #[test]
+    fn empty_input_returns_empty() {
+        let points: Vec<na::Point3<f64>> = vec![];
+        let result = CalibrationBoardLocatorNode::voxel_downsample(&points, 0.02, true);
+        assert_eq!(result.len(), 0, "Empty input should return empty output");
+    }
+
+    #[test]
+    fn single_point_unchanged() {
+        let points = vec![na::Point3::new(1.0, 2.0, 3.0)];
+        let result = CalibrationBoardLocatorNode::voxel_downsample(&points, 0.02, true);
+        assert_eq!(result.len(), 1);
+        assert!((result[0] - points[0]).norm() < 1e-10);
+    }
+
+    /// This is the highest-value port from the old suite: `use_centroid = false` (the
+    /// first-point strategy) exists only in this node's implementation -- neither
+    /// `board-cluster-detector::geometry::voxel_downsample` (centroid only) nor the old
+    /// dead `hollow-board-detector::algo::voxel_downsample` exercised it here -- and had
+    /// no coverage at all before this test.
+    #[test]
+    fn first_point_strategy_keeps_first_point_in_voxel() {
+        let points = vec![
+            na::Point3::new(0.000, 0.000, 0.000),
+            na::Point3::new(0.005, 0.005, 0.005),
+            na::Point3::new(0.010, 0.010, 0.010),
+        ];
+
+        let result = CalibrationBoardLocatorNode::voxel_downsample(&points, 0.02, false);
+        assert_eq!(result.len(), 1);
+        // First point strategy keeps the first point encountered, not a centroid.
+        assert!((result[0] - points[0]).norm() < 1e-10);
+    }
+
+    #[test]
+    fn negative_coordinates_floor_semantics() {
+        // Voxel -26 contains range [-0.52, -0.50):
+        // -0.52 / 0.02 = -26,   floor(-26)   = -26
+        // -0.51 / 0.02 = -25.5, floor(-25.5) = -26
+        // So both points fall in the same negative voxel -- a classic sign-bug guard for
+        // `floor()`-based keys, where a naive truncating cast would put -25.5 in voxel -25
+        // instead of -26.
+        let points_same_voxel = vec![
+            na::Point3::new(-0.52, -0.52, -0.52),
+            na::Point3::new(-0.51, -0.51, -0.51),
+        ];
+        let result = CalibrationBoardLocatorNode::voxel_downsample(&points_same_voxel, 0.02, true);
+        assert_eq!(
+            result.len(),
+            1,
+            "Negative coordinates in same voxel should work correctly"
+        );
+
+        // -0.52 is in voxel -26, -0.54 is in voxel -27: adjacent but distinct voxels.
+        let points_different_voxels = vec![
+            na::Point3::new(-0.52, -0.52, -0.52),
+            na::Point3::new(-0.54, -0.54, -0.54),
+        ];
+        let result2 =
+            CalibrationBoardLocatorNode::voxel_downsample(&points_different_voxels, 0.02, true);
+        assert_eq!(
+            result2.len(),
+            2,
+            "Points in different voxels should remain separate"
+        );
+    }
+
+    /// Guards the `voxel <= 0.0` / non-finite short-circuit: unlike the other two
+    /// `voxel_downsample` implementations, this node's version passes points through
+    /// unchanged rather than downsampling when given a degenerate voxel size. This
+    /// branch had no test before this one.
+    #[test]
+    fn non_positive_voxel_size_returns_points_unchanged() {
+        let points = vec![
+            na::Point3::new(0.0, 0.0, 0.0),
+            na::Point3::new(0.005, 0.005, 0.005),
+            na::Point3::new(1.0, 1.0, 1.0),
+        ];
+        let result = CalibrationBoardLocatorNode::voxel_downsample(&points, 0.0, true);
+        assert_eq!(
+            result, points,
+            "voxel <= 0.0 should pass points through unchanged"
+        );
+
+        let result_nan = CalibrationBoardLocatorNode::voxel_downsample(&points, f64::NAN, true);
+        assert_eq!(
+            result_nan, points,
+            "non-finite voxel should pass points through unchanged"
+        );
     }
 }

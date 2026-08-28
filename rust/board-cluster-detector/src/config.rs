@@ -1,9 +1,5 @@
 use serde::Deserialize;
-use std::{
-    ops::{Deref, DerefMut},
-    path::Path,
-    str::FromStr,
-};
+use std::{ops::Deref, str::FromStr};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DetectorTuning {
@@ -58,60 +54,6 @@ pub struct DetectorTuning {
     pub isolation_band_hi: f64,
 }
 
-/// Deprecated compatibility configuration for callers that still serialize a
-/// physical board side alongside detector tuning. New code receives a
-/// [`TargetSide`] at the detection boundary and uses [`DetectorTuning`].
-/// Its fields are intentionally private: direct struct literals are not part of
-/// the migration contract; use [`BoardConfig::new`], [`BoardConfig::side_m`],
-/// and [`BoardConfig::tuning`].
-#[deprecated(note = "load target geometry separately and use DetectorTuning")]
-#[derive(Debug, Clone, Deserialize)]
-pub struct BoardConfig {
-    /// Deprecated physical geometry. Kept only while old launch files and
-    /// callers migrate; [`crate::detector::detect`] delegates it to the target
-    /// side interface immediately.
-    #[serde(default = "d_side_m")]
-    side_m: f64,
-    #[serde(flatten)]
-    tuning: DetectorTuning,
-}
-
-#[allow(deprecated)]
-impl Deref for BoardConfig {
-    type Target = DetectorTuning;
-
-    fn deref(&self) -> &Self::Target {
-        &self.tuning
-    }
-}
-
-#[allow(deprecated)]
-impl DerefMut for BoardConfig {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tuning
-    }
-}
-
-#[allow(deprecated)]
-impl BoardConfig {
-    /// Migration constructor for legacy config readers. New target-aware code
-    /// passes these values independently to `detect_for_target`.
-    pub fn new(side_m: f64, tuning: DetectorTuning) -> Self {
-        Self { side_m, tuning }
-    }
-
-    pub fn side_m(&self) -> f64 {
-        self.side_m
-    }
-
-    pub fn tuning(&self) -> &DetectorTuning {
-        &self.tuning
-    }
-}
-
-fn d_side_m() -> f64 {
-    1.0
-}
 fn d_side_tol() -> f64 {
     0.20
 }
@@ -132,7 +74,7 @@ fn d_up_axis() -> [f64; 3] {
 }
 fn d_flatness() -> f64 {
     0.035
-} // BoardConfig default; production overrides to 0.045
+} // serde default; production overrides to 0.045
 fn d_stance_floor() -> f64 {
     0.0
 }
@@ -180,7 +122,7 @@ fn d_iso_band_hi() -> f64 {
 /// board plane a point may sit and still count as coplanar, and the inner/outer
 /// radii of the ring outside the quad that the density is counted in.
 ///
-/// These three always travel together; `BoardConfig` stores them as flat keys
+/// These three always travel together; `DetectorTuning` stores them as flat keys
 /// (the config file is flat by design) and hands them over as one value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IsolationBand {
@@ -230,8 +172,7 @@ impl TryFrom<f64> for TargetSide {
 }
 
 /// Neutral view shared by candidate generation and square fitting. It couples
-/// the selected target's one required geometric fact with detector tuning,
-/// without depending on the deprecated serialized facade.
+/// the selected target's one required geometric fact with detector tuning.
 #[derive(Debug, Clone, Copy)]
 pub struct TargetDetectionParams<'a> {
     target_side: TargetSide,
@@ -290,21 +231,6 @@ pub fn production_tuning(up_axis: [f64; 3], cluster_min_points: usize) -> Detect
     }
 }
 
-/// Deprecated compatibility constructor. New callers use [`TargetSide`] and
-/// [`production_tuning`] independently.
-#[deprecated(note = "use TargetSide and production_tuning independently")]
-#[allow(deprecated)]
-pub fn production_config(side_m: f64, up_axis: [f64; 3], cluster_min_points: usize) -> BoardConfig {
-    BoardConfig::new(side_m, production_tuning(up_axis, cluster_min_points))
-}
-
-#[allow(deprecated)]
-#[deprecated(note = "load target geometry separately; parse DetectorTuning instead")]
-pub fn load_board_config_json5(path: &Path) -> anyhow::Result<BoardConfig> {
-    let text = std::fs::read_to_string(path)?;
-    Ok(json5::from_str(&text)?)
-}
-
 /// Deserializes directly from the config's `foreground_method` string, so an
 /// invalid value fails at parse time with serde naming the valid variants —
 /// no separate validation pass, no `String` carried around post-parse.
@@ -327,14 +253,19 @@ impl FromStr for ForegroundMethod {
 }
 
 #[cfg(test)]
-#[allow(deprecated)] // Characterizes the serialized migration facade.
 mod flatten_tests {
     use super::*;
     use serde::Deserialize;
 
     // Mirrors the node's DetectionConfig: flat detector params + a
-    // `#[serde(flatten)]` BoardConfig, deserialized from a file that also
-    // carries unrelated legacy keys. Guards the config-flattening refactor.
+    // `#[serde(flatten)]` DetectorTuning, deserialized from a file that also
+    // carries unrelated keys. Guards the config-flattening refactor.
+    //
+    // `side_m` appears below as one of those unrelated keys on purpose. It used
+    // to be a real field of the `BoardConfig` adapter W5-E2 removed; physical
+    // geometry now reaches detection only as a `TargetSide` argument, so a file
+    // still carrying the key must be read as tuning-with-a-stray-key rather
+    // than silently reintroducing a 1 m board assumption.
     #[derive(Debug, Deserialize)]
     struct DetectionConfigLike {
         #[serde(default)]
@@ -342,11 +273,11 @@ mod flatten_tests {
         #[serde(default)]
         bbf_voxel: f64,
         #[serde(flatten)]
-        board: BoardConfig,
+        board: DetectorTuning,
     }
 
     #[test]
-    fn flatten_reads_board_and_ignores_legacy_keys() {
+    fn flatten_reads_tuning_and_ignores_legacy_geometry_keys() {
         let s = r#"{
             "detection_mode": "bbox_free",
             "bbf_voxel": 0.05,

@@ -24,12 +24,12 @@ just
 
 ## Project Structure
 
-- **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, hollow-board-detector, board-cluster-detector, plane-estimator, etc.)
+- **`rust/`**: Pure Rust libraries (aruco-config, aruco-detector, calibration-target, calibration-target-detector, board-cluster-detector, etc.)
 - **`ros/`**: ROS 2 packages
   - `lctk_launch/` - Unified launch system with config-driven calibration pipeline
   - `lctk_interfaces/` - Shared msg/srv definitions (solver services, quality report)
   - `aruco_locator_node/` - ArUco marker detection from camera images
-  - `aruco_generator_node/` - Prints the ArUco board pattern from `aruco_pattern.json5`
+  - `aruco_generator_node/` - Prints the ArUco board pattern from a Target Definition (`--target-config`)
   - `lidar_board_detector/` - Calibration board detection from point clouds
   - `extrinsic_solver_node/` - Superseded LiDAR-camera solver (unreachable from config-driven launch; pending deletion)
   - `lidar_to_camera_solver/` - LiDAR-camera solver with continuous and manual modes
@@ -458,12 +458,15 @@ exactly this.
 The legacy `type`/`board_config`/`aruco_config` marker keys still parse, but are scheduled for
 removal and no maintained example uses them any more.
 
-**ArUco config files are split by purpose:**
+**Physical layout and detector tuning are separate files:**
 
 | File | Describes | Also read by |
 |------|-----------|--------------|
-| `aruco_pattern.json5` | the *printed board* (marker IDs, dictionary, sizes) | `aruco_generator_node`, to print it |
+| `config/targets/<target>.json5` | the *physical target* (plate, cutouts, marker IDs, dictionary, sizes) | `aruco_generator_node --target-config`, to print it |
 | `aruco_detector.json5` | how the *detector* finds it (corner refinement, adaptive threshold) | — |
+
+The standalone `aruco_pattern.json5` that used to hold the printed-board half was deleted in
+W5-E1: the Target Definition is now the single source of that geometry.
 
 Detection runs on the **raw** camera frame: sub-pixel corner refinement reads image gradients, and
 undistorting first resamples them away. The detector maps the refined corners into the rectified

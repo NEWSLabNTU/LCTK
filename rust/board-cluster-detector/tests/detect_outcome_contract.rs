@@ -5,7 +5,7 @@
 use approx::assert_relative_eq;
 use board_cluster_detector::{
     background::BackgroundModel,
-    config::{production_config, production_tuning, ForegroundMethod, TargetSide},
+    config::{production_tuning, ForegroundMethod, TargetSide},
     detector::{detect, detect_for_target, RejectReason},
 };
 use nalgebra::Point3;
@@ -38,12 +38,14 @@ fn empty_background() -> BackgroundModel {
 #[test]
 fn accepted_one_metre_diamond_exposes_selected_patch_plane_and_pose() {
     let points = diamond_square_points(1.0);
-    let board = production_config(1.0, [0.0, 0.0, 1.0], 20);
+    let tuning = production_tuning([0.0, 0.0, 1.0], 20);
+    let side = TargetSide::metres(1.0).expect("one metre fixture side");
     let background = empty_background();
 
     let outcome = detect(
         &points,
-        &board,
+        side,
+        &tuning,
         ForegroundMethod::BackgroundSubtraction,
         0.01,
         Some(&background),
@@ -61,7 +63,7 @@ fn accepted_one_metre_diamond_exposes_selected_patch_plane_and_pose() {
 
     assert_eq!(outcome.n_candidates, 1);
     assert_eq!(selected_points.len(), outcome.foreground_points.len());
-    assert!(selected_points.len() >= board.patch_min_points);
+    assert!(selected_points.len() >= tuning.patch_min_points);
     assert!(outcome.reject.is_none());
     assert!(outcome.reject_detail.is_none());
     assert!(outcome.rejected_cluster.is_empty());
@@ -81,15 +83,17 @@ fn accepted_one_metre_diamond_exposes_selected_patch_plane_and_pose() {
 #[test]
 fn post_candidate_rejection_exposes_rejected_cluster_but_no_selection() {
     let points = diamond_square_points(1.0);
-    let mut board = production_config(1.0, [0.0, 0.0, 1.0], 20);
+    let mut tuning = production_tuning([0.0, 0.0, 1.0], 20);
+    let side = TargetSide::metres(1.0).expect("one metre fixture side");
     // No physical stance can exceed 1.0, so this forces rejection after the
     // candidate and 1 m square-fit stages without changing their evidence.
-    board.stance_floor = 1.01;
+    tuning.stance_floor = 1.01;
     let background = empty_background();
 
     let outcome = detect(
         &points,
-        &board,
+        side,
+        &tuning,
         ForegroundMethod::BackgroundSubtraction,
         0.01,
         Some(&background),
@@ -115,7 +119,7 @@ fn post_candidate_rejection_exposes_rejected_cluster_but_no_selection() {
     let neutral = detect_for_target(
         &points,
         TargetSide::metres(1.0).unwrap(),
-        board.tuning(),
+        &tuning,
         ForegroundMethod::BackgroundSubtraction,
         0.01,
         Some(&background),
@@ -162,21 +166,29 @@ fn target_side_interface_retains_neutral_square_plane_evidence_for_both_profiles
 }
 
 #[test]
-fn serialized_side_compatibility_delegates_to_target_side_interface() {
+fn pose_pipeline_agrees_with_neutral_detection_on_the_shared_decision() {
+    // `detect` runs `detect_for_target` and then adds pose construction, the
+    // legacy stance-before-isolation gate order, and lowest-residual selection.
+    // Everything the two share must therefore agree exactly; where they differ
+    // is only in what `detect` adds on top. Before W5-E2 this was framed as the
+    // serialized `side_m` adapter delegating to the TargetSide interface; that
+    // adapter is gone, but the agreement it pinned is still worth holding.
     let points = diamond_square_points(1.0);
     let background = empty_background();
-    let legacy_board = production_config(1.0, [0.0, 0.0, 1.0], 20);
+    let tuning = production_tuning([0.0, 0.0, 1.0], 20);
+    let side = TargetSide::metres(1.0).expect("one metre fixture side");
     let legacy = detect(
         &points,
-        &legacy_board,
+        side,
+        &tuning,
         ForegroundMethod::BackgroundSubtraction,
         0.01,
         Some(&background),
     );
     let target = detect_for_target(
         &points,
-        TargetSide::metres(1.0).unwrap(),
-        legacy_board.tuning(),
+        side,
+        &tuning,
         ForegroundMethod::BackgroundSubtraction,
         0.01,
         Some(&background),
