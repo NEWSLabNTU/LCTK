@@ -2,8 +2,10 @@
 
 - **Severity:** Low
 - **Area:** lctk_launch / config_parser, lidar_board_detector
-- **Status:** Open
-- **Verified:** By code trace (2026-08-11) while configuring a two-LiDAR calibration
+- **Status:** Fixed (2026-08-28) — W5-E1 (the selectable-calibration-targets cutover) removed the
+  `aruco_config` schema key entirely; see [Resolution](#resolution-2026-08-28) below
+- **Verified:** By code trace (2026-08-11) while configuring a two-LiDAR calibration; resolution
+  re-verified by code trace 2026-08-28
 
 ## Problem
 
@@ -37,3 +39,29 @@ requirement for any marker used by a camera.
 
 Alternatively, if the shared `BoardModel` is to stay as-is, document in the config schema that
 `aruco_config` is required for schema reasons and does not affect LiDAR detection.
+
+## Resolution (2026-08-28)
+
+The selectable-calibration-targets work (W5-E1) replaced the split `board_config`/`aruco_config`
+schema with a single required `target_config` (a Target Definition: plate, cutouts, fiducial
+layout, identity) plus `detector_config` (sensor-specific tuning only, no geometry). Verified in
+`ros/lctk_launch/lctk_launch/config_parser.py`:
+
+- `_parse_markers` now rejects `type`, `board_config`, and `aruco_config` outright as "retired
+  schema key(s)" (lines ~448–466) — the specific mandatory-but-unread `aruco_config` field this
+  issue was about no longer exists in the schema at all.
+- `_parse_new_marker` requires `target_config` and `detector_config` for **every** marker,
+  regardless of which device types observe it (lines ~475–484) — there is no longer a
+  LiDAR-specific carve-out to reason about.
+
+Critically, this isn't the same complaint under a new name: `target_config` is a real, consumed
+dependency of the LiDAR path, not vestigial metadata. `ros/lidar_board_detector/src/main.rs`
+requires `target_config` (`ConfigSource`, lines ~298–318), loads it via
+`Self::load_target()` → `ValidatedTarget::parse_json5` (line 1052), and threads the parsed
+`target` into the detection callback (`CallbackContext`, used by the ICP `estimator`). The old
+`aruco_config` fed only marker-paper geometry the LiDAR side never touched; the new
+`target_config` is the LiDAR fitter's actual geometry source. The complaint this issue tracked —
+a config key mandatory for a device type that never reads it — is gone by construction, not just
+relabeled.
+
+Closing 🟢 and archiving.
