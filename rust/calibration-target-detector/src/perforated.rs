@@ -196,9 +196,7 @@ impl<'a> PerforatedBoardIcpIterator<'a> {
                 ..current.clone()
             };
         };
-        // This inversion is intentional and matches the legacy iterator's
-        // input/model ordering exactly.
-        let new_pose = align_pose.inverse() * current.board_pose;
+        let new_pose = align_pose * current.board_pose;
         let damped_translation = Translation3::from(
             current.board_pose.translation.vector
                 + (new_pose.translation.vector - current.board_pose.translation.vector)
