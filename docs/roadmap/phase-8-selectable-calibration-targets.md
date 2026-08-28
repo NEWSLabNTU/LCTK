@@ -87,6 +87,22 @@ forwarding list (`debug_mode`, `log_level`, `mode`, `enable_rviz`, `solver_mode`
 `enable_judge`) and its hardcoded `config_file:=sample_data.yaml` — a legacy example until W5-D —
 remain correct against the new routing.
 
+Two launch-layer changes landed outside any packet while W5-C was closing, both prerequisites for
+the solid example W5-D adds. `079b983` stops `config_parser` demanding `bbox_config`: the board
+detector reads a crop box only when its tuning selects `detection_mode=bbox`, and every preset
+except `board_detector.json5` is `bbox_free`, so the solid presets could not have been used without
+naming a file nothing reads. Enforcement now sits in the node, which is the only component that
+parses detector tuning. `dff2bca` moves the Conflux window, queue size and drop policy out of the
+`mode` argument into a required `sync:` section of the calibration config, leaving `mode` owning
+QoS alone; the window is a judgement about how far the target moves between a camera frame and a
+LiDAR sweep, which live-versus-recorded cannot answer. Every example kept its existing values, so
+neither change retunes anything. The same commit deletes the unread `config/detection_sync.yaml`.
+
+Open question for W5-D: `seyond_left.yaml` and `seyond_right.yaml` now declare
+`queue_size: 100`/`drop_policy: reject_new`, matching what `mode=offline` gave them before. If
+those rigs are driven live rather than replayed, they want a small queue and `drop_oldest` instead.
+That is a retune, so it was left for whoever knows the rigs.
+
 Fresh-clone build note: a clean tree could not build until `sync-root-cargo-config.sh` learned to
 synthesise the root `[patch.crates-io]` block as the union of every per-package block (`0df4f48`).
 The generated golden fixtures under `rust/board-cluster-detector/tests/fixtures/` are gitignored and
