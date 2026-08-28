@@ -4,54 +4,71 @@ This document provides detailed information about the LCTK codebase structure, d
 
 ## Project Structure
 
-LCTK is organized into three main categories: libraries, standalone programs, and ROS 2 nodes.
+LCTK is organized into three main categories: pure Rust libraries, ROS 2 nodes, and launch/config
+packages. The layout below is current; an older `src/lib/` + `src/bin/` + `src/ros2/` layout
+predates a directory reorg to today's `rust/` + `ros/`, and any lingering reference to that old
+layout is stale.
 
-### Libraries (`src/lib/`)
+### Libraries (`rust/`)
 
-Core reusable functionality implemented as Rust libraries:
+Core reusable functionality implemented as pure Rust libraries (no ROS dependency):
 
-- **[aruco-config](src/lib/aruco-config/)** - Serializable types for ArUco pattern descriptions
-- **[aruco-detector](src/lib/aruco-detector/)** - ArUco marker detection algorithms
-- **[aruco-generator](src/lib/aruco-generator/)** - Generate ArUco board images (library)
-- **[hollow-board-config](src/lib/hollow-board-config/)** - Serializable types for hollow-board shapes
-- **[hollow-board-detector](src/lib/hollow-board-detector/)** - Detection of hollow-boards in point clouds
-- **[plane-estimator](src/lib/plane-estimator/)** - Plane fitting algorithms for point clouds
-- **[pnp-solver](src/lib/pnp-solver/)** - OpenCV wrapper for PnP (Perspective-n-Point) solving
-- **[serde-types](src/lib/serde-types/)** - Common serializable types used across the project
+- **[aruco-config](rust/aruco-config/)** - Serializable types for ArUco pattern descriptions
+- **[aruco-detector](rust/aruco-detector/)** - ArUco marker detection algorithms
+- **[aruco-generator](rust/aruco-generator/)** - Generate ArUco board images (library)
+- **[aruco-locator](rust/aruco-locator/)** - Locating ArUco markers in images
+- **[board-cluster-detector](rust/board-cluster-detector/)** - Isolates a calibration board's
+  point cluster from a point cloud without a hand-tuned crop box (`bbox_free` detection)
+- **[calibration-target](rust/calibration-target/)** - Validated, immutable physical
+  definitions of calibration targets (Target Definition parsing, validation, semantic identity,
+  and canonical board-local geometry). Supersedes the former `hollow-board-config`
+- **[calibration-target-detector](rust/calibration-target-detector/)** - Calibration-target
+  pose estimation (`TargetPoseEstimator`, plus the solid- and perforated-surface adapters).
+  Supersedes the former `hollow-board-detector`
+- **[multi-stream-synchronizer](rust/multi-stream-synchronizer/)** - Synchronizes timestamped
+  messages from multiple data streams using time-window based grouping
+- **[plane-estimator](rust/plane-estimator/)** - Plane fitting algorithms for point clouds
 
-### Standalone Programs (`src/bin/`)
+### ROS 2 Nodes and Packages (`ros/`)
 
-Command-line tools and ROS 2 nodes:
+#### Rust ROS 2 Nodes
+- **[aruco_generator_node](ros/aruco_generator_node/)** - Prints the ArUco board pattern from
+  a Target Definition
+- **[aruco_locator_node](ros/aruco_locator_node/)** - Detect ArUco markers in images
+- **[lidar_board_detector](ros/lidar_board_detector/)** - Detect calibration boards in point
+  clouds
 
-#### Command-Line Tools
-- **[aruco_generator](src/bin/aruco_generator/)** - Generate ArUco board images
-- **[extrinsic_solver](src/bin/extrinsic_solver/)** - Solve extrinsic parameters between sensors
-- **[multi_wayside](src/bin/multi_wayside/)** - Handle multi-wayside calibration
-- **[rosbag_deck](src/bin/rosbag_deck/)** - ROS bag playback and recording tools
+#### Python ROS 2 Nodes
+- **[extrinsic_solver_node](ros/extrinsic_solver_node/)** - Superseded LiDAR-camera solver;
+  unreachable from config-driven launch, pending deletion
+- **[lidar_to_camera_solver](ros/lidar_to_camera_solver/)** - LiDAR-camera solver
+  (continuous and manual modes)
+- **[interactive_solver_controller](ros/interactive_solver_controller/)** - Rich TUI driving
+  `lidar_to_camera_solver`
+- **[lidar_to_lidar_solver](ros/lidar_to_lidar_solver/)** - LiDAR-to-LiDAR calibration solver
+- **[lctk_quality](ros/lctk_quality/)** / **[calibration_judge](ros/calibration_judge/)** -
+  Extrinsic quality metric
+- **[pointcloud_image_overlay](ros/pointcloud_image_overlay/)** - Overlay point clouds on
+  camera images
+- **[filter_box_tuner](ros/filter_box_tuner/)** - Interactive crop-box tuning for the board
+  detector
+- **[lctk_autoware_export](ros/lctk_autoware_export/)** - Exports a solved extrinsic into an
+  Autoware `sensor_kit_calibration.yaml`
+- **[lctk_sync](ros/lctk_sync/)** - Owns Conflux-backed detection-pair synchronization used by
+  the solver nodes
+- **[lctk_target](ros/lctk_target/)** - Python-side Target Definition loading
 
-#### ROS 2 Nodes
-- **[aruco_locator_node](src/bin/aruco_locator_node/)** - Detect ArUco markers in images
-- **[lidar_board_detector](src/bin/lidar_board_detector/)** - Detect calibration boards in point clouds
-- **[extrinsic_solver_node](src/bin/extrinsic_solver_node/)** - Compute extrinsic calibration parameters
-- **[multi_wayside_node](src/bin/multi_wayside_node/)** - Multi-wayside calibration ROS node
-- **[pointcloud_image_overlay](src/bin/pointcloud_image_overlay/)** - Overlay point clouds on camera images
-- **[sensor_synchronizer_node](src/bin/sensor_synchronizer_node/)** - Synchronize multiple data streams
+#### Launch Files and Configuration
+- **[lctk_launch](ros/lctk_launch/)** - Config-driven launch system for calibration pipelines
+- **Configuration files** - Located in `ros/lctk_launch/config/`
 
-#### Other Components
-- **[iou_overlapping](src/bin/iou_overlapping/)** - Intersection over Union evaluation tools
+#### Interface Packages
+- **[lctk_interfaces](ros/lctk_interfaces/)** - Custom ROS 2 message/service definitions
+  (solver services, quality report)
 
-### Launch Files and Configuration
-
-- **[lctk_launch](src/ros2/lctk_launch/)** - ROS 2 launch files for calibration pipelines
-- **Configuration files** - Located in `src/ros2/lctk_launch/config/`
-
-### Interface Packages (`src/interface/`)
-
-Custom ROS 2 message definitions and interface types.
-
-### ROS 2 Rust Integration (`src/ros2_rust_ws/`)
-
-Integration layer for ROS 2 Rust support, including message generation and bindings.
+#### Data and External Integration
+- **[lctk_sample_data](ros/lctk_sample_data/)** - Sample data playback (pcap + avi)
+- **[conflux](ros/conflux/)** - Git submodule: message synchronizer used by all solvers
 
 ## ROS 2 Node Details
 
@@ -193,9 +210,14 @@ The project uses a three-pass build process:
 ### Configuration Management
 
 - Configuration files use JSON5 format for readability
-- Board detector configuration: `src/ros2/lctk_launch/config/board/board_detector.json5`
-- ArUco pattern configuration: `src/ros2/lctk_launch/config/aruco/`
-- Launch file parameters are defined in XML launch files
+- Target Definitions (physical plate geometry, cutouts, fiducial layout):
+  `ros/lctk_launch/config/targets/`
+- Detector Tuning presets (sensor-specific, geometry-free, per target):
+  `ros/lctk_launch/config/board/<target>/`, e.g. `hollow_1000/velodyne.json5`
+- ArUco detector tuning (corner refinement, adaptive threshold):
+  `ros/lctk_launch/config/aruco/`
+- Calibration is config-driven (`ros2 launch lctk_launch calibrate.launch.py
+  config_file:=<yaml>`); XML launch arguments for these files no longer exist
 
 ### Testing
 
@@ -281,4 +303,4 @@ When `debug_mode=true` is enabled:
 - **CLAUDE.md**: AI assistant instructions and detailed setup information
 - **README.md**: Quick start guide and usage examples
 - **Individual package READMEs**: Detailed documentation for each component
-- **Launch files**: XML configuration files in `src/ros2/lctk_launch/launch/`
+- **Launch files**: `ros/lctk_launch/launch/` (config-driven; see `calibrate.launch.py`)

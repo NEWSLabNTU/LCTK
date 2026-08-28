@@ -52,7 +52,9 @@ Phase 1 of the corner-aligned board-frame work
 redefines the board model's canonical frame so its in-plane axes run corner to corner. Under the new
 convention the base rotation the node builds — up axis projected into the board plane — is already
 the right one for a diamond-mounted board, so `initial_inplane_rotation_deg: 0.0` becomes correct
-rather than 45° off. `board_detector.json5` has always shipped `0.0`, so the template's seed (and
+rather than 45° off. `board_detector.json5` (deleted W5-E1; successor
+`ros/lctk_launch/config/board/hollow_1000/velodyne_bbox.json5`, the bbox-mode preset this issue is
+about) has always shipped `0.0`, so the template's seed (and
 with it `sample_data.yaml` and `vehicle.yaml`, the concrete case this issue tracks) should now be
 right by construction.
 

@@ -98,7 +98,8 @@ Pointcloud → Stage 1: cluster selection → RANSAC/PCA Plane → PCA Initial P
 ```
 
 Stage 1 selects the candidate board cluster, and its mode is chosen by
-`detection_mode` in `board_detector.json5`:
+`detection_mode` in the marker's Detector Tuning preset (e.g.
+`config/board/hollow_1000/velodyne.json5`):
 
 - **`bbox`** (default): a fixed bounding box crops points to a region of
   interest. Simple, but the board must stay inside a hand-tuned box.
@@ -119,11 +120,11 @@ Downstream stages are identical for both modes:
 #### The board model and its frame
 
 Everything downstream of Stage 1 is expressed in the board's **canonical
-local frame**, defined in `rust/hollow-board-config/src/lib.rs`. The plate
-is a square hung as a **diamond** — it stands on one corner — and the
-frame's in-plane axes run along its diagonals, corner to corner, so that
-every accessor name (`top_corner`, `left_circle_center`, …) means what it
-says:
+local frame**, defined in `rust/calibration-target/src/lib.rs` (the crate
+that superseded `hollow-board-config`). The plate is a square hung as a
+**diamond** — it stands on one corner — and the frame's in-plane axes run
+along its diagonals, corner to corner, so that every accessor name
+(`top_corner`, `left_corner`, …) means what it says:
 
 - **origin** — the plate's **centre**. A published board pose is therefore
   a pose *of the plate centre*.
@@ -132,8 +133,10 @@ says:
 - **+X** — `Y × Z`, from the centre toward the **left** corner.
 
 Viewed from the sensor (so +Z comes out of the page), with `W` the plate's
-edge length, `R = W/√2` its half-diagonal, `s` the configured
-`hole_center_shift` and `d = s√2`:
+edge length, `R = W/√2` its half-diagonal, `s` each cutout centre's offset
+from the plate centre along the plate's edge (as configured per-cutout in
+the Target Definition's `plate.surface.circular_cutouts`) and `d = s√2` its
+distance from the centre along the diagonal:
 
 ```
                              ▲ +Y
@@ -167,19 +170,23 @@ diagonal at +d, and none at −d. Board-interior points carry no in-plane
 information at all, so without that missing fourth hole the pose would be
 unobservable within the board plane.
 
-`hollow-board-config` also owns the **marker paper's** placement on the
+`calibration-target` also owns the **marker paper's** placement on the
 plate. Paper coordinates run along the paper's *edges*, i.e. at 45° to the
 board frame's axes; `marker_paper_point` is the single bridge between the
-two, and where the sheet sits is configuration
-(`paper_placement` in `aruco_pattern.json5`), not a derived constant.
+two, and where the sheet sits is configuration (`fiducial.paper_center` in
+the Target Definition, e.g. `config/targets/hollow_1000_aruco_4_v1.json5`),
+not a derived constant.
 
-The contract above is enforced by `rust/hollow-board-config/tests/`:
-`board_frame.rs` (accessor coordinates dotted against the model's *own*
-axes, under randomised poses), `boundary_projection.rs` (the plate is the
-L¹ ball `|x| + |y| ≤ R`, checked against a brute-force nearest-point
-reference), and `marker_layout_golden.rs` (marker corners in **world**
-coordinates, keyed by ArUco marker id, with an independent Python generator
-in `tests/fixtures/`).
+The contract above is enforced by
+`rust/calibration-target/tests/geometry_contract.rs`, which checks named
+boundary/interior/rim points and random query points under a fixed set of
+posed transforms — cross-checking every projection distance against an
+independently sampled surface (the same role `boundary_projection.rs` used
+to play) — and verifies marker corners in **world** coordinates against a
+golden fixture keyed by ArUco marker id
+(`fixtures/targets/marker_corners_world.golden.json`, produced by an
+independent Python generator, `fixtures/targets/generate_marker_corners_world.py`;
+the same role `marker_layout_golden.rs` used to play).
 
 > **Camera-side status.** The two Python solvers reimplement the marker
 > layout independently and still use the **previous, edge-aligned** frame.
@@ -219,9 +226,12 @@ Runtime Services (dynamic updates)
 ```
 
 Configuration files in `ros/lctk_launch/config/` define:
-- **ArUco pattern**: Marker IDs, positions, dictionary
-- **Board geometry**: Dimensions, hole specifications
-- **Bounding box**: Region of interest for detection
+- **Target Definition** (`targets/`): the physical truth — plate geometry, cutout layout,
+  fiducial marker IDs and placement
+- **Detector Tuning** (`board/<target>/`): sensor-specific, geometry-free ICP/RANSAC parameters
+- **ArUco detector tuning** (`aruco/`): corner refinement, adaptive threshold
+- **Bounding box** (`board/bbox*.json5`): region of interest for detection, when the tuning
+  preset selects `detection_mode: "bbox"`
 
 Launch files pass these to nodes as parameters. Some parameters (like bounding box) can be updated at runtime via services.
 
@@ -242,14 +252,21 @@ Use RViz or the web UI to visualize these topics during development.
 LCTK/
 ├── rust/                    # Core libraries (pure Rust)
 │   ├── aruco-detector/
-│   ├── hollow-board-detector/
+│   ├── calibration-target/          # Target Definitions: geometry, identity
+│   ├── calibration-target-detector/ # Pose estimation against a Target Definition
+│   ├── board-cluster-detector/
 │   ├── plane-estimator/
 │   └── ...
 ├── ros/                     # ROS 2 packages
 │   ├── aruco_locator_node/
 │   ├── lidar_board_detector/
-│   ├── extrinsic_solver_node/
+│   ├── extrinsic_solver_node/       # Superseded; pending deletion
+│   ├── lidar_to_camera_solver/
 │   ├── lctk_launch/         # Launch files and configs
+│   │   └── config/
+│   │       ├── targets/     # Target Definitions
+│   │       ├── board/       # Detector Tuning presets
+│   │       └── aruco/       # ArUco detector tuning
 │   └── ...
 ├── book/                    # This documentation
 └── justfile                 # Build commands

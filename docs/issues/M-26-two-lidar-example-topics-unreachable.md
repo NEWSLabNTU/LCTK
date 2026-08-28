@@ -1,4 +1,4 @@
-# M-23 · `two_lidar.yaml` names topics no in-repo data source ever publishes
+# M-26 · `two_lidar.yaml` names topics no in-repo data source ever publishes
 
 - **Severity:** Medium
 - **Area:** lctk_launch / config/examples, lctk_sample_data

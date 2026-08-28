@@ -1,8 +1,8 @@
-# L-26 · `extrinsic_solver_node.launch.xml` (lidar_to_camera_solver) cannot start the node
+# L-30 · `extrinsic_solver_node.launch.xml` (lidar_to_camera_solver) cannot start the node
 
 - **Severity:** Low
 - **Area:** lidar_to_camera_solver / launch
-- **Status:** Open
+- **Status:** 🟢 Fixed
 - **Verified:** By code trace (2026-08-28) against `main.py` and the launch file's current
   contents, plus `git show` on the commit before the identity-gate change to confirm the gap
   predates it
@@ -59,3 +59,21 @@ same-named, non-functional twin of the deprecated `ros/extrinsic_solver_node/` p
 file next to the maintained solver is actively confusing. If a standalone single-node launch entry
 point is still wanted for manual testing, it needs a `target_config` arg/param wired through like
 `calibrate.launch.py`'s.
+
+## Resolution (2026-08-28)
+
+W5-E3 deleted `ros/lidar_to_camera_solver/launch/extrinsic_solver_node.launch.xml` outright rather
+than repairing it. Two reasons it was not worth fixing:
+
+- It could never have been launched from an install in the first place. That package's `setup.py`
+  installs only `launch/*.py` (`glob("launch/*.py")`), so the `.xml` was never copied into
+  `share/lidar_to_camera_solver/launch/` and `ros2 launch lidar_to_camera_solver
+  extrinsic_solver_node.launch.xml` could not resolve it.
+- The maintained entry point is the config-driven graph, `ros2 launch lctk_launch
+  calibrate.launch.py config_file:=<yaml>`, which supplies `target_config` to every solver it
+  generates. A hand-maintained XML duplicate of one node's parameters is exactly the drift this
+  phase removed elsewhere.
+
+The `launch/` directory it occupied is now empty and gone. `ros/extrinsic_solver_node/` still ships
+its own same-named launch file; that package is superseded and pending deletion under the
+diamond-frame plan, and was deliberately left alone here.

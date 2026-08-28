@@ -15,18 +15,14 @@ This node processes 3D point cloud data to detect hollow calibration boards used
 ## Quick Start
 
 ```bash
-# Build the node
-source /opt/ros/humble/setup.bash
-make build_interface
-source install/setup.bash
-cargo build --release --manifest-path src/bin/lidar_board_detector/Cargo.toml
+# Build the node (always via just build -- see the repo root CLAUDE.md)
+just build
 
-# Run the node
-ros2 run lidar_board_detector lidar_board_detector
-
-# Run with custom configuration
+# Run the node directly (normally launched by lctk_launch's calibrate.launch.py instead)
 ros2 run lidar_board_detector lidar_board_detector \
-    --ros-args -p board_detector_config:=/path/to/config.json5
+    --ros-args \
+    -p target_config:=/path/to/config/targets/hollow_1000_aruco_4_v1.json5 \
+    -p detector_config:=/path/to/config/board/hollow_1000/velodyne.json5
 ```
 
 ## ROS Topics
@@ -39,14 +35,23 @@ ros2 run lidar_board_detector lidar_board_detector \
 
 ## Configuration
 
-The node uses configuration files for:
-- Board detector parameters: `config/board_detector.json5`
-- ArUco pattern specifications: `config/aruco_pattern.json5`
+The node reads two required, separately-scoped configuration files -- see the repo root
+`CLAUDE.md`'s "Config-Driven Calibration" section for the full split:
+- **Target Definition** (physical target geometry: plate, cutouts, fiducial layout), e.g.
+  `config/targets/hollow_1000_aruco_4_v1.json5`
+- **Detector Tuning** (sensor-specific ICP/RANSAC parameters; no geometry), e.g.
+  `config/board/hollow_1000/velodyne.json5`
+
+A crop-box config is additionally required when the Detector Tuning preset selects
+`detection_mode: "bbox"` (e.g. `config/board/bbox.json5`); the shipped `bbox_free` presets don't
+need one.
 
 ## ROS Parameters
 
-- `board_detector_config`: Path to board detector configuration file
-- `aruco_pattern_config`: Path to ArUco pattern configuration file
+- `target_config`: Path to the Target Definition file (required)
+- `detector_config`: Path to the Detector Tuning preset file (required)
+- `bbox_file`: Path to the crop-box config file (required only when `detector_config` selects
+  `detection_mode: "bbox"`)
 
 ## License
 
