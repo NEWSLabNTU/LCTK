@@ -66,6 +66,45 @@ markers:
     return config_path
 
 
+def _write_new_schema_detector_config_no_bbox(tmp_path: Path) -> Path:
+    """Same shape as ``_write_new_schema_detector_config`` but omits
+    ``bbox_config`` entirely.
+
+    config_parser no longer requires ``bbox_config`` (it is only read by
+    lidar_board_detector when detector tuning selects
+    ``detection_mode=bbox``; bbox_free -- what every maintained board config
+    ships -- never reads it). This exercises that a config without it still
+    generates a graph, and that ``bbox_file`` is simply absent from the
+    detector's params rather than present-as-``None`` (which would trip
+    launch_ros's eager ``normalize_parameters`` at ``Node()`` construction
+    time).
+    """
+
+    target_config = TARGETS_ROOT / "solid_600_aruco_1_v1.json5"
+    detector_config = tmp_path / "not-a-real-file-detector-tuning.json5"
+    config_path = tmp_path / "new_schema_no_bbox.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /velodyne_points
+      frame_id: velodyne
+    front_lidar:
+      pointcloud_topic: /iv_points
+      frame_id: seyond
+
+markers:
+  calibration_target:
+    target_config: {target_config}
+    detector_config: {detector_config}
+    pairs:
+      - [top_lidar, front_lidar]
+"""
+    )
+    return config_path
+
+
 def _write_new_schema_camera_config(tmp_path: Path) -> Path:
     """Write a new-schema (target_config/detector_config) marker config
     pairing a LiDAR with a camera.
@@ -343,6 +382,31 @@ def test_legacy_detector_gets_legacy_keys_and_omits_new_schema_keys(
     assert "detector_config" not in params
     assert params["bbox_file"].endswith("bbox.json5")
     assert None not in params.values()
+
+
+def test_new_schema_detector_without_bbox_config_omits_bbox_file(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """A marker that omits bbox_config still generates its graph without
+    raising, and the detector's params carry no bbox_file key at all.
+
+    config_parser's old "bbox_config is mandatory" guard is gone; the rule
+    now lives solely in lidar_board_detector, conditional on
+    detection_mode. A present-but-None bbox_file would trip launch_ros's
+    eager Node() parameter normalization before any node started -- see
+    commit eb58770 for the same failure mode on the camera-side nodes.
+    """
+
+    config_path = _write_new_schema_detector_config_no_bbox(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    detectors = _nodes_for_package(nodes, "lidar_board_detector")
+    assert len(detectors) == 2
+
+    for detector in detectors:
+        params = _parameters(detector)
+        assert "bbox_file" not in params
+        assert None not in params.values()
 
 
 def test_new_schema_camera_graph_generates_without_raising(
