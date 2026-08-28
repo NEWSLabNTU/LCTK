@@ -42,9 +42,6 @@ use calibration_target_detector::{CutoutIcpEvidence, EdgeCoverageEvidence, IcpTe
 
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
-const LEGACY_HOLLOW_TARGET: &[u8] =
-    include_bytes!("../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
-
 /// Every generated detector has one identity in its own namespace.  The
 /// publisher is latched below so a solver may join after node startup.
 const TARGET_IDENTITY_TOPIC: &str = "target_identity";
@@ -143,8 +140,6 @@ fn default_perforated_cutout_rim_tolerance_m() -> f64 {
 
 /// Detector Tuning plus the deployment-owned processing stages.  Target
 /// geometry is intentionally absent: `target_config` supplies it separately.
-/// The old `board_detector_file` remains readable through the same shape while
-/// the launch graph migrates; its board dimensions are ignored.
 #[derive(Debug, Clone, serde::Deserialize)]
 struct DetectorConfig {
     #[serde(default)]
@@ -276,16 +271,9 @@ impl DetectorConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConfigSourceKind {
-    New,
-    Legacy,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ConfigSource {
-    kind: ConfigSourceKind,
-    target_config: Option<String>,
+    target_config: String,
     detector_config: String,
 }
 
@@ -307,65 +295,28 @@ fn required_config<T>(name: &str, value: Option<T>) -> Result<T> {
         .ok_or_else(|| anyhow!("Detector Tuning must explicitly provide {name} for a solid target"))
 }
 
-/// Select exactly one configuration contract.  A legacy source always binds
-/// the explicit hollow Target Definition; a legacy pattern file is only a
-/// migration marker and never determines physical geometry.
+/// Select the configuration contract: `target_config` and `detector_config`
+/// must both be supplied, or neither.
 fn select_config_source(
     target_config: Option<&str>,
     detector_config: Option<&str>,
-    legacy_board_detector_file: Option<&str>,
-    legacy_aruco_pattern_file: Option<&str>,
 ) -> Result<ConfigSource> {
     let target_config = nonempty(target_config);
     let detector_config = nonempty(detector_config);
-    let legacy_board_detector_file = nonempty(legacy_board_detector_file);
-    let legacy_aruco_pattern_file = nonempty(legacy_aruco_pattern_file);
-    let new_any = target_config.is_some() || detector_config.is_some();
-    let legacy_any = legacy_board_detector_file.is_some() || legacy_aruco_pattern_file.is_some();
-    let new_complete = target_config.is_some() && detector_config.is_some();
-    let legacy_complete =
-        legacy_board_detector_file.is_some() && legacy_aruco_pattern_file.is_some();
 
-    if new_any && legacy_any {
-        return Err(anyhow!(
-            "target_config/detector_config and legacy board_detector_file/aruco_pattern_file cannot be mixed; select one source"
-        ));
+    match (target_config, detector_config) {
+        (Some(target_config), Some(detector_config)) => Ok(ConfigSource {
+            target_config: target_config.to_owned(),
+            detector_config: detector_config.to_owned(),
+        }),
+        (Some(_), None) => Err(anyhow!(
+            "target_config and detector_config must be supplied together"
+        )),
+        (None, Some(_)) => Err(anyhow!(
+            "target_config and detector_config must be supplied together"
+        )),
+        (None, None) => Err(anyhow!("target_config and detector_config are required")),
     }
-    if new_any {
-        if !new_complete {
-            return Err(anyhow!(
-                "target_config and detector_config must be supplied together"
-            ));
-        }
-        return Ok(ConfigSource {
-            kind: ConfigSourceKind::New,
-            target_config: Some(
-                target_config
-                    .ok_or_else(|| anyhow!("target_config is required with detector_config"))?
-                    .to_owned(),
-            ),
-            detector_config: detector_config
-                .ok_or_else(|| anyhow!("detector_config is required with target_config"))?
-                .to_owned(),
-        });
-    }
-    if legacy_any {
-        if !legacy_complete {
-            return Err(anyhow!(
-                "board_detector_file and aruco_pattern_file must be supplied together"
-            ));
-        }
-        return Ok(ConfigSource {
-            kind: ConfigSourceKind::Legacy,
-            target_config: None,
-            detector_config: legacy_board_detector_file
-                .ok_or_else(|| anyhow!("board_detector_file is required with aruco_pattern_file"))?
-                .to_owned(),
-        });
-    }
-    Err(anyhow!(
-        "target_config and detector_config are required (or the temporary legacy board_detector_file and aruco_pattern_file pair)"
-    ))
 }
 
 fn target_identity_publisher_options() -> PublisherOptions<'static> {
@@ -685,49 +636,28 @@ pub struct CalibrationBoardLocatorNode {
 
 impl CalibrationBoardLocatorNode {
     pub fn new(node: Node) -> Result<Self> {
-        // W5-E1 removes the four compatibility parameters. Until then, exactly
-        // one pair is accepted: target_config + detector_config, or the old
-        // board_detector_file + aruco_pattern_file pair. The latter always means
-        // the explicit hollow target below.
+        // Exactly one configuration pair is accepted: target_config +
+        // detector_config, both required together.
         let target_config_param: Option<Arc<str>> =
             node.declare_parameter("target_config").optional()?.get();
         let detector_config_param: Option<Arc<str>> =
             node.declare_parameter("detector_config").optional()?.get();
-        let board_detector_file_param: Option<Arc<str>> = node
-            .declare_parameter("board_detector_file")
-            .optional()?
-            .get();
-        let aruco_pattern_file_param: Option<Arc<str>> = node
-            .declare_parameter("aruco_pattern_file")
-            .optional()?
-            .get();
         let source = select_config_source(
             target_config_param.as_deref(),
             detector_config_param.as_deref(),
-            board_detector_file_param.as_deref(),
-            aruco_pattern_file_param.as_deref(),
         )?;
         // Bbox-free mode has no crop-box input.  Keep the parameter optional so
         // a target/detector pair can run without an otherwise meaningless file.
         let bbox_file_param: Option<Arc<str>> =
             node.declare_parameter("bbox_file").optional()?.get();
 
-        let target = Arc::new(match source.kind {
-            ConfigSourceKind::New => {
-                let path = source
-                    .target_config
-                    .as_deref()
-                    .expect("new source always carries target_config");
-                log_info!(LOGGER_NAME, "Loading Target Definition from: {path}");
-                Self::load_target(path)?
-            }
-            ConfigSourceKind::Legacy => {
-                log_warn!(
-                    LOGGER_NAME,
-                    "legacy board_detector_file/aruco_pattern_file is temporary and selects the explicit hollow_1000_aruco_4 target; migrate to target_config/detector_config"
-                );
-                Self::load_legacy_hollow_target()?
-            }
+        let target = Arc::new({
+            log_info!(
+                LOGGER_NAME,
+                "Loading Target Definition from: {}",
+                source.target_config
+            );
+            Self::load_target(&source.target_config)?
         });
 
         // Load and declare bbox parameters only when a crop-box file was
@@ -1112,9 +1042,7 @@ impl CalibrationBoardLocatorNode {
 
     fn load_detector_config(file_path: &str) -> Result<DetectorConfig> {
         if file_path.is_empty() {
-            return Err(anyhow!(
-                "detector_config (or legacy board_detector_file) was empty"
-            ));
+            return Err(anyhow!("detector_config was empty"));
         }
 
         let path = PathBuf::from(file_path);
@@ -1127,10 +1055,6 @@ impl CalibrationBoardLocatorNode {
         }
         let bytes = fs::read(file_path)?;
         ValidatedTarget::parse_json5(&bytes)
-    }
-
-    fn load_legacy_hollow_target() -> Result<ValidatedTarget> {
-        ValidatedTarget::parse_json5(LEGACY_HOLLOW_TARGET)
     }
 
     fn load_bbox_config(file_path: &str) -> Result<BBox> {
@@ -1560,7 +1484,7 @@ impl CalibrationBoardLocatorNode {
     /// only a selector; this adapter must still produce the same fixed-size
     /// square/plane observation as the bbox-free detector before entering the
     /// estimator seam.  Keeping this pure over already-selected points also
-    /// makes the legacy hollow point-cloud handoff regression-testable without
+    /// makes the hollow-target point-cloud handoff regression-testable without
     /// constructing a ROS node just to hold dynamic bbox parameters.
     fn select_bbox_evidence(
         active_points: &[na::Point3<f64>],
@@ -2640,41 +2564,23 @@ mod covariance_tests {
 
     #[test]
     fn shipped_config_is_bbox_mode_by_default() {
-        let text = include_str!("../../lctk_launch/config/board/board_detector.json5");
+        let text = include_str!("../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5");
         let cfg = crate::bbox_free::parse_detection_config(text).unwrap();
         assert_eq!(cfg.detection_mode, crate::bbox_free::DetectionMode::Bbox);
     }
 
     #[test]
-    fn config_source_requires_exactly_one_complete_pair() {
-        let new_source =
-            select_config_source(Some("target.json5"), Some("tuning.json5"), None, None).unwrap();
-        assert_eq!(new_source.kind, ConfigSourceKind::New);
-        assert_eq!(new_source.target_config.as_deref(), Some("target.json5"));
-        assert_eq!(new_source.detector_config, "tuning.json5");
-
-        let legacy_source =
-            select_config_source(None, None, Some("board.json5"), Some("aruco.json5")).unwrap();
-        assert_eq!(legacy_source.kind, ConfigSourceKind::Legacy);
-        assert_eq!(legacy_source.target_config, None);
-        assert_eq!(legacy_source.detector_config, "board.json5");
+    fn config_source_requires_both_or_neither() {
+        let source = select_config_source(Some("target.json5"), Some("tuning.json5")).unwrap();
+        assert_eq!(source.target_config, "target.json5");
+        assert_eq!(source.detector_config, "tuning.json5");
 
         for args in [
-            (Some("target.json5"), None, None, None),
-            (None, Some("tuning.json5"), None, None),
-            (None, None, Some("board.json5"), None),
-            (None, None, None, Some("aruco.json5")),
-            (
-                Some("target.json5"),
-                Some("tuning.json5"),
-                Some("board.json5"),
-                Some("aruco.json5"),
-            ),
+            (Some("target.json5"), None),
+            (None, Some("tuning.json5")),
+            (None, None),
         ] {
-            assert!(
-                select_config_source(args.0, args.1, args.2, args.3).is_err(),
-                "{args:?}"
-            );
+            assert!(select_config_source(args.0, args.1).is_err(), "{args:?}");
         }
     }
 
@@ -2834,17 +2740,11 @@ mod covariance_tests {
     }
 
     #[test]
-    fn legacy_hollow_source_keeps_identity_and_one_metre_output_geometry() {
-        let source = select_config_source(
-            None,
-            None,
-            Some("legacy-board.json5"),
-            Some("legacy-aruco.json5"),
-        )
+    fn hollow_manifest_keeps_identity_and_one_metre_output_geometry() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5"
+        ))
         .unwrap();
-        assert_eq!(source.kind, ConfigSourceKind::Legacy);
-
-        let target = CalibrationBoardLocatorNode::load_legacy_hollow_target().unwrap();
         assert_eq!(target.identity().target_id, "hollow_1000_aruco_4");
         assert_eq!(target.identity().revision, 1);
         assert_eq!(target.plate().side_um, 1_000_000);
@@ -2883,16 +2783,11 @@ mod covariance_tests {
     }
 
     #[test]
-    fn legacy_hollow_point_cloud_runs_bbox_adapter_and_estimator() {
-        let source = select_config_source(
-            None,
-            None,
-            Some("legacy-board.json5"),
-            Some("legacy-aruco.json5"),
-        )
+    fn hollow_point_cloud_runs_bbox_adapter_and_estimator() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5"
+        ))
         .unwrap();
-        let target = CalibrationBoardLocatorNode::load_legacy_hollow_target().unwrap();
-        assert_eq!(source.kind, ConfigSourceKind::Legacy);
 
         // This is the representative hollow sample used by the perforated
         // estimator facade: a diamond plate surface plus every cutout rim,
@@ -2900,7 +2795,7 @@ mod covariance_tests {
         // cloud exercises the observer adapter's plane/square handoff rather
         // than fabricating a TargetDetection for the regression.
         let Surface::Perforated { circular_cutouts } = &target.plate().surface else {
-            panic!("legacy compatibility target must be perforated");
+            panic!("hollow target must be perforated");
         };
         let mut points = Vec::new();
         for xi in -16..=16 {
@@ -2935,7 +2830,7 @@ mod covariance_tests {
         }
 
         let detector_config: DetectorConfig = json5::from_str(include_str!(
-            "../../lctk_launch/config/board/board_detector.json5"
+            "../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5"
         ))
         .unwrap();
         let selected = CalibrationBoardLocatorNode::select_bbox_evidence(

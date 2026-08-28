@@ -329,7 +329,8 @@ mod tests {
         ));
     }
 
-    const SHIPPED: &str = include_str!("../../lctk_launch/config/board/board_detector.json5");
+    const SHIPPED: &str =
+        include_str!("../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5");
 
     #[test]
     fn shipped_config_defaults_to_bbox() {

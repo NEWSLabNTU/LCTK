@@ -125,7 +125,6 @@ class LidarToCameraSolver(Node):
         self.child_frame = self._string_parameter("child_frame")
         camera_topic = self._string_parameter("camera_topic")
         target_config_file = self._string_parameter("target_config")
-        aruco_config_file = self._string_parameter("aruco_config_file")
         publishing_rate = self._double_parameter("publishing_rate")
         self.min_frames_required = self._integer_parameter("min_frames_required")
         self.solve_min_frames = (
@@ -148,9 +147,7 @@ class LidarToCameraSolver(Node):
             epoch_check_interval_s=self._double_parameter("epoch_check_interval_s"),
         )
 
-        self.target = self._load_target_definition(
-            target_config_file, aruco_config_file
-        )
+        self.target = self._load_target_definition(target_config_file)
         self.marker_corners_by_id = self.target.marker_corners_by_id
         self.identity_gate = TargetIdentityGate(self.target.identity)
         self.get_logger().debug(
@@ -251,7 +248,6 @@ class LidarToCameraSolver(Node):
             ("child_frame", "camera"),
             ("camera_topic", ""),
             ("target_config", ""),
-            ("aruco_config_file", ""),
             ("debug_mode", True),
             ("publishing_rate", 10.0),
             ("min_frames_required", 2),
@@ -1039,54 +1035,13 @@ class LidarToCameraSolver(Node):
                 throttle_duration_sec=5.0,
             )
 
-    @staticmethod
-    def _legacy_hollow_target_path() -> Path:
-        """Locate the explicit hollow manifest for the temporary old parameter."""
-
-        try:
-            from ament_index_python.packages import get_package_share_directory
-
-            return (
-                Path(get_package_share_directory("lctk_launch"))
-                / "config"
-                / "targets"
-                / "hollow_1000_aruco_4_v1.json5"
-            )
-        except (ImportError, LookupError):
-            # Source-tree tests can run before ament has indexed the package.
-            return (
-                Path(__file__).resolve().parents[2]
-                / "lctk_launch"
-                / "config"
-                / "targets"
-                / "hollow_1000_aruco_4_v1.json5"
-            )
-
-    def _load_target_definition(
-        self, target_config_file: str, legacy_aruco_config_file: str
-    ) -> ValidatedTarget:
-        """Load the selected target, with the temporary explicit-hollow bridge."""
+    def _load_target_definition(self, target_config_file: str) -> ValidatedTarget:
+        """Load the selected target."""
 
         target_config_file = target_config_file.strip()
-        legacy_aruco_config_file = legacy_aruco_config_file.strip()
-        if target_config_file and legacy_aruco_config_file:
-            raise ValueError(
-                "target_config and legacy aruco_config_file cannot both be set; "
-                "select one"
-            )
         if not target_config_file:
-            if not legacy_aruco_config_file:
-                raise ValueError(
-                    "target_config is required (or temporary legacy "
-                    "aruco_config_file during migration)"
-                )
-            target_path = self._legacy_hollow_target_path()
-            self.get_logger().warn(
-                "legacy aruco_config_file selects the explicit hollow_1000_aruco_4 "
-                "Target Definition; migrate to target_config before W5-E1"
-            )
-        else:
-            target_path = Path(target_config_file)
+            raise ValueError("target_config is required")
+        target_path = Path(target_config_file)
         self.get_logger().info(f"Loading Target Definition from: {target_path}")
         target = load_target_definition(target_path)
         self.get_logger().info(
