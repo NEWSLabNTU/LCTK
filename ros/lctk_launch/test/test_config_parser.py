@@ -71,17 +71,29 @@ def test_vehicle_config():
 
 
 @pytest.mark.parametrize(
-    "example_name",
+    ("example_name", "expected_target_id"),
     [
-        "sample_data.yaml",
-        "seyond_left.yaml",
-        "seyond_right.yaml",
-        "two_lidar.yaml",
-        "vehicle.yaml",
+        ("sample_data.yaml", "hollow_1000_aruco_4"),
+        ("seyond_left.yaml", "hollow_1000_aruco_4"),
+        ("seyond_right.yaml", "hollow_1000_aruco_4"),
+        ("two_lidar.yaml", "hollow_1000_aruco_4"),
+        ("vehicle.yaml", "hollow_1000_aruco_4"),
+        ("solid_600_handheld.yaml", "solid_600_aruco_1"),
     ],
 )
-def test_all_maintained_legacy_examples_parse(example_name):
-    """W5-A: every maintained example crosses the explicit hollow translation."""
+def test_maintained_examples_select_their_target(example_name, expected_target_id):
+    """W5-D: every maintained example parses to the target it now names via
+    target_config/detector_config, not the legacy translation.
+
+    Expressed per example rather than branching on the filename inside the
+    body, so this is also the guard against relabelling: the five examples
+    that already recorded data against the hollow board must keep resolving
+    to hollow_1000_aruco_4 -- the new solid_600_handheld.yaml example is the
+    only one that resolves to solid_600_aruco_1. A cutover bug that pointed
+    an existing example at the wrong target_config would either point it at
+    the wrong physical board (invalidating every recording made against it)
+    or fail this test outright.
+    """
     config_path = Path(__file__).parent.parent / "config" / "examples" / example_name
 
     pipeline = CalibrationConfigParser(str(config_path)).parse()
@@ -90,7 +102,7 @@ def test_all_maintained_legacy_examples_parse(example_name):
         detector.target_identity for detector in pipeline.lidar_board_detectors
     }
     assert identities
-    assert {identity.target_id for identity in identities} == {"hollow_1000_aruco_4"}
+    assert {identity.target_id for identity in identities} == {expected_target_id}
 
 
 def test_two_lidar_config():
@@ -238,6 +250,68 @@ def test_two_lidar_node_parity():
 
     # 0 lidar-camera solvers
     assert len(pipeline.lidar_camera_solvers) == 0
+
+
+def test_solid_600_handheld_config():
+    """solid_600_handheld.yaml parses to the single-pair pipeline it claims,
+    with the tighter sync window its hand-held (moving) board requires.
+
+    100ms is what every hollow example uses for a board on a tripod;
+    50ms/100/reject_new is deliberately tighter here because the board can
+    move between a camera frame and a LiDAR sweep in a way a stationary
+    board cannot.
+    """
+    config_path = (
+        Path(__file__).parent.parent / "config" / "examples" / "solid_600_handheld.yaml"
+    )
+    # Not pytest.skip: this example ships in the repo, so a missing file is a
+    # deleted maintained example, not an absent optional fixture. Skipping
+    # would hide the deletion behind a green run.
+    assert config_path.exists(), f"maintained example missing: {config_path}"
+
+    parser = CalibrationConfigParser(str(config_path))
+    pipeline = parser.parse()
+
+    assert len(pipeline.lidar_board_detectors) == 1
+    assert len(pipeline.aruco_locators) == 1
+    assert len(pipeline.lidar_camera_solvers) == 1
+    assert len(pipeline.lidar_lidar_solvers) == 0
+
+    assert pipeline.sync is not None
+    assert pipeline.sync.tolerance_ms == 50.0
+    assert pipeline.sync.queue_size == 100
+    assert pipeline.sync.drop_policy == "reject_new"
+
+
+def test_two_lidar_per_lidar_detector_config_override_reaches_the_right_node():
+    """two_lidar.yaml's per-LiDAR detector_config override on front_lidar
+    reaches only front_lidar's detector; top_lidar keeps the marker-level
+    preset.
+
+    two_lidar.yaml is the one maintained example where a per-device override
+    and a marker-level preset coexist (front_lidar overrides to the seyond
+    preset; top_lidar has no override and falls back to the marker's
+    velodyne preset). Getting this backwards would silently give the
+    solid-state LiDAR (seyond/Falcon) a spinning-LiDAR (velodyne) operating
+    point, or vice versa -- a real miscalibration, not just a wiring slip.
+    """
+    config_path = (
+        Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
+    )
+    assert config_path.exists(), f"maintained example missing: {config_path}"
+
+    parser = CalibrationConfigParser(str(config_path))
+    pipeline = parser.parse()
+
+    detector_by_lidar = {
+        detector.lidar_name: detector for detector in pipeline.lidar_board_detectors
+    }
+    assert detector_by_lidar["front_lidar"].detector_config.endswith(
+        "hollow_1000/seyond.json5"
+    )
+    assert detector_by_lidar["top_lidar"].detector_config.endswith(
+        "hollow_1000/velodyne.json5"
+    )
 
 
 def test_hollow_board_missing_bbox_config_parses(tmp_path):

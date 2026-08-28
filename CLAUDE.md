@@ -423,10 +423,16 @@ devices:
 
 markers:
   calibration_board:
-    type: hollow_board
-    board_config: $(find-pkg-share lctk_launch)/config/board/board_detector.json5
-    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
-    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    # target_config: the physical target -- plate, cutouts, fiducial
+    # layout, identity. detector_config: sensor-specific tuning only; it
+    # must contain no geometry.
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    # bbox_config is omitted here because this preset is bbox_free. It is
+    # required only when the chosen detector_config selects
+    # detection_mode: "bbox" -- of the shipped presets, only
+    # config/board/hollow_1000/velodyne_bbox.json5 does.
+    #
     # Optional. ArUco *detector* tuning (corner refinement, adaptive threshold).
     # Defaults to config/aruco/aruco_detector.json5 when omitted.
     aruco_detector_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_detector.json5
@@ -443,6 +449,14 @@ sync:
   queue_size: 100       # Positive integer buffer size per stream
   drop_policy: reject_new   # "reject_new" or "drop_oldest"
 ```
+
+A per-lidar `detector_config` under `devices.lidars.<name>` overrides the marker-level one. That is
+how two differently-sampled LiDARs (a spinning VLP-32C and a solid-state Falcon, say) share one
+target while each keeps its own sensor-specific tuning; `config/examples/two_lidar.yaml` does
+exactly this.
+
+The legacy `type`/`board_config`/`aruco_config` marker keys still parse, but are scheduled for
+removal and no maintained example uses them any more.
 
 **ArUco config files are split by purpose:**
 
@@ -499,8 +513,16 @@ Buffer overflow warnings are rate-limited and logged automatically:
 ```
 
 **Example Configs:**
-- `config/examples/sample_data.yaml` - Single lidar + camera (matches `just sample-data`)
+- `config/examples/sample_data.yaml` - Single lidar + camera (matches `just sample-data`); the one
+  maintained example still in bbox mode, via `hollow_1000/velodyne_bbox.json5`
+- `config/examples/seyond_left.yaml` - Single Seyond lidar + camera, left mount
+- `config/examples/seyond_right.yaml` - Single Seyond lidar + camera, right mount
+- `config/examples/two_lidar.yaml` - Two lidars, no camera: `top_lidar` takes the marker-level
+  Velodyne preset, `front_lidar` overrides it with the Seyond one
 - `config/examples/vehicle.yaml` - Multi-sensor vehicle setup
+- `config/examples/solid_600_handheld.yaml` - Selects the solid 600 mm target with an EXPERIMENTAL
+  preset; no recording for it ships in the repo. Its 50 ms sync window is tighter than the hollow
+  examples' because the intended recording is a hand-held, moving board
 
 ### LiDAR-to-LiDAR Calibration
 

@@ -13,8 +13,16 @@ TARGETS = CONFIG / "targets"
 BOARD = CONFIG / "board"
 
 PRESETS = {
-    "hollow_1000": {"velodyne", "seyond"},
-    "solid_600": {"velodyne", "seyond"},
+    "hollow_1000": {
+        "velodyne": "bbox_free",
+        "seyond": "bbox_free",
+        # The one exception: preserved verbatim from the former
+        # board_detector.json5 template, which is a bbox-mode config, for
+        # the shipped sample-data demo -- see
+        # test_hollow_presets_preserve_the_current_sensor_operating_values.
+        "velodyne_bbox": "bbox",
+    },
+    "solid_600": {"velodyne": "bbox_free", "seyond": "bbox_free"},
 }
 REMOVED_PHYSICAL_KEYS = {
     "board_width",
@@ -116,6 +124,7 @@ def test_setup_installs_target_manifests_and_nested_presets(monkeypatch):
         "share/lctk_launch/config/targets/solid_600_aruco_1_v1.json5",
         "share/lctk_launch/config/board/hollow_1000/velodyne.json5",
         "share/lctk_launch/config/board/hollow_1000/seyond.json5",
+        "share/lctk_launch/config/board/hollow_1000/velodyne_bbox.json5",
         "share/lctk_launch/config/board/solid_600/velodyne.json5",
         "share/lctk_launch/config/board/solid_600/seyond.json5",
     }
@@ -123,16 +132,24 @@ def test_setup_installs_target_manifests_and_nested_presets(monkeypatch):
 
 
 def test_target_preset_matrix_is_complete_and_geometry_free():
-    for target_directory, sensors in PRESETS.items():
+    """Exact stem -> detection_mode mapping per target directory, not a
+    same-mode set: hollow_1000/velodyne_bbox.json5 is the one preset that
+    selects "bbox" instead of "bbox_free" (it is the geometry-free copy of
+    the shipped sample-data bbox-mode template), so the contract has to say
+    so explicitly rather than being loosened to accept any mode. The
+    exact-set equality on `found` still fails if an unlisted preset file
+    appears, or a listed one goes missing.
+    """
+    for target_directory, expected_modes in PRESETS.items():
         found = {path.stem for path in (BOARD / target_directory).glob("*.json5")}
-        assert found == sensors
+        assert found == set(expected_modes)
 
-        for sensor in sensors:
+        for sensor, expected_mode in expected_modes.items():
             path = BOARD / target_directory / f"{sensor}.json5"
             preset = load_json5(path)
             assert REMOVED_PHYSICAL_KEYS.isdisjoint(preset)
             assert REQUIRED_TUNING_KEYS <= preset.keys()
-            assert preset["detection_mode"] == "bbox_free"
+            assert preset["detection_mode"] == expected_mode
 
 
 def test_solid_presets_are_explicitly_experimental():
@@ -143,6 +160,18 @@ def test_solid_presets_are_explicitly_experimental():
 
 
 def test_hollow_presets_preserve_the_current_sensor_operating_values():
+    """Every hollow_1000 preset must reproduce its pre-Phase-8 tuning file
+    exactly, except for the four physical-geometry keys that moved into the
+    target manifest -- proving Phase 8 did not silently retune a shipped
+    operating point.
+
+    hollow_1000/velodyne_bbox.json5 gets the same treatment against
+    board_detector.json5 (the bbox-mode template the shipped sample-data
+    demo has always used): every key the two files share must be equal, and
+    -- the stronger claim, since this file's whole purpose is to be a
+    geometry-free *copy* rather than a fresh tune -- the new file must
+    introduce no key that board_detector.json5 lacks.
+    """
     legacy = {
         "velodyne": load_json5(BOARD / "board_detector_velodyne.json5"),
         "seyond": load_json5(BOARD / "board_detector_seyond.json5"),
@@ -152,3 +181,9 @@ def test_hollow_presets_preserve_the_current_sensor_operating_values():
         for key, value in expected.items():
             if key not in REMOVED_PHYSICAL_KEYS:
                 assert preset[key] == value
+
+    board_detector = load_json5(BOARD / "board_detector.json5")
+    velodyne_bbox = load_json5(BOARD / "hollow_1000" / "velodyne_bbox.json5")
+    assert not set(velodyne_bbox) - set(board_detector)
+    for key in set(board_detector) - REMOVED_PHYSICAL_KEYS:
+        assert velodyne_bbox[key] == board_detector[key]
