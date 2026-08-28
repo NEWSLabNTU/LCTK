@@ -149,7 +149,7 @@ git commit -m "fix(boarddet): drop non-finite points before plane fit"
 
 ### Task 2: board_pose up-axis aware + sensor-facing normal + canonical winding
 
-Three coupled defects in `board_pose` ([pose.py:21-34](../../experiments/board-detection-2d/src/boarddet/pose.py)):
+Three coupled defects in `board_pose` ([pose.py:21-34](../../../experiments/board-detection-2d/src/boarddet/pose.py)):
 1. The board X axis is picked by raw world-Z (`corners_3d[:, 2]`), ignoring `board.up_axis` — wrong by ~90° on a z-forward rig (Seyond Falcon).
 2. The plane normal's sign (from SVD) is arbitrary, so the board's facing flips unpredictably; a calibration board normal should point toward the sensor.
 3. Corner winding is not canonicalized here, so the ICP path (corners from `fit_fixed_square`, fixed cyclic order) and the non-ICP path (corners CCW-sorted in the scorer) emit different orderings — a consumer pairing these with ArUco corners by index gets a mirrored map depending on which path ran.

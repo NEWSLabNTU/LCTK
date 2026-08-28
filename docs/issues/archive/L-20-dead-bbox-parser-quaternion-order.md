@@ -2,9 +2,9 @@
 
 - **Severity:** Low
 - **Area:** `ros/lidar_board_detector` / config parsing
-- **Status:** Open
+- **Status:** Fixed (2026-08-28) — see Resolution below
 - **Verified:** 2026-08-13 — read from `bbox.rs:133-208`; caller search across `ros/` and `rust/`
-- **Related:** [M-15 (archived)](./archive/M-15-bbox-quaternion-order-comment.md)
+- **Related:** [M-15 (archived)](./M-15-bbox-quaternion-order-comment.md)
 
 ## Problem
 
@@ -15,7 +15,7 @@ disagree about quaternion component order.
 `load_json5_file::<BBox>`, which uses the derived `Deserialize` on
 `BBox { pose: na::Isometry3<f64>, .. }` (`bbox.rs:7-11`). nalgebra serialises a `UnitQuaternion` as
 `[i, j, k, w]`, i.e. **w-last** — matching how every config file is authored. This is what
-[M-15](./archive/M-15-bbox-quaternion-order-comment.md) concluded, and it remains accurate.
+[M-15](./M-15-bbox-quaternion-order-comment.md) concluded, and it remains accurate.
 
 **The dead path is wrong.** `BBox::from_json5_string` (`bbox.rs:133-181`) parses into a local struct
 whose comment says `// [w, x, y, z]` and then destructures accordingly:
@@ -56,3 +56,24 @@ correct w-last identity is `[0, 0, 0, 1]`.
 Found while planning the board-frame change. An earlier reading of this code claimed M-15 had
 regressed and that the live crop box was being rotated by ~176°; that was wrong — the live path goes
 through nalgebra's serde and is correct. Only the dead parser carries the defect.
+
+## Resolution (2026-08-28)
+
+All three suggested-fix items landed in commit `6b28979` (2026-08-14, "fix(bbox): delete dead
+quaternion parser and correct two crop-box configs") — before this phase started, but never
+reflected back into this tracker entry until now.
+
+Read `ros/lidar_board_detector/src/bbox.rs` on this branch: `BBox::from_json5_string` and
+`BBox::load_from_file` — the dead, w-first parser and its only caller — no longer exist. The file is
+now 164 lines, contains a single parse path (derived `Deserialize` on `BBox { pose:
+na::Isometry3<f64>, .. }`, nalgebra's w-last order), and its module doc comment states the
+w-last/scalar-first traps explicitly (`bbox.rs:1-34`).
+
+`bbox_2_lidar_seyond.json5` and `bbox_2_lidar_vlp32.json5` (`ros/lctk_launch/config/board/`) both
+now carry `"rotation": [0.0, 0.0, 0.0, 1.0]` — the true w-last identity the suggested fix asked for —
+with a comment stating `-- scalar LAST, see BBox docs`. `bbox.rs`'s own test suite locks both parts
+in: `shipped_configs_parse_as_unit_quaternions` parses all six shipped bbox configs including these
+two, and `two_lidar_presets_are_unrotated` asserts `rotation.angle() == 0.0` for exactly these two
+files, which would fail on the old `[1, 0, 0, 0]` (a 180° rotation under w-last).
+
+Closing 🟢 and archiving.

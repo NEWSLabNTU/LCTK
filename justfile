@@ -144,6 +144,13 @@ lint:
     ruff check ros/
     ruff format --check ros/
 
+# Check that every relative link in the docs resolves.
+# Part of the release gate: CLAUDE.md requires that when an issue closes and
+# moves into docs/issues/archive/, every link crossing the move is repaired in
+# both directions -- which only holds if something checks it.
+check-docs:
+    python3 setup/scripts/check-doc-links.py
+
 # Fast Python-only lint (skips the multi-minute clippy step)
 lint-py:
     ruff check ros/

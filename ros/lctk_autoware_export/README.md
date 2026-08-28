@@ -18,9 +18,11 @@ ros2 run lctk_autoware_export export \
   --dry-run          # print the entry first; drop the flag to write
 ```
 
-- `--detections`: version-4 JSON from `lidar_to_camera_solver`'s `dump_detections` service
-  (manual mode; contains the raw solver `rvec`/`tvec`). The re-labeled TF topic is
-  deliberately not accepted as input (M-01).
+- `--detections`: version 4 or 5 JSON from `lidar_to_camera_solver`'s `dump_detections` service
+  (manual mode; contains the raw solver `rvec`/`tvec`). Only the solved transform's provenance is
+  needed here, not a Target Identity match, so both versions are accepted; version 5's
+  `target_identity` is validated structurally but not resolved against a target file. The
+  re-labeled TF topic is deliberately not accepted as input (M-01).
 - `--lidar-frame`: existing entry in the target YAML, used as the
   `sensor_kit_base_link -> lidar` anchor of the chain.
 - Writes are comment-preserving (`ruamel.yaml` round-trip) and create
