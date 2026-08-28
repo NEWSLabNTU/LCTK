@@ -323,6 +323,18 @@ regressions over the recorded fixtures.
 been run against real sensor data, and H-15 is the standing evidence that this matters: a shipped
 defect that survived every gate above and would have appeared on the first replay.
 
+An operator runbook for W7-B now exists at
+[`book/src/user-guide/field-validation.md`](../../book/src/user-guide/field-validation.md). It
+records the operator-visible delta from the pre-Phase-8 workflow, what each new failure mode looks
+like (the identity gate in particular presents as silence rather than an error), and how to collect
+W7-B's evidence by hand -- which is necessary because `lctk_quality`'s `EvidenceCollector` has no
+console script and no bag adapter. Writing it surfaced two operational traps worth naming here: the
+justfile defaults `enable_judge` to true while `calibrate.launch.py` never passes a ground-truth
+file, so a field session scores itself against one historical rig's extrinsic unless the operator
+passes `enable_judge=false`; and every `bbox_free` preset needs at least 20 board-absent frames at
+the head of a recording before it detects anything, which is a property of the bag, not of the
+config.
+
 ## Outstanding items no packet owns
 
 These are gaps and hazards that surfaced while implementing Phase 8 but that no packet's scope
