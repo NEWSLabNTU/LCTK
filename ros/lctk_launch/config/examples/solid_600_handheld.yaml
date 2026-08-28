@@ -1,0 +1,63 @@
+# LCTK Calibration Configuration — Solid 600 mm Target, Hand-Held
+#
+# This is the first maintained example selecting the solid 600 mm
+# calibration target (config/targets/solid_600_aruco_1_v1.json5) instead of
+# the hollow 1000 mm board used by the other examples. No recording for it
+# exists in the repo yet, and none is required to check this config in: the
+# topics below are placeholders matching the sample-data naming convention,
+# so a bag can arrive later without a config change -- point them at your
+# own bag's topics.
+#
+# EXPERIMENTAL detector tuning: config/board/solid_600/velodyne.json5 is a
+# sensor-specific starting point, not a field-validated operating point. It
+# does not block launch -- the pipeline runs with it -- but the numbers in
+# that preset await a real-bag evidence report before they can be trusted
+# the way the hollow_1000 presets are.
+#
+# Intended evidence source: a hand-held solid board, moved slowly through
+# the scene over tens of seconds, recorded against this config. That is the
+# intended way to exercise this target, not a limitation of it.
+#
+# Why sync.tolerance_ms is 50 here, not the 100 every hollow example uses:
+# with a board that moves, a mis-paired camera frame and LiDAR sweep don't
+# just add noise -- they produce a detection pair that is WRONG, because the
+# board isn't where the other sensor saw it. 50 ms is the stated intent for
+# a slow hand-held sweep; it is UNCONFIRMED until checked on a first replay
+# against the `pair skew last=/max=` figures that DetectionPairSource logs
+# in its periodic `sync: ...` line (see lctk_sync.DetectionPairSource).
+#
+# The preset uses background subtraction with bg_warmup_frames: 20, so
+# whatever recording feeds this config must begin with at least 20
+# consecutive board-absent frames (roughly 2 s at 10 Hz) before the board
+# enters the scene -- otherwise the background never finalizes and nothing
+# is detected.
+#
+# Usage:
+#   ros2 launch lctk_launch calibrate.launch.py \
+#       config_file:=$(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/solid_600_handheld.yaml
+
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
+      frame_id: velodyne_top
+
+  cameras:
+    front_center:
+      image_topic: /sensing/camera/front_center/image_raw
+      frame_id: camera_front_center
+
+# Synchronizer window -- see the tolerance_ms note above; this is narrower
+# than the hollow-target examples because this target is expected to move
+# during a hand-held recording.
+sync:
+  tolerance_ms: 50
+  queue_size: 100
+  drop_policy: reject_new
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/solid_600_aruco_1_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/solid_600/velodyne.json5
+    pairs:
+      - [top_lidar, front_center]
