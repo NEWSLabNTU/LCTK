@@ -41,9 +41,7 @@ sync:
 
 markers:
   calibration_board:
-    type: hollow_board
-    board_config: $(find-pkg-share lctk_launch)/config/board/board_detector_seyond.json5
-    aruco_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_pattern.json5
-    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
     pairs:
       - [seyond_lidar, left_camera]

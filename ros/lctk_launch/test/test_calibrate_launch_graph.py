@@ -26,8 +26,10 @@ def _write_new_schema_detector_config(tmp_path: Path) -> Path:
     Target Definition manifest (``target_config``) needs to exist on disk to
     parse -- ``detector_config``/``bbox_config`` are opaque paths as far as
     the parser and this launch file are concerned. Maintained examples under
-    ``config/examples/`` stay legacy-only (W5-D); this writes its own file
-    into pytest's tmp_path instead of touching them.
+    ``config/examples/`` moved onto this same new schema in W5-D; this test
+    still writes its own file into pytest's tmp_path rather than reading one
+    of them, so it stays independent of exactly which target/detector preset
+    a given maintained example happens to select.
 
     Deliberately a two-LiDAR pairing (no camera), like
     ``config/examples/two_lidar.yaml``, so the tests built on it exercise
@@ -213,6 +215,112 @@ sync:
     return config_path
 
 
+def _write_legacy_lidar_camera_config(tmp_path: Path) -> Path:
+    """Write a legacy-schema (type/board_config/aruco_config) LiDAR+camera
+    marker config, mirroring what ``config/examples/sample_data.yaml`` used
+    to be before the W5-D cutover moved that maintained example onto the new
+    target_config/detector_config schema.
+
+    The legacy compatibility path (``config_parser.py`` / ``calibrate.launch.py``)
+    is not removed until W5-E1, so it still needs its own fixture -- this is
+    that fixture, now that the maintained examples can no longer double as
+    one. board_config/aruco_config/bbox_config point at the real repo files
+    (built from ``PACKAGE_ROOT``) because the assertions built on this
+    fixture check the generated parameters end with the real filenames.
+    """
+
+    board_config = PACKAGE_ROOT / "config" / "board" / "board_detector.json5"
+    aruco_config = PACKAGE_ROOT / "config" / "aruco" / "aruco_pattern.json5"
+    bbox_config = PACKAGE_ROOT / "config" / "board" / "bbox.json5"
+    config_path = tmp_path / "legacy_lidar_camera.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
+      frame_id: velodyne_top
+  cameras:
+    front_center:
+      image_topic: /sensing/camera/front_center/image_raw
+      frame_id: camera_front_center
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: {board_config}
+    aruco_config: {aruco_config}
+    bbox_config: {bbox_config}
+    pairs:
+      - [top_lidar, front_center]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
+"""
+    )
+    return config_path
+
+
+def _write_legacy_two_lidar_config(tmp_path: Path) -> Path:
+    """Write a legacy-schema (type/board_config/aruco_config) two-LiDAR
+    marker config, mirroring what ``config/examples/two_lidar.yaml`` used to
+    be before the W5-D cutover moved that maintained example onto the new
+    target_config/detector_config schema.
+
+    See ``_write_legacy_lidar_camera_config`` above for why this fixture
+    exists at all: the legacy compatibility path survives until W5-E1 and
+    needs its own coverage now that the maintained examples no longer carry
+    it.
+
+    This one also carries the per-LiDAR ``board_config`` overrides the old
+    ``two_lidar.yaml`` had, because that file was the ONLY place the legacy
+    per-device override branch in ``_derive_pipeline``
+    (``lidar.board_config_override or marker.board_config``) was exercised
+    at all. Dropping them here would delete that branch's last coverage a
+    whole packet before W5-E1 deletes the branch itself.
+    """
+
+    board_config = PACKAGE_ROOT / "config" / "board" / "board_detector.json5"
+    velodyne_override = (
+        PACKAGE_ROOT / "config" / "board" / "board_detector_velodyne.json5"
+    )
+    seyond_override = PACKAGE_ROOT / "config" / "board" / "board_detector_seyond.json5"
+    aruco_config = PACKAGE_ROOT / "config" / "aruco" / "aruco_pattern.json5"
+    bbox_config = PACKAGE_ROOT / "config" / "board" / "bbox.json5"
+    config_path = tmp_path / "legacy_two_lidar.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    top_lidar:
+      pointcloud_topic: /velodyne_points
+      frame_id: velodyne
+      board_config: {velodyne_override}
+    front_lidar:
+      pointcloud_topic: /iv_points
+      frame_id: seyond
+      board_config: {seyond_override}
+
+markers:
+  calibration_board:
+    type: hollow_board
+    board_config: {board_config}
+    aruco_config: {aruco_config}
+    bbox_config: {bbox_config}
+    pairs:
+      - [top_lidar, front_lidar]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
+"""
+    )
+    return config_path
+
+
 class _LaunchContext:
     """Minimal launch context for evaluating LaunchConfiguration values."""
 
@@ -291,13 +399,20 @@ def _namespace(node: Node) -> str:
 
 
 def test_legacy_lidar_camera_graph_routes_each_identity(
-    calibrate_launch: ModuleType,
+    calibrate_launch: ModuleType, tmp_path: Path
 ):
-    """Legacy hollow graph keeps detection wiring and adds exact identity routes."""
+    """Legacy hollow graph keeps detection wiring and adds exact identity
+    routes.
 
-    nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "sample_data.yaml")
-    )
+    Uses a tmp_path legacy-schema fixture rather than
+    ``config/examples/sample_data.yaml``: that maintained example moved onto
+    the new target_config/detector_config schema in W5-D, but the legacy
+    compatibility path itself survives until W5-E1 and still needs this
+    coverage.
+    """
+
+    config_path = _write_legacy_lidar_camera_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
 
     detectors = _nodes_for_package(nodes, "lidar_board_detector")
     locators = _nodes_for_package(nodes, "aruco_locator_node")
@@ -329,18 +444,41 @@ def test_legacy_lidar_camera_graph_routes_each_identity(
 
 
 def test_legacy_lidar_lidar_graph_routes_each_identity(
-    calibrate_launch: ModuleType,
+    calibrate_launch: ModuleType, tmp_path: Path
 ):
-    """Legacy hollow two-LiDAR graph routes both detector identities exactly."""
+    """Legacy hollow two-LiDAR graph routes both detector identities exactly.
 
-    nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "two_lidar.yaml")
-    )
+    Uses a tmp_path legacy-schema fixture rather than
+    ``config/examples/two_lidar.yaml``: that maintained example moved onto
+    the new target_config/detector_config schema in W5-D, but the legacy
+    compatibility path itself survives until W5-E1 and still needs this
+    coverage.
+    """
+
+    config_path = _write_legacy_two_lidar_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
 
     detectors = _nodes_for_package(nodes, "lidar_board_detector")
     solvers = _nodes_for_package(nodes, "lidar_to_lidar_solver")
     assert len(detectors) == 2
     assert len(solvers) == 1
+
+    # Each LiDAR's own legacy `board_config` override must reach its own
+    # detector, not the marker-level file both would otherwise share. This
+    # is the legacy twin of
+    # `test_two_lidar_per_lidar_detector_config_override_reaches_the_right_node`
+    # in test_config_parser.py, and the only coverage the legacy override
+    # branch has left now that no maintained example uses it.
+    detector_files = {
+        _namespace(detector): _parameters(detector)["board_detector_file"]
+        for detector in detectors
+    }
+    assert detector_files["calibration/top_lidar_calibration_board"].endswith(
+        "board_detector_velodyne.json5"
+    )
+    assert detector_files["calibration/front_lidar_calibration_board"].endswith(
+        "board_detector_seyond.json5"
+    )
 
     remappings = _remappings(solvers[0])
     assert remappings == {
@@ -380,16 +518,21 @@ def test_new_schema_detector_gets_target_config_and_omits_legacy_keys(
 
 
 def test_legacy_detector_gets_legacy_keys_and_omits_new_schema_keys(
-    calibrate_launch: ModuleType,
+    calibrate_launch: ModuleType, tmp_path: Path
 ):
     """A legacy marker keeps today's board_detector_file/aruco_pattern_file
     params and must not carry target_config/detector_config -- those would
     make the node see both sources and refuse to start.
+
+    Uses a tmp_path legacy-schema fixture rather than
+    ``config/examples/sample_data.yaml``: that maintained example moved onto
+    the new target_config/detector_config schema in W5-D, but the legacy
+    compatibility path itself survives until W5-E1 and still needs this
+    coverage.
     """
 
-    nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "sample_data.yaml")
-    )
+    config_path = _write_legacy_lidar_camera_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
 
     detectors = _nodes_for_package(nodes, "lidar_board_detector")
     assert len(detectors) == 1
@@ -483,16 +626,21 @@ def test_new_schema_camera_nodes_get_target_config_and_omit_legacy_keys(
 
 
 def test_legacy_camera_nodes_keep_aruco_config_file_and_omit_target_config(
-    calibrate_launch: ModuleType,
+    calibrate_launch: ModuleType, tmp_path: Path
 ):
     """A legacy marker keeps today's aruco_config_file param on both
     camera-side nodes and must not carry target_config -- that would make
     the node see both sources and refuse to start.
+
+    Uses a tmp_path legacy-schema fixture rather than
+    ``config/examples/sample_data.yaml``: that maintained example moved onto
+    the new target_config/detector_config schema in W5-D, but the legacy
+    compatibility path itself survives until W5-E1 and still needs this
+    coverage.
     """
 
-    nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "sample_data.yaml")
-    )
+    config_path = _write_legacy_lidar_camera_config(tmp_path)
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
 
     locators = _nodes_for_package(nodes, "aruco_locator_node")
     solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
@@ -666,13 +814,17 @@ assert _EXAMPLE_CONFIGS, f"no maintained example configs found under {CONFIG_ROO
 @pytest.mark.parametrize(
     "config_path", _EXAMPLE_CONFIGS, ids=[p.stem for p in _EXAMPLE_CONFIGS]
 )
-def test_maintained_examples_use_only_the_legacy_compatibility_path(
+def test_maintained_examples_use_only_the_new_target_schema(
     calibrate_launch: ModuleType, config_path: Path
 ):
     """Every maintained example under config/examples/ generates a graph
-    whose nodes carry only legacy configuration keys -- never
-    target_config/detector_config -- because the cutover to the new schema
-    for these examples is W5-D, not this packet.
+    whose nodes carry only new-schema configuration keys -- target_config
+    and detector_config -- and never the legacy board_detector_file/
+    aruco_pattern_file/aruco_config_file keys, because W5-D cut every
+    maintained example over to the Target Definition schema. The legacy
+    compatibility path itself is not removed until W5-E1; it keeps its own
+    tmp_path-fixture coverage elsewhere in this file now that these examples
+    no longer double as its fixtures.
 
     Parametrized over the files discovered on disk so an example added
     later is covered automatically. two_lidar.yaml has no camera
@@ -696,10 +848,13 @@ def test_maintained_examples_use_only_the_legacy_compatibility_path(
 
     for detector in detectors:
         params = _parameters(detector)
-        assert "target_config" not in params
-        assert "detector_config" not in params
-        assert params["board_detector_file"]
-        assert params["aruco_pattern_file"]
+        # A present-but-None value would still be "present" to the node's
+        # select_config_source, so assert absence, not falsiness.
+        assert "board_detector_file" not in params
+        assert "aruco_pattern_file" not in params
+        assert params["target_config"]
+        assert params["detector_config"]
+        assert None not in params.values()
 
     # two_lidar.yaml legitimately has no camera, so it produces zero
     # locators and zero lidar-camera solvers -- the loops below then check
@@ -716,13 +871,71 @@ def test_maintained_examples_use_only_the_legacy_compatibility_path(
 
     for locator in locators:
         params = _parameters(locator)
-        assert "target_config" not in params
-        assert params["aruco_config_file"]
+        assert "aruco_config_file" not in params
+        assert params["target_config"]
+        assert None not in params.values()
 
     for solver in solvers:
         params = _parameters(solver)
-        assert "target_config" not in params
-        assert params["aruco_config_file"]
+        assert "aruco_config_file" not in params
+        assert params["target_config"]
+        assert None not in params.values()
+
+
+def test_solid_600_handheld_example_selects_solid_target(
+    calibrate_launch: ModuleType,
+):
+    """solid_600_handheld.yaml is the property the W5-D cutover exists to
+    demonstrate end to end: a maintained example selecting a target other
+    than the hollow board, wired through a coherent LiDAR-camera graph, with
+    its own (tighter) sync window intact.
+
+    No other test in this module pins this: the inverted
+    ``test_maintained_examples_use_only_the_new_target_schema`` above checks
+    every example's params carry *some* target_config, not that the solid
+    example's graph is internally coherent (one of each node kind, all three
+    naming the same target, the detector's tuning preset, and the identity
+    remaps resolving to this graph's own generated namespaces rather than a
+    hand-recomputed string).
+    """
+
+    nodes = calibrate_launch.generate_nodes(
+        _LaunchContext(CONFIG_ROOT / "solid_600_handheld.yaml")
+    )
+
+    detectors = _nodes_for_package(nodes, "lidar_board_detector")
+    locators = _nodes_for_package(nodes, "aruco_locator_node")
+    solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+    assert len(detectors) == 1
+    assert len(locators) == 1
+    assert len(solvers) == 1
+
+    detector_params = _parameters(detectors[0])
+    locator_params = _parameters(locators[0])
+    solver_params = _parameters(solvers[0])
+
+    assert detector_params["target_config"].endswith("solid_600_aruco_1_v1.json5")
+    assert locator_params["target_config"] == detector_params["target_config"]
+    assert solver_params["target_config"] == detector_params["target_config"]
+
+    assert detector_params["detector_config"].endswith("solid_600/velodyne.json5")
+    assert "bbox_file" not in detector_params
+
+    detector_namespace = _namespace(detectors[0])
+    locator_namespace = _namespace(locators[0])
+    remappings = _remappings(solvers[0])
+    assert (
+        remappings["lidar_target_identity"] == f"/{detector_namespace}/target_identity"
+    )
+    assert (
+        remappings["camera_target_identity"] == f"/{locator_namespace}/target_identity"
+    )
+
+    # The solid example's board is hand-held and moving, so its sync window
+    # is deliberately tighter than every hollow example's 100ms -- a future
+    # edit that quietly widened it back to the hollow default should fail
+    # here.
+    assert solver_params["sync_tolerance_ms"] == 50.0
 
 
 def test_sync_settings_reach_both_solver_kinds(calibrate_launch: ModuleType):
@@ -757,9 +970,11 @@ def _write_both_solver_kinds_config(tmp_path: Path, sync_block: str) -> Path:
     """Write a legacy-schema config with one lidar-camera pair and one
     lidar-lidar pair, so a single graph exercises both solver kinds.
 
-    Mirrors the maintained examples' legacy `type: hollow_board` shape
-    (like `vehicle.yaml`) rather than the new target_config/detector_config
-    schema, since only the routing of `sync:` values is under test here.
+    Uses the legacy `type: hollow_board` shape (what every maintained
+    example used before the W5-D cutover, and what the legacy compatibility
+    path still needs to keep exercising until W5-E1) rather than the new
+    target_config/detector_config schema, since only the routing of `sync:`
+    values is under test here.
     """
 
     config_path = tmp_path / "both_solver_kinds.yaml"
