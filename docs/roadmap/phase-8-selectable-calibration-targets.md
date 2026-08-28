@@ -65,20 +65,25 @@ sensor and the exact identity remaps; all legacy-schema tests still use the comp
 is now proved as graph-level invariants in `test_calibrate_launch_graph.py`, on top of the
 per-node routing C1/C2 already covered: one camera paired with two LiDARs against the same marker
 still yields exactly one `aruco_locator_node`; every node touching a given sensor — including the
-two solvers a shared camera produces — names the identical `target_config`; the new-schema
-LiDAR-camera solver's `lidar_target_identity`/`camera_target_identity` remaps resolve, by exact
-string equality, to the actual namespaces `generate_nodes` gave its own detector and locator, not
-to an independently recomputed string; and every maintained example under `config/examples/`
-(parametrized off disk, so a future example is covered automatically) generates a graph carrying
-only legacy configuration keys, with the zero-locator/zero-solver case (`two_lidar.yaml`) checked
-explicitly rather than passing vacuously, and an empty parametrization fails at import rather
-than collecting no test. The `ros/lctk_launch` suite is 82 tests, 74 before this packet. `demo.launch.py` needed no change:
-neither C1 nor C2 added a `DeclareLaunchArgument` to `calibrate.launch.py` — `target_config`/
-`detector_config` are resolved from the YAML config's marker section inside `generate_nodes`, not
-from top-level launch arguments — so `demo.launch.py`'s argument-forwarding list (`debug_mode`,
-`log_level`, `mode`, `enable_rviz`, `solver_mode`, `enable_overlay`, `enable_judge`) and its
-hardcoded `config_file:=sample_data.yaml` (a legacy example, until W5-D) remain exactly correct
-against the new routing.
+two solvers a shared camera produces — names the identical `target_config`. Read that second
+invariant as the routing check it is, not as a limit on what may be calibrated: every sensor in a
+session observes the same physical board at the same instant, which is what makes a correspondence
+between them exist at all, so the only failure it can catch is routing handing two nodes different
+values for one shared target. Beyond that, the new-schema LiDAR-camera solver's
+`lidar_target_identity`/`camera_target_identity` remaps resolve, by exact string equality, to the
+actual namespaces `generate_nodes` gave its own detector and locator, not to an independently
+recomputed string; and every maintained example under `config/examples/` (parametrized off disk, so
+a future example is covered automatically) generates a graph carrying only legacy configuration
+keys, with the zero-locator/zero-solver case (`two_lidar.yaml`) checked explicitly rather than
+passing vacuously, and an empty parametrization failing at import rather than collecting no test.
+The `ros/lctk_launch` suite is 82 tests, 74 before this packet.
+
+`demo.launch.py` needed no change: neither routing commit added a `DeclareLaunchArgument` to
+`calibrate.launch.py`, because `target_config` and `detector_config` are resolved from the config
+file's marker section inside `generate_nodes` rather than from top-level launch arguments. Its
+forwarding list (`debug_mode`, `log_level`, `mode`, `enable_rviz`, `solver_mode`, `enable_overlay`,
+`enable_judge`) and its hardcoded `config_file:=sample_data.yaml` — a legacy example until W5-D —
+remain correct against the new routing.
 
 Fresh-clone build note: a clean tree could not build until `sync-root-cargo-config.sh` learned to
 synthesise the root `[patch.crates-io]` block as the union of every per-package block (`0df4f48`).
