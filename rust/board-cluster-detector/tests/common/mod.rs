@@ -9,9 +9,7 @@
 use board_cluster_detector::{
     background::BackgroundModel,
     candidates::{generate_background_diff, generate_plane_strip},
-    config::{
-        production_config, production_tuning, ForegroundMethod, TargetDetectionParams, TargetSide,
-    },
+    config::{production_tuning, ForegroundMethod, TargetDetectionParams, TargetSide},
     detector::detect,
     geometry,
 };
@@ -366,9 +364,10 @@ pub fn method_and_background(f: &Fixture) -> (ForegroundMethod, Option<Backgroun
 pub const CORNER_MATCH_TOL: f64 = 0.055;
 
 pub fn assert_pose_corners_parity(f: &Fixture) {
-    let board = production_config(1.0, f.golden.up_axis, f.golden.cluster_min_points);
+    let tuning = production_tuning(f.golden.up_axis, f.golden.cluster_min_points);
+    let side = TargetSide::metres(1.0).expect("one metre fixture side");
     let (method, bg) = method_and_background(f);
-    let out = detect(&f.input, &board, method, f.golden.voxel, bg.as_ref());
+    let out = detect(&f.input, side, &tuning, method, f.golden.voxel, bg.as_ref());
 
     let det = out.detection.unwrap_or_else(|| {
         panic!(

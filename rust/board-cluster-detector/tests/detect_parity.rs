@@ -1,31 +1,31 @@
-//! End-to-end parity: full `detect()` pipeline vs the Python golden vectors.
+//! End-to-end parity: the full `detect()` pose pipeline vs the Python golden vectors.
 #![allow(deprecated)] // Legacy decision-parity contract.
 
 mod common;
 
 use approx::assert_relative_eq;
 use board_cluster_detector::{
-    config::{production_config, production_tuning, BoardConfig, TargetSide},
+    config::{production_tuning, TargetSide},
     detector::{detect, detect_for_target},
 };
 
 #[test]
-fn real_one_metre_fixture_has_equivalent_neutral_and_compatibility_evidence() {
+fn real_one_metre_fixture_has_equivalent_neutral_and_pose_pipeline_evidence() {
     let fixture = common::load_all()
         .into_iter()
         .find(|fixture| fixture.name == "ds5_f0034_ba")
         .expect("curated real 1 m fixture");
     let (method, background) = common::method_and_background(&fixture);
     let mut tuning = production_tuning(fixture.golden.up_axis, fixture.golden.cluster_min_points);
-    // Remove only the compatibility-only orientation gate. This makes the
-    // facade's decision boundary identical to neutral clustering while still
-    // exercising the actual deprecated delegation path.
+    // Disable the pose pipeline's extra orientation gate, which neutral
+    // detection has no equivalent of. With it off, the two must agree exactly
+    // on every fact they share; anything left over is what `detect` adds.
     tuning.stance_floor = 0.0;
-    let board = BoardConfig::new(1.0, tuning.clone());
+    let side = TargetSide::metres(1.0).expect("one metre fixture side");
 
     let neutral = detect_for_target(
         &fixture.input,
-        TargetSide::metres(1.0).unwrap(),
+        side,
         &tuning,
         method,
         fixture.golden.voxel,
@@ -33,7 +33,8 @@ fn real_one_metre_fixture_has_equivalent_neutral_and_compatibility_evidence() {
     );
     let compatibility = detect(
         &fixture.input,
-        &board,
+        side,
+        &tuning,
         method,
         fixture.golden.voxel,
         background.as_ref(),
@@ -88,9 +89,10 @@ fn real_one_metre_fixture_has_equivalent_neutral_and_compatibility_evidence() {
 fn per_frame_detection_decision_matches_python() {
     let mut unexpected = vec![];
     for f in common::load_all() {
-        let board = production_config(1.0, f.golden.up_axis, f.golden.cluster_min_points);
+        let tuning = production_tuning(f.golden.up_axis, f.golden.cluster_min_points);
+        let side = TargetSide::metres(1.0).expect("one metre fixture side");
         let (method, bg) = common::method_and_background(&f);
-        let out = detect(&f.input, &board, method, f.golden.voxel, bg.as_ref());
+        let out = detect(&f.input, side, &tuning, method, f.golden.voxel, bg.as_ref());
         if out.detection.is_some() != f.golden.detected {
             if !common::KNOWN_PER_FRAME_MISMATCHES.contains(&f.name.as_str()) {
                 unexpected.push(format!(
@@ -118,9 +120,10 @@ fn per_frame_detection_decision_matches_python() {
 #[test]
 fn recall_precision_parity_per_dataset() {
     common::assert_recall_precision_parity(&common::load_all(), |f| {
-        let board = production_config(1.0, f.golden.up_axis, f.golden.cluster_min_points);
+        let tuning = production_tuning(f.golden.up_axis, f.golden.cluster_min_points);
+        let side = TargetSide::metres(1.0).expect("one metre fixture side");
         let (m, bg) = common::method_and_background(f);
-        detect(&f.input, &board, m, f.golden.voxel, bg.as_ref())
+        detect(&f.input, side, &tuning, m, f.golden.voxel, bg.as_ref())
             .detection
             .is_some()
     });

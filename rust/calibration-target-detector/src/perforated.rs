@@ -1,9 +1,9 @@
 //! Perforated-target pose refinement.
 //!
-//! This adapter intentionally owns the old ICP lifecycle rather than changing
-//! `hollow-board-detector::BoardIcpIterator`.  The old iterator remains available
-//! to legacy callers; this one applies the same step-then-termination contract to
-//! a [`ValidatedTarget`] surface, whose closest-point query accounts for cutouts.
+//! This adapter owns the ICP lifecycle migrated from the former
+//! `hollow-board-detector::BoardIcpIterator`, which W5-E2 deleted along with its
+//! crate.  It applies the same step-then-termination contract to a
+//! [`ValidatedTarget`] surface, whose closest-point query accounts for cutouts.
 
 use anyhow::{bail, Result};
 use calibration_target::{CircularCutout, Surface, ValidatedTarget};
@@ -608,11 +608,16 @@ mod tests {
 
     #[test]
     fn manifest_icp_step_keeps_the_legacy_hollow_characterization_golden() {
-        // This is the old/new parity fixture formerly compared against
-        // `hollow-board-detector::BoardIcpIterator`.  The old crate now depends
-        // on this neutral crate for its compatibility facade, so making the
-        // neutral crate dev-depend on the old crate would create a Cargo cycle.
-        // Pin the exact legacy scene's public-neutral step metrics here instead.
+        // The old/new parity fixture, formerly compared against
+        // `hollow-board-detector::BoardIcpIterator`.  That crate is gone as of
+        // W5-E2, so this pins the exact legacy scene's public-neutral step
+        // metrics directly.
+        //
+        // Note what this golden does NOT cover: it pins per-step metrics that
+        // are computed before the pose update, so it is blind to the direction
+        // that update is applied in.  It passed unchanged across the H-14 sign
+        // fix.  Convergence from a perturbed seed is covered separately, in
+        // tests/perforated_convergence.rs.
         let target = target();
         let mut cfg = config();
         cfg.outlier_threshold_m = 2.0;

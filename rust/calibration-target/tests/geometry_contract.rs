@@ -274,6 +274,114 @@ fn both_targets_match_shared_marker_world_golden() {
     }
 }
 
+/// The marker paper's position on the plate (`fiducial.paper_center` in the manifest) is
+/// a **measurement**, not something derivable from the plate's own geometry. This pins
+/// that it is honoured: sliding the stated placement must slide every marker corner by
+/// exactly that world vector, and touch nothing else -- the plate corners least of all.
+///
+/// Ported from `hollow-board-config`'s `marker_corners_follow_the_stated_paper_placement`
+/// (the migration this crate supersedes it in). It is the only test in this file that
+/// would notice a `paper_center` plumbed through and silently ignored: every other
+/// geometry test here pins marker corners against a fixed golden, which would pass just
+/// as well with the field hard-coded.
+///
+/// Solid target excluded: `solid_600_aruco_1`'s paper is the same size as its plate
+/// (`paper_side` == plate `side`, both 0.6 m), so the paper already sits flush with the
+/// plate boundary at zero offset. Any nonzero shift immediately fails this crate's
+/// `fiducial: paper corners extend outside plate` validation -- there is no slack to
+/// shift into, so the solid target cannot exercise this property at all.
+#[test]
+fn marker_corners_follow_the_stated_paper_placement() {
+    // The exact manifest text for the field under test. Asserted present below so a
+    // fixture reformat fails loudly here rather than silently turning this into a
+    // zero-shift no-op.
+    const ORIGINAL_PAPER_CENTER: &str =
+        r#"paper_center: { toward_left_corner: "0m", toward_top_corner: "-0.353553391m" }"#;
+    assert!(
+        HOLLOW.contains(ORIGINAL_PAPER_CENTER),
+        "hollow_1000_aruco_4_v1.json5's paper_center formatting changed; \
+         update this test's substring"
+    );
+
+    // Deliberately small: hollow_1000's paper sits close to three circular cutouts (see
+    // the manifest), and a shift as large as the 0.1 m / 0.03 m the predecessor test
+    // used collides with one of them under this crate's paper-vs-cutout validation -- a
+    // check the old `hollow-board-config` crate's mutable `BoardModel` did not perform.
+    // This magnitude clears every cutout and the plate boundary with wide margin
+    // (tens of millimetres) while remaining unambiguously nonzero in both axes.
+    let shift_left_m = 0.01;
+    let shift_top_m = 0.02;
+    let shifted_paper_center = format!(
+        r#"paper_center: {{ toward_left_corner: "{shift_left_m}m", toward_top_corner: "{}m" }}"#,
+        -0.353553391 + shift_top_m,
+    );
+    let shifted_source = HOLLOW.replacen(ORIGINAL_PAPER_CENTER, &shifted_paper_center, 1);
+
+    let baseline = ValidatedTarget::parse_json5(HOLLOW.as_bytes()).unwrap();
+    let shifted = ValidatedTarget::parse_json5(shifted_source.as_bytes())
+        .expect("shifted manifest is still a valid target");
+
+    for pose in test_poses() {
+        let baseline_posed = baseline.posed(pose);
+        let shifted_posed = shifted.posed(pose);
+
+        // The plate itself has not moved.
+        for (name, baseline_point, shifted_point) in [
+            ("center", baseline_posed.center(), shifted_posed.center()),
+            (
+                "top corner",
+                baseline_posed.top_corner(),
+                shifted_posed.top_corner(),
+            ),
+            (
+                "bottom corner",
+                baseline_posed.bottom_corner(),
+                shifted_posed.bottom_corner(),
+            ),
+            (
+                "left corner",
+                baseline_posed.left_corner(),
+                shifted_posed.left_corner(),
+            ),
+            (
+                "right corner",
+                baseline_posed.right_corner(),
+                shifted_posed.right_corner(),
+            ),
+        ] {
+            assert!(
+                (baseline_point - shifted_point).norm() < TOL,
+                "plate {name} moved after sliding the paper: {baseline_point:?} -> {shifted_point:?}"
+            );
+        }
+
+        // Every marker corner must move by exactly the stated shift, expressed in the
+        // sensor frame via this pose's own axes.
+        let axes = shifted_posed.axes();
+        let expected_shift =
+            axes.toward_left_corner.scale(shift_left_m) + axes.toward_top_corner.scale(shift_top_m);
+
+        let before = baseline_posed.marker_corners_by_id();
+        let after = shifted_posed.marker_corners_by_id();
+        let marker_ids: Vec<u32> = before.keys().copied().collect();
+        assert_eq!(marker_ids, after.keys().copied().collect::<Vec<_>>());
+
+        for marker_id in marker_ids {
+            let before_corners = &before[&marker_id];
+            let after_corners = &after[&marker_id];
+            for (index, (was, now)) in before_corners.iter().zip(after_corners).enumerate() {
+                let name = ["right", "top", "left", "bottom"][index];
+                let expected = was + expected_shift;
+                assert!(
+                    (now - expected).norm() < TOL,
+                    "marker {marker_id} {name} after sliding the paper: \
+                     got {now:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+}
+
 struct Lcg(u64);
 
 impl Lcg {

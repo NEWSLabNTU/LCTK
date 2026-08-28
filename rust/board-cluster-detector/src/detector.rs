@@ -12,7 +12,7 @@ use nalgebra::Point3;
 use crate::{
     background::BackgroundModel,
     candidates::foreground_and_candidates,
-    config::{BoardConfig, DetectorTuning, ForegroundMethod, TargetDetectionParams, TargetSide},
+    config::{DetectorTuning, ForegroundMethod, TargetDetectionParams, TargetSide},
     geometry::{self, project_to_plane, PlaneModel},
     pose::{board_pose, isolation_density, stance_3d, BoardDetection},
     scorer::seed_center,
@@ -155,31 +155,31 @@ fn consider_reject(
     }
 }
 
-/// Detect the calibration board in one frame.
+/// Detect the calibration board in one frame, producing a board *pose*.
 ///
 /// Ports `detector.py:detect` (square_icp branch): `finite_only` ->
 /// `voxel_downsample` -> per-method candidate generation -> per candidate
 /// {project, seed, fixed-square fit, pose, stance gate, isolation gate} ->
 /// keep the lowest-residual survivor.
-#[deprecated(note = "load the selected target and call detect_for_target")]
-#[allow(deprecated)]
+///
+/// Production detection goes through [`detect_for_target`], which stops at
+/// neutral square/plane evidence and never constructs target-frame axes.  This
+/// function is the one place that still runs the Python pipeline's pose
+/// construction and its gate *ordering* -- stance before isolation -- and it
+/// exists because the recorded-fixture parity suite compares against Python's
+/// pose output, which neutral evidence alone cannot reproduce.  It is not a
+/// compatibility shim for a serialized config: W5-E2 removed the `side_m`
+/// adapter it used to take, so the physical side now enters the same way it
+/// does everywhere else, through [`TargetSide`].
 pub fn detect(
     points: &[Point3<f64>],
-    board: &BoardConfig,
+    target_side: TargetSide,
+    tuning: &DetectorTuning,
     method: ForegroundMethod,
     voxel: f64,
     background: Option<&BackgroundModel>,
 ) -> DetectOutcome {
-    let target_side = TargetSide::metres(board.side_m())
-        .expect("legacy BoardConfig side_m must be finite and positive");
-    let target = detect_for_target(
-        points,
-        target_side,
-        board.tuning(),
-        method,
-        voxel,
-        background,
-    );
+    let target = detect_for_target(points, target_side, tuning, method, voxel, background);
 
     let mut best: Option<(BoardDetection, SquarePlaneObservation)> = None;
     let mut furthest = target.square_furthest.clone();
@@ -194,18 +194,18 @@ pub fn detect(
             &observation.plane,
             &fit.corners_2d,
             1.0 / (1.0 + fit.residual),
-            board.up_axis,
+            tuning.up_axis,
         );
 
-        if board.stance_floor > 0.0 {
-            let stance = stance_3d(&det.corners_3d, board.up_axis);
-            if stance <= board.stance_floor {
+        if tuning.stance_floor > 0.0 {
+            let stance = stance_3d(&det.corners_3d, tuning.up_axis);
+            if stance <= tuning.stance_floor {
                 consider_reject(
                     &mut furthest,
                     RejectReason::Stance,
                     RejectDetail {
                         measured: stance,
-                        threshold: board.stance_floor,
+                        threshold: tuning.stance_floor,
                     },
                     &observation.points,
                 );
