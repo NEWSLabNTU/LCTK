@@ -102,10 +102,15 @@ If misaligned, check:
 
 ## Configuration
 
-Key parameters in `ros/lctk_launch/config/board/board_detector.json5`:
+Key parameters in the marker's Detector Tuning preset, e.g.
+`ros/lctk_launch/config/board/hollow_1000/velodyne.json5`:
 - `plane_ransac_max_iterations`: RANSAC iterations (default: 2000)
 - `plane_ransac_inlier_threshold`: Inlier distance in meters (default: 0.05)
 - `max_icp_iterations`: ICP refinement iterations (default: 10)
+
+Board geometry itself (plate size, cutout positions, marker layout) lives in the Target
+Definition, e.g. `ros/lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5`, not in the
+Detector Tuning preset.
 
 See [Configuration Guide](./configuration.md) for full details.
 

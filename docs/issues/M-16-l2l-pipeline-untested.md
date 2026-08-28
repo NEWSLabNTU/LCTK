@@ -6,7 +6,7 @@
 - **Verified:** By admission — CLAUDE.md and the L2L section both say "This pipeline is not yet tested"
 - **Related:** [M-04](./archive/M-04-l2l-wallclock-staleness.md), [M-05](./archive/M-05-l2l-wrong-pose-field.md),
   [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md), [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md),
-  [M-23](./M-23-two-lidar-example-topics-unreachable.md)
+  [M-26](./M-26-two-lidar-example-topics-unreachable.md)
 
 ## Problem
 
@@ -48,7 +48,7 @@ Read plainly, both are evidence that the L2L pipeline **has** been exercised on 
 since this issue was filed. This issue is not being closed on that basis, for two reasons:
 
 1. It's unclear whether that 2026-08-14 session used the committed
-   `config/examples/two_lidar.yaml`. See [M-23](./M-23-two-lidar-example-topics-unreachable.md):
+   `config/examples/two_lidar.yaml`. See [M-26](./M-26-two-lidar-example-topics-unreachable.md):
    that config's `pointcloud_topic` values (`/velodyne_points`, `/iv_points`) match neither the
    two-LiDAR pcap playback (`/sensing/lidar/top/pointcloud_raw`,
    `/sensing/lidar/front/pointcloud_raw`) nor the `TWO_LIDAR_*` bags' actual topics
