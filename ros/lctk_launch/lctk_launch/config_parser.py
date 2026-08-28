@@ -11,6 +11,7 @@ validation edges.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -34,6 +35,9 @@ DEFAULT_ARUCO_DETECTOR_CONFIG = (
 LEGACY_HOLLOW_TARGET_CONFIG = (
     "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
 )
+
+# The only two drop policies Conflux's DetectionPairSource accepts.
+VALID_SYNC_DROP_POLICIES = ("reject_new", "drop_oldest")
 
 
 def resolve_package_path(path: str) -> str:
@@ -127,6 +131,22 @@ class CalibrationPair:
     marker: str
 
 
+@dataclass(frozen=True)
+class SyncSettings:
+    """Conflux synchronizer window/buffer settings.
+
+    These are a physical judgement about the scene -- how far the
+    calibration target can move between a camera frame and a LiDAR sweep --
+    not something derivable from whether the data is live or recorded. They
+    used to be silently derived from the launch `mode` argument; they are
+    now required, explicit config, read from the `sync:` section.
+    """
+
+    tolerance_ms: float
+    queue_size: int
+    drop_policy: str
+
+
 @dataclass
 class LidarBoardDetectorNode:
     """Configuration for a lidar_board_detector node instance."""
@@ -209,6 +229,7 @@ class PipelineConfig:
     cameras: dict[str, CameraDevice] = field(default_factory=dict)
     calibration_plan: CalibrationPlan | None = None  # Set by planner
     calibration_plan_text: str | None = None  # Formatted ASCII plan for display
+    sync: SyncSettings | None = None  # Set by _parse_sync; required, never left None
 
 
 class CalibrationConfigParser:
@@ -226,6 +247,7 @@ class CalibrationConfigParser:
         self.markers: dict[str, Marker] = {}
         self.calibration_pairs: list[CalibrationPair] = []
         self._reference_frame: str | None = None
+        self._sync: SyncSettings | None = None
 
     def parse(self) -> PipelineConfig:
         """Parse configuration file and derive pipeline configuration."""
@@ -237,6 +259,8 @@ class CalibrationConfigParser:
         markers_config = raw_config.get("markers", {})
         self._parse_markers(markers_config)
         self._parse_marker_pairs(markers_config)
+
+        self._parse_sync(raw_config.get("sync"))
 
         self._reference_frame = raw_config.get("reference_frame")
         if self._reference_frame is None:
@@ -280,6 +304,103 @@ class CalibrationConfigParser:
                         marker=marker_name,
                     )
                 )
+
+    def _parse_sync(self, sync_config: dict | None) -> None:
+        """Parse and validate the required `sync:` section.
+
+        The synchronizer window, buffer size and drop policy are a physical
+        judgement about the scene -- how far the calibration target can move
+        between a camera frame and a LiDAR sweep -- not something derivable
+        from whether the data is live or recorded (that split is `mode`,
+        which controls QoS only). This section is therefore required, with
+        no mode-derived fallback: a config missing it is refused here rather
+        than silently defaulting.
+        """
+        if sync_config is None:
+            raise ValueError(
+                "Missing required 'sync' section (tolerance_ms, queue_size, "
+                "drop_policy). The synchronizer window is a physical "
+                "judgement about the scene and must be stated explicitly in "
+                "the config; it is not derived from 'mode'."
+            )
+
+        missing = [
+            key
+            for key in ("tolerance_ms", "queue_size", "drop_policy")
+            if key not in sync_config
+        ]
+        if missing:
+            raise ValueError(
+                f"'sync' section is missing required key(s): {', '.join(missing)}"
+            )
+
+        self._sync = SyncSettings(
+            tolerance_ms=self._parse_sync_tolerance_ms(sync_config["tolerance_ms"]),
+            queue_size=self._parse_sync_queue_size(sync_config["queue_size"]),
+            drop_policy=self._parse_sync_drop_policy(sync_config["drop_policy"]),
+        )
+
+    @staticmethod
+    def _parse_sync_tolerance_ms(value: object) -> float:
+        """Validate `sync.tolerance_ms`.
+
+        Conflux only matches messages by time when a finite window is set:
+        with an infinite window it skips the pruning step in
+        `State::try_match` and pairs whatever is at the FRONT of each
+        buffer -- i.e. by arrival order -- so two streams at different rates
+        drift apart without bound. Measured on this repository's own
+        conflux build: camera 10Hz + LiDAR 1Hz reaches a 53s gap INSIDE one
+        "synchronized" group; 30Hz + 10Hz saturates at 10s; the seyond rig's
+        5.4Hz + 4.4Hz passes 11s and keeps climbing. The same runs with a
+        50ms window stay within 33ms.
+
+        That failure is silent and ruinous: the solver pairs ArUco corners
+        with a board pose on the assumption both saw the board at the same
+        instant. Pair a camera frame with a LiDAR sweep 11s apart and the
+        board has MOVED, so the solve is wrong while the reprojection error
+        still looks fine. This is exactly why zero (infinite window) must be
+        refused, and why the refusal has to be airtight: a bare
+        `value <= 0` test does not catch `inf` (which is `> 0`) or `nan`
+        (every comparison with `nan` is `False`). `float()` also turns the
+        strings "inf", "Infinity" and any overflowing numeric literal such
+        as "1e400" into `inf`, so the check below uses `math.isfinite`
+        rather than a range comparison alone.
+        """
+        tolerance_ms: float | None
+        try:
+            tolerance_ms = None if isinstance(value, bool) else float(value)
+        except (TypeError, ValueError):
+            tolerance_ms = None
+        if tolerance_ms is None or not math.isfinite(tolerance_ms) or tolerance_ms <= 0:
+            raise ValueError(
+                "sync.tolerance_ms must be a finite, strictly positive "
+                f"number of milliseconds, got {value!r}"
+            )
+        return tolerance_ms
+
+    @staticmethod
+    def _parse_sync_queue_size(value: object) -> int:
+        """Validate `sync.queue_size`.
+
+        `bool` is a subclass of `int` in Python, so an explicit `bool` check
+        is required -- otherwise `True` would silently pass as a queue size
+        of 1.
+        """
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"sync.queue_size must be a positive integer, got {value!r}"
+            )
+        return value
+
+    @staticmethod
+    def _parse_sync_drop_policy(value: object) -> str:
+        """Validate `sync.drop_policy`."""
+        if value not in VALID_SYNC_DROP_POLICIES:
+            raise ValueError(
+                f"sync.drop_policy must be one of {VALID_SYNC_DROP_POLICIES}, "
+                f"got {value!r}"
+            )
+        return value
 
     def _run_planner(self, pipeline: PipelineConfig) -> None:
         """Run the calibration planner and attach results to pipeline."""
@@ -509,9 +630,11 @@ class CalibrationConfigParser:
 
     def _derive_pipeline(self) -> PipelineConfig:
         """Derive the complete pipeline configuration from parsed config."""
+        assert self._sync is not None  # _parse_sync always sets it or raises
         config = PipelineConfig(
             lidars=dict(self.lidars),
             cameras=dict(self.cameras),
+            sync=self._sync,
         )
 
         # Collect unique (lidar, marker) pairs for board detectors

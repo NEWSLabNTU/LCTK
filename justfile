@@ -8,7 +8,8 @@ set shell := ["bash", "-uc"]
 debug_mode := "true"
 log_level := "info"
 rviz_enabled := "true"
-# Processing mode: "offline" (RELIABLE QoS, perfect sync) or "realtime" (BEST_EFFORT QoS, no buffering)
+# Transport QoS only: "offline" (RELIABLE) or "realtime" (BEST_EFFORT). The synchronizer
+# window, queue size and drop policy come from the config's required `sync:` section.
 mode := "offline"
 solver_mode := "continuous"
 enable_overlay := "true"

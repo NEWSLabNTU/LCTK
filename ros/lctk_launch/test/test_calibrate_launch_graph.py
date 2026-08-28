@@ -61,6 +61,11 @@ markers:
     bbox_config: {bbox_config}
     pairs:
       - [top_lidar, front_lidar]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
     return config_path
@@ -100,6 +105,11 @@ markers:
     detector_config: {detector_config}
     pairs:
       - [top_lidar, front_lidar]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
     return config_path
@@ -146,6 +156,11 @@ markers:
     bbox_config: {bbox_config}
     pairs:
       - [top_lidar, front_center]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
     return config_path
@@ -188,6 +203,11 @@ markers:
     pairs:
       - [top_lidar, front_center]
       - [front_lidar, front_center]
+
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
 """
     )
     return config_path
@@ -703,3 +723,107 @@ def test_maintained_examples_use_only_the_legacy_compatibility_path(
         params = _parameters(solver)
         assert "target_config" not in params
         assert params["aruco_config_file"]
+
+
+def test_sync_settings_reach_both_solver_kinds(calibrate_launch: ModuleType):
+    """The config's `sync:` section reaches both `lidar_to_camera_solver`
+    and `lidar_to_lidar_solver` parameters, not just one of the two node
+    kinds that read it.
+
+    `vehicle.yaml` is the one maintained example with both solver kinds
+    (L1-C1/L1-C2/L2-C3/L2-C4 lidar-camera solvers, and one L1-L2
+    lidar-lidar solver), and it carries the same
+    tolerance_ms=100/queue_size=100/drop_policy=reject_new `sync:` block
+    every other maintained example does.
+    """
+
+    nodes = calibrate_launch.generate_nodes(
+        _LaunchContext(CONFIG_ROOT / "vehicle.yaml")
+    )
+
+    camera_solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+    lidar_solvers = _nodes_for_package(nodes, "lidar_to_lidar_solver")
+    assert len(camera_solvers) == 4
+    assert len(lidar_solvers) == 1
+
+    for solver in camera_solvers + lidar_solvers:
+        params = _parameters(solver)
+        assert params["sync_tolerance_ms"] == 100.0
+        assert params["sync_queue_size"] == 100
+        assert params["sync_drop_policy"] == "reject_new"
+
+
+def _write_both_solver_kinds_config(tmp_path: Path, sync_block: str) -> Path:
+    """Write a legacy-schema config with one lidar-camera pair and one
+    lidar-lidar pair, so a single graph exercises both solver kinds.
+
+    Mirrors the maintained examples' legacy `type: hollow_board` shape
+    (like `vehicle.yaml`) rather than the new target_config/detector_config
+    schema, since only the routing of `sync:` values is under test here.
+    """
+
+    config_path = tmp_path / "both_solver_kinds.yaml"
+    config_path.write_text(
+        f"""
+devices:
+  lidars:
+    L1:
+      pointcloud_topic: /sensing/lidar/front/points
+      frame_id: lidar_front
+    L2:
+      pointcloud_topic: /sensing/lidar/rear/points
+      frame_id: lidar_rear
+  cameras:
+    C1:
+      image_topic: /sensing/camera/front_left/image
+      frame_id: camera_front_left
+
+reference_frame: L1
+
+markers:
+  M1:
+    type: hollow_board
+    board_config: /tmp/board.json5
+    aruco_config: /tmp/aruco.json5
+    bbox_config: /tmp/bbox.json5
+    pairs:
+      - [L1, C1]
+      - [L1, L2]
+
+{sync_block}
+"""
+    )
+    return config_path
+
+
+def test_sync_settings_non_default_window_carried_through_unchanged(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """A `sync:` window that differs from every maintained example's
+    100/100/reject_new value reaches both solver kinds' parameters exactly
+    as configured, rather than being replaced by a mode-derived preset.
+
+    Before this change, `calibrate.launch.py` derived these three values
+    from the `mode` launch argument and ignored the config file entirely;
+    this asserts the specific non-default numbers below -- which do not
+    match either the old offline (100/100/reject_new) or realtime
+    (50/2/drop_oldest) preset -- survive unchanged from the config to the
+    generated node parameters.
+    """
+
+    config_path = _write_both_solver_kinds_config(
+        tmp_path,
+        "sync:\n  tolerance_ms: 50\n  queue_size: 7\n  drop_policy: drop_oldest\n",
+    )
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    camera_solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+    lidar_solvers = _nodes_for_package(nodes, "lidar_to_lidar_solver")
+    assert len(camera_solvers) == 1
+    assert len(lidar_solvers) == 1
+
+    for solver in camera_solvers + lidar_solvers:
+        params = _parameters(solver)
+        assert params["sync_tolerance_ms"] == 50.0
+        assert params["sync_queue_size"] == 7
+        assert params["sync_drop_policy"] == "drop_oldest"

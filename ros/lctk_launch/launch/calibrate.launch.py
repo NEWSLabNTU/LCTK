@@ -11,12 +11,18 @@ The config file describes:
 - Devices (lidars and cameras with their topics and frame IDs)
 - Markers (calibration boards with their configuration files)
 - Calibration pairs (which devices to calibrate together using which marker)
+- A required `sync:` section (tolerance_ms, queue_size, drop_policy) for the
+  Conflux synchronizer -- see config_parser.py's `_parse_sync_tolerance_ms`
 
 Modes:
 - offline: For processing recorded data (rosbags). Uses RELIABLE QoS to avoid
-  message drops. Synchronizer attempts perfect timestamp matches.
-- realtime: For live data processing. Uses BEST_EFFORT QoS with no buffering
-  for lowest latency.
+  message drops.
+- realtime: For live data processing. Uses BEST_EFFORT QoS for lowest
+  latency.
+
+`mode` controls transport QoS only. The synchronizer window/buffer/drop
+policy are a physical judgement about the scene, not about live-vs-recorded
+data, so they come from the config file's `sync:` section instead.
 
 See config/examples/ for example configurations.
 """
@@ -117,46 +123,30 @@ def generate_nodes(context, *args, **kwargs) -> list:
     enable_overlay = LaunchConfiguration("enable_overlay").perform(context) == "true"
     enable_judge = LaunchConfiguration("enable_judge").perform(context) == "true"
 
-    # Derive settings from mode
-    # - offline: RELIABLE QoS, exact sync matching, larger queues
-    # - realtime: BEST_EFFORT QoS, approximate sync, minimal buffering
+    # Derive settings from mode. `mode` now controls ONLY this transport
+    # property (live vs. recorded data): whether to use RELIABLE or
+    # BEST_EFFORT QoS.
+    # - offline: RELIABLE QoS
+    # - realtime: BEST_EFFORT QoS
     is_realtime = mode == "realtime"
     use_best_effort_qos = is_realtime
 
-    # Synchronization settings based on mode (used by Conflux synchronizer)
-    # - sync_tolerance_ms: Time window for grouping messages (0 = infinite window)
-    # - sync_queue_size: Buffer size per stream
-    # - sync_drop_policy: "reject_new" (preserve data) or "drop_oldest" (prefer latest)
-    if is_realtime:
-        sync_tolerance_ms = 50.0  # 50ms tolerance for real-time
-        sync_queue_size = 2  # Minimal buffering
-        sync_drop_policy = "drop_oldest"  # Always process latest data
-    else:
-        # 100ms window, NOT the infinite window this used to use.
-        #
-        # Conflux only matches by time when a finite window is set: with an infinite
-        # window it skips the pruning step in `State::try_match` and pairs whatever is
-        # at the FRONT of each buffer -- i.e. by arrival order. Two streams at
-        # different rates then drift apart without bound. Measured on this repository's
-        # own conflux build: camera 10Hz + LiDAR 1Hz reaches a 53s gap INSIDE one
-        # "synchronized" group; 30Hz + 10Hz saturates at 10s; the seyond rig's 5.4Hz +
-        # 4.4Hz passes 11s and keeps climbing. The same runs with a 50ms window stay
-        # within 33ms.
-        #
-        # That failure is silent and ruinous here: the solver pairs ArUco corners with
-        # a board pose on the assumption both saw the board at the same instant. Pair a
-        # camera frame with a LiDAR sweep 11s apart and the board has MOVED, so the
-        # solve is wrong while the reprojection error still looks fine.
-        #
-        # 100ms is a little over one frame interval at these rates -- wide enough to
-        # absorb the offset between a camera frame and the LiDAR sweep that overlaps
-        # it, narrow enough that a moving board cannot travel far within it.
-        sync_tolerance_ms = 100.0
-        sync_queue_size = 100  # Large queue for rosbag playback
-        sync_drop_policy = "reject_new"  # Preserve all data
-
     # Parse configuration
     pipeline = parse_config(config_file)
+
+    # Synchronizer window/buffer/drop-policy come from the config's required
+    # `sync:` section, NOT from `mode`. The window is a physical judgement
+    # about the scene -- how far the calibration target can move between a
+    # camera frame and a LiDAR sweep -- and is not derivable from whether the
+    # data happens to be live or recorded. See
+    # `CalibrationConfigParser._parse_sync_tolerance_ms` in config_parser.py
+    # for the validation and the measured infinite-window failure mode this
+    # guards against (a config with `sync:` omitted is refused at parse time,
+    # before reaching this point).
+    assert pipeline.sync is not None
+    sync_tolerance_ms = pipeline.sync.tolerance_ms
+    sync_queue_size = pipeline.sync.queue_size
+    sync_drop_policy = pipeline.sync.drop_policy
 
     nodes = []
 
@@ -175,6 +165,15 @@ def generate_nodes(context, *args, **kwargs) -> list:
             f"{len(pipeline.aruco_locators)} aruco locators, "
             f"{len(pipeline.lidar_camera_solvers)} lidar-camera solvers, "
             f"{len(pipeline.lidar_lidar_solvers)} lidar-lidar solvers"
+        )
+    )
+
+    # Log effective sync settings (from the config's required `sync:`
+    # section) so a replay's log records what was actually used.
+    nodes.append(
+        LogInfo(
+            msg=f"Sync settings: tolerance_ms={sync_tolerance_ms}, "
+            f"queue_size={sync_queue_size}, drop_policy={sync_drop_policy}"
         )
     )
 
