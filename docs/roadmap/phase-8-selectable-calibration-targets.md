@@ -76,7 +76,9 @@ recomputed string; and every maintained example under `config/examples/` (parame
 a future example is covered automatically) generates a graph carrying only legacy configuration
 keys, with the zero-locator/zero-solver case (`two_lidar.yaml`) checked explicitly rather than
 passing vacuously, and an empty parametrization failing at import rather than collecting no test.
-The `ros/lctk_launch` suite is 82 tests, 74 before this packet.
+The `ros/lctk_launch` suite is 82 tests, 74 before this packet. W5-C's gate passed with
+`just build` (17 ROS packages), `just test` (317 Rust and 374 Python tests, 361 before this
+packet), `just lint-py`, and `git diff --check`.
 
 `demo.launch.py` needed no change: neither routing commit added a `DeclareLaunchArgument` to
 `calibrate.launch.py`, because `target_config` and `detector_config` are resolved from the config
