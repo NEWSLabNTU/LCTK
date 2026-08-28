@@ -95,10 +95,13 @@ Set Fixed Frame to `velodyne_top`. If calibrated correctly, point clouds from bo
 
 Key parameters in `ros/lctk_launch/config/multi_wayside.yaml`:
 - `same_face_mode: true` - Both LiDARs see the **same side** of the board
-- `sync_tolerance_ms: 100` - Maximum time difference between detections
 - `min_detections_for_calibration: 5` - Minimum synchronized pairs needed
 
 If LiDARs see **opposite sides** of the board, set `same_face_mode: false` to apply 180 degree correction.
+
+The synchronizer window itself is configured separately: it lives in the calibration config's
+required `sync:` section (e.g. `config/examples/two_lidar.yaml`'s `sync.tolerance_ms`), not in
+`multi_wayside.yaml` — see "Synchronizer Parameters (Conflux)" in the top-level `CLAUDE.md`.
 
 ## Tips for Good Calibration
 
@@ -112,6 +115,6 @@ If LiDARs see **opposite sides** of the board, set `same_face_mode: false` to ap
 
 **Only one LiDAR detecting:** Check bounding box configuration covers board location for both sensors
 
-**Detections not synchronizing:** Increase `sync_tolerance_ms` or check that data streams have valid timestamps
+**Detections not synchronizing:** Increase `sync.tolerance_ms` in the calibration config's `sync:` section, or check that data streams have valid timestamps
 
 **Transform seems flipped:** Toggle `same_face_mode` in configuration

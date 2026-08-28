@@ -27,6 +27,18 @@ devices:
       image_topic: /camera/right/image_raw
       frame_id: camera_right
 
+# Synchronizer window: how far apart in time a camera frame and a LiDAR
+# sweep may be and still be treated as observing the calibration target at
+# the same instant. Too wide and a moving board gets paired across frames
+# where it has visibly moved; too narrow (or 0, meaning infinite) and
+# streams at different rates drift apart with no time-based pairing at all.
+# 100ms/100/reject_new matches the offline (rosbag/sample-data) default this
+# config has always run under.
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
+
 markers:
   calibration_board:
     type: hollow_board

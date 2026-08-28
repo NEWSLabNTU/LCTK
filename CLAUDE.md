@@ -257,27 +257,25 @@ This ensures always processing the latest data, not stale queued messages.
 
 ### Processing Modes
 
-The calibration pipeline supports two processing modes controlled by the `mode` parameter:
+The calibration pipeline supports two processing modes controlled by the `mode` parameter. `mode`
+controls **only** transport QoS — live-versus-recorded data is a genuine transport property. The
+synchronizer window/buffer/drop-policy are a physical judgement about the scene (how far the
+calibration target can move between a camera frame and a LiDAR sweep) and are **not** derivable
+from `mode`; they come from the calibration config file's required `sync:` section instead — see
+`sync:` under Configuration Format below.
 
-| Mode | QoS | Sync Window | Buffer Size | Drop Policy | Use Case |
-|------|-----|-------------|-------------|-------------|----------|
-| `offline` (default) | RELIABLE | infinite | 100 | reject_new | Recorded data (rosbags or the pcap/avi sample playback). No time-based dropping, preserves all data. |
-| `realtime` | BEST_EFFORT | 50ms | 2 | drop_oldest | Live sensor data. Low latency, always processes latest. |
+| Mode | QoS | Use Case |
+|------|-----|----------|
+| `offline` (default) | RELIABLE | Recorded data (rosbags or the pcap/avi sample playback). |
+| `realtime` | BEST_EFFORT | Live sensor data. Low latency. |
 
 Note: `lctk_sample_data` ships pcap + avi in git (datasets 1–5; dataset 3 is the lidar-camera
 default, dataset 4 the second lidar). Recorded two-LiDAR bags live in
 `ros/lctk_sample_data/bags/TWO_LIDAR_*` but are **gitignored** — see that directory's README to
 obtain them. To record more: `ros2 bag record -a` alongside `just sample-data`.
 
-**Settings derived from mode:**
+**Setting derived from mode:**
 - **QoS Reliability**: RELIABLE (offline) vs BEST_EFFORT (realtime)
-- **Sync Window**: Infinite (offline) vs 50ms tolerance (realtime)
-  - Infinite window: Messages are matched regardless of timestamp difference
-  - Finite window: Messages outside the time window are dropped
-- **Buffer Size**: Large buffer (offline) vs minimal buffering (realtime)
-- **Drop Policy**:
-  - `reject_new`: When buffer is full, reject new messages (preserves older data)
-  - `drop_oldest`: When buffer is full, drop oldest message (always accepts new data)
 
 **Usage:**
 ```bash
@@ -350,6 +348,14 @@ markers:
     # [deviceA, deviceB] pairs that observe this marker.
     pairs:
       - [top_lidar, front_center]
+
+# Required. Conflux synchronizer window/buffer/drop-policy -- a physical
+# judgement about the scene (how far the calibration target can move
+# between a camera frame and a LiDAR sweep), not derived from `mode`.
+sync:
+  tolerance_ms: 100    # Must be finite and > 0; 0/inf/nan are refused
+  queue_size: 100       # Positive integer buffer size per stream
+  drop_policy: reject_new   # "reject_new" or "drop_oldest"
 ```
 
 **ArUco config files are split by purpose:**
@@ -380,11 +386,15 @@ freshness/skew checks and operator diagnosis. The legacy `extrinsic_solver_node`
 directly, is unreachable from config-driven launch, and is scheduled for deletion by the
 diamond-frame plan.
 
+These three node parameters are populated by `calibrate.launch.py` from the calibration config's
+required `sync:` section (see Configuration Format above) — there is no mode-derived fallback, and
+a config that omits `sync:` is refused at parse time.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sync_tolerance_ms` | float | mode-dependent | Time window in ms. Must be positive on maintained solver paths; 0 enables unsafe arrival-order pairing and is refused. |
-| `sync_queue_size` | int | mode-dependent | Buffer size per stream |
-| `sync_drop_policy` | string | "reject_new" | Buffer overflow policy: "reject_new" or "drop_oldest" |
+| `sync_tolerance_ms` | float | none — required in config | Time window in ms. Must be finite and strictly positive; 0, negative, `inf` and `nan` enable unsafe arrival-order pairing (or worse) and are refused at config parse time. |
+| `sync_queue_size` | int | none — required in config | Buffer size per stream. Must be a positive integer. |
+| `sync_drop_policy` | string | none — required in config | Buffer overflow policy: "reject_new" or "drop_oldest" |
 
 **Drop Policies:**
 - `reject_new`: Preserves existing buffered data. Good for offline processing where you don't want to lose any data.
