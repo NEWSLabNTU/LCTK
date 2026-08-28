@@ -463,14 +463,16 @@ def test_one_locator_per_camera_shared_across_pairs(
 def test_one_selected_target_per_sensor(calibrate_launch: ModuleType, tmp_path: Path):
     """Every node belonging to a given sensor names the same target.
 
-    `config_parser._validate` (config_parser.py:483-497) refuses a *device*
-    that would be assigned two different Calibration Target Identities, and
-    `compute_plan` separately refuses a disconnected sensor graph -- between
-    them, two genuinely different Target Definitions cannot coexist in one
-    connected session (any bridging pair would itself assign an identity to
-    both its endpoints). So the graph-level property left to prove here is
-    not cross-target isolation -- it's that routing doesn't silently
-    diverge which value it hands to which node for the same sensor.
+    Calibration correlates what several sensors saw of ONE physical board at
+    one instant, so every sensor in a session observes the same target by
+    construction -- that shared target is what makes a correspondence exist
+    at all. `config_parser._validate` (config_parser.py:483-497) enforces it
+    per device.
+
+    What is left for this test is therefore not cross-target isolation,
+    which would be meaningless here: it is that routing hands every node the
+    same target value, and does not silently diverge for one of the several
+    nodes that share a sensor.
 
     Reuses the shared-camera config from
     `test_one_locator_per_camera_shared_across_pairs`: front_center pairs
