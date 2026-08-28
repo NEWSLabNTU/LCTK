@@ -4,78 +4,88 @@ This package provides YAML launch files for the LCTK (LiDAR and Camera Toolkit) 
 
 ## Overview
 
-The calibration pipeline consists of the following nodes:
+Nodes are generated dynamically from a YAML calibration config (devices, markers, calibration
+pairs). For a LiDAR-camera pair the generated pipeline is:
 
 1. **aruco_locator_node**: Detects ArUco markers in camera images
 2. **lidar_board_detector**: Detects calibration boards in point clouds
-3. **synchronizer**: Synchronizes detections from both sensors using timestamps
-4. **extrinsic_solver**: Solves camera-LiDAR extrinsic transformation parameters
-5. **pointcloud_image_overlay**: Visualizes calibration results using Rerun
+3. **lidar_to_camera_solver**: Synchronizes both detection streams (via `lctk_sync` /
+   Conflux) and solves the camera-LiDAR extrinsic transformation, in `continuous` (default) or
+   `manual` (multi-pose buffered) mode
+4. **pointcloud_image_overlay** (optional, `enable_overlay:=true`): Visualizes calibration
+   results using Rerun
+
+A LiDAR-LiDAR pair instead generates a **lidar_to_lidar_solver** node consuming both
+`lidar_board_detector` outputs.
 
 ## Example Usage
 
 ### Basic Usage
 
 ```bash
-ros2 launch calib_launch calibration_pipeline.launch.yaml \
-    camera_topic:=/my_camera/image_raw \
-    pointcloud_topic:=/my_lidar/pointcloud \
-    aruco_config_file:=/path/to/aruco_pattern.json5 \
-    board_config_file:=/path/to/board_detector.json5 \
-    debug_mode:=true
+ros2 launch lctk_launch calibrate.launch.py \
+    config_file:=/path/to/your_config.yaml
 ```
 
-### With Configuration Files
+`config_file` is a YAML document describing sensor topics/frames, calibration markers (each
+naming a Target Definition + Detector Tuning preset), calibration pairs, and a required `sync:`
+section. See `config/examples/sample_data.yaml` for a complete example and the "Configuration
+Format" section of the repo root `CLAUDE.md` for the full schema.
+
+### With Debug Logging and RViz
 
 ```bash
-# Provide configuration files for ArUco and board detection
-ros2 launch calib_launch calibration_pipeline.launch.yaml \
-    aruco_config_file:=$PWD/config/aruco_pattern.json5 \
-    board_config_file:=$PWD/config/board_detector.json5 \
-```
-
-### Real-world Example with ZED Camera and Velodyne LiDAR
-
-```bash
-# Complete calibration setup for ZED + Velodyne
-ros2 launch calib_launch calibration_pipeline.launch.yaml \
-    camera_topic:=/zed/zed_node/left/image_rect_color \
-    camera_info_topic:=/zed/zed_node/left/camera_info \
-    pointcloud_topic:=/velodyne_points \
+ros2 launch lctk_launch calibrate.launch.py \
+    config_file:=/path/to/your_config.yaml \
     debug_mode:=true \
-    sync_window_ms:=100 \
-    min_distance:=2.0 \
-    max_distance:=20.0
+    log_level:=debug \
+    enable_rviz:=true
 ```
 
+### Two-LiDAR Example
+
+```bash
+ros2 launch lctk_launch calibrate.launch.py \
+    config_file:=$(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/two_lidar.yaml
+```
+
+Equivalently, via the justfile: `just calibrate /path/to/your_config.yaml` (see the repo root
+`README.md`).
 
 ## Launch Arguments
 
-### calibration_pipeline.launch.yaml
+### calibrate.launch.py
 
-| Argument            | Default               | Description                                                                    |
-|---------------------|-----------------------|--------------------------------------------------------------------------------|
-| `camera_topic`      | `/camera/image_raw`   | Input camera image topic                                                       |
-| `camera_info_topic` | `/camera/camera_info` | Input camera info topic (provides camera intrinsics and distortion parameters) |
-| `pointcloud_topic`  | `/lidar/pointcloud`   | Input point cloud topic                                                        |
-| `aruco_config_file` | `""`                  | Path to ArUco pattern JSON5 config                                             |
-| `board_config_file` | `""`                  | Path to board detector JSON5 config                                            |
-| `debug_mode`        | `false`               | Enable debug logging and visualization                                         |
-| `sync_window_ms`    | `50`                  | Synchronization window size (milliseconds)                                     |
-| `max_distance`      | `10.0`                | Maximum point cloud distance filter (meters)                                   |
-| `min_distance`      | `1.0`                 | Minimum point cloud distance filter (meters)                                   |
+| Argument         | Default      | Description                                                                 |
+|------------------|--------------|------------------------------------------------------------------------------|
+| `config_file`    | (required)   | Path to the YAML calibration config                                         |
+| `debug_mode`     | `false`      | Enable debug topics                                                         |
+| `log_level`      | `info`       | ROS log level (debug/info/warn/error/fatal)                                 |
+| `mode`           | `offline`    | Transport QoS: `offline` (RELIABLE, recorded data) or `realtime` (BEST_EFFORT, live) |
+| `enable_rviz`    | `true`       | Launch RViz alongside the pipeline                                          |
+| `rviz_config`    | `config/rviz/calibration.rviz` | Path to RViz config file                                  |
+| `solver_mode`    | `continuous` | `continuous` (latest-pair auto-solve) or `manual` (multi-pose buffer)       |
+| `enable_overlay` | `false`      | Launch `pointcloud_image_overlay` for visual verification (one per pair)    |
+| `enable_judge`   | `false`      | Launch the calibration quality judge (one per pair)                         |
 
+(The `just calibrate` / `just demo` recipes pass their own defaults for several of these — see
+the repo root `README.md`'s "Configuration Variables" section — which differ from the launch
+file's own defaults above.)
+
+The old XML arguments `aruco_config_file:=` and `board_config_file:=` no longer exist on any
+maintained launch path; per-marker config is now supplied inside `config_file`'s YAML via
+`target_config` and `detector_config`.
 
 ## Output Topics
 
-The pipeline publishes the following topics:
+Topics are namespaced per generated node, e.g. for the pair `(top_lidar, front_center)`:
 
 - `/calibration/aruco_locator/aruco_detections` - ArUco marker detections
-- `/calibration/lidar_board_detector/board_detections` - Board detections
-- `/calibration/synchronizer/synchronized_detections` - Synchronized detection pairs
-- `/calibration/synchronizer/synchronized_pointcloud` - Synchronized point clouds
-- `/calibration/synchronizer/synchronized_image` - Synchronized images
-- `/calibration/extrinsic_solver/extrinsic_transform` - Camera-LiDAR transform
+- `/calibration/lidar_board_detector/calibration_board_detections` - Board detections
+- `/calibration/<lidar>_<camera>/extrinsic_transform` - Camera-LiDAR transform, published by
+  `lidar_to_camera_solver`
+- `/calibration/pointcloud_overlay` - Rerun visualization, published by
+  `pointcloud_image_overlay` when `enable_overlay:=true`
 
 ## Visualization
 

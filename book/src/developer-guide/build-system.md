@@ -51,8 +51,9 @@ LCTK/
 │   └── ...
 ├── rust/                   # Pure Rust libraries
 │   ├── aruco-detector/
-│   ├── hollow-board-detector/
-│   ├── pnp-solver/
+│   ├── calibration-target/          # Target Definitions: geometry, identity
+│   ├── calibration-target-detector/ # Pose estimation against a Target Definition
+│   ├── board-cluster-detector/
 │   └── ...
 ├── build/                  # Build artifacts (generated)
 ├── install/                # Install directory (generated)
@@ -108,7 +109,7 @@ colcon build \
 
 ```bash
 # Run tests for a specific library
-cargo test -p hollow-board-detector
+cargo test -p calibration-target-detector
 
 # Run all tests with nextest
 cargo nextest run --config build/ros2_cargo_config.toml

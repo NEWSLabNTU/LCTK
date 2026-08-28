@@ -639,9 +639,10 @@ fn test_small_rotation_handling() {
 /// `CutoutIcpEvidence` reports only the *final* `iteration_count` and the
 /// structured `termination` reason a hypothesis stopped for. So this test asks
 /// the same underlying question a different way: given enough iterations, does
-/// the loop ever actually stop via `IcpTermination::StablePose` (`termination_count
-/// > 100` in the private state machine) rather than always hitting the iteration
-/// cap or the (here, unreachable) good-fit exit first?
+/// the loop ever actually stop via `IcpTermination::StablePose` (which the
+/// private state machine reaches at `termination_count > 100`) rather than
+/// always hitting the iteration cap or the (here, unreachable) good-fit exit
+/// first?
 ///
 /// **Why this matters beyond this crate.** The deleted file measured, by
 /// instrumenting the private iterator directly, that the per-step pose weight on

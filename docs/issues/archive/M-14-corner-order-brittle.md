@@ -1,13 +1,21 @@
 # M-14 · Board origin-corner is disambiguated by gravity, and corner order is duplicated in two languages with no cross-check
 
 - **Severity:** Medium
-- **Area:** lidar_board_detector, hollow-board-config, advanced_extrinsic_solver
-- **Status:** Fixed (2026-08-15)
-- **Verified:** Yes (confirmed against live source, 2026-07-12)
+- **Area:** lidar_board_detector, calibration-target, advanced_extrinsic_solver
+- **Status:** Partially fixed (2026-07-13) — silent case now warns + NaN panics fixed; robust origin disambiguation remains
+- **Verified:** Yes (confirmed against live source, 2026-07-12); pointer to the Rust geometry
+  crate repaired 2026-08-28 after W5-E2 (`21142ac`) deleted `rust/hollow-board-config` — see the
+  dated note at the bottom of this file
 - **Location:**
   - `ros/lidar_board_detector/src/main.rs:1341-1397` (post-ICP origin-corner fixup)
-  - `rust/hollow-board-config/src/lib.rs:123-151` (`BoardModel::multi_marker_corners`)
-  - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1234-1288` (`_compute_multi_marker_corners`, a Python re-implementation of the above)
+  - `rust/calibration-target/src/lib.rs:150-179` (`CalibrationTarget::compute_marker_corners_by_id`,
+    the successor to the deleted `hollow-board-config`'s `BoardModel::multi_marker_corners`)
+  - `ros/advanced_extrinsic_solver/advanced_extrinsic_solver/main.py:1234-1288`
+    (`_compute_multi_marker_corners`, a Python re-implementation of the above) — **note:**
+    `ros/advanced_extrinsic_solver` itself no longer exists; it was renamed to
+    `ros/lidar_to_camera_solver` in `ecba23c`, well before this phase. That rename is a
+    pre-existing dangling reference outside this packet's scope (W5-E1/E2); left unrepaired here,
+    flagged for a future pass
 
 ## Problem
 
@@ -31,7 +39,9 @@ solution by whatever poses were correct.
 
 ### 2. Corner order is defined twice, in two languages, and never verified
 
-`BoardModel::multi_marker_corners` (Rust, `hollow-board-config/src/lib.rs:123-151`) emits each
+`BoardModel::multi_marker_corners` (Rust, originally `hollow-board-config/src/lib.rs:123-151`, now
+`CalibrationTarget::compute_marker_corners_by_id` at
+`calibration-target/src/lib.rs:150-179` — deleted-crate pointer repaired 2026-08-28) emits each
 marker's 4 corners in the order `[right, top, left, bottom]`, intended to line up with OpenCV
 `detectMarkers`' `TL, TR, BR, BL`. `_compute_multi_marker_corners` (Python,
 `advanced_extrinsic_solver/main.py:1234-1288`) reimplements the same layout independently.
@@ -59,7 +69,7 @@ overlay.
   orientation disagree by more than a tolerance. This turns a silent 90° error into a rejected
   detection.
 - **Delete the Python re-implementation.** Export the corner layout once (from the Rust
-  `hollow-board-config`, or from the JSON5 config), and have the solver read it — or at least
+  `calibration-target`, or from the JSON5 config), and have the solver read it — or at least
   add a test that asserts the two implementations agree corner-for-corner.
 - Once [H-09](./H-09-no-extrinsic-quality-metric.md) lands, a per-pose reprojection residual
   makes a permuted pose trivially detectable, and [M-12](./M-12-no-robust-estimation-or-refinement.md)
@@ -133,6 +143,15 @@ Two things improved for this issue specifically:
   against the same golden — from `ros/advanced_extrinsic_solver/test/` — is now a small, checkable
   job. It replaces the ad-hoc `tmp/test_m14_corner_impls_agree.py`, which only proved the two Python
   copies agreed with *each other*, not with the Rust model.
+
+  **2026-08-28:** `rust/hollow-board-config` (and its `tests/marker_layout_golden.rs`) was deleted
+  in W5-E2 (`21142ac`). The same assertion now lives in
+  `rust/calibration-target/tests/geometry_contract.rs::both_targets_match_shared_marker_world_golden`,
+  reading the same golden, relocated to `fixtures/targets/marker_corners_world.golden.json` with a
+  generator at `fixtures/targets/generate_marker_corners_world.py`. The cross-language seam this
+  bullet describes is unchanged in kind; see [H-11](./H-11-camera-solvers-stale-board-frame.md) for
+  the current list of that golden's consumers (H-11 also carries the correction that
+  `ros/advanced_extrinsic_solver` no longer exists under that name).
 
 Part 1 (robust origin disambiguation) is unchanged and still needs board captures near 45° roll.
 The ambiguity warning's *explanation* was also corrected in passing: it had named a diamond-mounted

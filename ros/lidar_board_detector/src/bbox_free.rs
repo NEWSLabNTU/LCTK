@@ -344,7 +344,7 @@ mod tests {
         let bf = cfg.into_bbox_free();
         assert_eq!(bf.method, ForegroundMethod::BackgroundSubtraction);
         assert_eq!(bf.voxel, 0.05);
-        // Production operating point — NOT the BoardConfig serde defaults.
+        // Production operating point — NOT the DetectorTuning serde defaults.
         assert_eq!(bf.board.flatness_rms_max, 0.045);
         assert_eq!(bf.board.stance_floor, 0.9);
         assert!(bf.board.isolation);

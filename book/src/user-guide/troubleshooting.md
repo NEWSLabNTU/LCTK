@@ -59,7 +59,7 @@ ros2 topic hz /sensing/camera/front_center/image_raw
 
 **Common fixes:**
 - Improve lighting (avoid glare and shadows)
-- Verify marker IDs match config file (`aruco_pattern.json5`)
+- Verify marker IDs match your Target Definition (`config/targets/<target>.json5`, `fiducial.marker_ids`)
 - Check camera_info is valid (not all zeros)
 - Clean marker surfaces
 - Ensure markers are flat and undistorted
@@ -72,15 +72,20 @@ ros2 topic hz /sensing/lidar/top/pointcloud_raw
 ```
 
 **Common fixes:**
-1. **Adjust bounding box** in `config/board/bbox.json5`:
+1. **Adjust bounding box** (only applies when the Detector Tuning preset selects
+   `detection_mode: "bbox"`) in the `bbox_config` file, e.g. `config/board/bbox.json5`:
    ```json5
    {
-     "center": [3.0, 0.0, 0.0],  // Board 3m in front
-     "size": [6.0, 6.0, 3.0]     // Large search area
+     "pose": {
+       "translation": [3.0, 0.0, 0.0],   // Board 3m in front
+       "rotation": [0.0, 0.0, 0.0, 1.0]  // No tilt
+     },
+     "size_xyz": [6.0, 6.0, 3.0]          // Large search area
    }
    ```
 
-2. **Increase RANSAC iterations** in `board_detector.json5`:
+2. **Increase RANSAC iterations** in the marker's Detector Tuning preset (e.g.
+   `config/board/hollow_1000/velodyne.json5`):
    ```json5
    "plane_ransac_max_iterations": 5000  // From default 2000
    ```
@@ -124,14 +129,16 @@ ros2 topic hz /sensing/lidar/top/pointcloud_raw
 
 3. **Verify board geometry:**
    - Measure physical board dimensions
-   - Update `board_detector.json5` if dimensions changed
-   - Check hole positions and diameters
+   - Update the Target Definition (`config/targets/<target>.json5`) if dimensions changed —
+     board geometry lives there, not in the Detector Tuning preset
+   - Check cutout (hole) positions and radii under `plate.surface.circular_cutouts`
 
 ### 4. Performance Issues
 
 **Slow detection (>2 seconds per frame):**
 ```bash
-# Reduce ICP iterations in board_detector.json5
+# Reduce ICP iterations in the marker's Detector Tuning preset
+# (e.g. config/board/hollow_1000/velodyne.json5)
 "max_icp_iterations": 5  # From default 10
 
 # Check CPU usage
@@ -176,7 +183,7 @@ ros2 topic hz /calibration_transform
 ### Enable Debug Mode
 
 ```bash
-ros2 launch lctk_launch lidar_camera_calibration.launch.xml debug_mode:=true
+just debug_mode=true calibrate /path/to/your_config.yaml
 ```
 
 Debug topics show intermediate steps:

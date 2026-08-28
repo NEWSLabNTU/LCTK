@@ -1,4 +1,4 @@
-# M-24 · `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback
+# M-27 · `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback
 
 - **Severity:** Medium
 - **Area:** lctk_launch / config/examples

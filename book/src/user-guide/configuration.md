@@ -26,19 +26,82 @@ distortion_coefficients:
 - `cx, cy`: Principal point (usually image center)
 - `k1-k3, p1-p2`: Distortion coefficients
 
-### 2. Board Detector Configuration
+### 2. Calibration Target Configuration
 
-**Location:** `config/board/board_detector.json5`
+Calibration configuration is split across two files with different jobs — do not mix them:
 
-Adjust these if detection fails:
+- **Target Definition** (`config/targets/<target>.json5`) — the physical truth: plate geometry,
+  cutout layout, fiducial (ArUco) marker IDs and placement. This is what you edit if you build a
+  *different physical board*.
+- **Detector Tuning** (`config/board/<target>/<sensor>.json5`) — sensor-specific, geometry-free
+  parameters: RANSAC/ICP knobs, the sensor's up-axis convention, and (for `bbox` mode only) which
+  crop box to use. This is what you edit if detection fails on a given sensor but the physical
+  board hasn't changed.
+
+#### Target Definition
+
+**Location:** `config/targets/hollow_1000_aruco_4_v1.json5` (the shipped 1000 mm perforated
+target; `config/targets/solid_600_aruco_1_v1.json5` is the shipped 600 mm solid target)
 
 ```json5
 {
-  // Board geometry — must match the physical plate
-  "board_width": "1000mm",        // edge length of the square plate
-  "hole_radius": "150mm",
-  "hole_center_shift": "200mm",   // hole offset from the centre, along the plate's EDGES
+  schema_version: 1,
+  target_id: "hollow_1000_aruco_4",
+  revision: 1,
+  board_frame_convention: "corner_aligned_plate_center_v1",
 
+  plate: {
+    side: "1000mm",               // edge length of the square plate
+    surface: {
+      kind: "perforated",
+      circular_cutouts: [
+        // cutout centre (x, y from the plate centre) and radius
+        { center: { x: "282.842712mm", y: "0mm" }, radius: "150mm" },
+        { center: { x: "0mm", y: "282.842712mm" }, radius: "150mm" },
+        { center: { x: "-282.842712mm", y: "0mm" }, radius: "150mm" },
+      ],
+    },
+  },
+
+  fiducial: {
+    kind: "square_aruco_grid",
+    dictionary: "DICT_5X5_1000",
+    marker_ids: [696, 64, 306, 195],
+    paper_side: "500mm",
+    paper_center: {
+      toward_left_corner: "0mm",
+      toward_top_corner: "-353.553391mm",
+    },
+    outer_border: "10mm",
+    cells_per_side: 2,
+    marker_fill_ratio: 0.8,
+    border_bits: 1,
+  },
+
+  lidar_orientation_reference: {
+    kind: "asymmetric_cutouts",
+  },
+}
+```
+
+**Must match your physical board.** The cutout centres are measured along the plate's
+**diagonals** here (unlike the older convention this superseded, which stated a single symmetric
+shift along the plate's edges); each `circular_cutouts` entry is independent, so an asymmetric
+board is representable too. `fiducial.paper_center` is the offset of the printed sheet's centre
+from the plate's centre, resolved the same way. This file is read both by the detector (via
+`target_config`) and by `aruco_generator_node` when printing the pattern.
+
+#### Detector Tuning
+
+**Location:** `config/board/hollow_1000/velodyne.json5` (per-target, per-sensor; e.g.
+`config/board/hollow_1000/seyond.json5`, `config/board/solid_600/velodyne.json5`)
+
+Adjust these if detection fails on a given sensor. Geometry keys (`board_width`, `hole_radius`,
+`hole_center_shift`, `side_m`, …) do **not** belong here any more — they were removed from
+Detector Tuning entirely and now live only in the Target Definition above:
+
+```json5
+{
   // RANSAC plane fitting
   "plane_ransac_max_iterations": 2000,    // Increase if board not detected
   "plane_ransac_inlier_threshold": 0.05,  // Meters (5cm tolerance)
@@ -47,26 +110,19 @@ Adjust these if detection fails:
   "sensor_up_axis": "z",                  // "x" | "y" | "z" — which sensor axis is up
   "initial_inplane_rotation_deg": 0.0,    // leave at 0.0; see below
 
-  // ICP pose refinement
-  "max_icp_iterations": 10,               // Usually sufficient
-  "icp_rejection_threshold": 0.030,       // Meters (3cm outlier threshold)
+  // ICP pose refinement (values as shipped in hollow_1000/velodyne.json5)
+  "max_icp_iterations": 100,              // Seyond preset ships 50
+  "icp_rejection_threshold": 0.005,       // Max accepted per-iteration ICP loss
 
-  // Bounding box (ROI filter)
-  "bbox_center": [2.0, 0.0, 0.0],        // Meters from sensor
-  "bbox_size": [4.0, 4.0, 2.0]           // Width, depth, height
+  "detection_mode": "bbox_free"           // "bbox" (Rust-level default) | "bbox_free" (shipped default)
 }
 ```
 
 **When to adjust:**
-- **Board too far/close:** Change `bbox_center` and `bbox_size`
+- **Board too far/close (bbox mode only):** Change the referenced `bbox_config`'s `pose` and
+  `size_xyz` (see Bounding Box below)
 - **Noisy point clouds:** Increase `plane_ransac_max_iterations`
 - **False detections:** Decrease `plane_ransac_inlier_threshold`
-
-`hole_center_shift` is measured along the plate's **edges**, as it is
-stamped on the plate. Because the board model's axes run corner to corner,
-the hole centres come out at `hole_center_shift × √2` from the plate
-centre — 283 mm for the shipped 200 mm — which is the number you will see
-in RViz.
 
 #### `sensor_up_axis` and `initial_inplane_rotation_deg`
 
@@ -95,37 +151,37 @@ These two seed the ICP; they do not tune it.
 
 #### Crop-box-free detection (optional)
 
-By default the detector crops to a bounding box (`detection_mode: "bbox"`).
-To detect the board **without** a bounding box, set `detection_mode:
-"bbox_free"` and add a `bbox_free` block to the same file:
+At the Rust type level, an omitted `detection_mode` defaults to `"bbox"`; in practice every
+shipped Detector Tuning preset selects `"bbox_free"` except
+`config/board/hollow_1000/velodyne_bbox.json5`, the one bbox-mode preset. Crop-box-free keys are
+**flat, top-level fields in the same tuning file** (not a nested `bbox_free` block) — geometry
+keys like `side_m` are no longer accepted here at all; board shape comes from the Target
+Definition instead. This mirrors the shipped
+`config/board/hollow_1000/velodyne.json5`:
 
 ```json5
 {
   // ... RANSAC/ICP keys above ...
-  "detection_mode": "bbox_free",   // "bbox" (default) | "bbox_free"
-  "bbox_free": {
-    // "background_subtraction" (fast, needs warmup) | "plane_strip" (slower, no warmup)
-    "foreground_method": "background_subtraction",
-    "voxel": 0.05,                 // internal downsample edge (m)
-    "board": {                     // board shape/size gates (production operating point)
-      "side_m": 1.0,
-      "up_axis": [0.0, 0.0, 1.0],
-      "cluster_min_points": 30,
-      "flatness_rms_max": 0.045,
-      "stance_floor": 0.9,
-      "isolation": true
-      // ... plus side_tol, cell_m, vertical_gap_deg, square_icp_residual_max, isolation_max_density
-    },
-    "background": {
-      "dilation_radius": 1,
-      "warmup_frames": 20          // board-FREE frames to observe before detecting
-    }
-  }
+  "detection_mode": "bbox_free",        // "bbox" (type-level default) | "bbox_free" (shipped default)
+
+  // "background_subtraction" (fast, needs warmup) | "plane_strip" (slower, no warmup)
+  "foreground_method": "background_subtraction",
+  "bbf_voxel": 0.05,                    // internal downsample edge (m)
+  "bg_dilation_radius": 1,
+  "bg_warmup_frames": 20,               // board-FREE frames to observe before detecting
+
+  // Board shape/size gates (production operating point)
+  "up_axis": [0.0, 0.0, 1.0],
+  "cluster_min_points": 20,
+  "flatness_rms_max": 0.045,
+  "stance_floor": 0.9,
+  "isolation": true
+  // ... plus side_tol, cell_m, vertical_gap_deg, square_icp_residual_max, isolation_max_density
 }
 ```
 
 **`background_subtraction` warmup:** start the node with the scene **empty**
-(no board). It observes `warmup_frames` clouds to learn the static
+(no board). It observes `bg_warmup_frames` clouds to learn the static
 background, then begins detecting. Walk the board in afterward. To
 re-learn the background at runtime (e.g. after moving the rig):
 
@@ -133,65 +189,62 @@ re-learn the background at runtime (e.g. after moving the rig):
 ros2 service call /lidar_board_detector/reset_background std_srvs/srv/Empty
 ```
 
-> **Note:** the `bbox_free.board` values must be the production operating
+> **Note:** these board-shape-gate values must be the production operating
 > point spelled out explicitly (`flatness_rms_max: 0.045`, `stance_floor:
 > 0.9`, `isolation: true`) — the library's own defaults are looser and are
 > not the tuned values.
 
-### 3. ArUco Pattern Configuration
+### 3. ArUco Detector Tuning
 
-**Location:** `config/aruco/aruco_pattern.json5`
+**Location:** `config/aruco/aruco_detector.json5`
 
-Defines the markers on your calibration board:
+The printed sheet's marker IDs, dictionary, size, and placement on the plate
+(`fiducial.*` and `fiducial.paper_center`) are part of the **Target
+Definition** — see the `fiducial` block under Target Definition above, not
+this file. This file is purely about how the *detector* finds markers that
+are already printed: corner refinement and adaptive thresholding. It has no
+business describing a piece of paper, so it carries no geometry.
 
 ```json5
 {
-  "marker_ids": [696, 64, 306, 195],  // x-major order by (x, y) on the sheet
-  "dictionary": "DICT_5X5_1000",      // ArUco dictionary used
-  "board_size": "500mm",              // printed sheet, including its white margin
-  "board_border_size": "10mm",        // white border around the marker grid
-  "num_squares_per_side": 2,          // 2x2 grid (the only supported layout)
-  "marker_square_size_ratio": 0.8,    // marker size as a fraction of its square
-  "border_bits": 1,
+    "corner_refinement": {
+        // NONE | SUBPIX | CONTOUR | APRILTAG
+        "method": "SUBPIX",
+        "win_size": 5,          // half-width of the SUBPIX search window, in pixels
+        "max_iterations": 30,
+        "min_accuracy": 0.01,
+    },
 
-  // Where the sheet is glued on the plate: the offset of the PAPER's centre
-  // from the PLATE's centre, resolved along the plate's two diagonals.
-  "paper_placement": {
-    "toward_left_corner": "0mm",
-    "toward_top_corner": "-353.5533905932738mm"
-  }
+    // Adaptive-threshold sweep used to find marker candidates.
+    "adaptive_thresh": {
+        "win_size_min": 13,
+        "win_size_max": 33,
+        "win_size_step": 10,
+    },
 }
 ```
 
-**Must match your physical board** (marker IDs, sizes, and where the sheet
-sits on the plate).
+Optional per-marker in the calibration config's `aruco_detector_config` key; when omitted it
+defaults to this same file.
 
-This file describes the *printed sheet*; `aruco_detector.json5` describes
-how the detector finds it (corner refinement, adaptive thresholding). Only
-this one is read by `aruco_generator_node` when printing the pattern.
-
-`paper_placement` is optional; when absent, the code falls back to the
-sheet's origin corner sitting on the plate's **bottom** corner. The shipped
-values **are** the measured placement of the board this repository
-calibrates against — confirmed against the physical hardware: the 500 mm
-sheet sits in the plate's lower quarter, with its top corner exactly at the
-plate centre. That is why the up-diagonal offset equals
-`(paper_size - board_width) / sqrt(2)`; the arithmetic reproduces the
-measurement rather than substituting for it. Do not "correct" these toward a
-centred sheet — that moves every marker corner and breaks the camera solve.
-
-If your board is built differently, measure yours and state it here.
+**Must match your physical board:** the marker IDs, sheet size, and where the sheet sits on the
+plate are stated in the Target Definition, not here. If your board is built differently, measure
+yours and state it in `config/targets/<your-target>.json5`.
 
 ### 4. Bounding Box (ROI) Configuration
 
-**Location:** `config/board/bbox.json5`
+**Location:** `config/board/bbox.json5` — only used when a Detector Tuning preset selects
+`detection_mode: "bbox"` (referenced via that preset's `bbox_config`)
 
 Defines where to look for the calibration board:
 
 ```json5
 {
-  "center": [2.0, 0.0, 0.0],  // [x, y, z] in meters from sensor
-  "size": [4.0, 4.0, 2.0]     // [width, depth, height] in meters
+  "pose": {
+    "translation": [2.0, 0.0, 0.0],        // [x, y, z] in meters from sensor
+    "rotation": [0.0, 0.0, 0.0, 1.0]       // quaternion [x, y, z, w]; identity = no tilt
+  },
+  "size_xyz": [4.0, 4.0, 2.0]              // [width, depth, height] in meters
 }
 ```
 
@@ -201,17 +254,18 @@ Visualize the bounding box in RViz (debug mode) to ensure it covers the board.
 
 ### Change Detection ROI
 
-If the board is in a different location:
+If the board is in a different location, when using a `bbox`-mode Detector Tuning preset:
 
-1. Edit `config/board/bbox.json5`
-2. Set `center` to board's approximate position
-3. Set `size` large enough to cover board movement
+1. Edit the referenced `bbox_config` file (e.g. `config/board/bbox.json5`)
+2. Set `pose.translation` to the board's approximate position, and `pose.rotation` if the box
+   needs to be tilted
+3. Set `size_xyz` large enough to cover board movement
 4. Restart calibration
 
 ### Enable Debug Visualization
 
 ```bash
-ros2 launch lctk_launch lidar_camera_calibration.launch.xml debug_mode:=true
+just debug_mode=true calibrate /path/to/your_config.yaml
 ```
 
 Debug topics show intermediate detection steps in RViz.
@@ -220,19 +274,24 @@ Debug topics show intermediate detection steps in RViz.
 
 **Board not detected:**
 - Increase `plane_ransac_max_iterations` (e.g., 5000)
-- Increase `bbox_size` to search wider area
+- Increase `size_xyz` in the `bbox_config` file to search a wider area (bbox mode only)
 - Check that board is in sensor range (3-8 meters works best)
 
 **Too many false detections:**
 - Decrease `plane_ransac_inlier_threshold` (e.g., 0.03)
-- Tighten `bbox_size` to focus on expected area
+- Tighten `size_xyz` in the `bbox_config` file to focus on the expected area (bbox mode only)
 
 ### Use Custom Data Files
 
+Calibration is config-driven: point a YAML config's device topics at your own data, then run it
+against your recording.
+
 ```bash
-ros2 launch lctk_launch lidar_camera_calibration.launch.xml \
-    pcap_file:=/path/to/your/lidar.pcap \
-    video_file:=/path/to/your/camera.mp4
+# Terminal 1: play your recording
+ros2 bag play /path/to/your_data.bag
+
+# Terminal 2: run the config-driven pipeline
+just calibrate /path/to/your_config.yaml
 ```
 
 ## Configuration File Locations
@@ -240,21 +299,22 @@ ros2 launch lctk_launch lidar_camera_calibration.launch.xml \
 | File | Purpose | Required For |
 |------|---------|-------------|
 | `camera_info.yaml` | Camera intrinsics | LiDAR-Camera |
-| `board_detector.json5` | Board detection params | All calibrations |
-| `aruco_pattern.json5` | ArUco marker layout | LiDAR-Camera |
-| `bbox.json5` | Detection region | All calibrations |
-| `multi_wayside.yaml` | Multi-LiDAR settings | Multi-LiDAR |
+| `config/targets/<target>.json5` | Target Definition: physical plate/cutout/fiducial geometry | All calibrations |
+| `config/board/<target>/<sensor>.json5` | Detector Tuning: sensor-specific ICP/RANSAC params | All calibrations |
+| `config/aruco/aruco_detector.json5` | ArUco detector tuning (corner refinement, threshold) | LiDAR-Camera |
+| `bbox.json5` | Detection region (only when `detection_mode: "bbox"`) | bbox-mode calibrations |
 
 ## Advanced: Multi-LiDAR Configuration
 
-**Location:** `config/multi_wayside.yaml`
+> **Note:** `config/multi_wayside.yaml` (referenced here previously) does not exist; the
+> multi-LiDAR / LiDAR-to-LiDAR configuration surface is under active revision in a parallel
+> work item as of this writing (see `docs/issues/` for the current M-1x/M-2x tracker entries on
+> `lidar_to_lidar_solver`). Not corrected further here to avoid documenting a moving target —
+> check `ros/lidar_to_lidar_solver/README.md` and `ros/lctk_launch/launch/calibrate.launch.py`
+> for the current state.
 
-Key parameter:
-```yaml
-same_face_mode: true  # Both LiDARs see same side of board
-```
-
-Set to `false` if LiDARs see opposite sides (applies 180° correction).
+`same_face_mode` (both LiDARs see the same side of the board vs. opposite sides, applying a 180°
+correction) is a `lidar_to_lidar_solver` ROS parameter, not a standalone config file.
 
 ## Next Steps
 

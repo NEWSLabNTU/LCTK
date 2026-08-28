@@ -25,7 +25,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-11](./H-11-camera-solvers-stale-board-frame.md) | High | Camera solvers still use the old edge-aligned board frame → extrinsic wrong by 45°, half of it silently | 🔴 |
 | [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
 | [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
-| [H-14](./H-14-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
+| [H-15](./H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
 | [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
@@ -48,8 +48,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) | Medium | Board model's axes run along edges while every accessor names a diamond → `initial_inplane_rotation_deg: 45.0` mandatory | 🟢 |
 | [M-21](./M-21-icp-stable-pose-exit-unreachable.md) | Medium | ICP's "stable pose" exit needs ~5× more iterations than any preset allows → `icp_pose_weight_threshold` is inert | 🔴 |
 | [M-22](./archive/M-22-root-cargo-patch-block-single-source.md) | Medium | Root `.cargo/config.toml` copied from one package → clean clone cannot build at all | 🟢 |
-| [M-23](./M-23-two-lidar-example-topics-unreachable.md) | Medium | `two_lidar.yaml` names topics no in-repo data source ever publishes | 🔴 |
-| [M-24](./M-24-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🔴 |
+| [M-26](./M-26-two-lidar-example-topics-unreachable.md) | Medium | `two_lidar.yaml` names topics no in-repo data source ever publishes | 🔴 |
+| [M-27](./M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
@@ -75,7 +75,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-23](./L-23-debug-mode-parameter-never-read.md) | Low | `debug_mode` declared by both solvers, read by neither | 🔴 |
 | [L-24](./archive/L-24-board-geometry-import-test-egl-stdout.md) | Low | Board-geometry import test rejects unrelated Jetson EGL stdout | 🟢 |
 | [L-25](./L-25-fresh-machine-bringup-deps-missing.md) | Low | `setup.sh` installs none of the tools `just test` and `just lint` need | 🔴 |
-| [L-26](./L-26-extrinsic-solver-launch-xml-missing-target-config.md) | Low | `extrinsic_solver_node.launch.xml` (lidar_to_camera_solver) never passes `target_config` → node can't start | 🔴 |
+| [L-30](./archive/L-30-extrinsic-solver-launch-xml-missing-target-config.md) | Low | `extrinsic_solver_node.launch.xml` (lidar_to_camera_solver) never passes `target_config` → node can't start | 🟢 |
+| [L-31](./L-31-plane-estimator-orphaned-crate.md) | Low | `rust/plane-estimator` is a live workspace member with zero consumers | 🔴 |
 
 ## Three headline gaps
 

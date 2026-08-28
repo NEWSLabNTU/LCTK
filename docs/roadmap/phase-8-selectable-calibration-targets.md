@@ -35,7 +35,7 @@ Updated 2026-08-28. Packet status changes land here with each accepted review ga
 | W5-C | Complete | Generated graph and identity routing (`1884b3d`, `eb58770`), graph invariants, `7839cf1` |
 | W5-D | Complete | Maintained-example cutover and first solid example, `24224c8` |
 | W5-E1 | Complete | Legacy schema removed from nodes, parser, launch and config, `fc512e8` |
-| W5-E2 | Complete | Facade crates deleted, coverage migrated, `21142ac`; H-14 ICP sign fix, `fcf9f06` |
+| W5-E2 | Complete | Facade crates deleted, coverage migrated, `21142ac`; H-15 ICP sign fix, `fcf9f06` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
@@ -187,8 +187,8 @@ tests), `just lint-py`, and `git diff --check`. The dangling-symlink build failu
 recurred exactly as predicted after deleting four config files, and cleared the same way.
 
 L-19 closed as a side effect: the parser guard that made `aruco_config` mandatory for LiDAR-only
-markers is gone along with the field. Three findings surfaced during the packet were filed as M-23,
-M-24 and L-26, and M-16 gained an update recording that later evidence contradicts its "never run
+markers is gone along with the field. Three findings surfaced during the packet were filed as M-26,
+M-27 and L-30, and M-16 gained an update recording that later evidence contradicts its "never run
 end-to-end" text without settling it. One documentation debt is left for W5-E3/W6-A:
 `ros/lctk_launch/README.md`, `ros/lctk_launch/config/README.md` and
 `ros/lidar_board_detector/README.md` still document a retired XML launch interface and now point at
@@ -216,7 +216,7 @@ standing instruction not to re-baseline from implementation output previously ha
 obeyed. The ported generator reproduces the committed golden to 5.8e-16 m from stdlib and json5
 alone.
 
-**Migrating the ICP suite exposed [H-14](../issues/H-14-perforated-icp-applies-correction-backwards.md),
+**Migrating the ICP suite exposed [H-15](../issues/H-15-perforated-icp-applies-correction-backwards.md),
 a shipped defect: the perforated ICP applied its Kabsch correction backwards, so every iteration
 moved the board pose away from the observed points.** It dated from W3-C and came from a naming trap
 -- the old crate's correspondence tuples were `(sensor, model)` but its unzipped variables were

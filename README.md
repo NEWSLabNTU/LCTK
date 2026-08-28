@@ -273,10 +273,14 @@ All calibration parameters and settings are stored in configuration files:
 ```bash
 # Configuration file locations
 ros/lctk_launch/config/
-├── board/              # Calibration board parameters
-│   └── board_detector.json5    # ICP and RANSAC settings
-├── aruco/              # ArUco marker patterns
-│   └── aruco_5x5_*.yaml        # Marker definitions
+├── targets/            # Target Definitions: physical plate geometry, cutouts,
+│   │                   # fiducial layout (the geometric truth)
+│   └── hollow_1000_aruco_4_v1.json5
+├── board/              # Detector Tuning presets: sensor-specific, geometry-free
+│   └── hollow_1000/
+│       └── velodyne.json5      # ICP and RANSAC settings
+├── aruco/              # ArUco detector tuning (corner refinement, adaptive threshold)
+│   └── aruco_detector.json5
 └── camera/             # Camera calibration
     └── front_center_camera_info.yaml         # Camera intrinsic parameters
 ```
