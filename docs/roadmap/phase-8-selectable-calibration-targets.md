@@ -7,7 +7,7 @@
 
 ## Current implementation state
 
-Updated 2026-08-27. Packet status changes land here with each accepted review gate.
+Updated 2026-08-28. Packet status changes land here with each accepted review gate.
 
 | Packet | State | Evidence / commit |
 |---|---|---|
@@ -33,18 +33,19 @@ Updated 2026-08-27. Packet status changes land here with each accepted review ga
 | W5-A | Complete | Selectable launch schema parser, `42a7934` |
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
 | W5-C | Complete | Generated graph and identity routing (`1884b3d`, `eb58770`), graph invariants, `7839cf1` |
+| W5-D | Complete | Maintained-example cutover and first solid example, `24224c8` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W5-D (maintained-example cutover), which depends on W5-B and W5-C. W5-C
-was the last packet Wave 4 blocked; it has now routed the new `target_config`/`detector_config`
+Active dependency path: W5-E1 (remove the ROS/config compatibility aliases), which W5-D has now
+unblocked. W5-C was the last packet Wave 4 blocked; it routed the new `target_config`/`detector_config`
 fields through the generated launch graph for every node that carries them (W4-C only added the
-identity routes required to keep the maintained legacy graph functional while gates activate).
-W5-E1 through W6-A remain pending behind W5-D. W7-B requires real rosbag evidence and is not
-headlessly closeable.
+identity routes required to keep the maintained legacy graph functional while gates activate), and
+W5-D has now put every maintained example on those fields. W5-E2 through W6-A remain pending behind
+W5-E1. W7-B requires real rosbag evidence and is not headlessly closeable.
 
 Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
 `just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
@@ -73,9 +74,10 @@ values for one shared target. Beyond that, the new-schema LiDAR-camera solver's
 `lidar_target_identity`/`camera_target_identity` remaps resolve, by exact string equality, to the
 actual namespaces `generate_nodes` gave its own detector and locator, not to an independently
 recomputed string; and every maintained example under `config/examples/` (parametrized off disk, so
-a future example is covered automatically) generates a graph carrying only legacy configuration
-keys, with the zero-locator/zero-solver case (`two_lidar.yaml`) checked explicitly rather than
-passing vacuously, and an empty parametrization failing at import rather than collecting no test.
+a future example is covered automatically) generated, at that time, a graph carrying only legacy
+configuration keys — W5-D has since inverted that assertion, keeping the same disk parametrization,
+the same explicit handling of the zero-locator/zero-solver case (`two_lidar.yaml`) rather than a
+vacuous pass, and the same import-time failure on an empty parametrization.
 The `ros/lctk_launch` suite is 82 tests, 74 before this packet. W5-C's gate passed with
 `just build` (17 ROS packages), `just test` (317 Rust and 374 Python tests, 361 before this
 packet), `just lint-py`, and `git diff --check`.
@@ -84,8 +86,9 @@ packet), `just lint-py`, and `git diff --check`.
 `calibrate.launch.py`, because `target_config` and `detector_config` are resolved from the config
 file's marker section inside `generate_nodes` rather than from top-level launch arguments. Its
 forwarding list (`debug_mode`, `log_level`, `mode`, `enable_rviz`, `solver_mode`, `enable_overlay`,
-`enable_judge`) and its hardcoded `config_file:=sample_data.yaml` — a legacy example until W5-D —
-remain correct against the new routing.
+`enable_judge`) and its hardcoded `config_file:=sample_data.yaml` remain correct against the new
+routing, and stayed correct through W5-D: that packet changed what `sample_data.yaml` contains, not
+its path, so the demo now runs the new schema without `demo.launch.py` changing at all.
 
 Two launch-layer changes landed outside any packet while W5-C was closing, both prerequisites for
 the solid example W5-D adds. `079b983` stops `config_parser` demanding `bbox_config`: the board
@@ -98,10 +101,55 @@ QoS alone; the window is a judgement about how far the target moves between a ca
 LiDAR sweep, which live-versus-recorded cannot answer. Every example kept its existing values, so
 neither change retunes anything. The same commit deletes the unread `config/detection_sync.yaml`.
 
-Open question for W5-D: `seyond_left.yaml` and `seyond_right.yaml` now declare
-`queue_size: 100`/`drop_policy: reject_new`, matching what `mode=offline` gave them before. If
-those rigs are driven live rather than replayed, they want a small queue and `drop_oldest` instead.
-That is a retune, so it was left for whoever knows the rigs.
+W5-D settled that packet's open question about the seyond configs: both keep
+`queue_size: 100`/`drop_policy: reject_new`. The evidence is in the files themselves — each opens by
+listing *rosbag* topics and by telling the reader how to republish a compressed image stream from a
+bag — so they are replay configs, and `reject_new` is the policy that loses no recorded data. The
+live-rig variant remains real: a rig driven from live sensors wants a small queue and `drop_oldest`,
+which is a retune for whoever drives one, not a default to guess at here.
+
+W5-D put every maintained example on `target_config`/`detector_config`, so no maintained launch
+depends on a compatibility parameter any more — which is the precondition W5-E1 was waiting on. The
+cutover retunes nothing: each example keeps the operating point it ran under, and the seyond examples
+move to `hollow_1000/seyond.json5`, which carries `board_detector_seyond.json5`'s values verbatim.
+`two_lidar.yaml` keeps its two different operating points by giving `top_lidar` the marker-level
+velodyne preset and overriding `front_lidar` to the seyond one, which is also the first maintained
+demonstration of a per-LiDAR `detector_config`. Every dropped `bbox_config` belonged to a `bbox_free`
+preset that never read it.
+
+`sample_data.yaml` is the one example that could not simply take an existing preset. It has always
+run `board_detector.json5`, which selects `detection_mode: bbox` and genuinely reads `bbox.json5`,
+and there was no bbox-mode preset under `config/board/hollow_1000/`. Pointing it at the bbox_free
+preset would have flipped the Stage-1 path of exactly the calibration route
+[M-17](../issues/M-17-initial-pose-rewrite-unverified-bbox-path.md) records as never measured, so
+`hollow_1000/velodyne_bbox.json5` copies that template minus the four geometry keys the Target
+Definition now owns. `test_hollow_presets_preserve_the_current_sensor_operating_values` compares the
+two files key by key and refuses any key the template lacks, because "only geometry was removed" is
+the entire claim and one changed number would be a silent retune of the shipped demo.
+
+`solid_600_handheld.yaml` is the first maintained example selecting the solid target. No recording
+for it is in the repo and none is needed: it names topics, so data can arrive later without a config
+change. Its header records what the values cannot: the `solid_600/velodyne` preset is experimental
+rather than field-validated; the intended recording is a hand-held board moved slowly over tens of
+seconds, which the spec names as the intended evidence source rather than a defect; the recording
+must open with at least 20 board-absent frames (~2 s at 10 Hz) or `bg_warmup_frames` never finalizes
+the background; and `sync.tolerance_ms` is 50 rather than 100 because a moving board makes a
+mis-paired camera frame and LiDAR sweep *wrong*, not merely noisy. That 50 ms is stated intent, not a
+measurement — it is to be confirmed on a first replay against the `pair skew last=/max=` figures
+`DetectionPairSource` logs, and the file says so rather than implying a tuned value.
+
+The maintained examples had also been serving as the legacy schema's test fixtures, so that coverage
+moved into `tmp_path` configs the tests write themselves — including the per-LiDAR `board_config`
+override, whose only exercise anywhere had been the old `two_lidar.yaml`, and which W5-E1 will delete
+a packet from now. The `ros/lctk_launch` suite is 90 tests, 82 before this packet. W5-D's gate passed
+with `just build` (17 ROS packages), `just test` (317 Rust and 400 Python tests, 374 before this
+packet), `just lint-py`, and `git diff --check`.
+
+One environment note, not a code finding: `just build` first failed with `error: can't copy
+'build/lctk_launch/config/detection_sync.yaml': doesn't exist or not a regular file`. `dff2bca`
+deleted that config, but `--symlink-install` leaves the dangling symlink in `build/` behind and
+colcon then tries to copy it. `rm -rf build/lctk_launch install/lctk_launch` before `just build`
+clears it; nothing in the source tree references the file.
 
 Fresh-clone build note: a clean tree could not build until `sync-root-cargo-config.sh` learned to
 synthesise the root `[patch.crates-io]` block as the union of every per-package block (`0df4f48`).
