@@ -32,16 +32,19 @@ Updated 2026-08-27. Packet status changes land here with each accepted review ga
 | W4-Ec | Complete | Version-dispatching migrator with marker-ID gate, `41dd046` |
 | W5-A | Complete | Selectable launch schema parser, `42a7934` |
 | W5-B | Complete | Hollow/solid detector presets, `a0664db` |
+| W5-C | Complete | Generated graph and identity routing (`1884b3d`, `eb58770`), graph invariants, `7839cf1` |
 | W7-A | Complete | Evidence schema/collector reviewed; test-suite negatives added, `6143676` |
 
 W4-C/W4-D combined gate passed: final Terra audit clean, `just build` (17 ROS packages), `just test`
 (317 Rust and 301 Python tests), `just lint-py`, deterministic cache/session race tests, and
 `git diff --check`.
 
-Active dependency path: W5-C graph routing, which is the last packet Wave 4 blocked. W5-C still
-must route the new `target_config`/`detector_config` fields; W4-C only added the identity routes
-required to keep the maintained legacy graph functional while gates activate. W5-D through W6-A
-remain pending. W7-B requires real rosbag evidence and is not headlessly closeable.
+Active dependency path: W5-D (maintained-example cutover), which depends on W5-B and W5-C. W5-C
+was the last packet Wave 4 blocked; it has now routed the new `target_config`/`detector_config`
+fields through the generated launch graph for every node that carries them (W4-C only added the
+identity routes required to keep the maintained legacy graph functional while gates activate).
+W5-E1 through W6-A remain pending behind W5-D. W7-B requires real rosbag evidence and is not
+headlessly closeable.
 
 Wave 4 is complete. W4-Ec passed its gate with `just test` (317 Rust and 361 Python tests) and
 `just lint-py`: v3-to-v4 is unchanged and still writes a literal version 4, v4-to-v5 binds an
@@ -56,6 +59,26 @@ leaves no temp-file debris behind a refusal; gating stays identity-only so a one
 remains savable per the accepted spec. W7-A's collector needed no production change; its fixtures
 now declare `test_only` provenance and cover the previously untested schema negatives. ROS bag
 extraction remains deferred until diagnostic topic/message mappings stabilize.
+
+W5-C's acceptance text ("generated graph contains one locator per camera, one selected target per
+sensor and the exact identity remaps; all legacy-schema tests still use the compatibility path")
+is now proved as graph-level invariants in `test_calibrate_launch_graph.py`, on top of the
+per-node routing C1/C2 already covered: one camera paired with two LiDARs against the same marker
+still yields exactly one `aruco_locator_node`; every node touching a given sensor — including the
+two solvers a shared camera produces — names the identical `target_config`; the new-schema
+LiDAR-camera solver's `lidar_target_identity`/`camera_target_identity` remaps resolve, by exact
+string equality, to the actual namespaces `generate_nodes` gave its own detector and locator, not
+to an independently recomputed string; and every maintained example under `config/examples/`
+(parametrized off disk, so a future example is covered automatically) generates a graph carrying
+only legacy configuration keys, with the zero-locator/zero-solver case (`two_lidar.yaml`) checked
+explicitly rather than passing vacuously, and an empty parametrization fails at import rather
+than collecting no test. The `ros/lctk_launch` suite is 82 tests, 74 before this packet. `demo.launch.py` needed no change:
+neither C1 nor C2 added a `DeclareLaunchArgument` to `calibrate.launch.py` — `target_config`/
+`detector_config` are resolved from the YAML config's marker section inside `generate_nodes`, not
+from top-level launch arguments — so `demo.launch.py`'s argument-forwarding list (`debug_mode`,
+`log_level`, `mode`, `enable_rviz`, `solver_mode`, `enable_overlay`, `enable_judge`) and its
+hardcoded `config_file:=sample_data.yaml` (a legacy example, until W5-D) remain exactly correct
+against the new routing.
 
 Fresh-clone build note: a clean tree could not build until `sync-root-cargo-config.sh` learned to
 synthesise the root `[patch.crates-io]` block as the union of every per-package block (`0df4f48`).
