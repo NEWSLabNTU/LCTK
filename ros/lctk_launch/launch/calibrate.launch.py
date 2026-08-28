@@ -56,52 +56,6 @@ def _identity_topic_for_detection(detection_topic: str) -> str:
     return f"{prefix}/target_identity"
 
 
-def _uses_target_definition(node) -> bool:
-    """Report whether a generated node's marker used the new Target Definition
-    schema (target_config/detector_config), rather than the legacy
-    board_config/aruco_config schema.
-
-    Works for any of the three node dataclasses that carry an `aruco_config`
-    field -- `LidarBoardDetectorNode`, `ArucoLocatorNode`,
-    `LidarCameraSolverNode` (W5-C pieces C1/C2/C3 respectively) -- because
-    `node.aruco_config is None` is a sound signal for all three, though not
-    an obvious one:
-
-    - `_parse_new_marker` in config_parser.py sets `aruco_config=None` on the
-      `Marker` (config_parser.py:392), which propagates unchanged into every
-      node dataclass built from that marker.
-    - `aruco_config` is *optional in the YAML* even for a legacy marker
-      (`config.get("aruco_config")`, config_parser.py:408), so on its own a
-      legacy marker's `aruco_config` could also be `None` -- which would make
-      this signal ambiguous.
-    - What removes the ambiguity is that a legacy marker (`marker_type is not
-      None`) missing `aruco_config` is refused before it ever reaches a node
-      dataclass: `_validate` raises at config_parser.py:534 (build validation
-      for `lidar_board_detector`) and again at config_parser.py:699 (the
-      camera/solver validation path). Between them, every legacy marker that
-      survives parsing has a non-None `aruco_config`.
-
-    If either of those two guards is ever relaxed, this predicate silently
-    breaks -- a legacy marker could then reach here with `aruco_config is
-    None` and be misread as "new schema".
-
-    Do NOT build this signal from `target_config` instead. `target_config`
-    is populated under BOTH schemas: `_parse_legacy_marker` in
-    config_parser.py always sets it to `LEGACY_HOLLOW_TARGET_CONFIG`, the
-    explicit hollow manifest, as a migration fallback for the legacy graph.
-    Keying on `target_config is not None` would therefore report "new
-    schema" for legacy markers too, and a generated lidar_board_detector
-    node would then receive BOTH the new target_config/detector_config pair
-    AND the legacy board_detector_file/aruco_pattern_file pair -- which
-    `select_config_source` in `ros/lidar_board_detector/src/main.rs` refuses
-    outright at startup: "target_config/detector_config and legacy
-    board_detector_file/aruco_pattern_file cannot be mixed; select one
-    source."
-    """
-
-    return node.aruco_config is None
-
-
 def generate_nodes(context, *args, **kwargs) -> list:
     """Generate nodes based on the configuration file."""
     from lctk_launch.config_parser import parse_config
@@ -191,6 +145,8 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "enable_debug": debug_mode == "true",
             "enable_icp_iteration_debug": debug_mode == "true",
             "use_best_effort_qos": use_best_effort_qos,
+            "target_config": detector.target_config,
+            "detector_config": detector.detector_config,
         }
 
         # bbox_config is optional (config_parser no longer requires it: it is
@@ -201,36 +157,6 @@ def generate_nodes(context, *args, **kwargs) -> list:
         # camera-side nodes.
         if detector.bbox_config:
             params["bbox_file"] = detector.bbox_config
-
-        uses_target_definition = _uses_target_definition(detector)
-        if uses_target_definition != (detector.detector_config is not None):
-            # config_parser guarantees these two signals agree (see
-            # `_uses_target_definition`'s docstring). If they ever disagree,
-            # a parser regression is about to hand `detector_config=None`
-            # straight into `Node(...)`, which fails deep inside
-            # launch_ros's `normalize_parameters` with a bare
-            # "TypeError: Unexpected type for parameter value None" that
-            # names neither the node nor the cause. Fail loudly here instead.
-            raise RuntimeError(
-                f"lidar_board_detector node '{detector.node_name}' has "
-                f"inconsistent schema signals: aruco_config="
-                f"{detector.aruco_config!r} (uses_target_definition="
-                f"{uses_target_definition}) but detector_config="
-                f"{detector.detector_config!r}. This indicates a config_parser "
-                "regression; the two must always agree."
-            )
-
-        if uses_target_definition:
-            # New Target Definition schema: hand the node the manifest +
-            # tuning pair and omit the legacy keys entirely. lidar_board_detector
-            # declares them `.optional()` and reads a missing key as "not
-            # supplied" -- a `None` parameter value is not the same thing and
-            # would still trip select_config_source's mixed-source refusal.
-            params["target_config"] = detector.target_config
-            params["detector_config"] = detector.detector_config
-        else:
-            params["board_detector_file"] = detector.board_config
-            params["aruco_pattern_file"] = detector.aruco_config
 
         nodes.append(
             Node(
@@ -255,26 +181,16 @@ def generate_nodes(context, *args, **kwargs) -> list:
 
         node_args = ["--ros-args", "--log-level", log_level]
 
-        # aruco_detector_config_file is mandatory under both schemas: it tunes
-        # the detector (corner refinement, adaptive threshold) independently
-        # of which schema supplies the physical marker layout below.
+        # aruco_detector_config_file tunes the detector (corner refinement,
+        # adaptive threshold) independently of target_config, which supplies
+        # the physical marker layout below.
         params = {
             "aruco_detector_config_file": locator.aruco_detector_config,
             "debug_mode": debug_mode == "true",
             "debug_overlay_enabled": debug_mode == "true",
             "use_best_effort_qos": use_best_effort_qos,
+            "target_config": locator.target_config,
         }
-
-        if _uses_target_definition(locator):
-            # New Target Definition schema: omit the legacy key entirely.
-            # aruco_locator_node declares both `target_config` and
-            # `aruco_config_file` `.optional()` and reads a missing key as
-            # "not supplied" -- a `None` parameter value is not the same
-            # thing and would still trip select_target_source's mixed-source
-            # refusal (ros/aruco_locator_node/src/main.rs).
-            params["target_config"] = locator.target_config
-        else:
-            params["aruco_config_file"] = locator.aruco_config
 
         nodes.append(
             Node(
@@ -317,20 +233,8 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "sync_tolerance_ms": sync_tolerance_ms,
             "sync_queue_size": sync_queue_size,
             "sync_drop_policy": sync_drop_policy,
+            "target_config": solver.target_config,
         }
-
-        if _uses_target_definition(solver):
-            # New Target Definition schema: omit the legacy key entirely.
-            # lidar_to_camera_solver reads both `target_config` and
-            # `aruco_config_file` as string parameters defaulting to "" and
-            # refuses to start if both are non-empty
-            # (_load_target_definition in
-            # ros/lidar_to_camera_solver/lidar_to_camera_solver/main.py) --
-            # a `None` parameter value would still fail earlier, inside
-            # launch_ros's `normalize_parameters` at Node construction time.
-            params["target_config"] = solver.target_config
-        else:
-            params["aruco_config_file"] = solver.aruco_config
 
         nodes.append(
             Node(

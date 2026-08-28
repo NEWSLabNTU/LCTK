@@ -159,31 +159,13 @@ def test_solid_presets_are_explicitly_experimental():
         assert "field-validated" in text
 
 
-def test_hollow_presets_preserve_the_current_sensor_operating_values():
-    """Every hollow_1000 preset must reproduce its pre-Phase-8 tuning file
-    exactly, except for the four physical-geometry keys that moved into the
-    target manifest -- proving Phase 8 did not silently retune a shipped
-    operating point.
-
-    hollow_1000/velodyne_bbox.json5 gets the same treatment against
-    board_detector.json5 (the bbox-mode template the shipped sample-data
-    demo has always used): every key the two files share must be equal, and
-    -- the stronger claim, since this file's whole purpose is to be a
-    geometry-free *copy* rather than a fresh tune -- the new file must
-    introduce no key that board_detector.json5 lacks.
-    """
-    legacy = {
-        "velodyne": load_json5(BOARD / "board_detector_velodyne.json5"),
-        "seyond": load_json5(BOARD / "board_detector_seyond.json5"),
-    }
-    for sensor, expected in legacy.items():
-        preset = load_json5(BOARD / "hollow_1000" / f"{sensor}.json5")
-        for key, value in expected.items():
-            if key not in REMOVED_PHYSICAL_KEYS:
-                assert preset[key] == value
-
-    board_detector = load_json5(BOARD / "board_detector.json5")
-    velodyne_bbox = load_json5(BOARD / "hollow_1000" / "velodyne_bbox.json5")
-    assert not set(velodyne_bbox) - set(board_detector)
-    for key in set(board_detector) - REMOVED_PHYSICAL_KEYS:
-        assert velodyne_bbox[key] == board_detector[key]
+# test_hollow_presets_preserve_the_current_sensor_operating_values used to live
+# here. It was the one-time proof that the Phase-8 cutover did not retune a
+# shipped operating point: it diffed config/board/hollow_1000/{velodyne,seyond}
+# .json5 against the legacy board_detector_velodyne.json5 / board_detector_
+# seyond.json5, and hollow_1000/velodyne_bbox.json5 against board_detector.json5.
+# W5-E1 deletes those legacy files, so the comparison lost its basis and the
+# test was removed along with the files it compared against rather than being
+# allowed to rot. Its evidence now lives in git history (commit a0664db for the
+# preset split, commit 24224c8 for velodyne_bbox) and in
+# docs/roadmap/phase-8-selectable-calibration-targets.md.

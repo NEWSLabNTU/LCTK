@@ -29,9 +29,6 @@ use vision_msgs::msg::{
 // Binary name for logging
 const LOGGER_NAME: &str = env!("CARGO_BIN_NAME");
 
-const LEGACY_HOLLOW_TARGET: &[u8] =
-    include_bytes!("../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5");
-
 /// The identity topic is deliberately relative: launch namespaces one locator per camera.
 const TARGET_IDENTITY_TOPIC: &str = "target_identity";
 
@@ -43,27 +40,6 @@ fn target_identity_publisher_options() -> PublisherOptions<'static> {
         ..QoSProfile::default().reliable().transient_local()
     };
     options
-}
-
-/// Resolve the temporary parameter bridge. W5-E1 removes `aruco_config_file` after maintained
-/// launch files have moved to `target_config`; the legacy path is deliberately always the known
-/// hollow target, never an attempt to infer physical geometry from a pattern-only file.
-fn select_target_source(
-    target_config: Option<&str>,
-    aruco_config_file: Option<&str>,
-) -> Result<bool> {
-    let target_config = target_config.filter(|value| !value.is_empty());
-    let aruco_config_file = aruco_config_file.filter(|value| !value.is_empty());
-    match (target_config, aruco_config_file) {
-        (Some(_), Some(_)) => {
-            bail!("target_config and legacy aruco_config_file cannot both be set; select one")
-        }
-        (Some(_), None) => Ok(false),
-        (None, Some(_)) => Ok(true),
-        (None, None) => bail!(
-            "target_config is required (or temporary legacy aruco_config_file during migration)"
-        ),
-    }
 }
 
 /// Convert aruco_locator::DetectionResult to Detection2DArray message
@@ -225,28 +201,12 @@ impl ArucoLocatorNode {
         let target_config_file = node
             .declare_parameter::<Arc<str>>("target_config")
             .optional()?
-            .get();
-        let legacy_aruco_config_file = node
-            .declare_parameter::<Arc<str>>("aruco_config_file")
-            .optional()?
-            .get();
-        let use_legacy_hollow = select_target_source(
-            target_config_file.as_deref(),
-            legacy_aruco_config_file.as_deref(),
-        )?;
+            .get()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow!("target_config is required"))?;
 
-        let target = if use_legacy_hollow {
-            log_warn!(
-                LOGGER_NAME,
-                "aruco_config_file is a temporary compatibility parameter and selects the explicit \
-                 hollow_1000_aruco_4 target; migrate to target_config before W5-E1"
-            );
-            Arc::new(Self::load_legacy_hollow_target()?)
-        } else {
-            let target_config_file = target_config_file.expect("validated above");
-            log_info!(LOGGER_NAME, "Using Target Definition: {target_config_file}");
-            Arc::new(Self::load_target(&target_config_file)?)
-        };
+        log_info!(LOGGER_NAME, "Using Target Definition: {target_config_file}");
+        let target = Arc::new(Self::load_target(&target_config_file)?);
         // The low-level detector and debug overlay still consume this legacy shape,
         // but it is derived exclusively from the immutable Target Definition.
         let aruco_pattern = Arc::new(aruco_config::MultiArucoPattern::from_target(&target)?);
@@ -506,10 +466,6 @@ impl ArucoLocatorNode {
     fn load_target(config_file: &str) -> Result<ValidatedTarget> {
         let bytes = std::fs::read(config_file)?;
         ValidatedTarget::parse_json5(&bytes)
-    }
-
-    fn load_legacy_hollow_target() -> Result<ValidatedTarget> {
-        ValidatedTarget::parse_json5(LEGACY_HOLLOW_TARGET)
     }
 
     fn identity_message(identity: &TargetIdentity) -> CalibrationTargetIdentity {
@@ -1023,24 +979,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn target_parameter_bridge_accepts_one_source_only() {
-        assert!(!select_target_source(Some("solid.json5"), None).unwrap());
-        assert!(select_target_source(None, Some("legacy-pattern.json5")).unwrap());
-        assert!(
-            select_target_source(Some("solid.json5"), Some("legacy-pattern.json5"))
-                .unwrap_err()
-                .to_string()
-                .contains("cannot both")
-        );
-        assert!(select_target_source(None, None)
-            .unwrap_err()
-            .to_string()
-            .contains("required"));
-    }
-
-    #[test]
-    fn legacy_path_is_the_explicit_hollow_target() {
-        let target = ArucoLocatorNode::load_legacy_hollow_target().unwrap();
+    fn hollow_manifest_is_the_explicit_hollow_target() {
+        let target = ValidatedTarget::parse_json5(include_bytes!(
+            "../../lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5"
+        ))
+        .unwrap();
         assert_eq!(target.target_id(), "hollow_1000_aruco_4");
         assert_eq!(target.fiducial().marker_ids, vec![696, 64, 306, 195]);
     }

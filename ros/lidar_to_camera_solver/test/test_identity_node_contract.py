@@ -290,28 +290,17 @@ def test_target_change_clears_capture_transform_and_publication_state():
     assert not solver.publishing_enabled
 
 
-def test_source_tree_legacy_hollow_target_path_uses_ros_workspace(monkeypatch):
-    """The temporary legacy bridge resolves the manifest from a source checkout."""
+def test_load_target_definition_rejects_empty_target_config_by_name():
+    """With the legacy aruco_config_file bridge gone, an empty target_config must
 
-    try:
-        from ament_index_python import packages
-    except ImportError:
-        packages = None
-    if packages is not None:
+    still fail with a clear, named error rather than falling through to an
+    opaque filesystem error from ``Path("")``.
+    """
 
-        def unavailable(_name):
-            raise LookupError("package is not indexed")
+    solver = object.__new__(LidarToCameraSolver)
 
-        monkeypatch.setattr(packages, "get_package_share_directory", unavailable)
-
-    expected = (
-        Path(__file__).resolve().parents[2]
-        / "lctk_launch"
-        / "config"
-        / "targets"
-        / "hollow_1000_aruco_4_v1.json5"
-    )
-    assert LidarToCameraSolver._legacy_hollow_target_path() == expected
+    with pytest.raises(ValueError, match="target_config is required"):
+        LidarToCameraSolver._load_target_definition(solver, "")
 
 
 def test_apply_update_rejects_stale_generation_before_repopulating_output():
