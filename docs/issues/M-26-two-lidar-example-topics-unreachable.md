@@ -42,7 +42,7 @@ data — not even in principle, since the launch recipe to produce the closest-m
 doesn't exist — short of an operator hand-remapping topics or replaying a rig bag with `ros2 bag
 play` and manual `-remap` flags.
 
-This predates the 2026-08-28 selectable-targets cutover (commit `24224c8`, "cut the maintained
+This predates the 2026-08-28 single-source-target cutover (commit `24224c8`, "cut the maintained
 examples over to selectable targets", rewrote only the `markers:` section of this file); the
 `devices.lidars.*.pointcloud_topic` values were already `/velodyne_points` / `/iv_points`
 beforehand, confirmed via `git show 24224c8^:ros/lctk_launch/config/examples/two_lidar.yaml`.

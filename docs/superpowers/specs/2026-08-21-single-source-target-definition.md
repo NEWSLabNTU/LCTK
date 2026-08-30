@@ -1,13 +1,30 @@
-# Spec: Selectable calibration targets
+# Spec: Single-source calibration target definition
 
 - **Date:** 2026-08-21
 - **Status:** Accepted
 - **Selected direction:** Keep both the existing hollow target and the new solid target behind one
   interface
-- **Decision record:** [ADR 0003](../../adr/0003-selectable-calibration-targets.md)
-- **Implementation plan:** [Phase 8](../../roadmap/phase-8-selectable-calibration-targets.md)
+- **Decision record:** [ADR 0003](../../adr/0003-single-source-target-definition.md)
+- **Implementation plan:** [Phase 8](../../roadmap/phase-8-single-source-target-definition.md)
 - **Related:** `2026-08-13-corner-aligned-board-frame.md`,
   `2026-08-14-lidar-to-camera-solver-diamond-frame.md`, H-11, L-19, M-17, M-21
+
+> **What this phase is about.** The mechanism is a **single source of truth for the
+> calibration target**: one Target Definition file states the plate geometry *and* the
+> fiducial layout, every component derives its view from that file, and a semantic hash
+> plus a fail-closed identity gate keep the derived views from drifting apart.
+>
+> Supporting two targets is the *demonstration* that the source of truth holds, not the
+> goal. This phase was originally titled "Selectable Calibration Targets", which read as
+> "replace the perforated board with a square one" — a misreading it invited more than
+> once. Nothing is replaced: the 1000 mm perforated target and the new 600 mm solid
+> target both ship, and the perforated path is the more capable of the two, because its
+> hole asymmetry resolves an in-plane orientation a plain square cannot.
+>
+> Read the packet list with that in mind. `CalibrationTargetIdentity.msg` (W0-B), the
+> semantic hash (W1-A), identity in archives (W2-C), the solver identity gates (W4-C,
+> W4-D) and the deletion of the legacy schema (W5-E1) are all about establishing and
+> enforcing one authoritative definition. None of them is about choosing.
 
 ## Status of decisions
 
@@ -705,6 +722,6 @@ Questions are resolved one at a time during the grilling session.
 
 ## Decision record
 
-[ADR 0003](../../adr/0003-selectable-calibration-targets.md) records why both targets share one
+[ADR 0003](../../adr/0003-single-source-target-definition.md) records why both targets share one
 interface, why selection is fixed per launch, and why the hollow adapter remains until the solid
 target has replacement field evidence.

@@ -168,4 +168,4 @@ def test_solid_presets_are_explicitly_experimental():
 # test was removed along with the files it compared against rather than being
 # allowed to rot. Its evidence now lives in git history (commit a0664db for the
 # preset split, commit 24224c8 for velodyne_bbox) and in
-# docs/roadmap/phase-8-selectable-calibration-targets.md.
+# docs/roadmap/phase-8-single-source-target-definition.md.

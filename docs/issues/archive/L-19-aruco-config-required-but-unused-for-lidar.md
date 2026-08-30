@@ -2,7 +2,7 @@
 
 - **Severity:** Low
 - **Area:** lctk_launch / config_parser, lidar_board_detector
-- **Status:** Fixed (2026-08-28) — W5-E1 (the selectable-calibration-targets cutover) removed the
+- **Status:** Fixed (2026-08-28) — W5-E1 (the single-source-target-definition cutover) removed the
   `aruco_config` schema key entirely; see [Resolution](#resolution-2026-08-28) below
 - **Verified:** By code trace (2026-08-11) while configuring a two-LiDAR calibration; resolution
   re-verified by code trace 2026-08-28
@@ -42,7 +42,7 @@ Alternatively, if the shared `BoardModel` is to stay as-is, document in the conf
 
 ## Resolution (2026-08-28)
 
-The selectable-calibration-targets work (W5-E1) replaced the split `board_config`/`aruco_config`
+The single-source-target-definition work (W5-E1) replaced the split `board_config`/`aruco_config`
 schema with a single required `target_config` (a Target Definition: plate, cutouts, fiducial
 layout, identity) plus `detector_config` (sensor-specific tuning only, no geometry). Verified in
 `ros/lctk_launch/lctk_launch/config_parser.py`:

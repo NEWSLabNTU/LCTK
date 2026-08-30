@@ -1,9 +1,26 @@
-# Phase 8: Selectable Calibration Targets
+# Phase 8: Single-Source Calibration Target Definition
 
 - **Status:** Headless implementation complete; field validation (W7-B) outstanding
 - **Date:** 2026-08-28
-- **Spec:** [Selectable calibration targets](../superpowers/specs/2026-08-21-selectable-calibration-targets.md)
-- **Decision:** [ADR 0003](../adr/0003-selectable-calibration-targets.md)
+- **Spec:** [Single-source calibration target definition](../superpowers/specs/2026-08-21-single-source-target-definition.md)
+- **Decision:** [ADR 0003](../adr/0003-single-source-target-definition.md)
+
+> **What this phase is about.** The mechanism is a **single source of truth for the
+> calibration target**: one Target Definition file states the plate geometry *and* the
+> fiducial layout, every component derives its view from that file, and a semantic hash
+> plus a fail-closed identity gate keep the derived views from drifting apart.
+>
+> Supporting two targets is the *demonstration* that the source of truth holds, not the
+> goal. This phase was originally titled "Selectable Calibration Targets", which read as
+> "replace the perforated board with a square one" — a misreading it invited more than
+> once. Nothing is replaced: the 1000 mm perforated target and the new 600 mm solid
+> target both ship, and the perforated path is the more capable of the two, because its
+> hole asymmetry resolves an in-plane orientation a plain square cannot.
+>
+> Read the packet list with that in mind. `CalibrationTargetIdentity.msg` (W0-B), the
+> semantic hash (W1-A), identity in archives (W2-C), the solver identity gates (W4-C,
+> W4-D) and the deletion of the legacy schema (W5-E1) are all about establishing and
+> enforcing one authoritative definition. None of them is about choosing.
 
 ## Current implementation state
 
@@ -1001,7 +1018,7 @@ thresholds. Promotion is a small separate config/docs commit per preset.
 Every dispatched packet receives:
 
 ```text
-Implement packet <ID> from docs/roadmap/phase-8-selectable-calibration-targets.md.
+Implement packet <ID> from docs/roadmap/phase-8-single-source-target-definition.md.
 Read CLAUDE.md, the accepted spec, ADR 0003, and the packet's dependencies.
 Edit only <owned paths>. Preserve unrelated/user changes.
 Do not broaden into listed adjacent issues.

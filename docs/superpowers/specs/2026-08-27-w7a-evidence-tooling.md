@@ -22,7 +22,7 @@ flowchart LR
 That keeps interval selection, identity checking, ordering, and serialization
 testable on this machine. The adapter boundary is explicit because the current
 detector diagnostics are ROS-node-specific and are still changing across the
-selectable-target migration; a future adapter must name every mapping it makes.
+single-source-target migration; a future adapter must name every mapping it makes.
 
 ## Sidecar manifest
 
