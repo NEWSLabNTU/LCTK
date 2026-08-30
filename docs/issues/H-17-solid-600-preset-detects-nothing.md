@@ -116,12 +116,52 @@ sensor produces, not from what a clean model would produce.**
    candidate formation is handing the square fit worse point sets than the data supports,
    i.e. clusters still carrying the holder or fragments. Candidate formation and the
    coverage metric both need work; fixing either alone is not enough.
-2. **Code** -- make the coverage band anisotropic, mirroring what `dbscan.rs` already
-   does for clustering (`anisotropic_scaled` widens the vertical tolerance with range).
-   A bin should only be charged as a miss if a point could physically have landed in it.
-   This is the principled fix and would also serve the perforated board at long range.
-   It changes detection outcomes, so it will move the golden parity fixtures and must be
-   sequenced with that in mind.
+2. **Anisotropic coverage band -- tried in simulation and DISPROVEN.** The idea was to
+   widen the band to the sampling pitch across each edge, so a bin is only charged when a
+   point could have landed in it. Prototyped in Python against the real clusters before
+   touching Rust, precisely so a speculative change would not disturb the parity fixtures.
+
+   It changes nothing. Measured level spacing on real board clusters is 0.037-0.044 m on
+   **both** in-plane axes, so half of it (0.019-0.022) never exceeds the fixed 0.036 band.
+   The reason is that the board is mounted diamond-wise: the fitted plane's principal axes
+   run along the plate's diagonals, so neither axis is purely vertical and both mix the
+   ~2.8 cm in-ring spacing with the ~15 cm ring gap. The prototype was verified correct on
+   synthetic ring-sampled data (0.150 vertical, 0.056 horizontal), so this is a real
+   negative result, not a broken experiment.
+
+3. **The deeper problem: the coverage term does not discriminate here, and cannot simply
+   be dropped.** Over the same clusters, split by flatness:
+
+   | | n | coverage residual, median |
+   |---|---|---|
+   | board (planar, flatness <= 0.03) | 30 | 0.684 |
+   | non-board (flatness > 0.03) | 4 | 0.553 |
+
+   Non-board scores **better** than board. The term is not separating the two; it is only
+   blocking. What actually separates them is flatness, which is already its own gate.
+
+   The geometric half tells the opposite story: `mean_outside / side` is 0.0082 median for
+   board (max 0.0276), and a 0.02 gate would admit 29 of 30. So the square model fits the
+   real geometry well.
+
+   But the coverage term **cannot just be zeroed**, because it is load-bearing for the
+   theta search, not only for gating. The module header states this: it charges for both
+   points outside the square and perimeter the square fails to reach, "so an over-large or
+   mis-rotated enclosing box is still penalized and the search has a gradient to follow."
+   Removing it leaves rotation nearly unconstrained, since an enclosing square larger than
+   the cloud is close to rotation-invariant under `mean_outside` alone.
+
+   The fix therefore has to **decouple the score that selects theta from the residual that
+   gates acceptance** -- keep coverage driving the search, gate on the geometric term plus
+   the existing flatness/extent gates. That is a change to the detector's contract and
+   deserves a deliberate decision rather than a preset tweak, which is why it stops here.
+
+### Caveat on the evidence
+
+The non-board sample is only n=4, drawn from one bag by a flatness split. The conclusion
+that coverage does not discriminate is well supported for *this* board, sensor and range;
+it should be re-measured on a mounted (non-handheld) capture and at closer range before
+being generalised.
 
 ## Why it is High
 
