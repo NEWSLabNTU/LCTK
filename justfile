@@ -20,66 +20,46 @@ default:
     @just --list
 
 # Build all ROS packages using colcon and cargo-ros2
-# The conflux packages LCTK depends on (conflux_cpp + conflux_py) are built
-# first by `build-conflux`; the rest of ros/conflux (conflux, conflux-ros2)
-# is excluded because it uses a git rclrs that conflicts with our crates.io rclrs.
-build: build-conflux
+# One colcon invocation for the whole workspace, conflux_cpp and conflux_py included.
+# Only `conflux` itself (ros/conflux/conflux_node) is excluded: it uses a git rclrs that
+# conflicts with our crates.io rclrs. colcon orders conflux_py ahead of the solvers from
+# their package.xml dependencies, so it needs no separate pass.
+build: _check-python-env
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
+    # M-18: the workspace root needs a [patch.crates-io] block or cargo re-resolves the
+    # wildcard ROS message crates and dies on the yanked sensor_msgs. colcon-cargo-ros2
+    # >= 0.5.3 writes that block into the root .cargo/config.toml itself, in which case
+    # this is a no-op; on older versions it synthesises the root config from the
+    # per-package ones. On a never-yet-built tree there is nothing to read either way --
+    # that is fine, colcon is about to create it and the post-build call picks it up.
+    ./setup/scripts/sync-root-cargo-config.sh || \
+        echo "no per-package cargo config yet; root config will be synthesised after colcon"
     # L-16 guard: colcon-cargo-ros2 generates Rust bindings once, then marks itself done
     # with build/.colcon/bindgen.lock and never re-checks its outputs. After a partial
     # clean (rm -rf build/<pkg>) the lock survives, generation is skipped, and every
     # Rust package fails with "failed to read .../rosidl_cargo/.../Cargo.toml".
-    # Drop the lock whenever any binding path pinned in .cargo/config.toml is missing.
-    if [[ -f build/.colcon/bindgen.lock ]]; then
-        while read -r path; do
-            if [[ ! -f "$path/Cargo.toml" ]]; then
-                echo "bindgen output missing ($path); removing stale bindgen.lock"
-                rm -f build/.colcon/bindgen.lock
-                break
-            fi
-        done < <(grep -oP 'path = "\K[^"]+' .cargo/config.toml)
-    fi
-    # L-29 guard: --symlink-install symlinks package data files into build/ and install/
-    # instead of copying them. When a source file is later deleted -- a launch file dropped
-    # in a rebase, say -- the symlink is left behind pointing at nothing, and the next build
-    # fails with "can't copy '<path>': doesn't exist or not a regular file". The path it
-    # names still shows up in `ls`, because a dangling symlink is a directory entry without
-    # a target, so the message reads as nonsense until you know to look for that.
-    #
-    # A broken symlink is never useful: colcon recreates the ones that should exist. Prune
-    # them before building rather than making the developer decode the error.
-    for tree in build install; do
-        if [[ -d "$tree" ]]; then
-            pruned=$(find "$tree" -xtype l -print -delete 2>/dev/null | wc -l)
-            if [[ "$pruned" -gt 0 ]]; then
-                echo "removed $pruned dangling symlink(s) under $tree/ (L-29)"
-            fi
-        fi
-    done
-
+    # Compare persistent source manifests, not mtimes, so additions, edits and
+    # deletions all invalidate the cached generated wrapper.  The helper accepts
+    # only build/<pkg>/rosidl_cargo/<same-pkg> as a deletion target.
+    ./setup/scripts/guard-rosidl-bindings.sh --check
     colcon build \
         --base-paths ros \
-        --packages-ignore conflux conflux_cpp conflux_py \
+        --packages-ignore conflux \
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         --cargo-args --profile=test-release
+    # Refresh from what colcon just wrote. Never hand-maintain this file: a *stale*
+    # root config fails the build with "Unable to update .../install/.../rust"
+    # (CLAUDE.md Known Issue 1).
+    ./setup/scripts/sync-root-cargo-config.sh
+    ./setup/scripts/guard-rosidl-bindings.sh --record
 
 # Build the conflux packages LCTK needs at runtime.
 # conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
 # solver nodes import conflux_py and fail to start without it. Only these two
 # packages are selected so the git-rclrs conflux/conflux-ros2 packages are skipped.
-build-conflux: _check-python-env
-    #!/usr/bin/env bash
-    set -eo pipefail
-    source /opt/ros/humble/setup.bash
-    colcon build \
-        --base-paths ros \
-        --packages-select conflux_cpp conflux_py \
-        --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-
 # Guard: this project runs against the SYSTEM python that ROS 2 Humble and apt's OpenCV were
 # built against. A pip `--user` install lands in ~/.local/lib/python3.10/site-packages, which
 # precedes /usr/lib/python3/dist-packages on sys.path and silently shadows the apt package.
@@ -97,32 +77,7 @@ build-conflux: _check-python-env
 #
 # Never `pip3 install --user` setuptools, numpy, or scipy on this machine.
 _check-python-env:
-    #!/usr/bin/env bash
-    set -eo pipefail
-    fail=0
-
-    for pkg in setuptools numpy scipy; do
-        location=$(python3 -c "import $pkg; print($pkg.__file__)" 2>/dev/null) || continue
-        version=$(python3 -c "import $pkg; print($pkg.__version__)" 2>/dev/null) || continue
-        if [[ "$location" != /usr/lib/python3/dist-packages/* ]]; then
-            echo "error: $pkg $version shadows the apt package that ROS 2 Humble needs." >&2
-            echo "       found: $location" >&2
-            echo "       Fix with:  pip3 uninstall -y $pkg" >&2
-            echo "" >&2
-            fail=1
-        fi
-    done
-
-    # The failure that actually bites at runtime: cv2 cannot import under a numpy it was not
-    # built against. Check it directly rather than inferring it from version numbers.
-    if ! python3 -c 'import cv2' 2>/dev/null; then
-        echo "error: 'import cv2' fails. The solver nodes import cv2 and will crash at startup." >&2
-        python3 -c 'import cv2' 2>&1 | tail -1 | sed 's/^/       /' >&2
-        echo "       Usually a pip numpy shadowing apt's; fix with:  pip3 uninstall -y numpy" >&2
-        fail=1
-    fi
-
-    [[ $fail -eq 0 ]]
+    @bash setup/scripts/check-python-env.sh
 
 # Set up development environment (install all dependencies)
 setup *args:
@@ -167,16 +122,72 @@ audit:
     source install/setup.bash
     cargo audit
 
-# Run all tests (Rust + Python)
-test:
+# Guard (M-18): prove the Rust suite can be COLLECTED before running it.
+#
+# The failure this exists to catch is silent. When the workspace root has no
+# .cargo/config.toml, cargo re-resolves the wildcard ROS message crates against
+# crates.io and aborts on the yanked sensor_msgs 4.2.3 -- it never compiles a
+# single test. That is easy to mistake for an environment hiccup and work around
+# by cd'ing into a package dir, which is exactly how the lidar_board_detector
+# tests stayed broken and unnoticed from commit 2a4fd49 until 2026-08-11.
+# `cargo nextest list` compiles every test target without running any, so a
+# non-zero test count is proof the suite is real before `just test` reports on it.
+_check-rust-tests-collectable:
     #!/usr/bin/env bash
     set -eo pipefail
-    cargo nextest run --cargo-profile test-release --no-fail-fast
+
+    if ! ./setup/scripts/sync-root-cargo-config.sh; then
+        echo "" >&2
+        echo "=====================================================================" >&2
+        echo " RUST TESTS COULD NOT BE COLLECTED: no root .cargo/config.toml" >&2
+        echo "=====================================================================" >&2
+        echo " The root config could not be synthesised (see the error above)." >&2
+        echo " Nothing was tested. Run 'just build' first." >&2
+        exit 1
+    fi
+
+    # Keep stderr OUT of $listing: cargo writes "Compiling ..."/"Finished" there, and
+    # counting those would make an empty suite look populated.
+    errlog=$(mktemp)
+    trap 'rm -f "$errlog"' EXIT
+    if ! listing=$(cargo nextest list --workspace --cargo-profile test-release 2>"$errlog"); then
+        cat "$errlog" >&2
+        echo "" >&2
+        echo "=====================================================================" >&2
+        echo " RUST TESTS COULD NOT BE COLLECTED: 'cargo nextest list' failed" >&2
+        echo "=====================================================================" >&2
+        echo " The test targets did not compile, so NO Rust test ran and none can." >&2
+        echo " This is NOT a passing suite -- see the compiler/cargo error above." >&2
+        echo "" >&2
+        echo " If it is 'sensor_msgs = \"*\" ... is yanked', the root" >&2
+        echo " .cargo/config.toml is missing or stale (M-18). Fix with: just build" >&2
+        exit 1
+    fi
+
+    count=$(grep -c '[^[:space:]]' <<<"$listing" || true)
+    if [[ "${count:-0}" -eq 0 ]]; then
+        echo "" >&2
+        echo "=====================================================================" >&2
+        echo " RUST TESTS COULD NOT BE COLLECTED: zero tests found" >&2
+        echo "=====================================================================" >&2
+        echo " 'cargo nextest list --workspace' succeeded but listed no tests." >&2
+        echo " An empty suite passes vacuously; refusing to report that as green." >&2
+        exit 1
+    fi
+    echo "rust test collection OK: $count tests"
+
+# Run all tests (Rust + Python)
+test: _check-rust-tests-collectable
+    #!/usr/bin/env bash
+    set -eo pipefail
+    ./setup/scripts/test-guard-rosidl-bindings.sh
+    cargo nextest run --workspace --cargo-profile test-release --no-fail-fast
     source install/setup.bash
-    # L-28: invoke pytest as a module. apt's python3-pytest installs the package but no
-    # `pytest` executable, so the bare form exits 127 and the Python half of the suite
-    # never ran.
-    python3 -m pytest ros/lctk_launch/test/ ros/advanced_extrinsic_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
+    # `python3 -m pytest`, not `pytest`: apt's python3-pytest installs the module and a
+    # `pytest-3` script but no bare `pytest` on PATH, so the plain name exits 127 and the
+    # Python half never runs. Same failure class as M-18 -- a suite that silently is not
+    # reached. Must be the system python3 (see _check-python-env).
+    python3 -m pytest setup/test/ ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ -v --no-header
 
 # Launch LiDAR-camera calibration (config-driven)
 lidar-camera CONFIG='seyond_left.yaml':

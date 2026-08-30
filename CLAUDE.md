@@ -9,8 +9,10 @@ LCTK (LiDAR and Camera Toolkit) is a set of libraries and tools for calibrating 
 ## Quick Start
 
 ```bash
-# Set up development environment
+# Set up development environment (scrollable selector; gates on `just` and offers to
+# install it). --status verifies every step against the machine rather than a marker.
 ./setup.sh
+./setup.sh --status
 
 # Build the project
 just build
@@ -41,6 +43,11 @@ just
   - `lctk_autoware_export/` - Exports a solved extrinsic into Autoware `sensor_kit_calibration.yaml`
   - `lctk_sample_data/` - Sample data playback (pcap + avi), plus gitignored recorded
     `bags/TWO_LIDAR_*` (two-LiDAR: VLP-32C + solid-state Falcon; see `bags/README.md`)
+  - `lctk_target/` - ROS-free validated Target Definition loader and board-local ArUco
+    geometry (`load_target`, `TargetIdentity`), shared by the solvers, `lctk_launch` and
+    `aruco_generator_node`
+  - `lctk_sync/` - `DetectionPairSource`: owns Conflux, finite-window validation, replay
+    recovery, freshness/skew checks and operator diagnosis for the maintained solvers
   - `conflux/` - Git submodule (jerry73204/conflux): message synchronizer used by all solvers
     (`conflux_cpp` builds `libconflux_ffi.so`, `conflux_py` wraps it via ctypes)
 - **`setup/`**: Development environment setup scripts
@@ -58,13 +65,18 @@ just
   ```bash
   colcon build \
       --base-paths ros \
+      --packages-ignore conflux \
       --symlink-install \
       --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       --cargo-args --profile=test-release
   ```
 - To build a single package, use: `just build` with `--packages-select <pkg>` appended manually if needed, but prefer building all packages
-- `just build` depends on `just build-conflux` (builds `conflux_cpp` + `conflux_py` first; the rest
-  of the conflux submodule is excluded because its git rclrs conflicts with our crates.io rclrs)
+- `just build` is a **single** colcon invocation covering the whole workspace,
+  `conflux_cpp` and `conflux_py` included. Only `conflux` itself
+  (`ros/conflux/conflux_node`) is excluded, because its git rclrs conflicts with our
+  crates.io rclrs. colcon orders `conflux_py` ahead of the solvers from their
+  `package.xml` dependencies, so no separate pass is needed (the old `build-conflux`
+  recipe is gone)
 - Binding generation runs once per `build/` tree, guarded by `build/.colcon/bindgen.lock` — see
   Known Issue 7 before deleting anything under `build/`
 - **Dependency updates must run inside the sourced build env** (`source /opt/ros/humble/setup.bash
@@ -85,7 +97,7 @@ just lint       # Full lint (rustfmt + clippy + ruff; clippy takes minutes)
 just lint-py    # Fast ruff-only lint
 just audit      # cargo-audit for RUSTSEC advisories (runs in the sourced build env)
 
-just lidar-camera   # Launch calibration (legacy XML launch)
+just lidar-camera   # Launch config-driven calibration (default config: seyond_left.yaml)
 just demo           # Launch demo (sample data + calibration pipeline)
 just sample-data    # Launch sample data playback
 just rviz           # Launch RViz
@@ -105,58 +117,6 @@ just serve          # Serve with live reload
 just serve-public   # Serve on 0.0.0.0
 ```
 
-## Testing Practices
-
-**A test recipe that cannot fail is worse than no recipe.** It converts "untested" into
-"believed tested", which is the more expensive state. This has bitten repeatedly, in two
-distinct shapes.
-
-**Shape 1 — the recipe runs but cannot fail.**
-
-- `just test` ended with a bare `pytest ...`. apt's `python3-pytest` installs the package but
-  no `pytest` executable, so the line exited 127 and LCTK's four Python suites — 92 tests
-  covering the config parser, the planner, pose weighting, the quality metric and the whole
-  Autoware export path — never ran through the documented entry point (L-28). Fixed by
-  invoking it as `python3 -m pytest`.
-- In the conflux submodule, `just test-cpp` echoed two lines and exited 0 while `conflux_cpp`
-  had no tests at all, and `just test-python` ran pytest-style tests through `colcon test`'s
-  unittest path, collecting 0 of 19 and exiting 0. See `ros/conflux/CLAUDE.md`.
-
-**Shape 2 — nothing runs the suite.** Harder to notice, because the recipe you *do* run is
-perfectly honest about the packages it covers.
-
-- `crates/conflux-ros2` is excluded from the cargo workspace, so no recipe ran its tests. A
-  duplicate synchronization algorithm lived there for months, covered only by tests that
-  exercised a bare `VecDeque` rather than any of the real code (H-14).
-- `calibration_judge` had no test directory at all until 2026-08-16 (M-17).
-
-### The check
-
-**When adding or changing a test recipe, break an assertion deliberately and confirm a
-non-zero exit before trusting it.** Seconds long, and it caught every instance above:
-
-```bash
-# make one assertion false, then:
-just test > /dev/null 2>&1; echo "exit=$?"   # must be non-zero
-# restore, then confirm it returns to 0
-```
-
-Two traps when checking this by hand:
-
-- **Don't read `$?` through a pipe.** `just test | grep ...; echo $?` reports grep's status, not
-  the recipe's. This produced a false "exit=0" during the L-22 work and nearly let a
-  can't-fail recipe through a second time.
-- **Clear stale results before re-checking colcon suites.** `colcon test-result` reads
-  `build/<pkg>/test_results/`, which survives across runs, so a fixed suite can still report
-  yesterday's failures. `rm -rf build/<pkg>/test_results` first. (Applies to the conflux
-  submodule's `just test-cpp`; LCTK's own suite is cargo + pytest and has no such cache.)
-
-### Adding a new package
-
-New ROS packages are not picked up automatically. Add the test directory to the `pytest`
-invocation in the `test` recipe, then run the break-an-assertion check to confirm it is
-actually wired in.
-
 ## Known Issues
 
 1. **Old .cargo/config.toml conflicts**: If build fails with `Unable to update .../install/.../rust`:
@@ -174,7 +134,7 @@ actually wired in.
    pip3 uninstall colcon-cargo colcon-ros-cargo
    ```
 
-3. **pip packages shadowing apt ones** (this has bitten four times — `just build` guards the first three):
+3. **pip packages shadowing apt ones** (this has bitten three times — `just build` now guards all three):
 
    A pip `--user` install lands in `~/.local/lib/python3.10/site-packages`, which **precedes**
    `/usr/lib/python3/dist-packages` on `sys.path` and silently shadows the apt package that ROS 2
@@ -185,20 +145,12 @@ actually wired in.
    | `error: option --editable not recognized` (kills `conflux_py` and every ament_python package) | **build** time | `pip3 uninstall -y setuptools` |
    | `ImportError: numpy.core.multiarray failed to import` (kills every solver node at startup, after a clean build) | **run** time | `pip3 uninstall -y numpy` |
    | `TypeError: 'numpy._DTypeMeta' object is not subscriptable` inside scipy (kills any test/node importing `scipy.optimize`) | **test/run** time | `pip3 uninstall -y scipy` |
-   | `ModuleNotFoundError: No module named '_pytest.scope'` raised from `anyio/pytest_plugin.py` during pytest **startup** (kills every pytest run in the workspace before a single test is collected) | **test** time | `pip3 uninstall -y anyio` |
 
    setuptools >= 80 removed the `setup.py develop --editable` step colcon uses for
    `--symlink-install`; numpy >= 2 breaks the ABI apt's `cv2` was compiled against;
-   scipy >= 1.15 requires numpy >= 1.23 while apt ships 1.21;
-   anyio >= 4.3 ships a pytest plugin that imports `_pytest.scope`, added in pytest 7 — apt ships
-   pytest 6.2.5, and plugin autoload pulls it in on *every* pytest invocation.
-   **Never `pip3 install --user` setuptools, numpy, scipy, or anyio on this machine** — and note
-   that installing *anything else* with pip can drag them in as dependencies.
-
-   **anyio was uninstalled on 2026-08-15 to unblock the conflux test suite.** It was a dependency
-   of the pip `--user` `starlette`, which is now broken. If you need starlette/fastapi back,
-   reinstall into a venv rather than `--user`; a bare `pip3 install --user anyio` re-breaks pytest
-   workspace-wide. Escape hatch without uninstalling: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest ...`.
+   scipy >= 1.15 requires numpy >= 1.23 while apt ships 1.21.
+   **Never `pip3 install --user` setuptools, numpy, or scipy on this machine** — and note that
+   installing *anything else* with pip can drag them in as dependencies.
 
 4. **ROS2 daemon issues**: Kill unresponsive daemon:
    ```bash
@@ -242,23 +194,6 @@ actually wired in.
    binding path from `.cargo/config.toml` is missing (L-16). The manual clean is still needed
    after changing/removing a `.msg`/`.srv`.
 
-8. **Dangling symlinks after a source file is deleted** (L-29, auto-guarded): `--symlink-install`
-   symlinks package data files into `build/` and `install/` rather than copying them. Delete a
-   launch file — in a rebase, say — and the symlink is left pointing at nothing, so the next build
-   fails:
-   ```
-   error: can't copy '.../build/lctk_launch/launch/<file>.launch.xml': doesn't exist or not a regular file
-   ```
-   The path it names still appears in `ls`, because a dangling symlink is a directory entry with no
-   target, which makes the message read as nonsense until you know to look for that.
-
-   `just build` now prunes broken symlinks from both trees before invoking colcon and says what it
-   removed. A broken symlink is never useful — colcon recreates the ones that should exist. If you
-   hit this on an older checkout, the manual form is:
-   ```bash
-   find build install -xtype l -delete
-   ```
-
 ## Coding Guidelines
 
 - **Temporary files**: Create temporary files and scripts in `$project/tmp/` directory, not `/tmp/`
@@ -269,11 +204,6 @@ actually wired in.
 - Don't use Pokemon exception handling (`try: except Exception: pass`)
 - Prefer functional struct initialization in Rust
 - When running sudo commands, show command to user instead of executing
-- **Never commit `Cargo.lock` churn from a build.** Building in the sourced ROS environment
-  rewrites the workspace lockfiles with this machine's generated message-crate versions and
-  `[[patch.unused]]` entries. That is local build state, not a change: `git checkout --` them
-  before committing. Real dependency updates are a separate, deliberate procedure — see
-  `docs/roadmap/phase-4-dependency-updates-and-vulns.md`
 
 ## Docs & Issue Tracking Practices
 
@@ -287,10 +217,6 @@ actually wired in.
 - Fixes land on a `fix/...` or `feat/...` branch, then `git checkout main && git merge --ff-only`
 - Multiple agents may work this repo concurrently: before starting an issue, check the tracker
   for 🟡 (in-progress) markers, and always `git fetch` + rebase before pushing
-- **Tracker state as of 2026-08-16: 71 🟢 fixed, 3 ⚪ won't-fix, 0 open.** Every finding from the
-  2026-07-09, 2026-07-12 and 2026-08-15 audits is closed. Read the archived issue before
-  re-opening one — several record *why* a fix took the shape it did, which is the part that is
-  expensive to rediscover
 
 ## ROS 2 Conventions
 
@@ -371,7 +297,12 @@ just demo mode=realtime   # For live sensors
 
 ### Performance Profiling Results
 
-Profiling conducted on sample data (2026-01-18):
+Profiling conducted on sample data (2026-01-18). These numbers predate the Phase 8 selectable-target
+detector path (Target Definition / Detector Tuning split); the new path has not yet been re-profiled
+against real data — see "Outstanding items no packet owns" in
+`docs/roadmap/phase-8-selectable-calibration-targets.md`. The numbers below were real when measured
+and are kept rather than deleted, but treat them as a baseline from the prior implementation, not a
+claim about the current one.
 
 **Throughput Comparison:**
 | Metric | Offline | Realtime | Notes |
@@ -455,8 +386,11 @@ how two differently-sampled LiDARs (a spinning VLP-32C and a solid-state Falcon,
 target while each keeps its own sensor-specific tuning; `config/examples/two_lidar.yaml` does
 exactly this.
 
-The legacy `type`/`board_config`/`aruco_config` marker keys still parse, but are scheduled for
-removal and no maintained example uses them any more.
+The legacy `type`/`board_config`/`aruco_config` marker keys (and a lidar device's `board_config`
+key) are now **retired**: `config_parser.py` raises a `ValueError` naming the offending key rather
+than parsing it, pointing at `target_config`/`detector_config` as the replacement. There is no
+automatic migration for launch YAML — replace the retired keys by hand, the same reasoning
+`detection_format.py` applies to a saved detection archive.
 
 **Physical layout and detector tuning are separate files:**
 
@@ -529,23 +463,7 @@ Buffer overflow warnings are rate-limited and logged automatically:
 
 ### LiDAR-to-LiDAR Calibration
 
-The `lidar_to_lidar_solver` Python node replaces the deprecated `multi_wayside_node` for two-LiDAR calibration. It subscribes to Detection3DArray messages from two `lidar_board_detector` nodes and computes the transform between frames.
-
-**Verified end-to-end on 2026-08-15** (M-16) against sample datasets 3 + 4: 81 solves with a
-0.304 m lateral baseline, repeatable to σ ≈ 1–9 mm in translation and ≈0.2° in rotation, which is
-inside the VLP-32C's ±3 cm range noise. Two bugs had to be fixed before it could run at all —
-`two_lidar.launch.xml` used an invalid `$(eval not loop)` substitution, and defaulted the second
-LiDAR to UDP port 2369 while both shipped pcaps are recorded on 2368, so the second sensor
-published nothing and no pair could ever synchronize.
-
-To reproduce:
-
-```bash
-# terminal 1
-ros2 launch lctk_sample_data two_lidar.launch.xml
-# terminal 2
-just two-lidar
-```
+The `lidar_to_lidar_solver` Python node replaces the deprecated `multi_wayside_node` for two-LiDAR calibration. It subscribes to Detection3DArray messages from two `lidar_board_detector` nodes and computes the transform between frames. **Note: This pipeline is not yet tested.**
 
 ### LiDAR-to-Camera Solver: Continuous Mode (Default)
 
@@ -575,10 +493,18 @@ demo`), then `just manual-solver-controller`.
 - `reset_transform` - Reset manual adjustments (re-solve from buffer)
 - `get_pose_info` - Get solved pose, current pose, and adjustment delta
 
-**Detection File Format** (version 3):
+**Detection File Format** (version 5):
 ```json
 {
-  "version": 3,
+  "version": 5,
+  "board_frame_convention": "corner_aligned_plate_center_v1",
+  "target_identity": {
+    "schema_version": 1,
+    "target_id": "hollow_1000_aruco_4",
+    "revision": 1,
+    "semantic_sha256": "<64 lowercase hex chars>",
+    "board_frame_convention": "corner_aligned_plate_center_v1"
+  },
   "num_detections": 5,
   "detections": [...],
   "transform": {
@@ -587,20 +513,46 @@ demo`), then `just manual-solver-controller`.
   }
 }
 ```
-Version 3 (H-10) persists the real ArUco corner pixels inside each 2D detection's `results`;
-v1/v2 files reload but fall back to the axis-aligned bbox — a biased (C-01) solve — and the
-loader warns loudly. `transform` is the raw solver output (`T_optical←lidar`), the input the
-Autoware exporter consumes.
+Version 5 adds the full **Target Identity** — `schema_version`, `target_id`, `revision`,
+`semantic_sha256` and `board_frame_convention` — binding the archive to the exact Target
+Definition it was captured against. A solver restores a version-5 archive only when every
+identity field exactly matches its locally selected target; a mismatch is refused, not
+silently reinterpreted.
 
-**Two directions coexist deliberately, and mixing them is the M-01 bug:**
+Version 4 (H-11) records the board-frame convention that produced the file and keeps the
+board pose's 6x6 covariance (v3 dropped it, so a reloaded buffer silently solved with
+uniform weight). It has no Target Identity and **cannot be restored** into a running
+solver's buffer — it remains useful only for migration and for `lctk_autoware_export`,
+which needs the solved transform's provenance, not a target match. Version 3 (H-10)
+persists the real ArUco corner pixels inside each 2D detection's `results`. `transform` is
+the raw solver output (`T_optical←lidar`), the input the Autoware exporter consumes. A
+saved calibration also carries its own quality record (H-09).
 
-| surface | direction | why |
-|---------|-----------|-----|
-| `extrinsic_transform` topic and `/tf_static` | `T_lidar←camera` (TF semantics) | what every tf2 consumer expects |
-| dump JSON `rvec`/`tvec` | `T_optical←lidar` (raw solvePnP) | what the exporter and any `projectPoints` call need |
+**Versions below the current one are rejected, not migrated on load** — a v3 file cannot
+say which board frame produced it, and a v4 file cannot say which target it was captured
+against; reinterpreting either would make the file's meaning depend on the build that
+opened it. Reaching version 5 from a version-3 file takes two explicit hops, each naming a
+different operator claim:
+```bash
+# 1. version 3 -> 4: name the board-frame convention the file was CAPTURED in
+ros2 run lidar_to_camera_solver migrate_detections \
+    --input ~/detections-v3.json --output ~/detections-v4.json \
+    --assume-convention corner_aligned_plate_center_v1
 
-`pointcloud_image_overlay` consumes the *topic* and inverts it back internally. If you add a
-consumer, decide which of the two it needs — do not assume the topic is the PnP output. A saved calibration also carries its own quality record (H-09).
+# 2. version 4 -> 5: bind the Target Definition the file was CAPTURED against
+ros2 run lidar_to_camera_solver migrate_detections \
+    --input ~/detections-v4.json --output ~/detections-v5.json \
+    --target-config /path/to/config/targets/<target>.json5
+```
+A file already at version 4 needs only the second hop. Migrating straight from version 3 to
+5 in one invocation is refused — each hop is a distinct claim the operator must make
+explicitly. Step 2 checks that every marker ID the archive actually observed belongs to the
+selected target (catching an obviously wrong selection), but it cannot prove which physical
+target produced the recording; that remains the operator's assertion.
+
+`lctk_autoware_export` accepts both version 4 and version 5 archives — it needs the solved
+transform, not a target match — and enforces the same board-frame-convention gate, because
+it writes into a file that reaches a vehicle.
 
 ### Interactive Solver Controller
 
@@ -641,12 +593,8 @@ ros2 run lctk_autoware_export export \
 ```
 
 **Frame pitfalls the exporter owns — do not "fix" these ad hoc elsewhere:**
-- Input is the dump JSON's raw `rvec`/`tvec` (`T_optical←lidar`). This is still the right
-  input — but no longer because the topic is broken. M-01 is **fixed**: since 2026-08-15 the
-  `extrinsic_transform` topic follows ROS TF semantics, so `frame_id=lidar, child=camera` is
-  genuinely the camera's pose in lidar coordinates. Use the dump JSON because the exporter's
-  arithmetic is written against the raw solve and is tested that way; if you ever switch it to
-  the topic, invert first
+- Input is the dump JSON's raw `rvec`/`tvec` (`T_optical←lidar`), **never** the TF topic —
+  the published frame labels are inverted (issue M-01)
 - Autoware's `camera*/camera_link` is the REP-103 body frame (x forward); PnP solves the
   optical frame (z forward). Fixed rotation `T(camera_link→optical)` = RPY `(-π/2, 0, -π/2)`
 - The exported entry is `T(kit→camera_link) = T(kit→lidar) · inv(solve) · inv(optical-in-link)`,
