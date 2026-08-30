@@ -6,7 +6,7 @@
 - **Verified:** 2026-08-13 — source walkthrough; detection empirically fails at `0.0` and works at `45.0`. Fix validated 2026-08-14 against the `TWO_LIDAR_*` recordings on the real Seyond + Velodyne rig
 - **Analysis:** [`2026-08-12-initial-board-pose-inplane-rotation.md`](../../superpowers/specs/2026-08-12-initial-board-pose-inplane-rotation.md)
 - **Implementation spec:** [`2026-08-13-corner-aligned-board-frame.md`](../../superpowers/specs/2026-08-13-corner-aligned-board-frame.md)
-- **Related:** [M-14](../M-14-corner-order-brittle.md), [M-17](../M-17-initial-pose-rewrite-unverified-bbox-path.md), [M-19](../M-19-debug-assertions-compiled-out.md), [L-21 (archived)](./L-21-find-correspondences-duplicated-tests-wrong-body.md), [H-11](../H-11-camera-solvers-stale-board-frame.md)
+- **Related:** [M-14](../archive/M-14-corner-order-brittle.md), [M-17](../M-17-initial-pose-rewrite-unverified-bbox-path.md), [M-19](../M-19-debug-assertions-compiled-out.md), [L-21 (archived)](./L-21-find-correspondences-duplicated-tests-wrong-body.md), [H-11](../H-11-camera-solvers-stale-board-frame.md)
 
 ## Problem
 

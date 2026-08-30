@@ -26,8 +26,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
 | [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
 | [H-15](./H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
-| [H-16](./H-16-main-fixes-unported-after-rebase.md) | High | main's M-01, M-12 and M-14 fixes are not present in the Phase-8 solver | 🔴 |
-| [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
+| [H-16](./archive/H-16-main-fixes-unported-after-rebase.md) | High | main's M-01 and M-12 fixes were not present in the Phase-8 solver | 🟢 |
+| [M-01](./archive/M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟢 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
 | [M-04](./archive/M-04-l2l-wallclock-staleness.md) | Medium | L2L staleness check uses wall-clock vs sensor stamp | 🟢 |
@@ -40,7 +40,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-11](./archive/M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🟢 |
 | [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🟢 |
 | [M-13](./archive/M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🟢 |
-| [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
+| [M-14](./archive/M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟢 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
 | [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
 | [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md) | Medium | Shared initial-pose rewrite leaves the bbox path's "unchanged" guarantee unproven | 🔴 |
