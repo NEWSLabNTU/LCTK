@@ -77,6 +77,7 @@ setup/.markers/
 # put in git history, and re-derivable only by re-recording. See
 # ros/lctk_sample_data/bags/README.md for the expected layout.
 /ros/lctk_sample_data/bags/
+
 # Play log
 /play_log
 
