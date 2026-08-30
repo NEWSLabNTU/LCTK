@@ -16,6 +16,7 @@
   <depend>conflux_py</depend>
   <depend>python3-opencv</depend>
   <depend>python3-numpy</depend>
+  <depend>python3-scipy</depend>
   <depend>python3-yaml</depend>
   <depend>python3-json5</depend>
 
