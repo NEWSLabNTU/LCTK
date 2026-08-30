@@ -5,7 +5,7 @@
 # then gives its SHA-256 and the exact UTF-8 canonical bytes between `canonical_bytes:`
 # and `---`.  Rust and Python must compare both bytes and digest exactly.
 target_id=solid_600_aruco_1
-semantic_sha256=9cf600d684a91ab3df6fdf549d71460fc6fc5321a037d5f61393bbd9db5b04fb
+semantic_sha256=33aa34dd5d77758000b040a6d2236b6d5e33a21096d5d33a3ea9b7b8c30bca23
 canonical_bytes:
 schema_version:1:1
 target_id:17:solid_600_aruco_1
@@ -15,7 +15,7 @@ plate.side_um:6:600000
 plate.surface.kind:5:solid
 fiducial.kind:17:square_aruco_grid
 fiducial.dictionary:13:DICT_5X5_1000
-fiducial.marker_ids[0]:1:1
+fiducial.marker_ids[0]:2:24
 fiducial.paper_side_um:6:600000
 fiducial.paper_center.toward_left_corner_um:1:0
 fiducial.paper_center.toward_top_corner_um:1:0
@@ -58,4 +58,3 @@ fiducial.cells_per_side:1:2
 fiducial.marker_fill_ratio_f64_bits:19:4605380978949069210
 fiducial.border_bits:1:1
 lidar_orientation_reference.kind:18:asymmetric_cutouts
----

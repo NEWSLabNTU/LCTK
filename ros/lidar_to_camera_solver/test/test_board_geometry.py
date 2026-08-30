@@ -45,8 +45,8 @@ def test_target_geometry_comes_from_shared_reader():
     hollow = load_target(HOLLOW)
 
     assert solid.plate.side_um == 600_000
-    assert solid.fiducial.marker_ids == (1,)
-    assert len(solid.marker_corners_by_id[1]) == 4
+    assert solid.fiducial.marker_ids == (24,)
+    assert len(solid.marker_corners_by_id[24]) == 4
     assert hollow.plate.side_um == 1_000_000
     assert len(hollow.marker_corners_by_id) == 4
     assert "marker_size=480.0mm" in marker_geometry_summary(solid)

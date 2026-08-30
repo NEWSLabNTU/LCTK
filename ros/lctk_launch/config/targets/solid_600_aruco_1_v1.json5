@@ -13,7 +13,19 @@
   fiducial: {
     kind: "square_aruco_grid",
     dictionary: "DICT_5X5_1000",
-    marker_ids: [1],
+    // The board's printed ArUco id, verified against the physical target on 2026-08-31.
+    // Scanning every predefined OpenCV dictionary over sampled frames of the 2026-08-12
+    // capture finds exactly one marker, id 24, in DICT_5X5_*: newtype_1 52/60 frames,
+    // newtype_2 56/60, and newtype_background (board absent) none at all -- so the id
+    // travels with the board rather than being fixed in the room. All four DICT_5X5_*
+    // sizes report it because they are nested and 24 < 50; the declared _1000 is correct.
+    //
+    // This was `[1]` from c5ea52f, the commit that created the schema. It was a
+    // placeholder that never met a board, and it made the shipped solid target
+    // undetectable: the locator reported "No ArUco markers detected" on every frame.
+    //
+    // `aruco_1` in the target_id means ONE marker, not id 1, so the name still holds.
+    marker_ids: [24],
     paper_side: "600mm",
     paper_center: {
       toward_left_corner: "0mm",

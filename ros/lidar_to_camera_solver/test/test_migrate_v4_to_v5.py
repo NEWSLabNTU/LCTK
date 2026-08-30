@@ -136,7 +136,7 @@ def test_marker_id_mismatch_rejects_names_the_id_and_writes_no_output(tmp_path):
 
 
 def test_marker_id_present_on_target_migrates_successfully(tmp_path):
-    archive = _v4_archive_observing(marker_id=1)  # solid_600_aruco_1 defines ID 1
+    archive = _v4_archive_observing(marker_id=24)  # solid_600_aruco_1 defines ArUco id 24
     input_path = _write(tmp_path, "in.json", archive)
     output = tmp_path / "out.json"
 
@@ -324,7 +324,7 @@ def test_a_malformed_detection_id_rejects_and_writes_no_output(tmp_path, malform
     """A detection id this command cannot parse must reject rather than vanish
     from the marker-ID check -- silently dropping it would let a wrong target
     selection pass vacuously, defeating the one check this migration performs."""
-    archive = _v4_archive_observing(marker_id=1)
+    archive = _v4_archive_observing(marker_id=24)
     archive["detections"][0]["aruco"]["detections"][0]["id"] = malformed_id
     input_path = _write(tmp_path, "in.json", archive)
     output = tmp_path / "out.json"

@@ -443,7 +443,7 @@ def test_different_paths_with_same_target_identity_share_sensor(tmp_path):
     outer_border: "0.060m",
     paper_center: { toward_top_corner: "0mm", toward_left_corner: "0mm" },
     paper_side: "0.600m",
-    marker_ids: [1],
+    marker_ids: [24],
     dictionary: "DICT_5X5_1000",
     kind: "square_aruco_grid",
   },

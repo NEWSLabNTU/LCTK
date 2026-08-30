@@ -57,8 +57,8 @@ def test_solid_marker_is_exactly_480_mm():
     assert (
         target.fiducial.paper_side_um - 2 * target.fiducial.outer_border_um == 480_000
     )
-    assert target.fiducial.marker_ids == (1,)
-    assert len(target.marker_corners_by_id[1]) == 4
+    assert target.fiducial.marker_ids == (24,)
+    assert len(target.marker_corners_by_id[24]) == 4
 
 
 def test_hollow_manifest_preserves_four_marker_order():

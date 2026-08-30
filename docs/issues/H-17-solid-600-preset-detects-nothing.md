@@ -2,7 +2,7 @@
 
 - **Severity:** High
 - **Area:** lidar_board_detector / config/board/solid_600
-- **Status:** Open
+- **Status:** Open (root-caused; fix is a code change, see "Two candidate fixes")
 - **Found:** 2026-08-31, first run of the solid target against real sensor data
 - **Data:** `~/Downloads/new_LCTK_board/` (`newtype_background`, `newtype_1`, `newtype_2`),
   ZED + VLP-32C + Seyond, from the 2026-08-12 capture
@@ -57,6 +57,71 @@ candidate clusters survived", 54 "square fit residual exceeded
 against a 0.6 m plate (0.849 m diagonal) with flatness 0.06–0.11 versus
 `flatness_rms_max: 0.045` — correctly rejected, since they contain a person. The
 board-only cluster is not surviving as a separate candidate.
+
+## Root cause: the square-fit coverage gate is unreachable for this board and sensor
+
+Measured 2026-08-31. This is the decisive finding; the gates in the previous section are
+real but secondary, and relaxing them only moves the failure here.
+
+`square_fit.rs::coverage_residual` returns `mean_outside / side + coverage_penalty`,
+where `coverage_penalty` is the fraction of 40 perimeter bins (4 sides x 10) that hold no
+point within `BAND_FRAC * side` = **3.6 cm** for a 600 mm board.
+
+Computing that same residual over 30 real, planar board clusters from `newtype_1`:
+
+| quantity | best | median |
+|---|---|---|
+| total residual | 0.436 | 0.684 |
+| coverage penalty alone | 0.425 | 0.675 |
+
+Against `square_icp_residual_max: 0.45`, **29 of 30 clusters are rejected.** The best
+frame the sensor produced misses the gate by 0.014.
+
+The residual is almost entirely coverage penalty: `mean_outside / side` contributes about
+0.01, meaning the square model **fits the geometry well** -- the board really is a
+600 mm square where it is sampled. What fails is the demand that points appear all the
+way round the perimeter.
+
+They cannot. A VLP-32C at 7-8 m samples anisotropically: roughly **2.8 cm between points
+within a ring, but ~15 cm between rings**. A 600 mm plate is therefore crossed by only
+about four rings. The two horizontal edges fall between rings and can never hold a point
+within 3.6 cm, so ~half the bins are unfillable by construction.
+
+An adaptive band was tried and rejected: widening it to the cloud's own median
+nearest-neighbour spacing changes nothing, because that spacing (2.4-3.0 cm measured) is
+the *horizontal* one and is already smaller than the fixed band. The quantity that
+matters is the vertical ring gap.
+
+### Why this is a C-04 repeat
+
+[C-04](./archive/C-04-board-detector-gate-unreachable.md) set `icp_good_fit_threshold`
+below the sensor's noise floor, so the detector silently accepted nothing. This is the
+same shape with a different quantity: a gate placed beyond what the sensor can deliver,
+producing silence rather than an error. Both were invisible because the detector reports
+"no board selected" either way.
+
+The general lesson the tracker keeps relearning: **a gate must be set from what the
+sensor produces, not from what a clean model would produce.**
+
+### Two candidate fixes
+
+1. **Config only -- tried, and it does not work.** Raising
+   `square_icp_residual_max` to 0.75 (above the 0.684 median measured offline) still
+   accepted nothing: the node's own reported residuals are 0.752-0.950, median 0.838,
+   with 52 frames still failing this gate. Even a threshold that accepted them would be
+   meaningless, since 0.95 means almost no perimeter coverage is required at all.
+
+   The gap between the node's residuals (best 0.752) and the same metric computed offline
+   on hand-clustered board points (best 0.436) is a **second finding**: the detector's
+   candidate formation is handing the square fit worse point sets than the data supports,
+   i.e. clusters still carrying the holder or fragments. Candidate formation and the
+   coverage metric both need work; fixing either alone is not enough.
+2. **Code** -- make the coverage band anisotropic, mirroring what `dbscan.rs` already
+   does for clustering (`anisotropic_scaled` widens the vertical tolerance with range).
+   A bin should only be charged as a miss if a point could physically have landed in it.
+   This is the principled fix and would also serve the perforated board at long range.
+   It changes detection outcomes, so it will move the golden parity fixtures and must be
+   sequenced with that in mind.
 
 ## Why it is High
 

@@ -5,7 +5,7 @@
   fiducial: {
     border_bits: 1, marker_fill_ratio: 1.0, cells_per_side: 1,
     outer_border: "0.060m", paper_center: { toward_top_corner: "0m", toward_left_corner: "0.0mm" },
-    paper_side: "0.6m", marker_ids: [1], dictionary: "DICT_5X5_1000", kind: "square_aruco_grid",
+    paper_side: "0.6m", marker_ids: [24], dictionary: "DICT_5X5_1000", kind: "square_aruco_grid",
   },
   plate: { surface: { kind: "solid" }, side: "0.600m" },
   board_frame_convention: "corner_aligned_plate_center_v1",
