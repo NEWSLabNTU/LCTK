@@ -7,7 +7,9 @@ set -e
 echo "Installing network packet capture libraries..."
 
 sudo apt-get update
-sudo apt-get install -y \
+# wireshark-common asks via debconf whether non-root users may capture packets,
+# which blocks a non-interactive run forever. Accept the packaged default.
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libpcap-dev \
     libpcap0.8-dev \
     tcpdump \

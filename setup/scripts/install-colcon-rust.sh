@@ -17,8 +17,14 @@ if pip3 list 2>/dev/null | grep -qE '^colcon-ros-cargo\s'; then
     pip3 uninstall -y colcon-ros-cargo
 fi
 
-echo "Installing colcon-cargo-ros2..."
-pip3 install --user colcon-cargo-ros2
+# Version-pinned per L-09, with an env override to move the floor deliberately
+# (e.g. COLCON_CARGO_ROS2_VERSION='>=0.6.0'). A floor rather than an exact pin:
+# 0.5.3 is the first release this workspace builds against, and older versions
+# are silently wrong rather than loudly broken.
+COLCON_CARGO_ROS2_VERSION="${COLCON_CARGO_ROS2_VERSION:->=0.5.3}"
+
+echo "Installing colcon-cargo-ros2 ${COLCON_CARGO_ROS2_VERSION}..."
+pip3 install --user --upgrade "colcon-cargo-ros2${COLCON_CARGO_ROS2_VERSION}"
 
 echo "Installing play_launch..."
 pip3 install --user 'play_launch>=0.5.0'
