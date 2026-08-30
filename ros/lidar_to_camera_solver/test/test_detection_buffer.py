@@ -54,7 +54,14 @@ MARKERS = {
 }
 
 
-def make_buffer(*, minimum=2, enforce=False, camera_matrix=K):
+def make_buffer(
+    *,
+    minimum=2,
+    enforce=False,
+    camera_matrix=K,
+    reject_outliers=True,
+    mad_k=4.0,
+):
     return DetectionBuffer(
         camera_matrix=camera_matrix,
         marker_corners_by_id=MARKERS,
@@ -62,6 +69,8 @@ def make_buffer(*, minimum=2, enforce=False, camera_matrix=K):
         min_normal_spread_deg=20.0,
         min_depth_range_m=1.0,
         enforce_pose_diversity=enforce,
+        reject_outlier_poses=reject_outliers,
+        outlier_pose_mad_k=mad_k,
     )
 
 
@@ -564,3 +573,59 @@ def test_malformed_archive_is_rejected_before_any_restore():
             },
             local_identity=IDENTITY,
         )
+
+
+# --- M-12: pose-granularity outlier rejection, end to end through the buffer ---------
+#
+# The unit tests in test_pose_gating.py cover the gate itself. These cover the wiring:
+# that _derive actually consults it, re-solves on the survivors, and reports what it
+# dropped. Ported with the gate when this branch rebased onto main (H-16).
+
+
+def _fill(buffer, count, *, bad_index=None, seed=0):
+    """`count` well-spread captures; the one at `bad_index` gets a mis-placed board.
+
+    `image_position` moves where the camera sees the board without moving what the LiDAR
+    reports, which is exactly the shape of an ICP that locked onto the wrong minimum.
+    """
+    rng = np.random.default_rng(seed)
+    for index in range(count):
+        position = (0.3 * index - 0.4, 0.2 * index - 0.3, 2.5 + 0.35 * index)
+        image_position = None
+        if index == bad_index:
+            image_position = (position[0] + 0.28, position[1] - 0.22, position[2])
+        buffer.capture(
+            make_pair(
+                position=position,
+                rotation=(0.0, 0.12 * index, 0.0),
+                image_position=image_position,
+                noise_px=0.15,
+                rng=rng,
+            )
+        )
+    return buffer.snapshot()
+
+
+def test_buffer_rejects_a_mis_placed_pose_and_still_solves():
+    snapshot = _fill(make_buffer(minimum=2), 6, bad_index=3)
+
+    assert isinstance(snapshot.outcome, Solved)
+    # The capture stays in the buffer -- rejection is a solve-time decision, not a
+    # deletion, so the operator can still see and remove it. What changes is the set the
+    # solve was computed over, which the quality report records.
+    assert snapshot.frame_count == 6
+    assert snapshot.outcome.estimate.quality.n_frames == 5
+
+
+def test_buffer_keeps_every_pose_when_rejection_is_disabled():
+    snapshot = _fill(make_buffer(minimum=2, reject_outliers=False), 6, bad_index=3)
+
+    assert isinstance(snapshot.outcome, Solved)
+    assert snapshot.outcome.estimate.quality.n_frames == 6
+
+
+def test_buffer_rejects_nothing_from_a_clean_capture_set():
+    snapshot = _fill(make_buffer(minimum=2), 6, bad_index=None)
+
+    assert isinstance(snapshot.outcome, Solved)
+    assert snapshot.outcome.estimate.quality.n_frames == 6

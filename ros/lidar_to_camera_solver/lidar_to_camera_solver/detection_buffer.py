@@ -162,6 +162,81 @@ def _marker_id(value: object) -> int | None:
         return None
 
 
+def pose_reprojection_rms(
+    object_points: np.ndarray,
+    image_points: np.ndarray,
+    camera_matrix: np.ndarray,
+    rvec: np.ndarray,
+    tvec: np.ndarray,
+) -> float:
+    """RMS reprojection error, in pixels, for one placement's corners."""
+    projected, _ = cv2.projectPoints(
+        object_points, rvec, tvec, camera_matrix, np.zeros(5, dtype=np.float64)
+    )
+    error = projected.reshape(-1, 2) - image_points.reshape(-1, 2)
+    return float(np.sqrt(np.mean(np.sum(error**2, axis=1))))
+
+
+def reject_outlier_poses(
+    per_pose_object_points: Sequence[np.ndarray],
+    per_pose_image_points: Sequence[np.ndarray],
+    camera_matrix: np.ndarray,
+    rvec: np.ndarray,
+    tvec: np.ndarray,
+    *,
+    k: float = 4.0,
+    min_keep: int = 3,
+    floor_px: float = 2.0,
+) -> tuple[list[int], list[float]]:
+    """Identify poses whose reprojection error marks them as outliers (M-12).
+
+    Rejection is at **pose** granularity, never per corner. A pose's corners share one
+    rigid board transform, so when the pose is wrong all of its corners are wrong
+    *together* -- one rigid misplacement observed N times, not N independent draws.
+    Rejecting individual corners would treat correlated error as independent, which is
+    the assumption least squares already makes and already gets wrong here.
+
+    The threshold is robust by construction: ``median + k * 1.4826 * MAD`` over the
+    per-pose RMS. A mean-and-sigma rule would be inflated by the very outlier it is
+    meant to catch.
+
+    Two guards keep this from eating good data:
+
+    - ``floor_px`` -- with a tight, clean buffer the MAD is nearly zero, so any spread
+      at all would look significant. Nothing is rejected unless it also exceeds this
+      absolute floor.
+    - ``min_keep`` -- refuse to reject if too few poses would survive. An
+      under-constrained solve is worse than one contaminated pose, and pose diversity is
+      already the scarce resource (H-07).
+
+    Returns the indices to reject and the per-pose RMS for every pose, so callers can
+    log the residuals whether or not anything was rejected.
+    """
+    rms = [
+        pose_reprojection_rms(objects, images, camera_matrix, rvec, tvec)
+        for objects, images in zip(per_pose_object_points, per_pose_image_points)
+    ]
+    if len(rms) < min_keep + 1:
+        # Rejecting anything here would drop the buffer below what a solve needs.
+        return [], rms
+
+    values = np.asarray(rms, dtype=np.float64)
+    median = float(np.median(values))
+    mad = float(np.median(np.abs(values - median)))
+    threshold = max(median + k * 1.4826 * mad, median + floor_px)
+
+    candidates = [index for index, value in enumerate(rms) if value > threshold]
+
+    # Never fall below min_keep: drop the worst offenders first and stop.
+    max_rejects = max(len(rms) - min_keep, 0)
+    if len(candidates) > max_rejects:
+        candidates = sorted(candidates, key=lambda i: rms[i], reverse=True)[
+            :max_rejects
+        ]
+
+    return sorted(candidates), rms
+
+
 class DetectionBuffer:
     """Thread-safe capture collection with atomic, revision-bound solving."""
 
@@ -174,6 +249,8 @@ class DetectionBuffer:
         min_normal_spread_deg: float,
         min_depth_range_m: float,
         enforce_pose_diversity: bool,
+        reject_outlier_poses: bool = True,
+        outlier_pose_mad_k: float = 4.0,
     ) -> None:
         camera_matrix = np.asarray(camera_matrix, dtype=np.float64)
         if camera_matrix.shape != (3, 3) or not np.all(np.isfinite(camera_matrix)):
@@ -200,6 +277,10 @@ class DetectionBuffer:
         self._min_normal_spread_deg = float(min_normal_spread_deg)
         self._min_depth_range_m = float(min_depth_range_m)
         self._enforce_pose_diversity = bool(enforce_pose_diversity)
+        self._reject_outlier_poses = bool(reject_outlier_poses)
+        self._outlier_pose_mad_k = float(outlier_pose_mad_k)
+        self._rejected_pose_indices: tuple[int, ...] = ()
+        self._per_pose_rms: tuple[float, ...] = ()
         self._lock = threading.RLock()
         self._captures: tuple[_PreparedCapture, ...] = ()
         self._placements: tuple[Placement, ...] = ()
@@ -457,42 +538,70 @@ class DetectionBuffer:
                 Refused(diversity.normal_span_deg, diversity.depth_range_m),
             )
 
-        objects = np.vstack([capture.object_points for capture in captures])
-        images = np.vstack([capture.image_points for capture in captures])
         weights = self._expanded_weights(captures)
         try:
-            ok, rvec, tvec = cv2.solvePnP(
-                objects,
-                images,
-                self._camera_matrix,
-                np.zeros(5, dtype=np.float64),
-                flags=cv2.SOLVEPNP_SQPNP,
-            )
-            if not ok:
-                return placements, correspondence_count, Failed(FailureCode.PNP_FAILED)
-            if weights is None:
-                rvec, tvec = cv2.solvePnPRefineLM(
-                    objects,
-                    images,
-                    self._camera_matrix,
-                    np.zeros(5, dtype=np.float64),
-                    rvec,
-                    tvec,
-                )
-            else:
-                rvec, tvec = self._refine_weighted(objects, images, rvec, tvec, weights)
+            solved = self._solve(captures, weights)
         except (cv2.error, ValueError, np.linalg.LinAlgError) as error:
             return (
                 placements,
                 correspondence_count,
                 Failed(FailureCode.PNP_FAILED, str(error)),
             )
+        if solved is None:
+            return placements, correspondence_count, Failed(FailureCode.PNP_FAILED)
+        rvec, tvec = solved
+
+        # M-12: one bad placement corrupts the whole solve, and every corner of that
+        # placement is an outlier together. Now that there is an estimate to measure
+        # against, look at the per-pose reprojection error and re-solve without any pose
+        # that stands out. A failed retry is not fatal -- the contaminated-but-valid
+        # first estimate is better than none, so it stands.
+        self._rejected_pose_indices = ()
+        self._per_pose_rms = ()
+        if self._reject_outlier_poses:
+            rejected, per_pose_rms = reject_outlier_poses(
+                [capture.object_points for capture in captures],
+                [capture.image_points for capture in captures],
+                self._camera_matrix,
+                rvec,
+                tvec,
+                k=self._outlier_pose_mad_k,
+            )
+            self._per_pose_rms = tuple(per_pose_rms)
+            if rejected:
+                kept = tuple(
+                    capture
+                    for index, capture in enumerate(captures)
+                    if index not in set(rejected)
+                )
+                try:
+                    retried = self._solve(kept, self._expanded_weights(kept))
+                except (cv2.error, ValueError, np.linalg.LinAlgError):
+                    retried = None
+                if retried is not None:
+                    rvec, tvec = retried
+                    self._rejected_pose_indices = tuple(rejected)
+                    captures = kept
+                    placements = tuple(
+                        distinct_placements(
+                            [
+                                (capture.board.position, capture.board.orientation)
+                                for capture in captures
+                            ]
+                        )
+                    )
+                    correspondence_count = sum(
+                        len(capture.object_points) for capture in captures
+                    )
 
         try:
             quality = build_report(
                 [capture.object_points for capture in captures],
                 [capture.image_points for capture in captures],
-                poses,
+                [
+                    (capture.board.position, capture.board.orientation)
+                    for capture in captures
+                ],
                 self._camera_matrix,
                 rvec,
                 tvec,
@@ -512,6 +621,40 @@ class DetectionBuffer:
             quality=quality,
         )
         return placements, correspondence_count, Solved(estimate)
+
+    def _solve(
+        self,
+        captures: tuple[_PreparedCapture, ...],
+        weights: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """SQPnP followed by an LM polish. None when OpenCV reports failure.
+
+        Split out of `_derive` so the M-12 retry can re-run exactly the same solve on
+        the surviving placements rather than an approximation of it.
+        """
+        objects = np.vstack([capture.object_points for capture in captures])
+        images = np.vstack([capture.image_points for capture in captures])
+        ok, rvec, tvec = cv2.solvePnP(
+            objects,
+            images,
+            self._camera_matrix,
+            np.zeros(5, dtype=np.float64),
+            flags=cv2.SOLVEPNP_SQPNP,
+        )
+        if not ok:
+            return None
+        if weights is None:
+            rvec, tvec = cv2.solvePnPRefineLM(
+                objects,
+                images,
+                self._camera_matrix,
+                np.zeros(5, dtype=np.float64),
+                rvec,
+                tvec,
+            )
+        else:
+            rvec, tvec = self._refine_weighted(objects, images, rvec, tvec, weights)
+        return rvec, tvec
 
     def _expanded_weights(
         self, captures: tuple[_PreparedCapture, ...]

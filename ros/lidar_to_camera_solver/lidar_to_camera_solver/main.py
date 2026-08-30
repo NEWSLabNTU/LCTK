@@ -133,6 +133,9 @@ class LidarToCameraSolver(Node):
         self.min_normal_spread_deg = self._double_parameter("min_normal_spread_deg")
         self.min_depth_range_m = self._double_parameter("min_depth_range_m")
         self.enforce_pose_diversity = self._bool_parameter("enforce_pose_diversity")
+        # M-12: drop a placement whose reprojection error stands out, then re-solve.
+        self.reject_outlier_poses = self._bool_parameter("reject_outlier_poses")
+        self.outlier_pose_mad_k = self._double_parameter("outlier_pose_mad_k")
         self.axis_length = self._double_parameter("axis_length")
         self.axis_diameter = self._double_parameter("axis_diameter")
         use_best_effort_qos = self._bool_parameter("use_best_effort_qos")
@@ -254,6 +257,8 @@ class LidarToCameraSolver(Node):
             ("min_normal_spread_deg", 20.0),
             ("min_depth_range_m", 1.0),
             ("enforce_pose_diversity", False),
+            ("reject_outlier_poses", True),
+            ("outlier_pose_mad_k", 4.0),
             ("axis_length", 0.3),
             ("axis_diameter", 0.02),
             ("use_best_effort_qos", True),
@@ -311,6 +316,8 @@ class LidarToCameraSolver(Node):
             min_normal_spread_deg=self.min_normal_spread_deg,
             min_depth_range_m=self.min_depth_range_m,
             enforce_pose_diversity=self.enforce_pose_diversity,
+            reject_outlier_poses=self.reject_outlier_poses,
+            outlier_pose_mad_k=self.outlier_pose_mad_k,
         )
 
     def camera_info_callback(self, msg: CameraInfo):
