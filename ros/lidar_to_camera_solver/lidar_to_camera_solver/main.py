@@ -1061,6 +1061,21 @@ class LidarToCameraSolver(Node):
         self, rvec: np.ndarray, tvec: np.ndarray
     ) -> TransformStamped:
         rotation_matrix, _ = cv2.Rodrigues(rvec)
+
+        # M-01: publish with ROS TF semantics.
+        #
+        # solvePnP returns (R, t) with p_cam = R @ p_lidar + t -- that is
+        # T_camera<-lidar. A transform labelled `frame_id=lidar, child_frame_id=camera`
+        # means the *opposite* in TF: the camera's pose expressed in lidar coordinates.
+        # Publishing the raw solve under those labels points every tf2 consumer the
+        # wrong way, which is the one thing standing between this output and a correct
+        # Autoware sensor_kit_calibration.yaml.
+        #
+        # The detection archive keeps the raw rvec/tvec -- that is what the exporter
+        # consumes, and it is deliberately not touched here.
+        rotation_matrix = rotation_matrix.T
+        tvec = -rotation_matrix @ np.asarray(tvec, dtype=np.float64).reshape(3, 1)
+
         quaternion = rotation_matrix_to_quaternion(rotation_matrix)
         message = TransformStamped()
         message.header = Header()
