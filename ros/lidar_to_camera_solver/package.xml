@@ -12,6 +12,7 @@
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>vision_msgs</depend>
+  <depend>visualization_msgs</depend>
   <!-- The synchronized detection pair (conflux ownership, window policy, epoch reset,
        staleness) lives here now; this node no longer imports conflux_py itself. -->
   <depend>lctk_sync</depend>
@@ -22,6 +23,7 @@
   <depend>lctk_quality</depend>
   <depend>python3-opencv</depend>
   <depend>python3-numpy</depend>
+  <depend>python3-scipy</depend>
   <depend>python3-yaml</depend>
   <depend>python3-json5</depend>
 
