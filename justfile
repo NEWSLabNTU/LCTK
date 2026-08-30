@@ -44,6 +44,24 @@ build: _check-python-env
     # deletions all invalidate the cached generated wrapper.  The helper accepts
     # only build/<pkg>/rosidl_cargo/<same-pkg> as a deletion target.
     ./setup/scripts/guard-rosidl-bindings.sh --check
+    # L-29 guard: --symlink-install symlinks package data files into build/ and install/
+    # instead of copying them. When a source file is later deleted -- a launch file dropped
+    # in a rebase, say -- the symlink is left behind pointing at nothing, and the next build
+    # fails with "can't copy '<path>': doesn't exist or not a regular file". The path it
+    # names still shows up in `ls`, because a dangling symlink is a directory entry without
+    # a target, so the message reads as nonsense until you know to look for that.
+    #
+    # A broken symlink is never useful: colcon recreates the ones that should exist. Prune
+    # them before building rather than making the developer decode the error.
+    for tree in build install; do
+        if [[ -d "$tree" ]]; then
+            pruned=$(find "$tree" -xtype l -print -delete 2>/dev/null | wc -l)
+            if [[ "$pruned" -gt 0 ]]; then
+                echo "removed $pruned dangling symlink(s) under $tree/ (L-29)"
+            fi
+        fi
+    done
+
     colcon build \
         --base-paths ros \
         --packages-ignore conflux \
