@@ -9,8 +9,10 @@ LCTK (LiDAR and Camera Toolkit) is a set of libraries and tools for calibrating 
 ## Quick Start
 
 ```bash
-# Set up development environment
+# Set up development environment (scrollable selector; gates on `just` and offers to
+# install it). --status verifies every step against the machine rather than a marker.
 ./setup.sh
+./setup.sh --status
 
 # Build the project
 just build
@@ -63,14 +65,18 @@ just
   ```bash
   colcon build \
       --base-paths ros \
-      --packages-ignore conflux conflux_cpp conflux_py \
+      --packages-ignore conflux \
       --symlink-install \
       --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       --cargo-args --profile=test-release
   ```
 - To build a single package, use: `just build` with `--packages-select <pkg>` appended manually if needed, but prefer building all packages
-- `just build` depends on `just build-conflux` (builds `conflux_cpp` + `conflux_py` first; the rest
-  of the conflux submodule is excluded because its git rclrs conflicts with our crates.io rclrs)
+- `just build` is a **single** colcon invocation covering the whole workspace,
+  `conflux_cpp` and `conflux_py` included. Only `conflux` itself
+  (`ros/conflux/conflux_node`) is excluded, because its git rclrs conflicts with our
+  crates.io rclrs. colcon orders `conflux_py` ahead of the solvers from their
+  `package.xml` dependencies, so no separate pass is needed (the old `build-conflux`
+  recipe is gone)
 - Binding generation runs once per `build/` tree, guarded by `build/.colcon/bindgen.lock` — see
   Known Issue 7 before deleting anything under `build/`
 - **Dependency updates must run inside the sourced build env** (`source /opt/ros/humble/setup.bash
