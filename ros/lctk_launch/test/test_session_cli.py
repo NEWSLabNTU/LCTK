@@ -89,3 +89,20 @@ def test_new_refuses_to_overwrite(tmp_path, capsys):
     target = make_session(tmp_path, name="existing")
     assert main(["new", str(target), "--from", str(template)]) != 0
     assert "exists" in capsys.readouterr().err.lower()
+
+
+def test_list_reports_each_session_once_across_overlapping_roots(tmp_path, capsys):
+    """`--symlink-install` makes ./sessions/x and <share>/sessions/x the same
+    files. Listing both roots must not imply there are two of the session."""
+    # Mirror what --symlink-install actually does: a real directory in the share,
+    # with the files inside it symlinked back to the source. Symlinking the
+    # directory itself would be an easier case than the one that occurs.
+    real = make_session(tmp_path, name="rig-a")
+    mirror = tmp_path / "share" / "rig-a"
+    mirror.mkdir(parents=True)
+    (mirror / "session.yaml").symlink_to(real / "session.yaml")
+
+    assert main(["list", str(tmp_path), str(tmp_path / "share")]) == 0
+
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if "rig-a" in ln]
+    assert len(lines) == 1, f"listed {len(lines)} times: {lines}"

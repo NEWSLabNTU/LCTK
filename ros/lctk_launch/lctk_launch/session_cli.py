@@ -68,13 +68,27 @@ def _default_roots() -> list[Path]:
 
 
 def _list(directories: list[str]) -> int:
+    """List every session under the given roots, each one once.
+
+    `--symlink-install` creates a real directory in the share and symlinks the
+    files inside it, so the two default roots would otherwise report every shipped
+    session twice and imply there are two of it. Deduplicating on the resolved
+    *directory* does not collapse them -- only the manifest is a symlink -- so
+    that is what identifies a session here.
+    """
     roots = [Path(d) for d in directories] or _default_roots()
+    seen: set[Path] = set()
     for root in roots:
         if not root.is_dir():
             continue
         for child in sorted(root.iterdir()):
-            if (child / MANIFEST_NAME).is_file():
-                print(f"{child.name:40s} {child}")
+            if not (child / MANIFEST_NAME).is_file():
+                continue
+            resolved = (child / MANIFEST_NAME).resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            print(f"{child.name:40s} {child}")
     return 0
 
 

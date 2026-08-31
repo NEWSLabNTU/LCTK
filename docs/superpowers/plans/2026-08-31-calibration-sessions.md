@@ -2058,8 +2058,28 @@ git rm ros/lctk_launch/config/board/bbox.json5 \
        ros/lctk_launch/config/board/sample_data_bbox.json5
 ```
 
-Ownership was already established by grep across `ros/` and `experiments/` on 2026-08-31,
-so this is settled rather than exploratory:
+**Correction (2026-09-01): the table below was wrong when first written.** It was built from
+a grep restricted to `*.yaml`, `*.py` and `*.json5`, which missed two whole classes of user:
+`ros/lidar_board_detector/src/bbox.rs` `include_str!`s the crop boxes (so a missing file is a
+*compile* error, not a runtime one), and `experiments/board-detection-2d/README.md` documents
+`bbox-vlp.json5` / `bbox-seyond.json5` as live `--bbox` arguments for the TWO_LIDAR bags.
+Deleting on the original table would have broken `just build`.
+
+Corrected ownership, from a grep over **all** file types:
+
+| crop box | real user | disposition |
+|---|---|---|
+| `sample_data_bbox.json5` | `sample_data.yaml` | -> `sessions/sample3-hollow-velodyne/bbox.json5` |
+| `bbox-vlp.json5` | board-detection-2d benchmarks, TWO_LIDAR | -> `sessions/twolidar-vlp32-falcon/bbox_vlp32.json5` |
+| `bbox-seyond.json5` | board-detection-2d benchmarks, TWO_LIDAR | -> `sessions/twolidar-vlp32-falcon/bbox_falcon.json5` |
+| `bbox.json5` | `benchmark_noe.py`, `benchmark_e_loo.py`, `test_bbox_ref.py` — all as the *pcap* reference, which per M-29 is the wrong box | delete; repoint those three at the sample session's `bbox.json5` |
+| `bbox_v1.json5`, `bbox_2_lidar_seyond.json5`, `bbox_2_lidar_vlp32.json5` | `bbox.rs`'s own `include_str!` guard only | delete, and update the guard |
+
+The lesson is worth keeping: **a grep scoped by file extension is not an ownership proof.**
+Config in this repo is referenced from Rust, from Markdown, and from experiment code, not
+only from the YAML that launches it.
+
+The original table, retained so the correction is legible:
 
 | crop box | user |
 |---|---|
