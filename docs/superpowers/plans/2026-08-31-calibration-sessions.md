@@ -870,6 +870,12 @@ After devices are parsed, verify bag topics:
             verify_bag_topics(self._data.path, wanted)
 ```
 
+**Parse order matters.** `data:` must be parsed *before* `_parse_devices`, not beside
+`_parse_sync`. `_parse_sync` runs after the devices are built, so parsing `data` there
+would leave `self._data` as `None` exactly when `_device_topic` needs it, and every
+derived-topic test would fail for a reason that looks like a topic bug rather than an
+ordering one.
+
 - [ ] **Step 5: Run the whole launch suite**
 
 ```bash
@@ -880,6 +886,10 @@ PYTHONPATH="$PWD/ros/lctk_launch:$PYTHONPATH" \
 
 Expected: all pass, including the pre-existing tests — this task must not change how a
 plain config parses.
+
+Bag verification is covered by
+`test_a_bag_session_naming_a_topic_the_bag_lacks_is_refused_at_parse_time`, which pins the
+M-26 case at parse time rather than leaving it to a hand smoke-test.
 
 - [ ] **Step 6: Confirm the suite can actually fail**
 
