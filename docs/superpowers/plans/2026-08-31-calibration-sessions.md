@@ -2103,6 +2103,28 @@ git commit -m "refactor(sessions): migrate the six examples; close M-26 and M-27
 - Modify: `docs/issues/README.md`, `docs/issues/M-26-*.md`, `docs/issues/M-27-*.md` (close them)
 - Move: both issue files to `docs/issues/archive/`
 
+- [ ] **Step 0: Retire the recipes that still name `config/examples/`**
+
+Task 8 deletes that directory, and four recipes still point into it — this was missed when
+Task 7 added the session aliases, so it is a real break rather than a tidy-up:
+
+| justfile line | recipe | replacement |
+|---|---|---|
+| 254 | `lidar-camera CONFIG='seyond_left.yaml'` | `just run seyond-left` |
+| 273 | `solid CONFIG='solid_600_handheld.yaml'` | `just run solid600-handheld-zed` |
+| 294 | `assisted CONFIG='seyond_left.yaml'` | `just solver_mode=assisted run <session>` |
+| 313 | `two-lidar` | `just run twolidar-vlp32-falcon` |
+| 409 | `calibrate`'s doc comment | a session path |
+
+Delete the first four: `run` plus the `solver_mode` variable covers every one of them, and a
+second way to start a run is what made the old config sprawl hard to reason about. **Keep
+`calibrate`** — it takes an explicit `config_file:=` and is the calibration-only half a live
+rig or an externally-played bag needs; only its example comment changes.
+
+Removing `assisted` means the assisted-capture guide's `just assisted` instructions change to
+`just solver_mode=assisted run <session>`; update
+`book/src/user-guide/assisted-capture.md` and `CLAUDE.md` in the steps below.
+
 - [ ] **Step 1: Write the user guide**
 
 Lead with the `ros2 launch` and `ros2 run` commands; show the `just` shorthand second. Cover:
