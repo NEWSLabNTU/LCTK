@@ -99,6 +99,14 @@ Use the standard ROS 2 `message_filters` package for Python nodes.
 
 ### Rust Nodes: `multi-stream-synchronizer`
 
+> **Superseded (2026-08-31).** This plan proposed `rust/multi-stream-synchronizer`, a
+> submodule of NEWSLabNTU/multi-stream-synchronizer. It was never wired into any LCTK
+> crate — nothing ever declared it as a dependency — and message synchronization is now
+> done by the `conflux` submodule for every maintained solver, through
+> `lctk_sync.DetectionPairSource`. The submodule was removed rather than left carrying 53
+> tests over code no shipped path could reach. The section below is kept as a record of
+> what was planned, not of what exists.
+
 Use the existing `rust/multi-stream-synchronizer/` library for Rust nodes.
 
 **Target Nodes:**
@@ -550,5 +558,5 @@ Timeline:
 - [ROS 2 message_filters Documentation](https://docs.ros.org/en/humble/p/message_filters/doc/index.html)
 - [ApproximateTime Synchronizer Tutorial (C++)](https://docs.ros.org/en/rolling/p/message_filters/doc/Tutorials/Approximate-Synchronizer-Cpp.html)
 - [ApproximateTime Synchronizer Tutorial (Python)](https://docs.ros.org/en/rolling/p/message_filters/doc/Tutorials/Approximate-Synchronizer-Python.html)
-- [multi-stream-synchronizer README](../../rust/multi-stream-synchronizer/README.md)
-- [multi-stream-synchronizer Algorithm](../../rust/multi-stream-synchronizer/ALGORITHM.md)
+- multi-stream-synchronizer README and ALGORITHM — no longer in this tree; see
+  <https://github.com/NEWSLabNTU/multi-stream-synchronizer> (this repo pinned `695a090`)

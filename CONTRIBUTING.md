@@ -25,8 +25,6 @@ Core reusable functionality implemented as pure Rust libraries (no ROS dependenc
 - **[calibration-target-detector](rust/calibration-target-detector/)** - Calibration-target
   pose estimation (`TargetPoseEstimator`, plus the solid- and perforated-surface adapters).
   Supersedes the former `hollow-board-detector`
-- **[multi-stream-synchronizer](rust/multi-stream-synchronizer/)** - Synchronizes timestamped
-  messages from multiple data streams using time-window based grouping
 - **[plane-estimator](rust/plane-estimator/)** - Plane fitting algorithms for point clouds
 
 ### ROS 2 Nodes and Packages (`ros/`)

@@ -39,7 +39,8 @@ regeneration command is documented only in `rust/board-cluster-detector/tests/fi
 which you find only after tracing the panic message. Neither CLAUDE.md nor the phase docs mention
 that a fresh clone starts with an incomplete Rust suite.
 
-Also worth noting: the submodules (`ros/conflux`, `rust/multi-stream-synchronizer`) come up
+Also worth noting: the submodules (`ros/conflux`; `rust/multi-stream-synchronizer` too,
+until it was removed unused on 2026-08-31) come up
 uninitialised on a fresh clone, and `just build` depends on `build-conflux`, so
 `git submodule update --init --recursive` is a required step that Quick Start does not mention.
 
