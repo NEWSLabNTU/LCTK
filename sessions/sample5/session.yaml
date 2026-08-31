@@ -9,6 +9,7 @@ data:
   kind: pcap_avi
   dir: $(session-dir)/data
   lidar: { model: vlp32c, rpm: 600 }
+  camera: { info_url: $(session-dir)/camera_info.yaml }
 
 devices:
   lidars:
@@ -22,7 +23,8 @@ markers:
     # Bbox-free: a crop box is per-recording geometry and nobody has measured
     # this rig's, so there is none to point at. Do not add velodyne_bbox.json5
     # here with a borrowed box -- that is exactly how M-29 killed the demo.
-    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne_bbox.json5
+    bbox_config: $(session-dir)/bbox.json5
     pairs:
       - [top, front_center]
 

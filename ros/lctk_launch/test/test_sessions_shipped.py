@@ -162,32 +162,46 @@ def test_every_shipped_session_documents_itself():
 
 
 @pytest.mark.parametrize("name", UNVERIFIED_SAMPLES)
-def test_the_unverified_sample_sessions_carry_no_crop_box(name):
-    """No crop box has been measured for these recordings, so none may be named.
+def test_every_sample_session_owns_its_crop_box_and_intrinsics(name):
+    """Self-contained means the files live here, not in a sibling session.
 
-    A bbox_config here would be a borrowed number wearing the look of a measured
-    one -- the M-29 failure exactly. The bbox-free preset is what makes its
-    absence correct rather than merely missing.
+    These four originally shipped bbox-free with no crop box, on the reasoning
+    that borrowing another recording's box is what silenced the demo in M-29.
+    Run that way they detected nothing -- background subtraction absorbed a board
+    that barely moves in these recordings. They now carry their own copies, which
+    were verified to detect on 2026-09-01. Naming sample3's file by path would
+    reintroduce exactly the sharing M-29 was about.
     """
+    session_dir = SESSIONS / name
+    assert (session_dir / "bbox.json5").is_file()
+    assert (session_dir / "camera_info.yaml").is_file()
+
     pipeline = parse_config(_manifest(name))
     for detector in pipeline.lidar_board_detectors:
-        assert detector.bbox_config is None, (
-            f"{name} names a crop box; nobody has measured one for this recording"
+        assert detector.bbox_config is not None, f"{name} needs a crop box to detect"
+        assert Path(detector.bbox_config).parent == session_dir, (
+            f"{name} points at a crop box outside its own directory: "
+            f"{detector.bbox_config}"
         )
-        assert Path(detector.detector_config).name == "velodyne.json5"
+        assert Path(detector.detector_config).name == "velodyne_bbox.json5", (
+            "the bbox-free preset finds nothing on these recordings"
+        )
 
 
 @pytest.mark.parametrize("name", UNVERIFIED_SAMPLES)
-def test_the_unverified_sample_sessions_say_so_in_their_readme(name):
-    """The README is the only place a reader learns these values are guesses.
+def test_every_sample_session_records_that_it_was_verified(name):
+    """The README is where a reader learns whether these values were checked.
 
-    A session that reads as authoritative and is not is worse than no session:
-    the manifest alone looks exactly like sample3's, which *is* verified.
+    They began as assumptions and are now measured; the file has to say which,
+    because the manifest alone looks identical either way.
     """
     text = (SESSIONS / name / "README.md").read_text(encoding="utf-8").lower()
-    assert "never been run" in text
-    assert "assumption" in text
-    assert "verification" in text
+    assert "verified" in text
+    assert "zero detector rejections" in text
+    assert "still not known" in text, (
+        "the README must keep saying what remains unchecked -- the extrinsic "
+        "itself has not been validated against the physical rig"
+    )
 
 
 @pytest.mark.parametrize("name", ["sample3-hollow-velodyne"] + UNVERIFIED_SAMPLES)

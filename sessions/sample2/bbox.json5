@@ -1,0 +1,27 @@
+// Crop box for the SHIPPED SAMPLE DATA (lctk_sample_data dataset 3, VLP-32C pcap).
+//
+// This is deliberately a separate file from `bbox.json5`. That one was retuned in
+// b4fea62 ("update configuration for new rosbags") for a Seyond rosbag capture, which
+// moved the box somewhere the sample data's board never is -- the detector then logged
+// "only 0 finite points in the configured box" on every frame and published nothing.
+// Two recordings with different rig geometry cannot share one crop box, so they no
+// longer try to.
+//
+// Verified 2026-08-31: with this box the detector finds ~2080 correspondences per frame
+// on dataset 3 and the assisted capture loop runs end to end.
+{
+    // Bounding box configuration for filtering point cloud data
+    // The pose defines the position and orientation of the box center
+    "pose": {
+        // Translation from origin (x, y, z in meters)
+        "translation": [2.6, 0.0, 0.35],
+        // Rotation as quaternion in (x, y, z, w) order -- this is nalgebra's serde
+        // representation, with w LAST. The value below is the identity (no rotation).
+        // NOTE: the previous value [1, 0, 0, 0] was NOT identity in this order; it is a
+        // 180 deg rotation about X, which only looked correct because this box is
+        // symmetric in y and z about its centre.
+        "rotation": [0.0, 0.0, 0.0, 1.0]
+    },
+    // Size of the bounding box in meters (x, y, z)
+    "size_xyz": [3.1, 3.94, 2.2]
+}

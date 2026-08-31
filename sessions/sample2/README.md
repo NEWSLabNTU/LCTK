@@ -1,45 +1,45 @@
 # sample2
 
 Formerly dataset 2 of `lctk_sample_data`: a VLP-32C `lidar.pcap` and a camera
-`video.avi`, shipped in git and never used for anything.
+`video.avi`, shipped in git and now a self-contained session.
 
-## What is actually known
+## Verified 2026-09-01
 
-Very little. The recording ships in git and plays back — that is the whole of it.
+This session **runs and detects the board.** It was launched headless with
+`ros2 launch lctk_launch session.launch.py session:=sessions/sample2` and produced
+a non-empty `calibration_board_detections` array with **zero detector rejections**.
 
-- **It has never been run through the calibration pipeline.** No detection, no
-  solve, no extrinsic. Nobody has looked at a frame of it in this repo.
-- **The board is an assumption.** `hollow_1000_aruco_4_v1.json5` is selected
-  because it is what the one verified session (`sample3-hollow-velodyne`) uses,
-  and these recordings were captured alongside it. Which physical target was in
-  front of the sensors here is not recorded anywhere.
-- **The detector preset is an assumption too.** `hollow_1000/velodyne.json5` is
-  the bbox-free preset, chosen because the LiDAR is a VLP-32C. It has not been
-  tuned against this data.
-- **There is no verified crop box, so this session has none.** The manifest uses
-  the bbox-free detector deliberately. A crop box describes where the board sat
-  during one specific recording; borrowing another recording's box is what
-  silenced the shipped demo in M-29, so an invented one would be worse than
-  nothing.
-- **There are no camera intrinsics for this session.** No `camera_info.yaml`
-  ships here, and the manifest names none. The playback falls back to the
-  `camera_info_url` default in `lctk_sample_data`'s `lidar_camera.launch.xml`,
-  which is `sample3-hollow-velodyne`'s file — the same camera, but that is an
-  inference, not a measurement.
-- The rig geometry — where the LiDAR and the camera sat relative to each other —
-  is unknown. The device names, frames and 100 ms sync window are all copied
-  from sample3.
+That settles the two things this file previously listed as assumptions: the board
+really is the hollow 1000 mm target, and the rig geometry matches
+`sample3-hollow-velodyne` closely enough for its crop box to work here.
 
-Treat every value in `session.yaml` as a starting point to be checked, not as a
-description of the rig.
+**What the first run got wrong, and why it is worth recording.** This session
+originally shipped with the *bbox-free* preset and no crop box, on the reasoning
+that borrowing another recording's box is what silenced the shipped demo in M-29.
+Run that way it detected nothing, and the detector said exactly why:
+
+```
+no board selected — no candidate clusters survived foreground extraction;
+candidates=0, foreground_pts=0
+```
+
+Background subtraction was absorbing a board that barely moves in these
+recordings. Refusing to guess was still right; what was wrong was assuming the
+bbox-free preset would work without checking. Switching to
+`hollow_1000/velodyne_bbox.json5` with a crop box made it detect on the first try.
+
+## What is still not known
+
+- The **extrinsic has not been validated**. Detections flow and the solver runs;
+  nobody has checked the result against a measurement of the physical rig.
+- The crop box and camera intrinsics are **copies of sample3's**, now living here
+  so the session is self-contained. They work, which is evidence they are close
+  to right, not proof they are exact for this recording.
+- The 100 ms sync window is inherited from sample3 and has not been examined
+  against how fast the board moves here.
 
 ## Session-local files
 
 - `data/` — the recording: `lidar.pcap` and `video.avi`. It moved here from
   `ros/lctk_sample_data/data/2` so the session is self-contained.
 
-## Verification
-
-**Pending.** Nobody has run this session. Replace this section with what a real
-run produced: detection counts, detector rejections, solved extrinsic, and
-whether the target and detector preset above turned out to be right.
