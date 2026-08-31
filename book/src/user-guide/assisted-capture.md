@@ -99,7 +99,7 @@ assisted:
 
   # Review server
   review_bind_host: "127.0.0.1"      # see the warning below before changing this
-  review_port: 8080
+  review_port: 8080                  # first pair; see the note below for multi-pair rigs
   review_jpeg_quality: 80
   review_max_previews: 64
   review_archive_path: ""            # where "Export archive" writes
@@ -109,6 +109,12 @@ assisted:
   export_camera_frame: ""            # e.g. camera0/camera_link
   export_lidar_frame: ""             # e.g. velodyne_top_base_link
 ```
+
+On a rig with more than one LiDAR-camera pair, each pair gets its own solver and therefore
+its own review server. The launch file offsets `review_port` by the pair's index — the first
+pair keeps the configured port, the second gets `+1`, and so on — because the server binds
+its port eagerly and two solvers sharing one would leave the second dead at startup, after
+the graph had already reported itself launched.
 
 If the board is being rejected, the banner says which gate refused it and by how much, so
 tune from the reported number rather than by guesswork. A board that reads "held still" but

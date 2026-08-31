@@ -982,3 +982,23 @@ def test_a_misspelled_assisted_key_is_refused(
 
     with pytest.raises(ValueError, match="stability_window_frame"):
         calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+
+def test_each_solver_gets_its_own_review_port(calibrate_launch: ModuleType):
+    """A multi-pair config must not hand every solver the same port.
+
+    `ReviewServer` binds eagerly in its constructor, so two solvers sharing a
+    port means the second dies with `OSError: Address already in use` -- and it
+    dies at startup, after the graph has already been reported as launched.
+    `vehicle.yaml` is the maintained example with four lidar-camera pairs.
+    """
+    context = _LaunchContext(CONFIG_ROOT / "vehicle.yaml")
+    context.launch_configurations["solver_mode"] = "assisted"
+
+    nodes = calibrate_launch.generate_nodes(context)
+
+    solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+    assert len(solvers) == 4
+    ports = [_parameters(solver)["review_port"] for solver in solvers]
+    assert len(set(ports)) == 4, f"ports collide: {ports}"
+    assert min(ports) == 8080, "the first pair keeps the configured port"

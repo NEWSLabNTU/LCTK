@@ -212,7 +212,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
         )
 
     # Generate lidar-camera solver nodes
-    for solver in pipeline.lidar_camera_solvers:
+    for solver_index, solver in enumerate(pipeline.lidar_camera_solvers):
         nodes.append(
             LogInfo(
                 msg=f"  LiDAR-Camera solver: {solver.node_name} ({solver.lidar_name} <-> {solver.camera_name}) [{solver_mode}]"
@@ -220,6 +220,14 @@ def generate_nodes(context, *args, **kwargs) -> list:
         )
 
         node_args = ["--ros-args", "--log-level", log_level]
+
+        # One review server per solver, so a multi-pair config must not hand
+        # every one the same port -- ReviewServer binds eagerly, and the second
+        # node would die with "Address already in use". Offsetting by the
+        # solver's index keeps the first pair on the configured port, which is
+        # what a single-pair config (every maintained example) still gets.
+        assisted_params = asdict(pipeline.assisted)
+        assisted_params["review_port"] = pipeline.assisted.review_port + solver_index
 
         params = {
             "solver_mode": solver_mode,
@@ -238,7 +246,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "sync_drop_policy": sync_drop_policy,
             "target_config": solver.target_config,
             # assisted-mode tuning; harmless for the other two, which never read it.
-            **asdict(pipeline.assisted),
+            **assisted_params,
         }
 
         nodes.append(
