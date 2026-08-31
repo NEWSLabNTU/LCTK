@@ -1,0 +1,29 @@
+name: twolidar-vlp32-falcon
+description: >
+  Two lidars, no camera: a VLP-32C and a solid-state Falcon observing one board.
+  The TWO_LIDAR_* recordings are gitignored -- see
+  ros/lctk_sample_data/bags/README.md to obtain one, then place or symlink it at
+  $(session-dir)/bag, or point `path:` somewhere else.
+
+data:
+  kind: bag
+  path: $(session-dir)/bag
+
+devices:
+  lidars:
+    top_lidar:
+      frame_id: velodyne
+      pointcloud_topic: /lidar/vlp32/velodyne_points
+    front_lidar:
+      frame_id: seyond
+      pointcloud_topic: /lidar/falcon/iv_points
+      detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [top_lidar, front_lidar]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }

@@ -43,8 +43,8 @@ The node reads two required, separately-scoped configuration files -- see the re
   `config/board/hollow_1000/velodyne.json5`
 
 A crop-box config is additionally required when the Detector Tuning preset selects
-`detection_mode: "bbox"` (e.g. `config/board/bbox.json5`); the shipped `bbox_free` presets don't
-need one.
+`detection_mode: "bbox"` (e.g. `sessions/sample3-hollow-velodyne/bbox.json5`); the shipped
+`bbox_free` presets don't need one.
 
 ## ROS Parameters
 

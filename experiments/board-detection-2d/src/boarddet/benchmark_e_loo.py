@@ -32,9 +32,10 @@ from .ingest import Frame, load_bag_frames, load_frames
 from .viz import render_methode
 
 # The pcap rig's reference, used by stages 3-8 and Method E. Other rigs
-# (e.g. the recorded TWO_LIDAR bags) supply their own via --bbox.
+# (e.g. the recorded TWO_LIDAR bags) supply their own via --bbox; theirs live
+# in sessions/twolidar-vlp32-falcon/.
 DEFAULT_BBOX_PATH = (Path(__file__).resolve().parents[4]
-                     / "ros" / "lctk_launch" / "config" / "board"
+                     / "sessions" / "sample3-hollow-velodyne"
                      / "bbox.json5")
 
 # Static clutter attractors documented across stages 1-8. A background built

@@ -17,9 +17,13 @@ _BOARDS = [
 # Documented static clutter attractors.
 _CLUTTER = [(-1.83, -2.89, -0.1), (4.7, 2.6, -0.1), (-3.3, 3.4, 0.5)]
 
-# The pcap rig's reference, as used by stages 3-8 and Method E.
+# The pcap rig's reference, as used by stages 3-8 and Method E. This is the
+# sample-data session's own crop box. It used to name config/board/bbox.json5,
+# which was a different rig's box entirely -- that file had been retuned for a
+# Seyond rosbag, so every assertion below was checking the pcap rig's confirmed
+# board centres against a box that does not contain them (M-29).
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-_PCAP_BBOX = _REPO_ROOT / "ros/lctk_launch/config/board/bbox.json5"
+_PCAP_BBOX = _REPO_ROOT / "sessions/sample3-hollow-velodyne/bbox.json5"
 
 
 def test_reads_json5_with_comments():

@@ -12,8 +12,21 @@ from launch_ros.actions import Node
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 LAUNCH_FILE = PACKAGE_ROOT / "launch" / "calibrate.launch.py"
-CONFIG_ROOT = PACKAGE_ROOT / "config" / "examples"
 TARGETS_ROOT = PACKAGE_ROOT / "config" / "targets"
+
+# The maintained configs are now session manifests at the repo root, one
+# directory per calibration run, rather than loose files under
+# config/examples/. `session.yaml` is a normal calibration config plus a
+# `data:` section, so everything this module asserts about a maintained
+# config still applies unchanged.
+SESSIONS_ROOT = PACKAGE_ROOT.parents[1] / "sessions"
+MANIFEST_NAME = "session.yaml"
+
+
+def _session(name: str) -> Path:
+    """The manifest of one shipped session, by directory name."""
+    return SESSIONS_ROOT / name / MANIFEST_NAME
+
 
 # Keep source-tree execution consistent with the existing lctk_launch tests.
 sys.path.insert(0, str(PACKAGE_ROOT))
@@ -25,14 +38,14 @@ def _write_new_schema_detector_config(tmp_path: Path) -> Path:
     Mirrors ``test_config_parser._write_new_schema_config``'s shape: only the
     Target Definition manifest (``target_config``) needs to exist on disk to
     parse -- ``detector_config``/``bbox_config`` are opaque paths as far as
-    the parser and this launch file are concerned. Maintained examples under
-    ``config/examples/`` moved onto this same new schema in W5-D; this test
+    the parser and this launch file are concerned. The maintained configs
+    under ``sessions/`` moved onto this same new schema in W5-D; this test
     still writes its own file into pytest's tmp_path rather than reading one
     of them, so it stays independent of exactly which target/detector preset
-    a given maintained example happens to select.
+    a given maintained session happens to select.
 
     Deliberately a two-LiDAR pairing (no camera), like
-    ``config/examples/two_lidar.yaml``, so the tests built on it exercise
+    ``sessions/twolidar-vlp32-falcon``, so the tests built on it exercise
     detector routing and nothing else. The LiDAR+camera case has its own
     helper, ``_write_new_schema_camera_config`` below.
     """
@@ -222,10 +235,11 @@ def _write_new_schema_two_lidar_detector_override_config(tmp_path: Path) -> Path
     New-schema successor of the deleted legacy two-LiDAR fixture: the
     per-device override branch in ``_derive_pipeline``
     (``lidar.detector_config_override or marker.detector_config``) still
-    needs launch-graph-level coverage now that no maintained example doubles
-    as its fixture in this file -- ``config/examples/two_lidar.yaml`` covers
+    needs launch-graph-level coverage now that no maintained config doubles
+    as its fixture in this file -- ``sessions/twolidar-vlp32-falcon`` covers
     the same shape, but this fixture keeps that coverage independent of
-    exactly what that maintained example currently contains.
+    exactly what that maintained session currently contains, and of whether
+    its gitignored recording is present on this machine.
 
     Points at real repo files (rather than opaque tmp_path strings) so the
     two LiDARs' resulting ``detector_config`` params are distinguishable by
@@ -641,37 +655,75 @@ def test_new_schema_lidar_camera_graph_routes_each_identity(
     )
 
 
-_EXAMPLE_CONFIGS = sorted(CONFIG_ROOT.glob("*.yaml"))
+_SESSION_MANIFESTS = sorted(SESSIONS_ROOT.glob(f"*/{MANIFEST_NAME}"))
 
 # An empty parametrization is collected as no test at all, so a glob that stops
 # matching would remove this coverage while the suite still reported green --
 # the same vacuous-pass failure the Rust collection guard in the justfile exists
 # to prevent. Fail at import instead.
-assert _EXAMPLE_CONFIGS, f"no maintained example configs found under {CONFIG_ROOT}"
-
-
-@pytest.mark.parametrize(
-    "config_path", _EXAMPLE_CONFIGS, ids=[p.stem for p in _EXAMPLE_CONFIGS]
+assert _SESSION_MANIFESTS, (
+    f"no maintained session manifests found under {SESSIONS_ROOT}"
 )
-def test_maintained_examples_use_only_the_new_target_schema(
+
+
+def _missing_recording(manifest: Path) -> str | None:
+    """Why this session cannot be parsed here, or None if it can.
+
+    A ``kind: bag`` session is verified against its recording at parse time --
+    that check is the whole point of M-26 -- so a session whose bag is
+    gitignored simply cannot be graphed on a machine that does not have it.
+    Skipping is the honest outcome; silently dropping the case from the
+    parametrization would take the coverage away wherever the bag IS present.
+    """
+    import yaml
+    from lctk_launch.session import resolve_config_path
+
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8")).get("data") or {}
+    if data.get("kind") != "bag":
+        return None
+    bag = Path(resolve_config_path(str(data["path"]), manifest.parent))
+    if bag.is_dir():
+        return None
+    return (
+        f"{manifest.parent.name} needs its recording at {bag}, which is "
+        "gitignored -- see ros/lctk_sample_data/bags/README.md to obtain it"
+    )
+
+
+_SESSION_PARAMS = [
+    pytest.param(
+        manifest,
+        id=manifest.parent.name,
+        marks=(
+            [pytest.mark.skip(reason=reason)]
+            if (reason := _missing_recording(manifest))
+            else []
+        ),
+    )
+    for manifest in _SESSION_MANIFESTS
+]
+
+
+@pytest.mark.parametrize("config_path", _SESSION_PARAMS)
+def test_maintained_sessions_use_only_the_new_target_schema(
     calibrate_launch: ModuleType, config_path: Path
 ):
-    """Every maintained example under config/examples/ generates a graph
+    """Every maintained session under sessions/ generates a graph
     whose nodes carry only new-schema configuration keys -- target_config
     and detector_config -- and never the legacy board_detector_file/
     aruco_pattern_file/aruco_config_file keys, because W5-D cut every
-    maintained example over to the Target Definition schema. The legacy
+    maintained config over to the Target Definition schema. The legacy
     compatibility path itself is not removed until W5-E1; it keeps its own
     tmp_path-fixture coverage elsewhere in this file now that these examples
     no longer double as its fixtures.
 
-    Parametrized over the files discovered on disk so an example added
-    later is covered automatically. two_lidar.yaml has no camera
+    Parametrized over the manifests discovered on disk so a session added
+    later is covered automatically. twolidar-vlp32-falcon has no camera
     (0 locators, 0 lidar-camera solvers); the assertions below don't fold
     those empty lists into an `all(...)` that would pass vacuously -- every
     branch first asserts there is at least one node of a type that must
-    exist in every example (a board detector), and only then checks the
-    optional node types when the example actually produced any.
+    exist in every session (a board detector), and only then checks the
+    optional node types when the session actually produced any.
     """
 
     nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
@@ -680,10 +732,12 @@ def test_maintained_examples_use_only_the_new_target_schema(
     locators = _nodes_for_package(nodes, "aruco_locator_node")
     solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
 
-    # Every maintained example pairs at least one lidar with a marker, so a
+    # Every maintained session pairs at least one lidar with a marker, so a
     # config that produced zero detectors would itself be a finding, not a
     # silently-passing empty parametrization.
-    assert detectors, f"{config_path.name} produced no lidar_board_detector nodes"
+    assert detectors, (
+        f"{config_path.parent.name} produced no lidar_board_detector nodes"
+    )
 
     for detector in detectors:
         params = _parameters(detector)
@@ -695,17 +749,17 @@ def test_maintained_examples_use_only_the_new_target_schema(
         assert params["detector_config"]
         assert None not in params.values()
 
-    # two_lidar.yaml legitimately has no camera, so it produces zero
+    # twolidar-vlp32-falcon legitimately has no camera, so it produces zero
     # locators and zero lidar-camera solvers -- the loops below then check
     # nothing for it, which would silently pass even if camera-side routing
-    # were broken for every OTHER example. Name the one example allowed to
-    # take that empty path so a future example with a camera that
+    # were broken for every OTHER session. Name the one session allowed to
+    # take that empty path so a future session with a camera that
     # unexpectedly produced no camera-side nodes fails loudly instead of
-    # being read as "just another two_lidar.yaml".
+    # being read as "just another two-lidar session".
     if not locators and not solvers:
-        assert config_path.name == "two_lidar.yaml", (
-            f"{config_path.name} unexpectedly produced no camera-side nodes "
-            "(zero aruco_locator_node and zero lidar_to_camera_solver)"
+        assert config_path.parent.name == "twolidar-vlp32-falcon", (
+            f"{config_path.parent.name} unexpectedly produced no camera-side "
+            "nodes (zero aruco_locator_node and zero lidar_to_camera_solver)"
         )
 
     for locator in locators:
@@ -721,25 +775,25 @@ def test_maintained_examples_use_only_the_new_target_schema(
         assert None not in params.values()
 
 
-def test_solid_600_handheld_example_selects_solid_target(
+def test_solid_600_handheld_session_selects_solid_target(
     calibrate_launch: ModuleType,
 ):
-    """solid_600_handheld.yaml is the property the W5-D cutover exists to
-    demonstrate end to end: a maintained example selecting a target other
+    """solid600-handheld-zed is the property the W5-D cutover exists to
+    demonstrate end to end: a maintained config selecting a target other
     than the hollow board, wired through a coherent LiDAR-camera graph, with
     its own (tighter) sync window intact.
 
     No other test in this module pins this: the inverted
-    ``test_maintained_examples_use_only_the_new_target_schema`` above checks
-    every example's params carry *some* target_config, not that the solid
-    example's graph is internally coherent (one of each node kind, all three
+    ``test_maintained_sessions_use_only_the_new_target_schema`` above checks
+    every session's params carry *some* target_config, not that the solid
+    session's graph is internally coherent (one of each node kind, all three
     naming the same target, the detector's tuning preset, and the identity
     remaps resolving to this graph's own generated namespaces rather than a
     hand-recomputed string).
     """
 
     nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "solid_600_handheld.yaml")
+        _LaunchContext(_session("solid600-handheld-zed"))
     )
 
     detectors = _nodes_for_package(nodes, "lidar_board_detector")
@@ -770,8 +824,8 @@ def test_solid_600_handheld_example_selects_solid_target(
         remappings["camera_target_identity"] == f"/{locator_namespace}/target_identity"
     )
 
-    # The solid example's board is hand-held and moving, so its sync window
-    # is deliberately tighter than every hollow example's 100ms -- a future
+    # The solid session's board is hand-held and moving, so its sync window
+    # is deliberately tighter than every hollow session's 100ms -- a future
     # edit that quietly widened it back to the hollow default should fail
     # here.
     assert solver_params["sync_tolerance_ms"] == 50.0
@@ -782,15 +836,15 @@ def test_sync_settings_reach_both_solver_kinds(calibrate_launch: ModuleType):
     and `lidar_to_lidar_solver` parameters, not just one of the two node
     kinds that read it.
 
-    `vehicle.yaml` is the one maintained example with both solver kinds
-    (L1-C1/L1-C2/L2-C3/L2-C4 lidar-camera solvers, and one L1-L2
+    `vehicle-multisensor` is the one maintained session with both solver
+    kinds (L1-C1/L1-C2/L2-C3/L2-C4 lidar-camera solvers, and one L1-L2
     lidar-lidar solver), and it carries the same
     tolerance_ms=100/queue_size=100/drop_policy=reject_new `sync:` block
-    every other maintained example does.
+    every other maintained session does.
     """
 
     nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "vehicle.yaml")
+        _LaunchContext(_session("vehicle-multisensor"))
     )
 
     camera_solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
@@ -852,7 +906,7 @@ markers:
 def test_sync_settings_non_default_window_carried_through_unchanged(
     calibrate_launch: ModuleType, tmp_path: Path
 ):
-    """A `sync:` window that differs from every maintained example's
+    """A `sync:` window that differs from every maintained session's
     100/100/reject_new value reaches both solver kinds' parameters exactly
     as configured, rather than being replaced by a mode-derived preset.
 
@@ -890,7 +944,7 @@ def test_assisted_is_an_accepted_solver_mode(calibrate_launch: ModuleType):
     regression that made `assisted` generate a different graph would be a
     regression in the two older modes too.
     """
-    context = _LaunchContext(CONFIG_ROOT / "seyond_left.yaml")
+    context = _LaunchContext(_session("seyond-left"))
     context.launch_configurations["solver_mode"] = "assisted"
 
     nodes = calibrate_launch.generate_nodes(context)
@@ -909,7 +963,7 @@ def test_an_unknown_solver_mode_is_refused_and_names_all_three(
     would run a whole capture session under a policy the operator did not ask
     for. The message names every accepted value so the typo is self-correcting.
     """
-    context = _LaunchContext(CONFIG_ROOT / "seyond_left.yaml")
+    context = _LaunchContext(_session("seyond-left"))
     context.launch_configurations["solver_mode"] = "automatic"
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -928,12 +982,10 @@ def test_assisted_defaults_reach_the_solver_when_no_section_is_given(
 
     `continuous` and `manual` read none of these values, so refusing a config
     that omits the section would break both modes over a setting neither uses.
-    The maintained examples carry no `assisted:` block, so this also pins that
+    The maintained sessions carry no `assisted:` block, so this also pins that
     they still parse.
     """
-    nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(CONFIG_ROOT / "seyond_left.yaml")
-    )
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(_session("seyond-left")))
 
     params = _parameters(_nodes_for_package(nodes, "lidar_to_camera_solver")[0])
     assert params["stability_window_frames"] == 10
@@ -947,11 +999,13 @@ def test_an_assisted_section_overrides_only_what_it_names(
     calibrate_launch: ModuleType, tmp_path: Path
 ):
     """Named keys override; unnamed ones keep the node's defaults."""
-    # A maintained example, so the graph really has a lidar-camera solver to
+    # A maintained session, so the graph really has a lidar-camera solver to
     # carry the parameters; the tmp_path fixtures in this file are lidar-only.
+    # Copied rather than read in place: seyond-left is `kind: live` and names
+    # no $(session-dir) path, so it stays valid outside its own directory.
     config_path = tmp_path / "assisted.yaml"
     config_path.write_text(
-        (CONFIG_ROOT / "seyond_left.yaml").read_text(encoding="utf-8") + "\nassisted:\n"
+        _session("seyond-left").read_text(encoding="utf-8") + "\nassisted:\n"
         "  stability_window_frames: 4\n"
         '  review_bind_host: "0.0.0.0"\n',
         encoding="utf-8",
@@ -975,7 +1029,7 @@ def test_a_misspelled_assisted_key_is_refused(
     working rather than like a typo."""
     config_path = tmp_path / "misspelled.yaml"
     config_path.write_text(
-        (CONFIG_ROOT / "seyond_left.yaml").read_text(encoding="utf-8")
+        _session("seyond-left").read_text(encoding="utf-8")
         + "\nassisted:\n  stability_window_frame: 4\n",
         encoding="utf-8",
     )
@@ -990,9 +1044,10 @@ def test_each_solver_gets_its_own_review_port(calibrate_launch: ModuleType):
     `ReviewServer` binds eagerly in its constructor, so two solvers sharing a
     port means the second dies with `OSError: Address already in use` -- and it
     dies at startup, after the graph has already been reported as launched.
-    `vehicle.yaml` is the maintained example with four lidar-camera pairs.
+    `vehicle-multisensor` is the maintained session with four lidar-camera
+    pairs.
     """
-    context = _LaunchContext(CONFIG_ROOT / "vehicle.yaml")
+    context = _LaunchContext(_session("vehicle-multisensor"))
     context.launch_configurations["solver_mode"] = "assisted"
 
     nodes = calibrate_launch.generate_nodes(context)

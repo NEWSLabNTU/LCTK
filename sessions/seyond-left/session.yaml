@@ -1,0 +1,25 @@
+name: seyond-left
+description: >
+  Seyond Falcon plus the left camera, live sensors. No recording ships for this rig.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    seyond_lidar:
+      frame_id: seyond
+      pointcloud_topic: /lidar/falcon/iv_points
+  cameras:
+    left_camera:
+      frame_id: camera_left
+      image_topic: /camera/left/image_raw
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
+    pairs:
+      - [seyond_lidar, left_camera]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }

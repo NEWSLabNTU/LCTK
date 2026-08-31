@@ -242,16 +242,22 @@ test: _check-rust-tests-collectable
     # reached. Must be the system python3 (see _check-python-env).
     python3 -m pytest ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
-# Launch LiDAR-camera calibration (config-driven)
-lidar-camera CONFIG='seyond_left.yaml':
+# Launch a session's calibration graph only, with the lidar-camera RViz layout.
+# `just run <session>` is the full path (data source + graph); this assumes the
+# data is already flowing.
+lidar-camera SESSION='seyond-left':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
     SHARE=$(ros2 pkg prefix lctk_launch --share)
+    # Resolve first, into a variable: under `set -e` a failing command
+    # substitution aborts an assignment but NOT an argument, so inlining it
+    # would swallow the "no session" message and launch against an empty path.
+    session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$SHARE/config/examples/{{ CONFIG }} \
+        config_file:="$session_path/session.yaml" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
@@ -262,15 +268,19 @@ lidar-camera CONFIG='seyond_left.yaml':
         enable_judge:={{ enable_judge }}
 
 # Development only, remove later
-solid CONFIG='solid_600_handheld.yaml':
+solid SESSION='solid600-handheld-zed':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
     SHARE=$(ros2 pkg prefix lctk_launch --share)
+    # Resolve first, into a variable: under `set -e` a failing command
+    # substitution aborts an assignment but NOT an argument, so inlining it
+    # would swallow the "no session" message and launch against an empty path.
+    session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$SHARE/config/examples/{{ CONFIG }} \
+        config_file:="$session_path/session.yaml" \
         debug_mode:=true \
         log_level:=info \
         mode:=realtime \
@@ -283,15 +293,19 @@ solid CONFIG='solid_600_handheld.yaml':
 # `solver_mode` stays a switch: `just solver_mode=continuous lidar-camera` and
 # `just solver_mode=manual lidar-camera` still run the original paths unchanged.
 # Launch assisted calibration (auto-capture + review page on :8080)
-assisted CONFIG='seyond_left.yaml':
+assisted SESSION='seyond-left':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
     SHARE=$(ros2 pkg prefix lctk_launch --share)
+    # Resolve first, into a variable: under `set -e` a failing command
+    # substitution aborts an assignment but NOT an argument, so inlining it
+    # would swallow the "no session" message and launch against an empty path.
+    session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$SHARE/config/examples/{{ CONFIG }} \
+        config_file:="$session_path/session.yaml" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
@@ -307,10 +321,11 @@ two-lidar:
     set -eo pipefail
     source install/setup.bash
     SHARE=$(ros2 pkg prefix lctk_launch --share)
+    session_path=$(just _session-path twolidar-vlp32-falcon)
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$SHARE/config/examples/two_lidar.yaml \
+        config_file:="$session_path/session.yaml" \
         rviz_config:=$SHARE/config/rviz/two_lidar_calibration.rviz \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
@@ -406,7 +421,7 @@ rviz:
 
 # Launch config-driven calibration pipeline
 # Usage: just calibrate /path/to/config.yaml
-# Example: just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/sample_data.yaml
+# Example: just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/sessions/sample3-hollow-velodyne/session.yaml
 calibrate config_file:
     #!/usr/bin/env bash
     set -eo pipefail

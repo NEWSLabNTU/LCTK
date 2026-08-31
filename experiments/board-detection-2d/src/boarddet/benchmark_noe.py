@@ -25,7 +25,7 @@ from .ingest import Frame, load_bag_frames, load_frames
 from .viz import render_noe
 
 DEFAULT_BBOX_PATH = (Path(__file__).resolve().parents[4]
-                     / "ros" / "lctk_launch" / "config" / "board"
+                     / "sessions" / "sample3-hollow-velodyne"
                      / "bbox.json5")
 
 

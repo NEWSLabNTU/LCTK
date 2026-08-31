@@ -1,0 +1,150 @@
+"""Every shipped session parses, and the sample-data one keeps its topics.
+
+These read the sessions as they actually sit on disk. The manifests under
+`sessions/` are the shipped product of this repo -- what `just demo` runs and
+what `lctk_session new` is copied from -- so a manifest that no longer parses
+is a shipping defect, not a test fixture problem.
+"""
+
+from pathlib import Path
+
+import pytest
+from lctk_launch.config_parser import parse_config
+from lctk_launch.session import MANIFEST_NAME
+
+SESSIONS = Path(__file__).resolve().parents[3] / "sessions"
+
+NAMES = [
+    "sample3-hollow-velodyne",
+    "seyond-left",
+    "seyond-right",
+    "solid600-handheld-zed",
+    "twolidar-vlp32-falcon",
+    "vehicle-multisensor",
+]
+
+# The TWO_LIDAR_* recordings are gitignored (~2.4 GB), so this session's bag is
+# a symlink an operator places by hand. A `kind: bag` manifest is verified
+# against its recording's metadata.yaml at parse time -- that verification is
+# the entire point of M-26 -- so where the bag is absent the session genuinely
+# cannot be parsed, and skipping is the honest outcome rather than weakening
+# the check to make it pass everywhere.
+_TWO_LIDAR_BAG = SESSIONS / "twolidar-vlp32-falcon" / "bag"
+_NEEDS_BAG = pytest.mark.skipif(
+    not _TWO_LIDAR_BAG.is_dir(),
+    reason=(
+        f"no recording at {_TWO_LIDAR_BAG}; the TWO_LIDAR_* bags are gitignored "
+        "-- see ros/lctk_sample_data/bags/README.md to obtain one and symlink it "
+        "there"
+    ),
+)
+
+
+def _manifest(name: str) -> str:
+    return str(SESSIONS / name / MANIFEST_NAME)
+
+
+def test_the_shipped_session_list_is_exactly_what_is_on_disk():
+    """A session added or renamed without updating NAMES would otherwise leave
+    the parametrization below silently covering the old set."""
+    on_disk = sorted(path.parent.name for path in SESSIONS.glob(f"*/{MANIFEST_NAME}"))
+    assert on_disk == sorted(NAMES)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            name, marks=[_NEEDS_BAG] if name == "twolidar-vlp32-falcon" else []
+        )
+        for name in NAMES
+    ],
+)
+def test_every_shipped_session_parses(name):
+    parse_config(_manifest(name))
+
+
+def test_the_sample_session_keeps_the_topics_the_playback_publishes():
+    """The migration must not move dataset 3's topics; the playback defaults
+    and the calibration graph have to keep meeting at the same names.
+
+    This is why the lidar device is named `top` and not `top_lidar`: under
+    `kind: pcap_avi` the topic is derived from the device name, and `top` is
+    what reproduces lidar_camera.launch.xml's long-standing defaults.
+    """
+    pipeline = parse_config(_manifest("sample3-hollow-velodyne"))
+    assert (
+        pipeline.lidars["top"].pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
+    )
+    assert (
+        pipeline.cameras["front_center"].image_topic
+        == "/sensing/camera/front_center/image_raw"
+    )
+
+
+def test_the_sample_session_carries_its_own_crop_box():
+    """The bbox-mode preset needs a crop box, and it must be the session's own.
+
+    The shared config/board/bbox.json5 this used to be adjacent to had been
+    retuned for a Seyond rosbag, which put the box where dataset 3's board
+    never is; the detector then found zero points in it on every frame and
+    published nothing (M-29). A session-local box cannot be retuned by another
+    rig's operator without noticing whose file they are editing.
+    """
+    pipeline = parse_config(_manifest("sample3-hollow-velodyne"))
+    bbox = Path(pipeline.lidar_board_detectors[0].bbox_config)
+    assert bbox == SESSIONS / "sample3-hollow-velodyne" / "bbox.json5"
+    assert bbox.is_file()
+
+
+@_NEEDS_BAG
+def test_the_two_lidar_session_names_the_topics_the_bag_records():
+    """M-26: the old config named /velodyne_points; the bag records
+    /lidar/vlp32/velodyne_points. Parsing verifies against metadata.yaml, so this
+    test failing means the manifest is wrong, not the test."""
+    pipeline = parse_config(_manifest("twolidar-vlp32-falcon"))
+    topics = {lidar.pointcloud_topic for lidar in pipeline.lidars.values()}
+    assert topics == {"/lidar/vlp32/velodyne_points", "/lidar/falcon/iv_points"}
+
+
+@_NEEDS_BAG
+def test_the_two_lidar_session_keeps_its_per_device_detector_override():
+    """The per-LiDAR detector_config override is the feature this session exists
+    to demonstrate: a spinning VLP-32C and a solid-state Falcon share one target
+    while each keeps its own sensor tuning. Losing it in the migration would
+    leave both LiDARs on the Velodyne preset and look like a tuning problem."""
+    pipeline = parse_config(_manifest("twolidar-vlp32-falcon"))
+    presets = {
+        detector.lidar_name: Path(detector.detector_config).name
+        for detector in pipeline.lidar_board_detectors
+    }
+    assert presets == {"top_lidar": "velodyne.json5", "front_lidar": "seyond.json5"}
+
+
+def test_the_solid_session_keeps_its_tighter_sync_window():
+    """50 ms, not the 100 ms every hollow session uses: the solid board is
+    hand-held and moving, so a mis-paired frame is wrong rather than merely
+    noisy. A migration that quietly normalised this to 100 should fail here."""
+    pipeline = parse_config(_manifest("solid600-handheld-zed"))
+    assert pipeline.sync.tolerance_ms == 50.0
+
+
+def test_the_right_camera_session_names_its_camera_right():
+    """The example this replaces called the device `left_camera` while giving it
+    the right camera's topic and frame -- a copy-paste from the left example.
+    The device name reaches generated node names and namespaces, so the wrong
+    one made a right-camera calibration report itself as left."""
+    pipeline = parse_config(_manifest("seyond-right"))
+    assert list(pipeline.cameras) == ["right_camera"]
+    camera = pipeline.cameras["right_camera"]
+    assert camera.image_topic == "/camera/right/image_raw"
+    assert camera.frame_id == "camera_right"
+
+
+def test_every_shipped_session_documents_itself():
+    """A session is meant to be read before it is run -- especially the four
+    whose data does not ship, where the README is the only place that says so."""
+    for name in NAMES:
+        readme = SESSIONS / name / "README.md"
+        assert readme.is_file(), f"{name} has no README.md"
+        assert readme.read_text(encoding="utf-8").strip()

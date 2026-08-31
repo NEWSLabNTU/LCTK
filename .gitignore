@@ -83,6 +83,11 @@ setup/.markers/
 # Per-session run outputs: detections archives, exports, logs.
 /sessions/*/out/
 
+# A session's own copy of, or symlink to, its recording. The bag itself is
+# already ignored above; this keeps the link out of git too, so cloning the
+# repo never implies the recording is present.
+/sessions/*/bag
+
 # Play log
 /play_log
 

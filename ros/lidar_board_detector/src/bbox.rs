@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Crop box used to isolate the calibration board from the raw cloud.
 ///
-/// # On-disk format (`config/board/bbox*.json5`)
+/// # On-disk format (`sessions/<name>/bbox*.json5`)
 ///
 /// The file is parsed straight into this struct by `serde`; there is no
 /// hand-written parser. That means the `rotation` array is deserialized by
@@ -93,30 +93,22 @@ mod tests {
     /// unit norm silently corrupts `contains_point`.
     #[test]
     fn shipped_configs_parse_as_unit_quaternions() {
-        const SHIPPED: [(&str, &str); 6] = [
+        // Crop boxes are session-local: each one belongs to the recording it
+        // was measured against, and lives in that session's directory. The
+        // four unowned files that used to sit beside them under
+        // `config/board/` were deleted with `config/examples/`.
+        const SHIPPED: [(&str, &str); 3] = [
             (
-                "bbox.json5",
-                include_str!("../../lctk_launch/config/board/bbox.json5"),
+                "sample3-hollow-velodyne/bbox.json5",
+                include_str!("../../../sessions/sample3-hollow-velodyne/bbox.json5"),
             ),
             (
-                "bbox_v1.json5",
-                include_str!("../../lctk_launch/config/board/bbox_v1.json5"),
+                "twolidar-vlp32-falcon/bbox_vlp32.json5",
+                include_str!("../../../sessions/twolidar-vlp32-falcon/bbox_vlp32.json5"),
             ),
             (
-                "bbox-seyond.json5",
-                include_str!("../../lctk_launch/config/board/bbox-seyond.json5"),
-            ),
-            (
-                "bbox-vlp.json5",
-                include_str!("../../lctk_launch/config/board/bbox-vlp.json5"),
-            ),
-            (
-                "bbox_2_lidar_seyond.json5",
-                include_str!("../../lctk_launch/config/board/bbox_2_lidar_seyond.json5"),
-            ),
-            (
-                "bbox_2_lidar_vlp32.json5",
-                include_str!("../../lctk_launch/config/board/bbox_2_lidar_vlp32.json5"),
+                "twolidar-vlp32-falcon/bbox_falcon.json5",
+                include_str!("../../../sessions/twolidar-vlp32-falcon/bbox_falcon.json5"),
             ),
         ];
 
@@ -134,14 +126,17 @@ mod tests {
         }
     }
 
-    /// The two-LiDAR presets mean "no rotation". Written scalar-first as
-    /// `[1, 0, 0, 0]` they parsed as a 180° roll instead — harmless only
-    /// because that maps a centered box onto itself. Pin the intent.
+    /// A crop box meaning "no rotation" must parse as no rotation. Written
+    /// scalar-first as `[1, 0, 0, 0]` such a box parsed as a 180° roll
+    /// instead — harmless only because that maps a centered box onto itself,
+    /// so nothing downstream noticed. Pin the intent on the shipped boxes
+    /// that claim identity; `bbox_falcon.json5` is genuinely tilted and is
+    /// deliberately not in this list.
     #[test]
-    fn two_lidar_presets_are_unrotated() {
+    fn shipped_identity_rotations_are_unrotated() {
         for text in [
-            include_str!("../../lctk_launch/config/board/bbox_2_lidar_seyond.json5"),
-            include_str!("../../lctk_launch/config/board/bbox_2_lidar_vlp32.json5"),
+            include_str!("../../../sessions/sample3-hollow-velodyne/bbox.json5"),
+            include_str!("../../../sessions/twolidar-vlp32-falcon/bbox_vlp32.json5"),
         ] {
             let rotation = parse(text).pose.rotation;
             assert_close(rotation.angle(), 0.0, 1e-12, "rotation angle");

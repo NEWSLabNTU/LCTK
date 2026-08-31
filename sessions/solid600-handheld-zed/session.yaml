@@ -1,0 +1,26 @@
+name: solid600-handheld-zed
+description: >
+  Solid 600 mm target held by hand, Velodyne plus a ZED. Live sensors; no recording
+  ships. The sync window is tighter than the hollow sessions because the board moves.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    top_lidar:
+      frame_id: velodyne
+      pointcloud_topic: /velodyne_points
+  cameras:
+    front_center:
+      frame_id: zed_left_camera_frame_optical
+      image_topic: /sensing/camera/zed/rgb/color/rect/image
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/solid_600_aruco_1_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/solid_600/velodyne.json5
+    pairs:
+      - [top_lidar, front_center]
+
+sync: { tolerance_ms: 50, queue_size: 100, drop_policy: reject_new }

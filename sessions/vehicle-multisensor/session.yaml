@@ -1,0 +1,40 @@
+name: vehicle-multisensor
+description: >
+  Two lidars and four cameras across three markers, showing the multi-pair schema.
+  There is no recording and no rig behind this; it exists to document the format.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    L1: { frame_id: lidar_front, pointcloud_topic: /sensing/lidar/front/points }
+    L2: { frame_id: lidar_rear, pointcloud_topic: /sensing/lidar/rear/points }
+  cameras:
+    C1: { frame_id: camera_front_left, image_topic: /sensing/camera/front_left/image }
+    C2: { frame_id: camera_front_right, image_topic: /sensing/camera/front_right/image }
+    C3: { frame_id: camera_rear_left, image_topic: /sensing/camera/rear_left/image }
+    C4: { frame_id: camera_rear_right, image_topic: /sensing/camera/rear_right/image }
+
+reference_frame: L1
+
+markers:
+  M1:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [L1, C1]
+      - [L1, C2]
+  M2:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [L2, C3]
+      - [L2, C4]
+  M3:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [L1, L2]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }

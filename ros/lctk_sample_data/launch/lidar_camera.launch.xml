@@ -53,7 +53,7 @@
          description="Camera namespace for topics"/>
 
     <arg name="camera_info_url"
-         default="file://$(find-pkg-share lctk_launch)/config/camera/front_center_camera_info.yaml"
+         default="file://$(find-pkg-share lctk_launch)/sessions/sample3-hollow-velodyne/camera_info.yaml"
          description="Camera calibration URL (file:///path/to/calibration.yaml)"/>
 
     <arg name="camera_frame_id"

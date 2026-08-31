@@ -15,6 +15,30 @@ import pytest
 # Add the package to path for standalone testing
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# The maintained configs are session manifests at the repo root now, one
+# directory per calibration run. A `session.yaml` is a normal calibration
+# config plus a `data:` section, so everything asserted below still applies.
+SESSIONS = Path(__file__).resolve().parents[3] / "sessions"
+
+
+def session_manifest(name: str) -> Path:
+    """The manifest of one shipped session, by directory name."""
+    return SESSIONS / name / "session.yaml"
+
+
+# The TWO_LIDAR_* recordings are gitignored, and a `kind: bag` manifest is
+# verified against its recording at parse time (M-26). Where the bag is
+# absent the session genuinely cannot be parsed, so these skip rather than
+# being weakened into passing everywhere.
+_TWO_LIDAR_BAG = SESSIONS / "twolidar-vlp32-falcon" / "bag"
+needs_two_lidar_bag = pytest.mark.skipif(
+    not _TWO_LIDAR_BAG.is_dir(),
+    reason=(
+        f"no recording at {_TWO_LIDAR_BAG}; the TWO_LIDAR_* bags are gitignored "
+        "-- see ros/lctk_sample_data/bags/README.md to obtain one"
+    ),
+)
+
 try:
     from lctk_launch.config_parser import CalibrationConfigParser, parse_config
     from lctk_launch.session import SessionError
@@ -28,14 +52,17 @@ except ImportError as e:
 
 
 def test_sample_data_config():
-    """Test parsing the sample_data.yaml config."""
-    config_path = (
-        Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
-    )
-    if not config_path.exists():
-        import pytest
+    """Test parsing the shipped sample-data session.
 
-        pytest.skip(f"Config file not found: {config_path}")
+    Its lidar device is named `top`, not `top_lidar`: under `kind: pcap_avi`
+    the topics are derived from the device name, and `top` is what
+    reproduces the playback's long-standing /sensing/lidar/top/... names.
+    The reference frame therefore follows the device, not the old label.
+    """
+    config_path = session_manifest("sample3-hollow-velodyne")
+    # Not pytest.skip: this session ships in the repo, so a missing manifest
+    # is a deleted maintained config, not an absent optional fixture.
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
@@ -48,18 +75,15 @@ def test_sample_data_config():
 
     # Calibration plan assertions
     assert pipeline.calibration_plan is not None, "Expected calibration plan"
-    assert pipeline.calibration_plan.reference_frame == "top_lidar"
+    assert pipeline.calibration_plan.reference_frame == "top"
     assert len(pipeline.calibration_plan.tree_edges) == 1
     assert len(pipeline.calibration_plan.validation_edges) == 0
 
 
 def test_vehicle_config():
-    """Test parsing the vehicle.yaml config (multi-sensor)."""
-    config_path = Path(__file__).parent.parent / "config" / "examples" / "vehicle.yaml"
-    if not config_path.exists():
-        import pytest
-
-        pytest.skip(f"Config file not found: {config_path}")
+    """Test parsing the vehicle-multisensor session (multi-sensor)."""
+    config_path = session_manifest("vehicle-multisensor")
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
@@ -72,30 +96,34 @@ def test_vehicle_config():
 
 
 @pytest.mark.parametrize(
-    ("example_name", "expected_target_id"),
+    ("session_name", "expected_target_id"),
     [
-        ("sample_data.yaml", "hollow_1000_aruco_4"),
-        ("seyond_left.yaml", "hollow_1000_aruco_4"),
-        ("seyond_right.yaml", "hollow_1000_aruco_4"),
-        ("two_lidar.yaml", "hollow_1000_aruco_4"),
-        ("vehicle.yaml", "hollow_1000_aruco_4"),
-        ("solid_600_handheld.yaml", "solid_600_aruco_1"),
+        ("sample3-hollow-velodyne", "hollow_1000_aruco_4"),
+        ("seyond-left", "hollow_1000_aruco_4"),
+        ("seyond-right", "hollow_1000_aruco_4"),
+        pytest.param(
+            "twolidar-vlp32-falcon",
+            "hollow_1000_aruco_4",
+            marks=needs_two_lidar_bag,
+        ),
+        ("vehicle-multisensor", "hollow_1000_aruco_4"),
+        ("solid600-handheld-zed", "solid_600_aruco_1"),
     ],
 )
-def test_maintained_examples_select_their_target(example_name, expected_target_id):
-    """W5-D: every maintained example parses to the target it now names via
+def test_maintained_sessions_select_their_target(session_name, expected_target_id):
+    """W5-D: every maintained session parses to the target it names via
     target_config/detector_config, not the legacy translation.
 
-    Expressed per example rather than branching on the filename inside the
-    body, so this is also the guard against relabelling: the five examples
+    Expressed per session rather than branching on the name inside the
+    body, so this is also the guard against relabelling: the five configs
     that already recorded data against the hollow board must keep resolving
-    to hollow_1000_aruco_4 -- the new solid_600_handheld.yaml example is the
-    only one that resolves to solid_600_aruco_1. A cutover bug that pointed
-    an existing example at the wrong target_config would either point it at
-    the wrong physical board (invalidating every recording made against it)
-    or fail this test outright.
+    to hollow_1000_aruco_4 -- solid600-handheld-zed is the only one that
+    resolves to solid_600_aruco_1. A cutover bug that pointed an existing
+    session at the wrong target_config would either point it at the wrong
+    physical board (invalidating every recording made against it) or fail
+    this test outright.
     """
-    config_path = Path(__file__).parent.parent / "config" / "examples" / example_name
+    config_path = session_manifest(session_name)
 
     pipeline = CalibrationConfigParser(str(config_path)).parse()
 
@@ -106,15 +134,11 @@ def test_maintained_examples_select_their_target(example_name, expected_target_i
     assert {identity.target_id for identity in identities} == {expected_target_id}
 
 
+@needs_two_lidar_bag
 def test_two_lidar_config():
-    """Test parsing the two_lidar.yaml config."""
-    config_path = (
-        Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
-    )
-    if not config_path.exists():
-        import pytest
-
-        pytest.skip(f"Config file not found: {config_path}")
+    """Test parsing the twolidar-vlp32-falcon session."""
+    config_path = session_manifest("twolidar-vlp32-falcon")
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
@@ -139,7 +163,7 @@ def test_two_lidar_config():
 
 
 def test_sample_data_node_parity():
-    """Verify sample_data.yaml produces nodes matching what the XML would generate.
+    """Verify the sample-data session produces nodes matching the XML path.
 
     The XML path (lidar_camera_calibration.launch.xml) produced:
     - 1 aruco_locator in calibration/aruco_locator namespace
@@ -149,13 +173,8 @@ def test_sample_data_node_parity():
     The config-driven path should produce equivalent nodes (possibly different
     namespaces, but same count and correct topic wiring).
     """
-    config_path = (
-        Path(__file__).parent.parent / "config" / "examples" / "sample_data.yaml"
-    )
-    if not config_path.exists():
-        import pytest
-
-        pytest.skip(f"Config file not found: {config_path}")
+    config_path = session_manifest("sample3-hollow-velodyne")
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
@@ -169,13 +188,16 @@ def test_sample_data_node_parity():
     # 1 board detector
     assert len(pipeline.lidar_board_detectors) == 1
     detector = pipeline.lidar_board_detectors[0]
-    assert detector.lidar_name == "top_lidar"
+    assert detector.lidar_name == "top"
+    # The device rename top_lidar -> top is what keeps this topic what it
+    # has always been: under kind: pcap_avi the topic is DERIVED from the
+    # device name, so the name had to become the one already in the topic.
     assert detector.pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
 
     # 1 lidar-camera solver
     assert len(pipeline.lidar_camera_solvers) == 1
     solver = pipeline.lidar_camera_solvers[0]
-    assert solver.lidar_name == "top_lidar"
+    assert solver.lidar_name == "top"
     assert solver.camera_name == "front_center"
     assert solver.parent_frame == "velodyne_top"
     assert solver.child_frame == "camera_front_center"
@@ -189,8 +211,7 @@ def test_sample_data_node_parity():
     assert len(pipeline.lidars) == 1
     assert len(pipeline.cameras) == 1
     assert (
-        pipeline.lidars["top_lidar"].pointcloud_topic
-        == "/sensing/lidar/top/pointcloud_raw"
+        pipeline.lidars["top"].pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
     )
     assert (
         pipeline.cameras["front_center"].image_topic
@@ -198,21 +219,17 @@ def test_sample_data_node_parity():
     )
 
 
+@needs_two_lidar_bag
 def test_two_lidar_node_parity():
-    """Verify two_lidar.yaml produces correct nodes for two-lidar calibration.
+    """Verify the two-lidar session produces correct nodes.
 
     Expected:
     - 2 lidar_board_detectors (one per lidar)
     - 1 lidar-lidar solver
     - 0 aruco locators (no cameras)
     """
-    config_path = (
-        Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
-    )
-    if not config_path.exists():
-        import pytest
-
-        pytest.skip(f"Config file not found: {config_path}")
+    config_path = session_manifest("twolidar-vlp32-falcon")
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
@@ -229,8 +246,9 @@ def test_two_lidar_node_parity():
     assert len(pipeline.lidar_lidar_solvers) == 1
     solver = pipeline.lidar_lidar_solvers[0]
     assert {solver.lidar1_name, solver.lidar2_name} == {"top_lidar", "front_lidar"}
-    # Frame ids come from two_lidar.yaml, which describes the real two-LiDAR rig
-    # (VLP-32C + Seyond Falcon). The recorded bags publish exactly these frames.
+    # Frame ids come from the session manifest, which describes the real
+    # two-LiDAR rig (VLP-32C + Seyond Falcon). The recorded bags publish
+    # exactly these frames.
     frames = {
         solver.lidar1_name: solver.lidar1_frame,
         solver.lidar2_name: solver.lidar2_frame,
@@ -254,21 +272,19 @@ def test_two_lidar_node_parity():
 
 
 def test_solid_600_handheld_config():
-    """solid_600_handheld.yaml parses to the single-pair pipeline it claims,
+    """solid600-handheld-zed parses to the single-pair pipeline it claims,
     with the tighter sync window its hand-held (moving) board requires.
 
-    100ms is what every hollow example uses for a board on a tripod;
+    100ms is what every hollow session uses for a board on a tripod;
     50ms/100/reject_new is deliberately tighter here because the board can
     move between a camera frame and a LiDAR sweep in a way a stationary
     board cannot.
     """
-    config_path = (
-        Path(__file__).parent.parent / "config" / "examples" / "solid_600_handheld.yaml"
-    )
-    # Not pytest.skip: this example ships in the repo, so a missing file is a
-    # deleted maintained example, not an absent optional fixture. Skipping
+    config_path = session_manifest("solid600-handheld-zed")
+    # Not pytest.skip: this session ships in the repo, so a missing file is a
+    # deleted maintained config, not an absent optional fixture. Skipping
     # would hide the deletion behind a green run.
-    assert config_path.exists(), f"maintained example missing: {config_path}"
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()
@@ -284,22 +300,21 @@ def test_solid_600_handheld_config():
     assert pipeline.sync.drop_policy == "reject_new"
 
 
+@needs_two_lidar_bag
 def test_two_lidar_per_lidar_detector_config_override_reaches_the_right_node():
-    """two_lidar.yaml's per-LiDAR detector_config override on front_lidar
+    """The session's per-LiDAR detector_config override on front_lidar
     reaches only front_lidar's detector; top_lidar keeps the marker-level
     preset.
 
-    two_lidar.yaml is the one maintained example where a per-device override
-    and a marker-level preset coexist (front_lidar overrides to the seyond
+    twolidar-vlp32-falcon is the one maintained session where a per-device
+    override and a marker-level preset coexist (front_lidar overrides to the seyond
     preset; top_lidar has no override and falls back to the marker's
     velodyne preset). Getting this backwards would silently give the
     solid-state LiDAR (seyond/Falcon) a spinning-LiDAR (velodyne) operating
     point, or vice versa -- a real miscalibration, not just a wiring slip.
     """
-    config_path = (
-        Path(__file__).parent.parent / "config" / "examples" / "two_lidar.yaml"
-    )
-    assert config_path.exists(), f"maintained example missing: {config_path}"
+    config_path = session_manifest("twolidar-vlp32-falcon")
+    assert config_path.exists(), f"maintained session missing: {config_path}"
 
     parser = CalibrationConfigParser(str(config_path))
     pipeline = parser.parse()

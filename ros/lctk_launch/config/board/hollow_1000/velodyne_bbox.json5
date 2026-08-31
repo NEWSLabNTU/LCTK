@@ -11,21 +11,24 @@
     //
     // Unlike the other detector-tuning presets under config/board/,
     // this one selects `detection_mode: "bbox"` and therefore
-    // REQUIRES a `bbox_config` naming the crop box
-    // (config/board/bbox.json5) -- every other preset is bbox_free
-    // and must not name one.
+    // REQUIRES a `bbox_config` naming the crop box. A crop box is
+    // session-local -- it is measured against one recording -- so it
+    // lives in that session's directory, e.g.
+    // sessions/sample3-hollow-velodyne/bbox.json5. Every other preset
+    // is bbox_free and must not name one.
     // ============================================================
 
     // ========================================
     // GLOBAL — Stage-1 selector
     // ========================================
-    // Stage-1 path: "bbox" (crop box, see bbox.json5) | "bbox_free" (detector below)
+    // Stage-1 path: "bbox" (crop box, see the session's bbox.json5) | "bbox_free"
     "detection_mode": "bbox",
 
     // ========================================
     // STAGE 1a — BBOX CROP  (detection_mode == "bbox")
     // ========================================
-    // The crop box lives in a SEPARATE file: config/board/bbox.json5
+    // The crop box lives in a SEPARATE, session-local file, e.g.
+    // sessions/sample3-hollow-velodyne/bbox.json5
     // (translation / rotation / size), also runtime-tunable via `ros2 param set`
     // (bbox_center_*, bbox_rotation_*, bbox_size_*). Not duplicated here.
 

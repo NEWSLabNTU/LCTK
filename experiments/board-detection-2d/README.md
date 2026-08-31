@@ -87,7 +87,7 @@ uv run python -m boarddet.benchmark_e_loo --source bag --sensor vlp32 \
   --names TWO_LIDAR_1 TWO_LIDAR_3 --min-sources 1 \
   --side 1.0 --stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 1.0 \
   --cluster-min-points 20 \
-  --bbox ../../ros/lctk_launch/config/board/bbox-vlp.json5 \
+  --bbox ../../sessions/twolidar-vlp32-falcon/bbox_vlp32.json5 \
   --out results/bagE-vlp32
 
 # Falcon: solid-state, no rings -> anisotropic clustering OFF; z-forward
@@ -96,7 +96,7 @@ uv run python -m boarddet.benchmark_e_loo --source bag --sensor falcon \
   --names TWO_LIDAR_1 TWO_LIDAR_3 --min-sources 1 \
   --side 1.0 --stance-gate --flatness-rms-max 0.045 --vertical-gap-deg 0 \
   --square-icp --up-axis 0 1 0 \
-  --bbox ../../ros/lctk_launch/config/board/bbox-seyond.json5 \
+  --bbox ../../sessions/twolidar-vlp32-falcon/bbox_falcon.json5 \
   --out results/bagE-falcon
 ```
 
