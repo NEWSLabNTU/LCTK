@@ -16,7 +16,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
-    from lctk_launch.config_parser import CalibrationConfigParser
+    from lctk_launch.config_parser import CalibrationConfigParser, parse_config
+    from lctk_launch.session import SessionError
 except ImportError as e:
     print(f"Error: {e}")
     print()
@@ -806,6 +807,120 @@ sync:
     assert pipeline.sync.tolerance_ms == 250.0
     assert pipeline.sync.queue_size == 5
     assert pipeline.sync.drop_policy == "drop_oldest"
+
+
+# --- Sessions: the `data:` section and $(session-dir) in a config ----------
+
+
+def write_session(tmp_path, data_block, devices_block, name="rig"):
+    directory = tmp_path / name
+    directory.mkdir(parents=True, exist_ok=True)
+    target = "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
+    detector = "$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5"
+    (directory / "session.yaml").write_text(
+        f"""
+name: {name}
+{data_block}
+{devices_block}
+markers:
+  calibration_board:
+    target_config: {target}
+    detector_config: {detector}
+    pairs:
+      - [top, front_center]
+sync:
+  tolerance_ms: 100
+  queue_size: 100
+  drop_policy: reject_new
+""",
+        encoding="utf-8",
+    )
+    return directory / "session.yaml"
+
+
+def make_pcap_dir(tmp_path, name="data"):
+    directory = tmp_path / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "lidar.pcap").write_bytes(b"")
+    (directory / "video.avi").write_bytes(b"")
+    return directory
+
+
+def test_pcap_avi_derives_device_topics(tmp_path):
+    make_pcap_dir(tmp_path / "rig")
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+    )
+    pipeline = parse_config(str(manifest))
+    assert (
+        pipeline.lidars["top"].pointcloud_topic == "/sensing/lidar/top/pointcloud_raw"
+    )
+    assert (
+        pipeline.cameras["front_center"].image_topic
+        == "/sensing/camera/front_center/image_raw"
+    )
+
+
+def test_pcap_avi_refuses_a_stated_topic(tmp_path):
+    """Accepting one would reinstate the two-sources-of-truth bug the manifest
+    exists to remove."""
+    make_pcap_dir(tmp_path / "rig")
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /my/topic\n"
+        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+    )
+    with pytest.raises((ValueError, SessionError), match="derived"):
+        parse_config(str(manifest))
+
+
+def test_live_requires_a_stated_topic(tmp_path):
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: live\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+    )
+    with pytest.raises((ValueError, SessionError), match="pointcloud_topic"):
+        parse_config(str(manifest))
+
+
+def test_session_dir_resolves_in_a_marker_path(tmp_path):
+    make_pcap_dir(tmp_path / "rig")
+    bbox = tmp_path / "rig" / "bbox.json5"
+    bbox.write_text("{}", encoding="utf-8")
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+    )
+    text = manifest.read_text(encoding="utf-8").replace(
+        "    pairs:", "    bbox_config: $(session-dir)/bbox.json5\n    pairs:"
+    )
+    manifest.write_text(text, encoding="utf-8")
+    pipeline = parse_config(str(manifest))
+    assert pipeline.lidar_board_detectors[0].bbox_config == str(bbox)
+
+
+def test_a_config_without_a_data_section_still_parses(tmp_path):
+    """calibrate.launch.py must keep working against plain configs and live rigs."""
+    manifest = write_session(
+        tmp_path,
+        "",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n"
+        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n"
+        "      image_topic: /image\n",
+    )
+    pipeline = parse_config(str(manifest))
+    assert pipeline.data is None
+    assert pipeline.lidars["top"].pointcloud_topic == "/points"
 
 
 if __name__ == "__main__":

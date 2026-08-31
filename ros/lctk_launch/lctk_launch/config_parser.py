@@ -12,7 +12,6 @@ validation edges.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
@@ -21,6 +20,15 @@ import yaml
 from lctk_target import TargetIdentity, load_target
 
 from lctk_launch.calibration_planner import CalibrationPlan, compute_plan, format_plan
+from lctk_launch.session import (
+    DataSource,
+    SessionError,
+    derived_camera_topics,
+    derived_lidar_topics,
+    parse_data,
+    resolve_config_path,
+    verify_bag_topics,
+)
 
 # Detector tuning used when a marker does not name its own. The node itself has no hidden
 # defaults; this is the launch layer supplying the shipped file so pre-existing configs, which
@@ -33,34 +41,24 @@ DEFAULT_ARUCO_DETECTOR_CONFIG = (
 VALID_SYNC_DROP_POLICIES = ("reject_new", "drop_oldest")
 
 
-def resolve_package_path(path: str) -> str:
+def resolve_package_path(path: str, session_dir: Path | None = None) -> str:
     """
-    Resolve ROS2 package path substitutions like $(find-pkg-share package_name).
+    Resolve path substitutions: $(find-pkg-share package_name) and $(session-dir).
+
+    Kept for its existing call sites; the rules themselves live in `session.py`,
+    which is ROS-free so they can be tested without a graph.
 
     Args:
-        path: Path string that may contain $(find-pkg-share ...) substitutions
+        path: Path string that may contain $(find-pkg-share ...) or
+            $(session-dir) substitutions
+        session_dir: Directory the config was loaded from, which $(session-dir)
+            expands to. `None` means the caller has no session context, and a
+            path using $(session-dir) is then refused rather than guessed at.
 
     Returns:
         Resolved absolute path string
     """
-    # Pattern to match $(find-pkg-share package_name)
-    pattern = r"\$\(find-pkg-share\s+([^)]+)\)"
-
-    def replace_func(match):
-        package_name = match.group(1).strip()
-        try:
-            from ament_index_python.packages import (
-                PackageNotFoundError,
-                get_package_share_directory,
-            )
-
-            return get_package_share_directory(package_name)
-        except (PackageNotFoundError, ValueError) as e:
-            # PackageNotFoundError: not on AMENT_PREFIX_PATH. ValueError: the
-            # package is registered but its share directory does not exist.
-            raise ValueError(f"Failed to find package '{package_name}': {e}") from e
-
-    return re.sub(pattern, replace_func, path)
+    return resolve_config_path(path, session_dir)
 
 
 class DeviceType(Enum):
@@ -235,6 +233,11 @@ class PipelineConfig:
     assisted: AssistedSettings = field(
         default_factory=AssistedSettings
     )  # Optional `assisted:` section
+    # Optional `data:` section. `None` means the config is a plain calibration
+    # config rather than a session manifest -- it says nothing about where the
+    # data comes from, so LCTK starts nothing and every device states its topic,
+    # exactly as before sessions existed.
+    data: DataSource | None = None
 
 
 class CalibrationConfigParser:
@@ -247,6 +250,11 @@ class CalibrationConfigParser:
 
     def __init__(self, config_path: str):
         self.config_path = Path(config_path)
+        # The directory `$(session-dir)` expands to. Anchoring on the config file
+        # itself, not the working directory, is what lets a session directory be
+        # copied anywhere and still resolve its own files.
+        self._session_dir = self.config_path.resolve().parent
+        self._data: DataSource | None = None
         self.lidars: dict[str, LidarDevice] = {}
         self.cameras: dict[str, CameraDevice] = {}
         self.markers: dict[str, Marker] = {}
@@ -260,7 +268,16 @@ class CalibrationConfigParser:
         with open(self.config_path) as f:
             raw_config = yaml.safe_load(f)
 
+        # Read `data:` before the devices, because it decides how a device's
+        # topic is obtained: derived under `pcap_avi`, stated under `bag`/`live`.
+        # (The plan sketched this next to `_parse_sync`, which runs after the
+        # devices are already built -- too late to govern them.)
+        raw_data = raw_config.get("data")
+        if raw_data is not None:
+            self._data = parse_data(raw_data, self._session_dir)
+
         self._parse_devices(raw_config.get("devices", {}))
+        self._verify_data_topics()
 
         markers_config = raw_config.get("markers", {})
         self._parse_markers(markers_config)
@@ -458,6 +475,47 @@ class CalibrationConfigParser:
         pipeline.calibration_plan = plan
         pipeline.calibration_plan_text = format_plan(plan, device_frame_ids)
 
+    def _device_topic(self, kind_of: str, name: str, stated: str | None) -> str:
+        """Derive, or require, a device's topic according to the data source.
+
+        What is knowable differs by source, so the rule does. Under `pcap_avi`
+        LCTK drives the playback, so one source feeds both the player and the
+        calibration graph and a mismatch becomes unrepresentable. Under `bag` and
+        `live` -- and for a plain config with no `data:` at all -- the topic is a
+        fact about the recording or the rig, so it is stated.
+        """
+        key = "pointcloud_topic" if kind_of == "lidar" else "image_topic"
+        if self._data is not None and self._data.kind == "pcap_avi":
+            derived = (
+                derived_lidar_topics(name)["pointcloud"]
+                if kind_of == "lidar"
+                else derived_camera_topics(name)["image"]
+            )
+            if stated is not None:
+                raise SessionError(
+                    f"device '{name}' states {key}, but under data.kind 'pcap_avi' "
+                    f"the topic is derived ({derived}). Stating it would "
+                    "reintroduce the two-sources-of-truth mismatch the manifest "
+                    "exists to remove."
+                )
+            return derived
+        if stated is None:
+            raise ValueError(f"device '{name}' requires {key}")
+        return stated
+
+    def _verify_data_topics(self) -> None:
+        """Refuse a manifest naming a topic its bag does not record.
+
+        M-26 caught at startup rather than as a pipeline that launches cleanly
+        and then sits silent forever.
+        """
+        if self._data is None or self._data.kind != "bag":
+            return
+        assert self._data.path is not None  # parse_data guarantees it for 'bag'
+        wanted = [lidar.pointcloud_topic for lidar in self.lidars.values()]
+        wanted += [camera.image_topic for camera in self.cameras.values()]
+        verify_bag_topics(self._data.path, wanted)
+
     def _parse_devices(self, devices_config: dict) -> None:
         """Parse device definitions."""
         # Parse LiDARs
@@ -479,14 +537,18 @@ class CalibrationConfigParser:
             detector_config_override = config.get("detector_config")
             if detector_config_override:
                 detector_config_override = resolve_package_path(
-                    detector_config_override
+                    detector_config_override, self._session_dir
                 )
             bbox_config_override = config.get("bbox_config")
             if bbox_config_override:
-                bbox_config_override = resolve_package_path(bbox_config_override)
+                bbox_config_override = resolve_package_path(
+                    bbox_config_override, self._session_dir
+                )
             self.lidars[name] = LidarDevice(
                 name=name,
-                pointcloud_topic=config["pointcloud_topic"],
+                pointcloud_topic=self._device_topic(
+                    "lidar", name, config.get("pointcloud_topic")
+                ),
                 frame_id=config["frame_id"],
                 detector_config_override=detector_config_override,
                 bbox_config_override=bbox_config_override,
@@ -496,7 +558,9 @@ class CalibrationConfigParser:
         for name, config in devices_config.get("cameras", {}).items():
             self.cameras[name] = CameraDevice(
                 name=name,
-                image_topic=config["image_topic"],
+                image_topic=self._device_topic(
+                    "camera", name, config.get("image_topic")
+                ),
                 frame_id=config["frame_id"],
             )
 
@@ -540,15 +604,19 @@ class CalibrationConfigParser:
                 f"Marker '{name}' is missing required parameter(s): "
                 f"{', '.join(missing)}"
             )
-        target_config = resolve_package_path(config["target_config"])
+        target_config = resolve_package_path(config["target_config"], self._session_dir)
         target = load_target(target_config)
-        detector_config = resolve_package_path(config["detector_config"])
+        detector_config = resolve_package_path(
+            config["detector_config"], self._session_dir
+        )
         bbox_config = config.get("bbox_config")
         if bbox_config:
-            bbox_config = resolve_package_path(bbox_config)
+            bbox_config = resolve_package_path(bbox_config, self._session_dir)
         aruco_detector_config = config.get("aruco_detector_config")
         if aruco_detector_config:
-            aruco_detector_config = resolve_package_path(aruco_detector_config)
+            aruco_detector_config = resolve_package_path(
+                aruco_detector_config, self._session_dir
+            )
 
         self.markers[name] = Marker(
             name=name,
@@ -626,6 +694,7 @@ class CalibrationConfigParser:
             cameras=dict(self.cameras),
             sync=self._sync,
             assisted=self._assisted,
+            data=self._data,
         )
 
         # Collect unique (lidar, marker) pairs for board detectors
@@ -719,7 +788,9 @@ class CalibrationConfigParser:
                     marker = self.markers[pair.marker]
                     aruco_detector_configs.add(
                         marker.aruco_detector_config
-                        or resolve_package_path(DEFAULT_ARUCO_DETECTOR_CONFIG)
+                        or resolve_package_path(
+                            DEFAULT_ARUCO_DETECTOR_CONFIG, self._session_dir
+                        )
                     )
 
             if len(aruco_detector_configs) > 1:
