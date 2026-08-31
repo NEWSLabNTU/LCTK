@@ -45,6 +45,6 @@ markers:
     # velodyne_bbox.json5 selects detection_mode: bbox, so it needs the crop
     # box below -- every other hollow_1000 preset is bbox_free and omits it.
     detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne_bbox.json5
-    bbox_config: $(find-pkg-share lctk_launch)/config/board/bbox.json5
+    bbox_config: $(find-pkg-share lctk_launch)/config/board/sample_data_bbox.json5
     pairs:
       - [top_lidar, front_center]

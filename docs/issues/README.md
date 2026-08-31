@@ -51,6 +51,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-26](./M-26-two-lidar-example-topics-unreachable.md) | Medium | `two_lidar.yaml` names topics no in-repo data source ever publishes | 🔴 |
 | [M-27](./M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🔴 |
 | [M-28](./M-28-generator-geometry-cell-handedness-disagree.md) | Medium | ArUco generator and target geometry bind cells with opposite handedness (2x2 targets) | 🔴 |
+| [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |
