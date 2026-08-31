@@ -1,4 +1,8 @@
 // 600 mm solid Calibration Target.  The complete face is one centred ArUco sign.
+// The name says "aruco_1" for historical reasons: marker ID 1 was a placeholder
+// used while the target schema was being developed. The physical sheet carries
+// ID 24. The id is an opaque identifier, not a description of the contents --
+// read marker_ids below, never the name.
 {
   schema_version: 1,
   target_id: "solid_600_aruco_1",

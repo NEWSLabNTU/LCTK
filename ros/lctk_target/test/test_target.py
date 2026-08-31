@@ -91,7 +91,7 @@ def test_solid_marker_is_exactly_480_mm_and_has_documented_corners():
     assert fiducial.paper_side_um - 2 * fiducial.outer_border_um == 480_000
     expected = 0.480 / math.sqrt(2.0)
     actual = [
-        coordinate for corner in target.marker_corners_by_id[1] for coordinate in corner
+        coordinate for corner in target.marker_corners_by_id[24] for coordinate in corner
     ]
     wanted = [
         coordinate
@@ -164,10 +164,10 @@ def test_hollow_marker_corners_match_canonical_micrometre_geometry():
 def test_marker_geometry_is_deeply_immutable():
     target = load_target(FIXTURES / "solid_600_aruco_1_v1.json5")
     assert isinstance(target.marker_corners_by_id, MappingProxyType)
-    assert isinstance(target.marker_corners_by_id[1], tuple)
-    assert all(isinstance(corner, tuple) for corner in target.marker_corners_by_id[1])
+    assert isinstance(target.marker_corners_by_id[24], tuple)
+    assert all(isinstance(corner, tuple) for corner in target.marker_corners_by_id[24])
     with pytest.raises(TypeError):
-        target.marker_corners_by_id[1] = ()
+        target.marker_corners_by_id[24] = ()
 
 
 def test_loader_imports_without_rclpy(monkeypatch):
@@ -193,7 +193,7 @@ def test_loader_imports_without_rclpy(monkeypatch):
     [
         "revision: 1, revision: 2,",
         'plate: { surface: { kind: "solid", kind: "solid" }, side: "0.600m" },',
-        'paper_side: "0.6m", marker_ids: [1], marker_ids: [2],',
+        'paper_side: "0.6m", marker_ids: [24], marker_ids: [2],',
     ],
 )
 def test_duplicate_keys_are_rejected_at_every_nesting_level(tmp_path, duplicate):
@@ -205,7 +205,7 @@ def test_duplicate_keys_are_rejected_at_every_nesting_level(tmp_path, duplicate)
             'plate: { surface: { kind: "solid" }, side: "0.600m" },', duplicate, 1
         )
     else:
-        source = source.replace('paper_side: "0.6m", marker_ids: [1],', duplicate, 1)
+        source = source.replace('paper_side: "0.6m", marker_ids: [24],', duplicate, 1)
     path = tmp_path / "duplicate.json5"
     path.write_text(source, encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate|Duplicate"):
@@ -216,8 +216,8 @@ def test_duplicate_keys_are_rejected_at_every_nesting_level(tmp_path, duplicate)
     ("old", "new", "field"),
     [
         ('side: "0.6m"', 'side: "600mm"', None),
-        ("marker_ids: [1]", "marker_ids: [1, 1]", "fiducial.marker_ids"),
-        ("marker_ids: [1]", "marker_ids: [1000]", "fiducial.marker_ids"),
+        ("marker_ids: [24]", "marker_ids: [24, 24]", "fiducial.marker_ids"),
+        ("marker_ids: [24]", "marker_ids: [1000]", "fiducial.marker_ids"),
         ('outer_border: "0.060m"', 'outer_border: "300mm"', "fiducial.outer_border"),
         ('kind: "solid"', 'kind: "unknown"', "plate.surface.kind"),
     ],

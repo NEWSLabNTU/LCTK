@@ -819,14 +819,14 @@ mod tests {
         );
         let marker_half_diagonal_um = 480_000.0 / 2f64.sqrt();
         assert!((marker_half_diagonal_um - 339_411.254_970).abs() < 1e-6);
-        assert_eq!(target.fiducial().marker_ids, vec![1]);
+        assert_eq!(target.fiducial().marker_ids, vec![24]);
     }
 
     #[test]
     fn solid_marker_is_exactly_480_mm_and_uses_camera_corner_order() {
         let target = ValidatedTarget::parse_json5(SOLID.as_bytes()).unwrap();
         let corners = target.marker_corners_by_id();
-        let marker = corners.get(&1).expect("solid target has marker ID 1");
+        let marker = corners.get(&24).expect("solid target has marker ID 24");
         let half_diagonal = 0.480 / 2f64.sqrt();
         let expected = [
             Point3::new(-half_diagonal, 0.0, 0.0), // right
@@ -1068,7 +1068,7 @@ mod tests {
             ("surface kind", LAUNCH_HOLLOW, LAUNCH_HOLLOW.replacen("kind: \"perforated\",\n      circular_cutouts: [\n        { center: { x: \"282.842712mm\", y: \"0mm\" }, radius: \"150mm\" },\n        { center: { x: \"0mm\", y: \"282.842712mm\" }, radius: \"150mm\" },\n        { center: { x: \"-282.842712mm\", y: \"0mm\" }, radius: \"150mm\" },\n      ],", "kind: \"solid\",", 1).replacen("kind: \"asymmetric_cutouts\",", "kind: \"mounting_up\",\n    local_axis: \"+y\",", 1)),
             ("cutout center", LAUNCH_HOLLOW, LAUNCH_HOLLOW.replacen("282.842712mm", "281mm", 1)),
             ("cutout radius", LAUNCH_HOLLOW, LAUNCH_HOLLOW.replacen("radius: \"150mm\"", "radius: \"149mm\"", 1)),
-            ("marker ID", LAUNCH_SOLID, LAUNCH_SOLID.replacen("marker_ids: [1]", "marker_ids: [2]", 1)),
+            ("marker ID", LAUNCH_SOLID, LAUNCH_SOLID.replacen("marker_ids: [24]", "marker_ids: [2]", 1)),
             ("marker order", LAUNCH_HOLLOW, LAUNCH_HOLLOW.replacen("[696, 64, 306, 195]", "[64, 696, 306, 195]", 1)),
             ("paper side", LAUNCH_HOLLOW, LAUNCH_HOLLOW.replacen("paper_side: \"500mm\"", "paper_side: \"499mm\"", 1)),
             ("paper center", LAUNCH_HOLLOW, LAUNCH_HOLLOW.replacen("-353.553391mm", "-350mm", 1)),
@@ -1179,7 +1179,7 @@ mod tests {
             ),
             (
                 "marker count",
-                SOLID.replacen("marker_ids: [1]", "marker_ids: [1, 1]", 1),
+                SOLID.replacen("marker_ids: [24]", "marker_ids: [24, 24]", 1),
                 "fiducial.marker_ids",
             ),
             (
@@ -1189,7 +1189,7 @@ mod tests {
             ),
             (
                 "out of dictionary marker",
-                LAUNCH_SOLID.replacen("marker_ids: [1]", "marker_ids: [1000]", 1),
+                LAUNCH_SOLID.replacen("marker_ids: [24]", "marker_ids: [1000]", 1),
                 "outside",
             ),
             (

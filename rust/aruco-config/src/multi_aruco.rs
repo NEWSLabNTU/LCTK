@@ -202,7 +202,7 @@ mod tests {
         let target = ValidatedTarget::parse_json5(SOLID).unwrap();
         let pattern = MultiArucoPattern::from_target(&target).unwrap();
 
-        assert_eq!(pattern.marker_ids, vec![1]);
+        assert_eq!(pattern.marker_ids, vec![24]);
         assert_eq!(pattern.dictionary, ArucoDictionary::DICT_5X5_1000);
         assert_eq!(pattern.num_squares_per_side, 1);
         assert_eq!(pattern.board_size.as_millimeters(), 600.0);

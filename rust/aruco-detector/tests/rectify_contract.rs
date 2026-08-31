@@ -141,12 +141,12 @@ fn solid_target_profile_accepts_exactly_its_single_marker() -> Result<()> {
     .build()?;
     let detection = detector
         .detect_markers(&image)?
-        .expect("the target profile must accept its rendered ID 1 marker");
+        .expect("the target profile must accept its rendered ID 24 marker");
 
     let markers: Vec<_> = detection.markers().collect();
     assert_eq!(
         markers.iter().map(|marker| marker.id).collect::<Vec<_>>(),
-        vec![1]
+        vec![24]
     );
     let corners = markers[0].corners;
     // OpenCV's stable marker order is top-left, top-right, bottom-right, bottom-left.

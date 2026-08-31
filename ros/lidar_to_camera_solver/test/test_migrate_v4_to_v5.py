@@ -136,7 +136,7 @@ def test_marker_id_mismatch_rejects_names_the_id_and_writes_no_output(tmp_path):
 
 
 def test_marker_id_present_on_target_migrates_successfully(tmp_path):
-    archive = _v4_archive_observing(marker_id=1)  # solid_600_aruco_1 defines ID 1
+    archive = _v4_archive_observing(marker_id=24)  # solid_600_aruco_1 defines ID 24
     input_path = _write(tmp_path, "in.json", archive)
     output = tmp_path / "out.json"
 

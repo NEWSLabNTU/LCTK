@@ -544,7 +544,7 @@ mod target_renderer_tests {
         let pattern = MultiArucoPattern::from_target(&target)?;
 
         assert_eq!((image.cols(), image.rows()), (6000, 6000));
-        assert_eq!(pattern.marker_ids, vec![1]);
+        assert_eq!(pattern.marker_ids, vec![24]);
         // The marker occupies [600, 5400) on each axis. Taking the bounding box of
         // all non-white ink measures the quiet zone without assuming its interior
         // code cells are black.
@@ -553,7 +553,7 @@ mod target_renderer_tests {
         assert_eq!(pixel(&image, 600, 3000), 0);
         assert_eq!(pixel(&image, 5399, 3000), 0);
         assert_eq!(pixel(&image, 5400, 3000), 255);
-        assert_marker_roi(&image, &pattern, 1, Rect::new(600, 600, 4800, 4800))?;
+        assert_marker_roi(&image, &pattern, 24, Rect::new(600, 600, 4800, 4800))?;
         Ok(())
     }
 
