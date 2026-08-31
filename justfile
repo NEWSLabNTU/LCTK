@@ -349,6 +349,16 @@ sample-data SESSION='sample3-hollow-velodyne':
         lctk_launch session_data.launch.py \
         session:="$session_path"
 
+# Play every shipped recording and assert detections actually flow. Slow (~1 min
+# per session) and deliberately NOT part of `just test`: it is the only check that
+# would have caught M-29, where every unit gate passed while the pipeline was dead.
+# Smoke-test the shipped sessions end to end
+smoke:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    python3 -m pytest ros/lctk_launch/smoke/ -v --no-header
+
 # List available sessions
 sessions:
     #!/usr/bin/env bash

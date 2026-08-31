@@ -84,10 +84,26 @@ The crop box also stopped being shareable by construction: it lives in the sessi
 the recording, which is what the sessions work
 ([design](../superpowers/specs/2026-08-31-calibration-sessions-design.md)) was for.
 
-**The end-to-end gap is still open.** The pipeline was verified by hand on 2026-09-01 —
-dataset 3 plays, the detector reports zero rejections, `continuous` publishes the extrinsic
-at ~14.5 Hz — but *nothing automates that*. Every test in the suite is unit-level. A smoke
-check that plays dataset 3 and asserts a non-zero board-detection count is still the thing
-that would have caught both original failures on the commit that introduced them, and it is
-still missing. Hand-verification does not close this; it only proves the check would pass
-today.
+**The end-to-end gap is now closed.** `ros/lctk_launch/smoke/test_session_smoke.py`, run by
+`just smoke`, plays every shipped `pcap_avi` session and asserts a non-empty detection array
+and zero detector rejections. Six checks over five recordings, ~28 s total.
+
+It is deliberately outside `test/` and not part of `just test`: real playback is too slow for
+the edit loop, and a slow check that people skip protects nothing. It polls with a deadline
+rather than sleeping — a fixed sleep long enough for one machine is a false pass on a slower
+one — and tears down the whole process group in a `finally`, since `ros2 launch` spawns a
+driver, a decoder, detectors and solvers that would otherwise orphan and break the next
+session.
+
+Verified to fail, not just to pass: moving one session's crop box to `(99, 99, 99)` — this
+issue's own failure, reproduced — fails exactly that session, passes the other four, exits
+non-zero, and surfaces the detector's own words:
+
+```
+Detector said:
+  bbox: no board selected — only 0 finite points in the configured box
+```
+
+That is the message that was previously buried in a log nobody read. Reporting *why* rather
+than "assert failed" is the difference between a check that catches this class of bug and one
+that merely notices it.
