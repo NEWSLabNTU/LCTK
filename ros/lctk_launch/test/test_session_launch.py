@@ -24,8 +24,15 @@ def load(path: Path, name: str) -> ModuleType:
 
 
 class _Context:
-    def __init__(self, session: Path):
-        self.launch_configurations = {"session": str(session)}
+    """A LaunchContext stand-in holding only the configurations under test.
+
+    ``**configurations`` stands in for what ``DeclareLaunchArgument`` puts into a
+    real context before the ``OpaqueFunction`` runs; a launch file performing an
+    argument it declares needs that argument present here too.
+    """
+
+    def __init__(self, session: Path, **configurations: str):
+        self.launch_configurations = {"session": str(session), **configurations}
 
     def perform_substitution(self, substitution):
         return substitution.perform(self)
@@ -111,3 +118,57 @@ sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
 def test_a_missing_session_is_refused(data_launch, tmp_path):
     with pytest.raises(Exception, match="no session"):
         data_launch.generate_data_source(_Context(tmp_path / "absent"))
+
+
+SESSION_LAUNCH = PACKAGE_ROOT / "launch" / "session.launch.py"
+
+# What DeclareLaunchArgument puts in the context before the OpaqueFunction runs.
+# The names are pinned independently by the declaration test below.
+FORWARDED_DEFAULTS = {
+    "debug_mode": "false",
+    "log_level": "info",
+    "mode": "offline",
+    "enable_rviz": "true",
+    "solver_mode": "continuous",
+    "enable_overlay": "false",
+    "enable_judge": "false",
+}
+
+
+def test_session_launch_declares_session_and_the_calibrate_arguments():
+    module = load(SESSION_LAUNCH, "session_launch")
+    description = module.generate_launch_description()
+    names = {
+        action.name
+        for action in description.entities
+        if hasattr(action, "name") and action.name
+    }
+    assert "session" in names
+    for expected in (
+        "solver_mode",
+        "mode",
+        "enable_rviz",
+        "enable_overlay",
+        "log_level",
+    ):
+        assert expected in names, f"{expected} must still be settable end to end"
+
+
+def test_session_launch_feeds_the_same_manifest_to_both_halves(tmp_path):
+    """The data source and the calibration graph must read one file.
+
+    If they can be pointed at different files the design's guarantee is gone --
+    that is the two-sources-of-truth bug this whole change exists to remove.
+    """
+    module = load(SESSION_LAUNCH, "session_launch2")
+    directory = make_pcap_session(tmp_path)
+    includes = module.generate_session(_Context(directory, **FORWARDED_DEFAULTS))
+    argument_sets = [
+        {k: v for k, v in action.launch_arguments}
+        for action in includes
+        if hasattr(action, "launch_arguments")
+    ]
+    sessions = {a["session"] for a in argument_sets if "session" in a}
+    configs = {a["config_file"] for a in argument_sets if "config_file" in a}
+    assert sessions == {str(directory)}
+    assert configs == {str(directory / "session.yaml")}
