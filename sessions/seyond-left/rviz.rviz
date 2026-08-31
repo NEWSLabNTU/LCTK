@@ -31,7 +31,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: Foreground
 Visualization Manager:
   Class: ""
   Displays:
@@ -506,10 +506,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: -1.4197962284088135
+      Pitch: -1.3847962617874146
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 0.17360660433769226
+      Yaw: 0.00860775075852871
     Saved: ~
 Window Geometry:
   ArUco detection:

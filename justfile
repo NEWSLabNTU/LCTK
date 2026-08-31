@@ -242,75 +242,72 @@ test: _check-rust-tests-collectable
     # reached. Must be the system python3 (see _check-python-env).
     python3 -m pytest ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
-# Launch a session's calibration graph only, with the lidar-camera RViz layout.
-# `just run <session>` is the full path (data source + graph); this assumes the
-# data is already flowing.
+# Launch a lidar-camera session. Identical to `just run` -- kept as the name
+# most of the docs and muscle memory reach for. The RViz layout is no longer
+# named here: a session ships its own `rviz.rviz` and session.launch.py picks
+# it up, so the layout lives with the rig it was framed for.
 lidar-camera SESSION='seyond-left':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    SHARE=$(ros2 pkg prefix lctk_launch --share)
     # Resolve first, into a variable: under `set -e` a failing command
     # substitution aborts an assignment but NOT an argument, so inlining it
     # would swallow the "no session" message and launch against an empty path.
     session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch calibrate.launch.py \
-        config_file:="$session_path/session.yaml" \
+        lctk_launch session.launch.py \
+        session:="$session_path" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        rviz_config:=$SHARE/config/rviz/lidar_camera.rviz \
         solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}
 
-# Development only, remove later
+# Development only, remove later. A `just run` with the solid-board bench
+# settings baked in; the RViz layout comes from the session's own rviz.rviz.
 solid SESSION='solid600-handheld-zed':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    SHARE=$(ros2 pkg prefix lctk_launch --share)
     # Resolve first, into a variable: under `set -e` a failing command
     # substitution aborts an assignment but NOT an argument, so inlining it
     # would swallow the "no session" message and launch against an empty path.
     session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch calibrate.launch.py \
-        config_file:="$session_path/session.yaml" \
+        lctk_launch session.launch.py \
+        session:="$session_path" \
         debug_mode:=true \
         log_level:=info \
         mode:=realtime \
         enable_rviz:=true \
-        rviz_config:=$SHARE/config/rviz/solid_board.rviz \
         solver_mode:=manual \
         enable_overlay:=true \
         enable_judge:=false
 
 # `solver_mode` stays a switch: `just solver_mode=continuous lidar-camera` and
 # `just solver_mode=manual lidar-camera` still run the original paths unchanged.
-# Launch assisted calibration (auto-capture + review page on :8080)
+# Launch assisted calibration (auto-capture + review page on :8080). Equivalent
+# to `just solver_mode=assisted run <session>`.
 assisted SESSION='seyond-left':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    SHARE=$(ros2 pkg prefix lctk_launch --share)
     # Resolve first, into a variable: under `set -e` a failing command
     # substitution aborts an assignment but NOT an argument, so inlining it
     # would swallow the "no session" message and launch against an empty path.
     session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch calibrate.launch.py \
-        config_file:="$session_path/session.yaml" \
+        lctk_launch session.launch.py \
+        session:="$session_path" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
-        rviz_config:=$SHARE/config/rviz/lidar_camera.rviz \
         solver_mode:=assisted \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}

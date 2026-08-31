@@ -132,6 +132,7 @@ FORWARDED_DEFAULTS = {
     "solver_mode": "continuous",
     "enable_overlay": "false",
     "enable_judge": "false",
+    "rviz_config": "",
 }
 
 
@@ -150,6 +151,7 @@ def test_session_launch_declares_session_and_the_calibrate_arguments():
         "enable_rviz",
         "enable_overlay",
         "log_level",
+        "rviz_config",
     ):
         assert expected in names, f"{expected} must still be settable end to end"
 
@@ -172,3 +174,52 @@ def test_session_launch_feeds_the_same_manifest_to_both_halves(tmp_path):
     configs = {a["config_file"] for a in argument_sets if "config_file" in a}
     assert sessions == {str(directory)}
     assert configs == {str(directory / "session.yaml")}
+
+
+def _calibrate_arguments(includes) -> dict:
+    """The arguments session.launch.py hands to calibrate.launch.py."""
+    for action in includes:
+        if not hasattr(action, "launch_arguments"):
+            continue
+        arguments = {k: v for k, v in action.launch_arguments}
+        if "config_file" in arguments:
+            return arguments
+    raise AssertionError("no calibrate include found")
+
+
+def test_a_session_local_rviz_layout_is_forwarded(tmp_path):
+    """An RViz layout is per-experiment, so a session that ships one gets it.
+
+    Without this the layout had to be named again on every command line, which
+    is how the justfile ended up repeating the same --rviz_config in four
+    recipes -- a session detail living outside the session.
+    """
+    module = load(SESSION_LAUNCH, "session_launch_rviz")
+    directory = make_pcap_session(tmp_path)
+    (directory / module.SESSION_RVIZ).write_text("Panels: []\n", encoding="utf-8")
+    includes = module.generate_session(_Context(directory, **FORWARDED_DEFAULTS))
+    arguments = _calibrate_arguments(includes)
+    assert arguments["rviz_config"] == str(directory / module.SESSION_RVIZ)
+
+
+def test_a_session_without_a_layout_leaves_the_calibrate_default_alone(tmp_path):
+    """Not passing the argument is not the same as passing a copy of its default.
+
+    Restating calibration.rviz here would give one default two homes, free to
+    drift apart; saying nothing lets calibrate.launch.py stay its only owner.
+    """
+    module = load(SESSION_LAUNCH, "session_launch_rviz_absent")
+    directory = make_pcap_session(tmp_path)
+    includes = module.generate_session(_Context(directory, **FORWARDED_DEFAULTS))
+    assert "rviz_config" not in _calibrate_arguments(includes)
+
+
+def test_an_explicit_rviz_config_beats_the_session_layout(tmp_path):
+    """An operator who types rviz_config:= means it, session file or not."""
+    module = load(SESSION_LAUNCH, "session_launch_rviz_explicit")
+    directory = make_pcap_session(tmp_path)
+    (directory / module.SESSION_RVIZ).write_text("Panels: []\n", encoding="utf-8")
+    chosen = tmp_path / "mine.rviz"
+    context = _Context(directory, **{**FORWARDED_DEFAULTS, "rviz_config": str(chosen)})
+    arguments = _calibrate_arguments(module.generate_session(context))
+    assert arguments["rviz_config"] == str(chosen)
