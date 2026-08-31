@@ -351,7 +351,7 @@ Debug mode provides:
    cat ros/lctk_launch/launch/camera.launch.xml
 
    # Test the GStreamer pipeline manually
-   gst-launch-1.0 filesrc location=ros/lctk_sample_data/data/3/video.avi ! \
+   gst-launch-1.0 filesrc location=sessions/sample3-hollow-velodyne/data/video.avi ! \
        decodebin ! videoconvert ! autovideosink
 
    # Install missing plugins if needed

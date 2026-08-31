@@ -1,0 +1,29 @@
+name: sample1
+description: >
+  Formerly dataset 1 of lctk_sample_data: a VLP-32C pcap and a camera avi that
+  ship in git. UNVERIFIED -- this recording has never been run through the
+  pipeline, and the board and detector preset below are assumptions. See
+  README.md before trusting anything here.
+
+data:
+  kind: pcap_avi
+  dir: $(session-dir)/data
+  lidar: { model: vlp32c, rpm: 600 }
+
+devices:
+  lidars:
+    top: { frame_id: velodyne_top }
+  cameras:
+    front_center: { frame_id: camera_front_center }
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    # Bbox-free: a crop box is per-recording geometry and nobody has measured
+    # this rig's, so there is none to point at. Do not add velodyne_bbox.json5
+    # here with a borrowed box -- that is exactly how M-29 killed the demo.
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [top, front_center]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }

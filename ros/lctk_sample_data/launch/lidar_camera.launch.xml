@@ -10,9 +10,23 @@
     ros2 launch lctk_sample_data lidar_camera.launch.xml pcap_file:=/path/to/file.pcap video_file:=/path/to/file.avi
 -->
 <launch>
+    <!--
+        Why the defaults point into lctk_launch rather than this package:
+        the recordings used to live at lctk_sample_data/data/<N>, but a
+        calibration session is now one self-contained directory, so each
+        recording moved into the session that describes it. This package ships
+        no data/ at all any more. The defaults below name the sample3 session's
+        copy so that a bare `ros2 launch lctk_sample_data lidar_camera.launch.xml`
+        still plays what it always played.
+
+        These defaults only matter to direct invocation. `session_data.launch.py`
+        always passes pcap_file and video_file explicitly, derived from the
+        manifest -- one source of truth, which is the point of sessions.
+    -->
+
     <!-- LiDAR Arguments -->
     <arg name="pcap_file"
-         default="$(find-pkg-share lctk_sample_data)/data/3/lidar.pcap"
+         default="$(find-pkg-share lctk_launch)/sessions/sample3-hollow-velodyne/data/lidar.pcap"
          description="Path to the PCAP file containing Velodyne VLP-32C data"/>
 
     <arg name="pointcloud_topic"
@@ -41,7 +55,7 @@
 
     <!-- Camera Arguments -->
     <arg name="video_file"
-         default="$(find-pkg-share lctk_sample_data)/data/3/video.avi"
+         default="$(find-pkg-share lctk_launch)/sessions/sample3-hollow-velodyne/data/video.avi"
          description="Path to the video file (mp4, avi, etc.)"/>
 
     <arg name="camera_name"

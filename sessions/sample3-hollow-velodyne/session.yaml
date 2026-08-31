@@ -1,11 +1,12 @@
 name: sample3-hollow-velodyne
 description: >
-  Dataset 3 from lctk_sample_data: a VLP-32C pcap and a camera avi, hollow 1000 board,
-  one board placement. The data ships in git. This is what `just demo` runs.
+  A VLP-32C pcap and a camera avi, hollow 1000 board, one board placement. The
+  recording lives in this session's own data/ and ships in git. This is what
+  `just demo` runs.
 
 data:
   kind: pcap_avi
-  dir: $(find-pkg-share lctk_sample_data)/data/3
+  dir: $(session-dir)/data
   lidar: { model: vlp32c, rpm: 600 }
   camera: { info_url: $(session-dir)/camera_info.yaml }
 

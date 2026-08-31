@@ -25,11 +25,18 @@ what used to fail silently at run time.
 <name>/
   session.yaml       # the manifest
   README.md          # what the recording is, and whether the data ships
+  data/              # optional: the recording itself, when it is small enough to ship
   bbox.json5         # optional: the crop box for THIS recording
   camera_info.yaml   # optional: intrinsics for THIS camera
   rviz.rviz          # optional: the RViz layout for THIS experiment
   out/               # run outputs — gitignored
 ```
+
+A session that ships its recording keeps it in its own `data/`, reached as
+`$(session-dir)/data`. The five pcap/avi sample recordings used to live in
+`lctk_sample_data` and be reached across packages; each now sits inside the session that
+describes it, so copying the directory copies the run. A large recording is still
+referenced rather than moved — the two-LiDAR bags are gitignored and symlinked in.
 
 The rule for what belongs here is whether the file describes a *recording* or the *world*.
 A crop box says where a board sat during one recording, so it is session-local. A target
@@ -38,7 +45,7 @@ stays in the shared library under `lctk_launch/config/`:
 
 | session-local | shared library (`lctk_launch/config/`) |
 |---|---|
-| data source, topics, frame ids | `targets/` — a physical board |
+| data source, the recording, topics, frame ids | `targets/` — a physical board |
 | crop box, camera intrinsics | `board/` — detector tuning per (target, sensor) |
 | sync window, RViz layout | `aruco/` — ArUco detector tuning |
 
@@ -54,12 +61,12 @@ sessions can live anywhere.
 ```yaml
 name: sample3-hollow-velodyne
 description: >
-  Dataset 3 from lctk_sample_data: a VLP-32C pcap and a camera avi, hollow 1000
-  board, one board placement. The data ships in git.
+  A VLP-32C pcap and a camera avi, hollow 1000 board, one board placement.
+  The recording ships in git, in this session's own data/.
 
 data:
   kind: pcap_avi                                   # pcap_avi | bag | live
-  dir: $(find-pkg-share lctk_sample_data)/data/3
+  dir: $(session-dir)/data
   lidar: { model: vlp32c, rpm: 600 }               # optional
   camera: { info_url: $(session-dir)/camera_info.yaml }   # optional
 
@@ -211,7 +218,7 @@ and frames each device will actually use — without starting a graph:
 $ ros2 run lctk_launch lctk_session check sessions/sample3-hollow-velodyne
 session:  /home/you/LCTK/sessions/sample3-hollow-velodyne
 manifest: /home/you/LCTK/sessions/sample3-hollow-velodyne/session.yaml
-data:     pcap_avi /home/you/LCTK/install/lctk_sample_data/share/lctk_sample_data/data/3
+data:     pcap_avi /home/you/LCTK/sessions/sample3-hollow-velodyne/data
   lidar  top: /sensing/lidar/top/pointcloud_raw  frame=velodyne_top
   camera front_center: /sensing/camera/front_center/image_raw  frame=camera_front_center
 OK
@@ -272,14 +279,22 @@ is the point.
 
 | session | data | notes |
 |---|---|---|
-| `sample3-hollow-velodyne` | `pcap_avi`, dataset 3 | ships in git; what `just demo` runs |
+| `sample1` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
+| `sample2` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
+| `sample3-hollow-velodyne` | `pcap_avi`, own `data/` | ships in git; verified end to end; what `just demo` runs |
+| `sample4` | `pcap_avi`, own `data/` | ships in git; **never run**; its pcap is the second LiDAR of the two-LiDAR captures |
+| `sample5` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
 | `seyond-left` | `live` | Seyond Falcon + left camera; no recording ships |
 | `seyond-right` | `live` | Seyond Falcon + right camera; no recording ships |
 | `solid600-handheld-zed` | `live` | solid 600 mm target, hand-held, ZED; 50 ms sync window |
 | `twolidar-vlp32-falcon` | `bag`, `TWO_LIDAR_1` | the bag is gitignored — see `ros/lctk_sample_data/bags/README.md` |
 | `vehicle-multisensor` | `live` | a schema demonstration; no rig behind it |
 
-Each has its own `README.md` saying what the recording is and whether the data ships.
+Each has its own `README.md` saying what the recording is and whether the data ships. Only
+`sample3-hollow-velodyne` has been run end to end; the other four `sampleN` sessions ship a
+playable recording whose board, detector preset and rig geometry nobody has verified. Their
+manifests are bbox-free on purpose: a crop box is per-recording geometry, and a borrowed one
+is what silenced the shipped demo (M-29). Read those READMEs before trusting their values.
 
 ## The `just` shorthand
 
@@ -294,6 +309,7 @@ the installed share directory.
 | `just new <path> [<template>]` | `ros2 run lctk_launch lctk_session new … --from …` |
 | `just run <name-or-path>` | `ros2 launch lctk_launch session.launch.py session:=…` |
 | `just demo` | `just run sample3-hollow-velodyne` |
+| `just sample-data [<name>]` | `ros2 launch lctk_launch session_data.launch.py session:=…` — playback only |
 | `just lidar-camera [<name>]` | `just run`, defaulting to `seyond-left` |
 | `just solid [<name>]` | `just run` with the solid-board bench settings |
 | `just assisted [<name>]` | `just run` with `solver_mode:=assisted` |

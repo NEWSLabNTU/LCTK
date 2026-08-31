@@ -10,9 +10,17 @@
     ros2 launch lctk_sample_data two_lidar.launch.xml lidar1_pcap:=/path/to/lidar1.pcap lidar2_pcap:=/path/to/lidar2.pcap
 -->
 <launch>
+    <!--
+        The default pcaps live under lctk_launch's shipped sessions, not in this
+        package: each recording moved into the session directory that describes
+        it, so a session is self-contained on disk. Datasets 3 and 4 are now
+        sessions/sample3-hollow-velodyne/data and sessions/sample4/data. The
+        pairing itself is unchanged.
+    -->
+
     <!-- LiDAR 1 Arguments -->
     <arg name="lidar1_pcap"
-         default="$(find-pkg-share lctk_sample_data)/data/3/lidar.pcap"
+         default="$(find-pkg-share lctk_launch)/sessions/sample3-hollow-velodyne/data/lidar.pcap"
          description="Path to the PCAP file for LiDAR 1"/>
 
     <arg name="lidar1_pointcloud_topic"
@@ -33,7 +41,7 @@
 
     <!-- LiDAR 2 Arguments -->
     <arg name="lidar2_pcap"
-         default="$(find-pkg-share lctk_sample_data)/data/4/lidar.pcap"
+         default="$(find-pkg-share lctk_launch)/sessions/sample4/data/lidar.pcap"
          description="Path to the PCAP file for LiDAR 2"/>
 
     <arg name="lidar2_pointcloud_topic"
@@ -54,8 +62,9 @@
 
                       M-16: this defaulted to 2369, the second Velodyne's usual live port. But
                       these drivers read from PCAP *files*, where the port is only a filter on
-                      the recorded packets -- and both shipped datasets (3 and 4) were captured
-                      on 2368. Filtering dataset 4 for 2369 matched nothing, so the second LiDAR
+                      the recorded packets -- and both shipped recordings (the sample3 and
+                      sample4 sessions) were captured on 2368. Filtering the second for 2369
+                      matched nothing, so the second LiDAR
                       published no clouds at all, only one detector ever saw the board, and the
                       lidar-to-lidar solver could never form a synchronized pair. There is no
                       port conflict between the two drivers because neither binds a socket."/>

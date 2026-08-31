@@ -29,7 +29,7 @@ in the repo root.
 ## Running the benchmark
 
 Frames are ingested from the sample-data pcaps
-(`ros/lctk_sample_data/data/{1..5}/lidar.pcap`) via `velodyne_decoder` and
+(`sessions/sample{1,2,3-hollow-velodyne,4,5}/data/lidar.pcap`) via `velodyne_decoder` and
 cached to `.npz` so repeat runs skip pcap decoding.
 
 ```bash
@@ -143,6 +143,6 @@ uv run pytest -m "not realdata"
 ```
 
 It skips itself (with an explicit reason) when the sample pcaps
-(`ros/lctk_sample_data/data/{1..5}/lidar.pcap`) or `velodyne_decoder` are
+(`sessions/sample{1,2,3-hollow-velodyne,4,5}/data/lidar.pcap`) or `velodyne_decoder` are
 absent; run the full suite including it before finalizing a change to the
 Method E pipeline.

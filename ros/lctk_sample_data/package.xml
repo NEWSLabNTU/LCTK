@@ -3,7 +3,7 @@
 <package format="3">
   <name>lctk_sample_data</name>
   <version>0.0.1</version>
-  <description>Sample data and launch files for LCTK calibration demonstrations</description>
+  <description>Playback launch files for LCTK calibration demonstrations (the recordings themselves live in sessions/)</description>
   <maintainer email="lctk@example.com">LCTK Team</maintainer>
   <license>Apache-2.0</license>
 

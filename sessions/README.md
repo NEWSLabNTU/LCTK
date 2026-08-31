@@ -14,11 +14,19 @@ read one file.
 sessions/<name>/
   session.yaml     # the manifest: data:, devices:, markers:, sync:
   README.md        # what the recording is, and whether the data ships
+  data/            # optional, session-local: the recording itself
   bbox.json5       # optional, session-local: a crop box for this rig
   camera_info.yaml # optional, session-local: intrinsics for this camera
   rviz.rviz        # optional, session-local: the layout for this experiment
   out/             # run outputs (detection archives, exports) — gitignored
 ```
+
+A recording small enough to ship lives in the session's own `data/`, named as
+`$(session-dir)/data`. The five pcap/avi sample recordings used to sit in
+`lctk_sample_data` and be reached across packages; each is now inside the session
+that describes it, so nothing about a run lives in a second package. A recording
+too large for git is referenced instead — the two-LiDAR bags are gitignored and
+symlinked in as `bag`.
 
 `session.yaml` is a normal calibration config plus a `data:` section, so anything
 `calibrate.launch.py` accepts still works. Inside it, `$(session-dir)` expands to
@@ -47,6 +55,19 @@ Which side owns the topic names follows from what is knowable:
   so each device **states** it. Under `bag` the stated set is checked against the
   recording's `metadata.yaml` at startup, and a name the bag does not publish is
   refused with the list of names it does.
+
+## The shipped sessions
+
+| session | data | state |
+|---|---|---|
+| `sample1`, `sample2`, `sample4`, `sample5` | `pcap_avi`, own `data/` | ship in git, **never run** — board, detector preset and rig geometry are all assumptions, and none has a measured crop box |
+| `sample3-hollow-velodyne` | `pcap_avi`, own `data/` | ships in git, verified end to end; `just demo` runs it |
+| `seyond-left`, `seyond-right`, `solid600-handheld-zed`, `vehicle-multisensor` | `live` | no recording ships |
+| `twolidar-vlp32-falcon` | `bag` | the TWO_LIDAR_* bags are gitignored; symlink one in as `bag` |
+
+Read a session's own README before running it. The four unverified `sampleN`
+manifests look exactly like the verified one, and only their READMEs say which
+values were measured and which were copied.
 
 ## Running a session
 

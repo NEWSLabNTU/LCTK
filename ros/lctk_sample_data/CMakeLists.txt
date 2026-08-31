@@ -9,10 +9,9 @@ install(DIRECTORY launch/
   PATTERN "*.launch.xml"
 )
 
-# Install sample data files
-install(DIRECTORY data/
-  DESTINATION share/${PROJECT_NAME}/data
-)
+# No data/ install rule: the recordings moved into the sessions that describe
+# them (sessions/<name>/data), so each calibration session is self-contained on
+# disk. This package now ships launch files only.
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

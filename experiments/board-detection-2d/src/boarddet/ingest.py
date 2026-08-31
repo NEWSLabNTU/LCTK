@@ -20,8 +20,31 @@ import velodyne_decoder as vd
 
 # Repo-relative anchors; ingest.py sits at src/boarddet/ingest.py.
 _PKG_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = _PKG_ROOT.parents[1] / "ros" / "lctk_sample_data" / "data"
+SESSIONS_DIR = _PKG_ROOT.parents[1] / "sessions"
 CACHE_DIR = _PKG_ROOT / "cache"
+
+# The five sample recordings used to sit together at
+# ros/lctk_sample_data/data/<N>. Each now lives inside the calibration session
+# that describes it, so a session directory is self-contained -- which is why
+# this is a name map rather than an f-string: dataset 3 is the one with a
+# descriptive session name.
+_SAMPLE_SESSIONS = {
+    1: "sample1",
+    2: "sample2",
+    3: "sample3-hollow-velodyne",
+    4: "sample4",
+    5: "sample5",
+}
+
+
+def sample_pcap(dataset: int | str) -> Path:
+    """Path to sample dataset N's lidar.pcap, inside its session directory."""
+    key = int(dataset)
+    if key not in _SAMPLE_SESSIONS:
+        raise KeyError(
+            f"no sample dataset {dataset!r}; known: {sorted(_SAMPLE_SESSIONS)}"
+        )
+    return SESSIONS_DIR / _SAMPLE_SESSIONS[key] / "data" / "lidar.pcap"
 
 # Field names as produced by velodyne_decoder as_pcl_structs=True.
 # Single place to adjust if the installed decoder version differs.
@@ -131,7 +154,7 @@ def load_frames(dataset: int, max_frames: int | None = None) -> list[Frame]:
     if cached.exists():
         frames = _load_cache(cached)
     else:
-        pcap = DATA_DIR / str(dataset) / "lidar.pcap"
+        pcap = sample_pcap(dataset)
         if not pcap.exists():
             raise FileNotFoundError(f"sample pcap not found: {pcap}")
         frames = _decode_pcap(pcap, max_frames=None)

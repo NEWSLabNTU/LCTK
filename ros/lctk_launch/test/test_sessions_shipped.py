@@ -9,19 +9,30 @@ is a shipping defect, not a test fixture problem.
 from pathlib import Path
 
 import pytest
+import yaml
 from lctk_launch.config_parser import parse_config
-from lctk_launch.session import MANIFEST_NAME
+from lctk_launch.session import MANIFEST_NAME, parse_data
 
 SESSIONS = Path(__file__).resolve().parents[3] / "sessions"
 
 NAMES = [
+    "sample1",
+    "sample2",
     "sample3-hollow-velodyne",
+    "sample4",
+    "sample5",
     "seyond-left",
     "seyond-right",
     "solid600-handheld-zed",
     "twolidar-vlp32-falcon",
     "vehicle-multisensor",
 ]
+
+# The four sampleN sessions besides dataset 3 have never been run: their target,
+# detector preset, frames and sync window are all copied from sample3 and none of
+# them is verified against the recording. They are bbox-free on purpose -- a crop
+# box is per-recording geometry, and inventing one is how M-29 silenced the demo.
+UNVERIFIED_SAMPLES = ["sample1", "sample2", "sample4", "sample5"]
 
 # The TWO_LIDAR_* recordings are gitignored (~2.4 GB), so this session's bag is
 # a symlink an operator places by hand. A `kind: bag` manifest is verified
@@ -148,3 +159,49 @@ def test_every_shipped_session_documents_itself():
         readme = SESSIONS / name / "README.md"
         assert readme.is_file(), f"{name} has no README.md"
         assert readme.read_text(encoding="utf-8").strip()
+
+
+@pytest.mark.parametrize("name", UNVERIFIED_SAMPLES)
+def test_the_unverified_sample_sessions_carry_no_crop_box(name):
+    """No crop box has been measured for these recordings, so none may be named.
+
+    A bbox_config here would be a borrowed number wearing the look of a measured
+    one -- the M-29 failure exactly. The bbox-free preset is what makes its
+    absence correct rather than merely missing.
+    """
+    pipeline = parse_config(_manifest(name))
+    for detector in pipeline.lidar_board_detectors:
+        assert detector.bbox_config is None, (
+            f"{name} names a crop box; nobody has measured one for this recording"
+        )
+        assert Path(detector.detector_config).name == "velodyne.json5"
+
+
+@pytest.mark.parametrize("name", UNVERIFIED_SAMPLES)
+def test_the_unverified_sample_sessions_say_so_in_their_readme(name):
+    """The README is the only place a reader learns these values are guesses.
+
+    A session that reads as authoritative and is not is worse than no session:
+    the manifest alone looks exactly like sample3's, which *is* verified.
+    """
+    text = (SESSIONS / name / "README.md").read_text(encoding="utf-8").lower()
+    assert "never been run" in text
+    assert "assumption" in text
+    assert "verification" in text
+
+
+@pytest.mark.parametrize("name", ["sample3-hollow-velodyne"] + UNVERIFIED_SAMPLES)
+def test_every_sample_session_owns_its_recording(name):
+    """A session is self-contained: its data sits inside the session directory.
+
+    The recordings used to live in lctk_sample_data and be reached with
+    $(find-pkg-share lctk_sample_data)/data/<N>, which meant copying a session
+    elsewhere left its data behind.
+    """
+    directory = SESSIONS / name
+    manifest = yaml.safe_load((directory / MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert manifest["data"]["dir"] == "$(session-dir)/data"
+    source = parse_data(manifest["data"], directory)
+    assert source.directory == directory / "data"
+    assert (source.directory / "lidar.pcap").is_file()
+    assert (source.directory / "video.avi").is_file()

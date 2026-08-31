@@ -149,7 +149,8 @@ centred sheet.
 
 **Update (2026-08-14, second).** The closing condition above — "requires a recording with both a
 LiDAR and a camera observing the board" — is **already satisfied**, and was when this issue was
-filed. All five `ros/lctk_sample_data/data/` datasets pair a VLP-32C pcap with a synchronised avi;
+filed. All five sample datasets (now `sessions/sample*/data/`, then `ros/lctk_sample_data/data/`)
+pair a VLP-32C pcap with a synchronised avi;
 dataset 3 carries 270 frames at 1920×1080 with the board filling the image. Frame inspection confirms
 it is the **same physical board** Phase 1 validated: diamond-hung square plate, three holes with none
 at the bottom, ArUco sheet in the lower quarter with its top corner at the plate centre — matching

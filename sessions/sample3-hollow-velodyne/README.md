@@ -1,14 +1,20 @@
 # sample3-hollow-velodyne
 
-Dataset 3 of `lctk_sample_data`: a VLP-32C `lidar.pcap` and a camera `video.avi`
-recorded together against the hollow 1000 mm board, with one board placement.
+Formerly dataset 3 of `lctk_sample_data`: a VLP-32C `lidar.pcap` and a camera
+`video.avi` recorded together against the hollow 1000 mm board, with one board
+placement.
 
-**The data ships in git**, at `ros/lctk_sample_data/data/3`, so this session runs
-on a fresh clone with no extra downloads. It is what `just demo` runs.
+**The data ships in git**, in this session's own `data/`, so this session runs on
+a fresh clone with no extra downloads. It is what `just demo` runs.
+
+The recording used to live in another package, at `ros/lctk_sample_data/data/3`,
+and was reached with `$(find-pkg-share lctk_sample_data)`. It moved here so the
+session is self-contained: everything one run needs is under this directory, and
+copying the directory elsewhere copies the recording with it.
 
 | | |
 |---|---|
-| Data | `pcap_avi`, `$(find-pkg-share lctk_sample_data)/data/3` |
+| Data | `pcap_avi`, `$(session-dir)/data` |
 | LiDAR | VLP-32C at 600 rpm, device `top`, frame `velodyne_top` |
 | Camera | device `front_center`, frame `camera_front_center` |
 | Target | hollow 1000 mm, four ArUco markers |
@@ -21,6 +27,7 @@ exactly.
 
 ## Session-local files
 
+- `data/` — the recording itself: `lidar.pcap` and `video.avi`.
 - `bbox.json5` — the crop box for **this** recording. It was split out from the
   shared `config/board/bbox.json5` because that file had been retuned for a Seyond
   rosbag, which moved the box somewhere this recording's board never is; the

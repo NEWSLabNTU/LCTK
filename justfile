@@ -331,13 +331,23 @@ two-lidar:
         enable_rviz:={{ rviz_enabled }} \
         solver_mode:={{ solver_mode }}
 
-# Launch sample data playback only
-sample-data:
+# Launch a session's data playback only: just sample-data [<path-or-name>]
+#
+# Goes through session_data.launch.py rather than lctk_sample_data's launch file
+# directly. The recordings now live inside their sessions, so the manifest is
+# where the pcap, the avi, the topics and the frame ids come from -- driving the
+# playback launch file directly would mean restating them here.
+sample-data SESSION='sample3-hollow-velodyne':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
+    # Resolve first, into a variable: under `set -e` a failing command substitution
+    # aborts an assignment but NOT an argument, so inlining it would swallow the
+    # "no session" message and launch against an empty path.
+    session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
-        lctk_sample_data lidar_camera.launch.xml
+        lctk_launch session_data.launch.py \
+        session:="$session_path"
 
 # List available sessions
 sessions:

@@ -133,7 +133,8 @@ corners. Works with or without holes.
 
 Standalone uv project. No ROS.
 
-- **Ingest:** `velodyne_decoder` reads `ros/lctk_sample_data/data/{1..5}/lidar.pcap`
+- **Ingest:** `velodyne_decoder` reads the five sample recordings' `lidar.pcap`
+  (`sessions/sample{1,2,3-hollow-velodyne,4,5}/data/`, formerly `ros/lctk_sample_data/data/{1..5}`)
   directly → per-frame numpy `(N, 4)` xyz + intensity (ring kept for
   diagnostics only — never used by the algorithm). Frames cached to `.npz` so
   iteration skips pcap decoding.

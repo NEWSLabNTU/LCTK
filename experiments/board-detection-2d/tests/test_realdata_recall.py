@@ -11,14 +11,15 @@ pytestmark = pytest.mark.realdata
 
 def _have_pcaps():
     try:
-        from boarddet.ingest import DATA_DIR
+        from boarddet.ingest import sample_pcap
     except Exception:
         return False
-    return all((DATA_DIR / n / "lidar.pcap").exists() for n in "12345")
+    return all(sample_pcap(n).exists() for n in range(1, 6))
 
 
 @pytest.mark.skipif(not _have_pcaps(),
-                    reason="sample pcaps ros/lctk_sample_data/data/{1..5} absent")
+                    reason="sample pcaps sessions/sample{1,2,3-hollow-velodyne,4,5}"
+                           "/data/lidar.pcap absent")
 def test_methode_loo_recall_floor(tmp_path):
     pytest.importorskip("velodyne_decoder",
                         reason="velodyne_decoder not installed")
