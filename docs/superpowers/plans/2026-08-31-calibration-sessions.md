@@ -1719,6 +1719,24 @@ Session-local files move with their session: `config/judge/ground_truth_config.y
 layouts. Each goes to the session that uses it, as `judge_ground_truth.yaml` and `rviz.rviz`;
 `config/rviz/calibration.rviz` stays as the shared default for a session that ships none.
 
+Per-session specifics, read off the six files on 2026-08-31:
+
+- **`seyond-right`** — the example names its camera device `left_camera` while giving it
+  `/camera/right/image_raw` and frame `camera_right`: a copy-paste from `seyond_left.yaml`.
+  Rename the device to `right_camera` during migration. The device name reaches node names
+  and namespaces, so the wrong one makes a right-camera calibration report itself as left.
+- **`solid600-handheld-zed`** — `kind: live`. Keeps `tolerance_ms: 50` (tighter than the
+  hollow sessions because the board is hand-held and moving) and the ZED's
+  `/sensing/camera/zed/rgb/color/rect/image`. Its `/velodyne_points` is the topic M-27 says
+  collides with the sample-data playback; under `live` it is simply stated, and the collision
+  is gone because the sample data is now a different session with derived topics.
+- **`twolidar-vlp32-falcon`** — two lidars, no camera. `front_lidar` keeps its per-device
+  `detector_config` override (the Seyond preset) while the marker-level one stays Velodyne;
+  that override is the feature `two_lidar.yaml` exists to demonstrate, so preserve it.
+- **`vehicle-multisensor`** — two lidars, four cameras, three markers, `reference_frame: L1`.
+  Pure schema demonstration with no data behind it; mark it `kind: live` and say so in its
+  README rather than implying a rig exists.
+
 Two things change meaning during migration and must be done deliberately:
 
 - **`sample3-hollow-velodyne` renames its lidar device `top_lidar` → `top`**, so the derived
