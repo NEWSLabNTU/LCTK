@@ -15,5 +15,5 @@ just log_level=info solver_mode=manual lidar-camera seyond_<left|right>.yaml
 
 In terminal 4, open the solver's control panel
 ```bash
-just manual-solver-controller
+just extrinsic-solver-controller
 ```

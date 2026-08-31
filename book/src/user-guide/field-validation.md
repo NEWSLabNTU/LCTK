@@ -29,7 +29,7 @@ watch RViz, read logs. These are the differences that will actually stop you.
 | Detector presets | Moved to `config/board/<target>/<sensor>.json5`. The old `board_detector*.json5` files are gone. |
 | ICP correctness | Issue H-15: until recently the perforated ICP applied its correction *backwards*. If you tried the new detector before that fix, what you saw was that bug. |
 
-Unchanged: the TUI, its key bindings, `just manual-solver-controller`, the solver services, and the
+Unchanged: the TUI, its key bindings, `just extrinsic-solver-controller`, the solver services, and the
 overall manual-mode capture loop.
 
 ## Before you start: fix your config
@@ -135,7 +135,7 @@ image topic's namespace.
 **Terminal 3 — the TUI.**
 
 ```bash
-just manual-solver-controller
+just extrinsic-solver-controller
 ```
 
 It discovers the solver on the graph by itself. If more than one lidar-camera pair exists it offers

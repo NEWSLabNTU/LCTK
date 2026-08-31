@@ -1714,11 +1714,10 @@ Cover: what assisted mode does, the two gates and why both exist, the workflow (
 
 - [ ] **Step 2: Update `SUMMARY.md`**
 
-```markdown
-- [Assisted Capture](./user-guide/assisted-capture.md)
-```
-
-placed after the LiDAR-Camera Calibration entry.
+Add a bullet linking `./user-guide/assisted-capture.md` with the title
+`Assisted Capture`, placed after the Multi-LiDAR Calibration entry. (Written as prose
+rather than as a literal snippet because `setup/scripts/check-doc-links.py` does not skip
+fenced code blocks, and would resolve the example link relative to this plan.)
 
 - [ ] **Step 3: Update `CLAUDE.md` and the three READMEs**
 

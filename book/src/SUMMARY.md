@@ -10,6 +10,7 @@
 - [Quick Start](./user-guide/quickstart.md)
 - [LiDAR-Camera Calibration](./user-guide/lidar-camera.md)
 - [Multi-LiDAR Calibration](./user-guide/multi-lidar.md)
+- [Assisted Capture](./user-guide/assisted-capture.md)
 - [Exporting to Autoware](./user-guide/autoware-export.md)
 - [Configuration](./user-guide/configuration.md)
 - [Field Validation Runbook (Wave 7)](./user-guide/field-validation.md)

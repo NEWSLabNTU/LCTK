@@ -22,7 +22,10 @@ just solver_mode=continuous lidar-camera
 
 # Multi-pose workflow
 just solver_mode=manual lidar-camera
-just manual-solver-controller
+just extrinsic-solver-controller
+
+# Auto-capture still, novel poses; review at http://localhost:8080
+just assisted
 ```
 
 Direct invocation uses the same parameter:
@@ -32,7 +35,7 @@ ros2 run lidar_to_camera_solver lidar_to_camera_solver \
   --ros-args -p solver_mode:=manual
 ```
 
-Accepted `solver_mode` values are exactly `continuous` and `manual`.
+Accepted `solver_mode` values are exactly `continuous`, `manual` and `assisted`.
 
 ## Interfaces
 

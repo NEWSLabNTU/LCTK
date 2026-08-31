@@ -181,7 +181,7 @@ debug_mode=true            # Enable debug topics
 log_level=info             # ROS log level (debug/info/warn/error)
 rviz_enabled=true          # Launch RViz
 mode=offline               # offline (RELIABLE QoS, rosbags) or realtime (BEST_EFFORT, live)
-solver_mode=continuous     # continuous (latest pair) or manual (multi-pose buffer)
+solver_mode=continuous     # continuous (latest pair), manual (multi-pose buffer), assisted (auto-capture + web review)
 enable_overlay=true        # Point cloud / image overlay for visual validation
 enable_judge=true          # Calibration judge (IoU metrics)
 
@@ -240,7 +240,7 @@ just rviz
 
 ```bash
 # Interactive TUI to drive the manual multi-pose solver
-just manual-solver-controller
+just extrinsic-solver-controller
 ```
 
 ### Running and stopping a launch
@@ -452,7 +452,7 @@ just calibrate <config>    # Config-driven calibration for your own sensors
 
 # Tools
 just rviz                          # Launch RViz
-just manual-solver-controller      # Interactive manual-solver TUI
+just extrinsic-solver-controller      # Interactive manual-solver TUI
 ```
 
 ## Contributing

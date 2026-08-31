@@ -64,7 +64,7 @@ Equivalently, via the justfile: `just calibrate /path/to/your_config.yaml` (see 
 | `mode`           | `offline`    | Transport QoS: `offline` (RELIABLE, recorded data) or `realtime` (BEST_EFFORT, live) |
 | `enable_rviz`    | `true`       | Launch RViz alongside the pipeline                                          |
 | `rviz_config`    | `config/rviz/calibration.rviz` | Path to RViz config file                                  |
-| `solver_mode`    | `continuous` | `continuous` (latest-pair auto-solve) or `manual` (multi-pose buffer)       |
+| `solver_mode`    | `continuous` | `continuous` (latest-pair auto-solve), `manual` (multi-pose buffer), or `assisted` (auto-capture + web review) |
 | `enable_overlay` | `false`      | Launch `pointcloud_image_overlay` for visual verification (one per pair)    |
 | `enable_judge`   | `false`      | Launch the calibration quality judge (one per pair)                         |
 

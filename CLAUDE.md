@@ -32,7 +32,7 @@ just
   - `aruco_generator_node/` - Prints the ArUco board pattern from a Target Definition (`--target-config`)
   - `lidar_board_detector/` - Calibration board detection from point clouds
   - `extrinsic_solver_node/` - Superseded LiDAR-camera solver (unreachable from config-driven launch; pending deletion)
-  - `lidar_to_camera_solver/` - LiDAR-camera solver with continuous and manual modes
+  - `lidar_to_camera_solver/` - LiDAR-camera solver with continuous, manual and assisted modes
   - `interactive_solver_controller/` - Rich TUI driving `lidar_to_camera_solver`
   - `lidar_to_lidar_solver/` - LiDAR-to-LiDAR calibration solver
   - `lctk_quality/` + `calibration_judge/` - Extrinsic quality metric (H-09)
@@ -103,6 +103,7 @@ just calibrate /path/to/config.yaml
 just demo mode=realtime              # Use realtime mode (BEST_EFFORT QoS, no buffering)
 just demo mode=offline               # Use offline mode (RELIABLE QoS, default)
 just demo solver_mode=manual         # Use service-driven multi-pose buffering
+just assisted                        # Auto-capture still, novel poses; review at :8080
 just demo debug_mode=false           # Disable debug output
 
 # Documentation (run from book/ directory)
@@ -493,6 +494,8 @@ hand `detect_markers` a rectified image.
 - `lidar_to_camera_solver` (one per LiDAR-camera pair), selected by `solver_mode`:
   - `continuous` (default) - Auto-solves and publishes from each latest detection pair
   - `manual` - Multi-pose buffered solve with service control
+  - `assisted` - Auto-captures still, geometrically-new poses and serves a browser review
+    page; also creates the manual services
 - `lidar_to_lidar_solver` - One per lidar-lidar pair
 
 **Synchronizer Parameters (Conflux):**
@@ -571,11 +574,34 @@ calibration.
 
 Use it for quick calibration verification or real-time transform updates.
 
+### LiDAR-to-Camera Solver: Assisted Mode
+
+`lidar_to_camera_solver` with `solver_mode=assisted` auto-captures a detection pair whenever the
+board is held still in a placement it has not seen before, and serves a review page on
+`http://localhost:8080`. Run `just assisted`, then open the page.
+
+Two gates decide a capture, and both are load-bearing:
+
+- **Stillness** — the board pose's *span across a sliding window*, not its frame-to-frame delta.
+  A board drifting at 1 mm per frame has a negligible per-frame delta and is not still.
+- **Novelty** — `lctk_quality.distinct_placements` (5 cm / 5 deg). Without it an auto-capture loop
+  manufactures the degenerate capture `lctk_quality.diversity` exists to detect, where reprojection
+  RMSE and subset resampling both *invert* and rate one placement filmed nine times as excellent.
+  The page therefore leads with the diversity meter, not the residual.
+
+This is the only solver that subscribes to a camera image. The frame is used for the review
+preview only, never for the solve, and a missing frame never blocks a capture. Full guide:
+`book/src/user-guide/assisted-capture.md`; design:
+`docs/superpowers/specs/2026-08-31-assisted-extrinsic-solver-design.md`.
+
+The review server is **unauthenticated**; it binds `127.0.0.1` unless `review_bind_host` says
+otherwise, and logs a warning naming the exposure when it does.
+
 ### LiDAR-to-Camera Solver: Manual Mode
 
 `lidar_to_camera_solver` with `solver_mode=manual` provides multi-pose calibration with manual
 adjustment capabilities. Run `just solver_mode=manual lidar-camera` (or `just solver_mode=manual
-demo`), then `just manual-solver-controller`.
+demo`), then `just extrinsic-solver-controller`.
 
 **Services** (under `~/calibration/<pair>/lidar_to_camera_solver/`):
 - `add_detection` - Add current ArUco + board detection pair to buffer
