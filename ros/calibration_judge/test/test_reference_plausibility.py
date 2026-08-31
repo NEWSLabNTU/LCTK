@@ -12,7 +12,6 @@ without risking a confident wrong diagnosis.
 """
 
 import numpy as np
-
 from calibration_judge.judge_node import CalibrationJudgeNode as J
 
 MAX_ERROR_M = 0.10

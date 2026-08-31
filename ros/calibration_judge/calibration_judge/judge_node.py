@@ -18,7 +18,7 @@ now expected and will score as badly wrong. Invert such a file once:
     T_new = numpy.linalg.inv(T_old)
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import rclpy
@@ -200,7 +200,7 @@ class CalibrationJudgeNode(Node):
         ground_truth: np.ndarray,
         estimate: np.ndarray,
         max_error_m: float,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Warn when the ground truth looks like it describes a different rig (M-17).
 
         A reference recorded for the wrong setup scores 0/15 forever, no matter how good the

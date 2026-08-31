@@ -227,10 +227,11 @@ def reject_outlier_poses(
     # Never fall below min_keep: drop the worst offenders first and stop.
     max_rejects = max(len(rms) - min_keep, 0)
     if len(candidates) > max_rejects:
-        candidates = sorted(candidates, key=lambda i: rms[i], reverse=True)[:max_rejects]
+        candidates = sorted(candidates, key=lambda i: rms[i], reverse=True)[
+            :max_rejects
+        ]
 
     return sorted(candidates), rms
-
 
 
 class DetectionBuffer:
@@ -598,7 +599,11 @@ class DetectionBuffer:
                         )
                     else:
                         rvec_retry, tvec_retry = self._refine_weighted(
-                            kept_objects, kept_images, rvec_retry, tvec_retry, kept_weights
+                            kept_objects,
+                            kept_images,
+                            rvec_retry,
+                            tvec_retry,
+                            kept_weights,
                         )
                     rvec, tvec = rvec_retry, tvec_retry
                     self._last_rejected_poses = tuple(rejected)

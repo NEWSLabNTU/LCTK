@@ -12,7 +12,6 @@ misplacement seen 16 times.
 
 import cv2
 import numpy as np
-
 from lidar_to_camera_solver.main import LidarToCameraSolver as S
 
 K = np.array([[1164.6, 0, 950.1], [0, 1161.1, 538.6], [0, 0, 1]], dtype=np.float64)

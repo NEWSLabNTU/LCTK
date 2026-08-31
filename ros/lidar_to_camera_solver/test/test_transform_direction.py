@@ -18,7 +18,6 @@ consumer finally gets the direction it asks for.
 import cv2
 import numpy as np
 from geometry_msgs.msg import TransformStamped
-
 from lidar_to_camera_solver.main import LidarToCameraSolver as S
 from pointcloud_image_overlay.overlay_node import transform_to_rvec_tvec
 

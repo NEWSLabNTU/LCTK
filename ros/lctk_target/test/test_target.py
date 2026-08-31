@@ -91,7 +91,9 @@ def test_solid_marker_is_exactly_480_mm_and_has_documented_corners():
     assert fiducial.paper_side_um - 2 * fiducial.outer_border_um == 480_000
     expected = 0.480 / math.sqrt(2.0)
     actual = [
-        coordinate for corner in target.marker_corners_by_id[24] for coordinate in corner
+        coordinate
+        for corner in target.marker_corners_by_id[24]
+        for coordinate in corner
     ]
     wanted = [
         coordinate
