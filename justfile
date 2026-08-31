@@ -326,14 +326,42 @@ sample-data:
     play_launch launch \
         lctk_sample_data lidar_camera.launch.xml
 
-# Launch demo (sample data + calibration pipeline)
-demo:
+# List available sessions
+sessions:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
+    ros2 run lctk_launch lctk_session list
+
+# Validate a session without launching it: just check <path-or-name>
+check SESSION:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    # Resolve first, into a variable: under `set -e` a failing command substitution
+    # aborts an assignment but NOT an argument, so inlining it would swallow the
+    # "no session" message and run the tool against an empty path instead.
+    session_path=$(just _session-path {{ SESSION }})
+    ros2 run lctk_launch lctk_session check "$session_path"
+
+# Scaffold a new session: just new <new-path> [<template-path-or-name>]
+new TARGET FROM='sample3-hollow-velodyne':
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    template_path=$(just _session-path {{ FROM }})
+    ros2 run lctk_launch lctk_session new {{ TARGET }} --from "$template_path"
+
+# Run a session end to end: just run <path-or-name>
+run SESSION:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    session_path=$(just _session-path {{ SESSION }})
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
-        lctk_launch demo.launch.py \
+        lctk_launch session.launch.py \
+        session:="$session_path" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
@@ -341,6 +369,33 @@ demo:
         solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}
+
+# Run the shipped sample-data session end to end
+demo:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    just run sample3-hollow-velodyne
+
+# Resolve a session name to a path. Name lookup lives HERE, in the alias layer --
+# the ros2 interface takes an explicit path and makes no assumption about where
+# sessions live or where the user is standing.
+_session-path SESSION:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    if [[ -e "{{ SESSION }}" ]]; then
+        realpath "{{ SESSION }}"
+    elif [[ -e "sessions/{{ SESSION }}" ]]; then
+        realpath "sessions/{{ SESSION }}"
+    else
+        source install/setup.bash
+        SHARE=$(ros2 pkg prefix lctk_launch --share)
+        if [[ -e "$SHARE/sessions/{{ SESSION }}" ]]; then
+            echo "$SHARE/sessions/{{ SESSION }}"
+        else
+            echo "no session '{{ SESSION }}' as a path, in ./sessions/, or in $SHARE/sessions/" >&2
+            exit 1
+        fi
+    fi
 
 # Launch RViz for calibration visualization
 rviz:

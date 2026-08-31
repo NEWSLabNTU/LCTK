@@ -80,6 +80,9 @@ setup/.markers/
 # ros/lctk_sample_data/bags/README.md for the expected layout.
 /ros/lctk_sample_data/bags/
 
+# Per-session run outputs: detections archives, exports, logs.
+/sessions/*/out/
+
 # Play log
 /play_log
 
