@@ -51,6 +51,13 @@ Full calibration configs (devices, markers, sync, pairs) for `ros2 launch lctk_l
 calibrate.launch.py config_file:=...` / `just calibrate`. See the repo root `CLAUDE.md`'s
 "Config-Driven Calibration" section for the schema and a description of each shipped example.
 
+A config may also carry an optional `assisted:` section, read only by
+`solver_mode=assisted`. It is optional -- unlike `sync:` -- because `continuous` and
+`manual` read none of it, so refusing a config that omits it would break both modes over a
+setting neither uses. An unknown key inside the section *is* refused, since silently
+ignoring a misspelling would leave you tuning a value that never reaches the node. Keys and
+defaults are documented in `book/src/user-guide/assisted-capture.md`.
+
 ## Usage in Launch Files
 
 Calibration is config-driven: a single YAML config file (see `examples/`) is passed to
