@@ -124,14 +124,14 @@ def make_pair(
     return DetectionPair(aruco=aruco, board=board)
 
 
-@pytest.mark.parametrize("mode", ["continuous", "manual"])
+@pytest.mark.parametrize("mode", ["continuous", "manual", "assisted"])
 def test_solver_mode_accepts_only_named_behaviours(mode):
     assert parse_solver_mode(mode) == mode
 
 
 @pytest.mark.parametrize("mode", ["", "standard", "advanced", "true"])
 def test_solver_mode_rejects_removed_or_unknown_values(mode):
-    with pytest.raises(ValueError, match="expected 'continuous', 'manual'"):
+    with pytest.raises(ValueError, match="expected 'continuous', 'manual', 'assisted'"):
         parse_solver_mode(mode)
 
 

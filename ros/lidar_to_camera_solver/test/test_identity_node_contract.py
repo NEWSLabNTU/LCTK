@@ -125,6 +125,11 @@ def solver_harness(*, ready: bool) -> LidarToCameraSolver:
     solver.last_transform = object()
     solver.publishing_enabled = True
     solver._continuous_solve_count = 0
+    solver._stillness = None
+    solver._preview_store = None
+    solver._review_server = None
+    solver._last_stillness = None
+    solver._last_epoch_resets = 0
     solver._logger = _Logger()
     solver.get_logger = lambda: solver._logger
     return solver

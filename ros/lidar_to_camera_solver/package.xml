@@ -20,6 +20,9 @@
        was migrated from never declared it. -->
   <depend>lctk_interfaces</depend>
   <depend>lctk_quality</depend>
+  <!-- assisted mode's review page exports straight into an Autoware
+       sensor_kit_calibration.yaml, reusing the exporter's frame chain. -->
+  <depend>lctk_autoware_export</depend>
   <depend>python3-opencv</depend>
   <depend>python3-numpy</depend>
   <depend>python3-yaml</depend>

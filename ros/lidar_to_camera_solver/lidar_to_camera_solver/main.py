@@ -1,16 +1,18 @@
-"""ROS adapter for continuous and manual LiDAR-to-camera calibration."""
+"""ROS adapter for continuous, manual and assisted LiDAR-to-camera calibration."""
 
 import json
 import os
 import sys
 import tempfile
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, Quaternion, TransformStamped, Vector3
+from lctk_autoware_export.export import ExportError, patch_calibration
 from lctk_interfaces.msg import CalibrationTargetIdentity
 from lctk_interfaces.srv import (
     AddDetectionToBuffer,
@@ -24,11 +26,18 @@ from lctk_interfaces.srv import (
     RemoveDetectionFromBuffer,
     ResetTransform,
 )
+from lctk_quality import compute_diversity
+from lctk_quality.placements import (
+    DEFAULT_ORIENTATION_TOL_DEG,
+    DEFAULT_POSITION_TOL_M,
+    Placement,
+    board_normal,
+)
 from lctk_sync import DetectionPairSource, PairSourceConfig
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import ColorRGBA, Header
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
@@ -61,8 +70,11 @@ from lidar_to_camera_solver.detection_format import (
     encode_detection_archive,
     select_loaded_adjustment,
 )
+from lidar_to_camera_solver.preview import PreviewStore, decode_image
+from lidar_to_camera_solver.review_server import ReviewServer
+from lidar_to_camera_solver.stability import StillnessTracker
 
-SOLVER_MODES = ("continuous", "manual")
+SOLVER_MODES = ("continuous", "manual", "assisted")
 
 
 def target_identity_qos_profile() -> QoSProfile:
@@ -107,6 +119,121 @@ def parse_solver_mode(value: str) -> str:
         choices = "', '".join(SOLVER_MODES)
         raise ValueError(f"Invalid solver_mode '{value}'; expected '{choices}'.")
     return value
+
+
+def board_pose_from_detections(
+    message: object,
+) -> tuple[tuple[float, float, float], tuple[float, float, float, float]] | None:
+    """The board's position and unit quaternion, or ``None`` if unreadable.
+
+    This is deliberately a *lenient* reader, unlike ``DetectionBuffer._read_board``
+    which raises an admission error naming the exact defect. The stillness tracker
+    runs on every synchronized pair, including the ones the buffer would refuse, and
+    a detector hiccup must not be able to raise out of a subscription callback.
+    The buffer still does the strict reading when a capture is actually attempted.
+    """
+
+    detections = getattr(message, "detections", ())
+    if not detections:
+        return None
+    results = getattr(detections[0], "results", ())
+    if not results:
+        return None
+    pose = results[0].pose.pose
+    position = np.asarray(
+        (pose.position.x, pose.position.y, pose.position.z), dtype=np.float64
+    )
+    quaternion = np.asarray(
+        (
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ),
+        dtype=np.float64,
+    )
+    norm = float(np.linalg.norm(quaternion))
+    if (
+        not np.all(np.isfinite(position))
+        or not np.all(np.isfinite(quaternion))
+        or norm < 1e-12
+    ):
+        return None
+    quaternion = quaternion / norm
+    return (
+        tuple(float(value) for value in position),
+        tuple(float(value) for value in quaternion),
+    )
+
+
+def aruco_corner_quads(message: object) -> list[np.ndarray]:
+    """One 4x2 array of corner pixels per detected marker.
+
+    The same extraction ``DetectionBuffer._prepare_pair`` performs, minus the
+    board-geometry lookup: the preview draws whatever the detector saw, including
+    markers that are not part of the selected target, because a stray marker in the
+    frame is exactly the kind of thing a reviewer needs to see.
+    """
+
+    quads: list[np.ndarray] = []
+    for detection in getattr(message, "detections", ()):
+        results = getattr(detection, "results", ())
+        if len(results) < 4:
+            continue
+        pixels = np.asarray(
+            [
+                (result.pose.pose.position.x, result.pose.pose.position.y)
+                for result in results[:4]
+            ],
+            dtype=np.float64,
+        )
+        if pixels.shape != (4, 2) or not np.all(np.isfinite(pixels)):
+            continue
+        quads.append(pixels)
+    return quads
+
+
+def placement_is_new(
+    position: Sequence[float],
+    quaternion: Sequence[float],
+    placements: Sequence[Placement],
+    *,
+    position_tol_m: float = DEFAULT_POSITION_TOL_M,
+    orientation_tol_deg: float = DEFAULT_ORIENTATION_TOL_DEG,
+) -> bool:
+    """Would this pose form a placement the buffer does not already hold?
+
+    The same test `lctk_quality.distinct_placements` applies when it groups frames,
+    asked of one candidate pose against the placements already captured. It has to
+    agree with that grouping: N is the number of *distinct placements*, never the
+    frame count, so a capture the metric would fold into an existing placement adds
+    nothing and makes every frame-counting number more confident about a worse
+    calibration.
+
+    The tolerances are configurable because how far apart two placements must be is
+    a judgement about the scene, not a property of the code; they default to
+    lctk_quality's own.
+    """
+
+    candidate_position = np.asarray(position, dtype=np.float64)
+    candidate_normal = board_normal(quaternion)
+    for placement in placements:
+        distance = float(
+            np.linalg.norm(
+                candidate_position - np.asarray(placement.position, dtype=np.float64)
+            )
+        )
+        if distance > position_tol_m:
+            continue
+        # abs(): the board is a plane, so a normal and its negation are the same
+        # orientation.
+        cosine = abs(
+            float(np.dot(candidate_normal, np.asarray(placement.normal, np.float64)))
+        )
+        angle = float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+        if angle <= orientation_tol_deg:
+            return False
+    return True
 
 
 def rotation_vector_to_euler(rvec: np.ndarray, *, degrees: bool = False) -> np.ndarray:
@@ -171,6 +298,15 @@ class LidarToCameraSolver(Node):
         self.last_transform: TransformStamped | None = None
         self.publishing_enabled = False
         self._continuous_solve_count = 0
+        # Assisted-mode state.  All three stay None in continuous and manual, which
+        # is what keeps those two paths byte-for-byte the behaviour they had.
+        self._stillness: StillnessTracker | None = None
+        self._preview_store: PreviewStore | None = None
+        self._review_server: ReviewServer | None = None
+        self._last_stillness = None
+        self._last_epoch_resets = 0
+        self._novelty_position_tol_m = DEFAULT_POSITION_TOL_M
+        self._novelty_orientation_tol_deg = DEFAULT_ORIENTATION_TOL_DEG
         self.state_lock = threading.RLock()
         # Bump whenever a solver-state reset invalidates an in-flight mutation.
         # Continuous solves capture this token before doing work and must match it
@@ -222,6 +358,8 @@ class LidarToCameraSolver(Node):
             on_pair=(
                 self._continuous_pair_callback
                 if self.solver_mode == "continuous"
+                else self._assisted_pair_callback
+                if self.solver_mode == "assisted"
                 else None
             ),
             admit_pair=self._admit_detection_pair,
@@ -235,7 +373,12 @@ class LidarToCameraSolver(Node):
         self.camera_info_subscription = self.create_subscription(
             CameraInfo, camera_info_topic, self.camera_info_callback, qos_profile
         )
-        if self.solver_mode == "manual":
+        self.image_subscription = None
+        if self.solver_mode == "assisted":
+            self._start_assisted(camera_topic, qos_profile)
+        # Assisted is a multi-pose buffer too, so it gets the manual services: the
+        # interactive controller still attaches, and dump/load stays reachable.
+        if self.solver_mode in ("manual", "assisted"):
             self._create_services()
         else:
             self._services = []
@@ -272,9 +415,99 @@ class LidarToCameraSolver(Node):
             ("epoch_check_interval_s", 1.0),
             ("lidar_target_identity_topic", LIDAR_TARGET_IDENTITY_TOPIC),
             ("camera_target_identity_topic", CAMERA_TARGET_IDENTITY_TOPIC),
+            # Assisted mode only.  Read once in _start_assisted; ignored by the
+            # other two modes, which never construct the subsystems that use them.
+            ("stability_window_frames", 10),
+            ("stability_max_translation_m", 0.005),
+            ("stability_max_rotation_deg", 0.5),
+            ("stability_cooldown_s", 1.0),
+            ("novelty_position_tol_m", DEFAULT_POSITION_TOL_M),
+            ("novelty_orientation_tol_deg", DEFAULT_ORIENTATION_TOL_DEG),
+            ("review_bind_host", "127.0.0.1"),
+            ("review_port", 8080),
+            ("review_jpeg_quality", 80),
+            ("review_max_previews", 64),
+            ("review_archive_path", ""),
+            ("export_autoware_target", ""),
+            ("export_camera_frame", ""),
+            ("export_lidar_frame", ""),
         )
         for name, default in parameters:
             self.declare_parameter(name, default)
+
+    def _start_assisted(self, camera_topic: str, qos_profile: QoSProfile) -> None:
+        """Build the stillness gate, the preview store and the review server.
+
+        Called only for ``solver_mode=assisted``.  Nothing here is reachable from
+        the other two modes, so neither can change behaviour because of it.
+        """
+
+        self._stillness = StillnessTracker(
+            window_frames=self._integer_parameter("stability_window_frames"),
+            max_translation_m=self._double_parameter("stability_max_translation_m"),
+            max_rotation_deg=self._double_parameter("stability_max_rotation_deg"),
+            cooldown_s=self._double_parameter("stability_cooldown_s"),
+        )
+        self._novelty_position_tol_m = self._double_parameter("novelty_position_tol_m")
+        self._novelty_orientation_tol_deg = self._double_parameter(
+            "novelty_orientation_tol_deg"
+        )
+        self._preview_store = PreviewStore(
+            max_previews=self._integer_parameter("review_max_previews"),
+            jpeg_quality=self._integer_parameter("review_jpeg_quality"),
+        )
+        if camera_topic:
+            # The image is for the reviewer, never for the solve, so it takes the
+            # same QoS as the detections and keeps only the newest frame.
+            self.image_subscription = self.create_subscription(
+                Image, camera_topic, self._image_callback, qos_profile
+            )
+        else:
+            self.get_logger().warn(
+                "camera_topic is unset; the review page will show no previews"
+            )
+
+        host = self._string_parameter("review_bind_host")
+        self._review_server = ReviewServer(
+            self, host=host, port=self._integer_parameter("review_port")
+        )
+        self._review_server.start()
+        if host not in ("127.0.0.1", "localhost"):
+            self.get_logger().warn(
+                f"review server bound to {host}:{self._review_server.port} -- "
+                "the queue, the camera previews and the solved extrinsic are "
+                "readable by anyone who can reach that port, and there is no "
+                "authentication"
+            )
+        else:
+            self.get_logger().info(
+                f"review server on http://{host}:{self._review_server.port}"
+            )
+
+    def _image_callback(self, message) -> None:
+        """Store the newest frame and return.
+
+        Per the ArcSwap guidance in CLAUDE.md this stays cheap: the annotate and
+        JPEG encode happen at capture time, on the pair callback, not here.
+        """
+
+        if self._preview_store is None:
+            return
+        try:
+            frame = decode_image(
+                height=message.height,
+                width=message.width,
+                encoding=message.encoding,
+                step=message.step,
+                data=bytes(message.data),
+            )
+        except ValueError as error:
+            self.get_logger().warn(
+                f"preview disabled for this frame: {error}",
+                throttle_duration_sec=10.0,
+            )
+            return
+        self._preview_store.set_latest(frame)
 
     def _create_services(self) -> None:
         services = (
@@ -422,6 +655,115 @@ class LidarToCameraSolver(Node):
         # synchronized pair produces a publication immediately. The normal timer
         # continues refreshing the latest transform for late subscribers.
         self._publishing_timer_callback(expected_generation=generation)
+
+    def _assisted_pair_callback(self, messages: tuple[object, ...]) -> None:
+        """Auto-capture a pair when the board is held still in a new placement.
+
+        Two gates, and both are load-bearing.  Stillness stops motion blur.
+        Novelty stops the degenerate capture -- one placement filmed forty times --
+        that `lctk_quality` exists to detect and that every residual-based number
+        rates as excellent.
+
+        Novelty is asked twice, and the two questions differ.  `placement_is_new`
+        asks it against the operator's configured tolerances *before* capturing, so
+        a rig that wants placements further apart than lctk_quality's 5 cm / 5 deg
+        gets what it asked for.  `added_new_placement` then reports what the buffer's
+        own grouping concluded, which is what the diversity metric will count; a
+        capture the metric would fold into an existing placement is undone rather
+        than left to pad the buffer.
+        """
+
+        aruco, board = messages
+        epoch_resets = self.pair_source.epoch_resets
+        if epoch_resets != self._last_epoch_resets:
+            # The recording changed under the synchronizer.  The window this
+            # tracker filled belongs to the previous epoch, and a "still" verdict
+            # must not carry across the seam.
+            self._last_epoch_resets = epoch_resets
+            self._stillness.reset()
+
+        pose = board_pose_from_detections(board)
+        if pose is None:
+            self.get_logger().warn(
+                "Ignoring synchronized detection pair: no readable board pose",
+                throttle_duration_sec=5.0,
+            )
+            return
+        position, orientation = pose
+        stamp_s = self.get_clock().now().nanoseconds * 1e-9
+        state = self._stillness.push(position, orientation, stamp_s)
+        self._last_stillness = state
+        if not state.should_capture:
+            return
+
+        # One node lock over the identity check and the mutation, exactly as the
+        # manual capture path does: an identity update must not be able to change
+        # the accepted target between the two.
+        with self.state_lock:
+            generation = self._identity_generation
+            buffer = self.detection_buffer
+            identity_error = self.identity_gate.error
+            if identity_error is not None:
+                self.get_logger().warn(
+                    "Skipping assisted capture before Target Identity agreement: "
+                    f"{identity_error}",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            if buffer is None:
+                self.get_logger().warn(
+                    "Skipping assisted capture: no camera info available",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            if not placement_is_new(
+                position,
+                orientation,
+                buffer.snapshot().placements,
+                position_tol_m=self._novelty_position_tol_m,
+                orientation_tol_deg=self._novelty_orientation_tol_deg,
+            ):
+                self.get_logger().info(
+                    "Held still, but this placement is already captured; "
+                    "move or tilt the board",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            update = buffer.capture(DetectionPair(aruco=aruco, board=board))
+            if not update.accepted:
+                self.get_logger().warn(
+                    f"Assisted capture rejected: {self._rejection_text(update)}",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            pair_id = update.snapshot.frame_count - 1
+            if update.added_new_placement is False:
+                # Still, but not a new placement.  Undo rather than pad the buffer
+                # with a view that adds no geometry and inflates every metric that
+                # counts frames.
+                buffer.remove(pair_id)
+                self.get_logger().info(
+                    "Held still, but this is not a new board placement; "
+                    "move or tilt the board",
+                    throttle_duration_sec=5.0,
+                )
+                return
+
+        # Outside the lock: annotating and JPEG-encoding a frame is real work, and
+        # state_lock is also DetectionPairSource's admission lock.
+        self._preview_store.capture(
+            pair_id, corners=aruco_corner_quads(aruco), reprojected=None
+        )
+        if not self._apply_update(update, expected_generation=generation):
+            self.get_logger().warn(
+                "Assisted capture invalidated by a target or session reset",
+                throttle_duration_sec=5.0,
+            )
+            return
+        self.get_logger().info(
+            f"Captured new board placement #{pair_id}. "
+            f"{self._status_text(update.snapshot)}"
+        )
 
     def _admit_detection_pair(self, _messages: tuple[object, ...]) -> str | None:
         """Reject a pair before :class:`DetectionPairSource` mutates its cache.
@@ -1013,6 +1355,153 @@ class LidarToCameraSolver(Node):
         response.adjust_yaw = response.current_yaw - response.solved_yaw
         return response
 
+    # --- NodeFacade -----------------------------------------------------------
+    # The review server calls these from its own thread.  DetectionBuffer is
+    # internally locked, so a snapshot needs no node lock; anything reading node
+    # state takes state_lock, and nothing holds it across HTTP or disk I/O --
+    # state_lock is also DetectionPairSource's admission lock and the publishing
+    # timer's lock, so holding it over a file write would stall the graph.
+
+    def state(self) -> dict:
+        """Everything the review page renders, as plain JSON-able data."""
+
+        snapshot = self._snapshot()
+        stillness = self._last_stillness
+        diversity = (
+            compute_diversity(snapshot.placements) if snapshot is not None else None
+        )
+        estimate = snapshot.estimate if snapshot is not None else None
+        per_pose_rms = (
+            list(estimate.quality.residuals.per_pose_rms_px)
+            if estimate is not None
+            else []
+        )
+        with self.state_lock:
+            identity_error = self.identity_gate.error
+        return {
+            "mode": self.solver_mode,
+            "sync": self.pair_source.status_line(),
+            "identity_error": identity_error,
+            "stillness": {
+                "is_still": bool(stillness is not None and stillness.is_still),
+                "reason": (
+                    stillness.reason
+                    if stillness is not None
+                    else "waiting for detections"
+                ),
+                "frames": stillness.frames if stillness is not None else 0,
+            },
+            "diversity": (
+                {
+                    "n_placements": diversity.n_placements,
+                    "normal_span_deg": diversity.normal_span_deg,
+                    "depth_range_m": diversity.depth_range_m,
+                    "lateral_span_m": diversity.lateral_span_m,
+                    "is_degenerate": diversity.is_degenerate,
+                    "shortfalls": diversity.shortfalls(),
+                }
+                if diversity is not None
+                else {"n_placements": 0, "shortfalls": ["no placements yet"]}
+            ),
+            "solve": {
+                "status": (
+                    self._status_text(snapshot)
+                    if snapshot is not None
+                    else "No camera info available"
+                ),
+                "rms_px": (
+                    estimate.quality.residuals.rms_px if estimate is not None else None
+                ),
+            },
+            "pairs": [
+                {
+                    "id": index,
+                    "rms_px": (
+                        per_pose_rms[index] if index < len(per_pose_rms) else None
+                    ),
+                    "has_preview": self.preview(index) is not None,
+                }
+                for index in range(snapshot.frame_count if snapshot is not None else 0)
+            ],
+            "export": {
+                "archive_path": self._string_parameter("review_archive_path"),
+                "autoware_ready": bool(
+                    self._string_parameter("export_autoware_target")
+                    and self._string_parameter("export_camera_frame")
+                    and self._string_parameter("export_lidar_frame")
+                ),
+            },
+        }
+
+    def preview(self, pair_id: int) -> bytes | None:
+        if self._preview_store is None:
+            return None
+        return self._preview_store.get(pair_id)
+
+    def drop(self, pair_id: int) -> tuple[bool, str]:
+        with self.state_lock:
+            buffer = self.detection_buffer
+            if buffer is None:
+                return False, "No camera info available"
+            generation = self._identity_generation
+            update = buffer.remove(pair_id)
+        if not update.accepted:
+            return False, self._rejection_text(update)
+        if self._preview_store is not None:
+            self._preview_store.drop(pair_id)
+        if not self._apply_update(update, expected_generation=generation):
+            return False, "Removal invalidated by a target or session reset; retry"
+        return True, f"Dropped pair {pair_id}. {self._status_text(update.snapshot)}"
+
+    def export_archive(self, path: str) -> tuple[bool, str]:
+        """Write the detection archive, reusing the dump service's whole body.
+
+        Duplicating the encode/temp-file/rename here would give the archive two
+        implementations and one of them would drift; the service already does its
+        file I/O outside state_lock.
+        """
+
+        request = DumpDetections.Request()
+        request.file_path = path
+        response = self.dump_detections_callback(request, DumpDetections.Response())
+        return bool(response.success), response.message
+
+    def export_autoware(self, dry_run: bool) -> tuple[bool, str, dict | None]:
+        target = self._string_parameter("export_autoware_target")
+        camera_frame = self._string_parameter("export_camera_frame")
+        lidar_frame = self._string_parameter("export_lidar_frame")
+        missing = [
+            name
+            for name, value in (
+                ("export_autoware_target", target),
+                ("export_camera_frame", camera_frame),
+                ("export_lidar_frame", lidar_frame),
+            )
+            if not value
+        ]
+        if missing:
+            return False, f"unset parameter(s): {', '.join(missing)}", None
+        snapshot = self._snapshot()
+        estimate = snapshot.estimate if snapshot is not None else None
+        if estimate is None:
+            return False, "no solved estimate to export", None
+        try:
+            # The raw solver rvec/tvec (T_optical<-lidar) is what the exporter
+            # consumes -- never the published transform, whose frame labels are
+            # inverted (M-01).
+            entry = patch_calibration(
+                target,
+                rvec=np.asarray(estimate.rvec, dtype=np.float64).reshape(3),
+                tvec=np.asarray(estimate.tvec, dtype=np.float64).reshape(3),
+                camera_frame=camera_frame,
+                lidar_frame=lidar_frame,
+                dry_run=dry_run,
+            )
+        except (ExportError, OSError, KeyError, TypeError, ValueError) as error:
+            return False, f"{error!s}", None
+        verb = "Would write" if dry_run else "Wrote"
+        return True, f"{verb} {camera_frame} under {target}", dict(entry)
+
     def _target_identity_callback(
         self, source: str, message: CalibrationTargetIdentity
     ) -> None:
@@ -1104,6 +1593,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if node._review_server is not None:
+            node._review_server.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 
