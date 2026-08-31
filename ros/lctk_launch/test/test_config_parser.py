@@ -923,6 +923,68 @@ def test_a_config_without_a_data_section_still_parses(tmp_path):
     assert pipeline.lidars["top"].pointcloud_topic == "/points"
 
 
+def write_bag(tmp_path, topics, name="bag"):
+    """A minimal rosbag2 directory: only metadata.yaml is read for verification."""
+    import yaml
+
+    bag = tmp_path / name
+    bag.mkdir(parents=True, exist_ok=True)
+    (bag / "metadata.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "rosbag2_bagfile_information": {
+                    "topics_with_message_count": [
+                        {"topic_metadata": {"name": topic}} for topic in topics
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bag
+
+
+def test_a_bag_session_naming_a_topic_the_bag_lacks_is_refused_at_parse_time(tmp_path):
+    """M-26, caught before a node starts.
+
+    `two_lidar.yaml` named /velodyne_points while TWO_LIDAR_1 records
+    /lidar/vlp32/velodyne_points. The pipeline launched cleanly and sat silent
+    forever. Verifying against metadata.yaml at parse time turns that into a
+    refusal that names the fix.
+    """
+    (tmp_path / "rig").mkdir(parents=True, exist_ok=True)
+    write_bag(tmp_path / "rig", ["/lidar/vlp32/velodyne_points"])
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: bag\n  path: $(session-dir)/bag\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /velodyne_points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    with pytest.raises((ValueError, SessionError)) as excinfo:
+        parse_config(str(manifest))
+    message = str(excinfo.value)
+    assert "does not publish /velodyne_points" in message
+    assert "It records: /lidar/vlp32/velodyne_points" in message
+
+
+def test_a_bag_session_whose_topics_match_parses(tmp_path):
+    (tmp_path / "rig").mkdir(parents=True, exist_ok=True)
+    write_bag(tmp_path / "rig", ["/lidar/vlp32/velodyne_points", "/image"])
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: bag\n  path: $(session-dir)/bag\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /lidar/vlp32/velodyne_points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    pipeline = parse_config(str(manifest))
+    assert pipeline.data.kind == "bag"
+    assert pipeline.lidars["top"].pointcloud_topic == "/lidar/vlp32/velodyne_points"
+
+
 if __name__ == "__main__":
     import inspect
 
