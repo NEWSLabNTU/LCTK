@@ -351,6 +351,8 @@ class DetectionBuffer:
                 ],
                 dtype=np.float64,
             )
+            # Quick fix: rotate the corner order by 1 position (90 degrees)
+            pixels = np.roll(pixels, shift=1, axis=0)
             if pixels.shape != (4, 2) or not np.all(np.isfinite(pixels)):
                 continue
             world_corners = (rotation @ local_corners.T).T + position
