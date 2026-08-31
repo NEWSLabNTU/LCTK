@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 
@@ -129,6 +129,31 @@ class SyncSettings:
 
 
 @dataclass
+class AssistedSettings:
+    """Tuning for `solver_mode=assisted`, from the optional `assisted:` section.
+
+    Unlike `sync:`, this section is optional. `continuous` and `manual` read
+    none of it, so refusing a config that omits it would break both modes for
+    a setting neither uses. The defaults here are the node's own.
+    """
+
+    stability_window_frames: int = 10
+    stability_max_translation_m: float = 0.005
+    stability_max_rotation_deg: float = 0.5
+    stability_cooldown_s: float = 1.0
+    novelty_position_tol_m: float = 0.05
+    novelty_orientation_tol_deg: float = 5.0
+    review_bind_host: str = "127.0.0.1"
+    review_port: int = 8080
+    review_jpeg_quality: int = 80
+    review_max_previews: int = 64
+    review_archive_path: str = ""
+    export_autoware_target: str = ""
+    export_camera_frame: str = ""
+    export_lidar_frame: str = ""
+
+
+@dataclass
 class LidarBoardDetectorNode:
     """Configuration for a lidar_board_detector node instance."""
 
@@ -207,6 +232,9 @@ class PipelineConfig:
     calibration_plan: CalibrationPlan | None = None  # Set by planner
     calibration_plan_text: str | None = None  # Formatted ASCII plan for display
     sync: SyncSettings | None = None  # Set by _parse_sync; required, never left None
+    assisted: AssistedSettings = field(
+        default_factory=AssistedSettings
+    )  # Optional `assisted:` section
 
 
 class CalibrationConfigParser:
@@ -225,6 +253,7 @@ class CalibrationConfigParser:
         self.calibration_pairs: list[CalibrationPair] = []
         self._reference_frame: str | None = None
         self._sync: SyncSettings | None = None
+        self._assisted = AssistedSettings()
 
     def parse(self) -> PipelineConfig:
         """Parse configuration file and derive pipeline configuration."""
@@ -238,6 +267,7 @@ class CalibrationConfigParser:
         self._parse_marker_pairs(markers_config)
 
         self._parse_sync(raw_config.get("sync"))
+        self._parse_assisted(raw_config.get("assisted"))
 
         self._reference_frame = raw_config.get("reference_frame")
         if self._reference_frame is None:
@@ -281,6 +311,34 @@ class CalibrationConfigParser:
                         marker=marker_name,
                     )
                 )
+
+    def _parse_assisted(self, assisted_config: dict | None) -> None:
+        """Parse the optional `assisted:` section.
+
+        Absent means "use the node's defaults", which is right because the two
+        older solver modes never read any of it. An *unknown key* is still an
+        error: silently ignoring a misspelled tuning parameter would leave the
+        operator adjusting a value that never reaches the node.
+        """
+        if assisted_config is None:
+            return
+        if not isinstance(assisted_config, dict):
+            # Deliberately ValueError, not the TypeError TRY004 prefers: every
+            # config-shape complaint in this parser is a ValueError, and that is
+            # what callers and tests catch. A lone TypeError would escape them.
+            raise ValueError(  # noqa: TRY004
+                f"'assisted' section must be a mapping, got "
+                f"{type(assisted_config).__name__}"
+            )
+        known = {f.name for f in fields(AssistedSettings)}
+        unknown = set(assisted_config) - known
+        if unknown:
+            raise ValueError(
+                f"Unknown key(s) in the 'assisted' section: "
+                f"{', '.join(sorted(unknown))}. Known keys: "
+                f"{', '.join(sorted(known))}"
+            )
+        self._assisted = AssistedSettings(**assisted_config)
 
     def _parse_sync(self, sync_config: dict | None) -> None:
         """Parse and validate the required `sync:` section.
@@ -567,6 +625,7 @@ class CalibrationConfigParser:
             lidars=dict(self.lidars),
             cameras=dict(self.cameras),
             sync=self._sync,
+            assisted=self._assisted,
         )
 
         # Collect unique (lidar, marker) pairs for board detectors

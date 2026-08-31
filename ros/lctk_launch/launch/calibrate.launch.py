@@ -27,6 +27,8 @@ data, so they come from the config file's `sync:` section instead.
 See config/examples/ for example configurations.
 """
 
+from dataclasses import asdict
+
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -70,9 +72,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
     if mode not in ("offline", "realtime"):
         raise RuntimeError(f"Invalid mode '{mode}'; expected 'offline' or 'realtime'.")
     solver_mode = LaunchConfiguration("solver_mode").perform(context)
-    if solver_mode not in ("continuous", "manual"):
+    if solver_mode not in ("continuous", "manual", "assisted"):
         raise RuntimeError(
-            f"Invalid solver_mode '{solver_mode}'; expected 'continuous' or 'manual'."
+            f"Invalid solver_mode '{solver_mode}'; "
+            "expected 'continuous', 'manual' or 'assisted'."
         )
     enable_overlay = LaunchConfiguration("enable_overlay").perform(context) == "true"
     enable_judge = LaunchConfiguration("enable_judge").perform(context) == "true"
@@ -234,6 +237,8 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "sync_queue_size": sync_queue_size,
             "sync_drop_policy": sync_drop_policy,
             "target_config": solver.target_config,
+            # assisted-mode tuning; harmless for the other two, which never read it.
+            **asdict(pipeline.assisted),
         }
 
         nodes.append(
@@ -445,7 +450,12 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "solver_mode",
                 default_value="continuous",
-                description="LiDAR-camera solver behaviour: 'continuous' (auto-publishes latest pair) or 'manual' (service-driven multi-pose buffer)",
+                description=(
+                    "LiDAR-camera solver behaviour: 'continuous' (auto-publishes the "
+                    "latest pair), 'manual' (service-driven multi-pose buffer), or "
+                    "'assisted' (auto-captures still, novel poses and serves a review "
+                    "page)"
+                ),
             ),
             DeclareLaunchArgument(
                 "enable_overlay",

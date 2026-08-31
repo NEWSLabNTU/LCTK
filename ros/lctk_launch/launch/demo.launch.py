@@ -50,7 +50,7 @@ def generate_launch_description():
     solver_mode_arg = DeclareLaunchArgument(
         "solver_mode",
         default_value="continuous",
-        description="LiDAR-camera solver behaviour: 'continuous' or 'manual'",
+        description="LiDAR-camera solver behaviour: 'continuous', 'manual' or 'assisted'",
     )
 
     enable_overlay_arg = DeclareLaunchArgument(

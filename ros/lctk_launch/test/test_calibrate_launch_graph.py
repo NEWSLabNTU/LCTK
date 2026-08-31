@@ -880,3 +880,105 @@ def test_sync_settings_non_default_window_carried_through_unchanged(
         assert params["sync_tolerance_ms"] == 50.0
         assert params["sync_queue_size"] == 7
         assert params["sync_drop_policy"] == "drop_oldest"
+
+
+def test_assisted_is_an_accepted_solver_mode(calibrate_launch: ModuleType):
+    """`assisted` generates the same graph as the other modes.
+
+    The mode changes only what the solver node does with its pairs; the graph
+    around it -- detectors, locators, remappings -- is mode-independent, and a
+    regression that made `assisted` generate a different graph would be a
+    regression in the two older modes too.
+    """
+    context = _LaunchContext(CONFIG_ROOT / "seyond_left.yaml")
+    context.launch_configurations["solver_mode"] = "assisted"
+
+    nodes = calibrate_launch.generate_nodes(context)
+
+    solvers = _nodes_for_package(nodes, "lidar_to_camera_solver")
+    assert len(solvers) == 1
+    assert _parameters(solvers[0])["solver_mode"] == "assisted"
+
+
+def test_an_unknown_solver_mode_is_refused_and_names_all_three(
+    calibrate_launch: ModuleType,
+):
+    """A typo must not silently ship a different solver policy.
+
+    Same reasoning as the L-05 guard on `mode`: falling back to a default here
+    would run a whole capture session under a policy the operator did not ask
+    for. The message names every accepted value so the typo is self-correcting.
+    """
+    context = _LaunchContext(CONFIG_ROOT / "seyond_left.yaml")
+    context.launch_configurations["solver_mode"] = "automatic"
+
+    with pytest.raises(RuntimeError) as excinfo:
+        calibrate_launch.generate_nodes(context)
+
+    message = str(excinfo.value)
+    assert "automatic" in message
+    for mode in ("continuous", "manual", "assisted"):
+        assert mode in message
+
+
+def test_assisted_defaults_reach_the_solver_when_no_section_is_given(
+    calibrate_launch: ModuleType,
+):
+    """`assisted:` is optional, unlike `sync:`.
+
+    `continuous` and `manual` read none of these values, so refusing a config
+    that omits the section would break both modes over a setting neither uses.
+    The maintained examples carry no `assisted:` block, so this also pins that
+    they still parse.
+    """
+    nodes = calibrate_launch.generate_nodes(
+        _LaunchContext(CONFIG_ROOT / "seyond_left.yaml")
+    )
+
+    params = _parameters(_nodes_for_package(nodes, "lidar_to_camera_solver")[0])
+    assert params["stability_window_frames"] == 10
+    assert params["stability_max_translation_m"] == 0.005
+    assert params["novelty_position_tol_m"] == 0.05
+    assert params["review_bind_host"] == "127.0.0.1"
+    assert params["review_port"] == 8080
+
+
+def test_an_assisted_section_overrides_only_what_it_names(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """Named keys override; unnamed ones keep the node's defaults."""
+    # A maintained example, so the graph really has a lidar-camera solver to
+    # carry the parameters; the tmp_path fixtures in this file are lidar-only.
+    config_path = tmp_path / "assisted.yaml"
+    config_path.write_text(
+        (CONFIG_ROOT / "seyond_left.yaml").read_text(encoding="utf-8") + "\nassisted:\n"
+        "  stability_window_frames: 4\n"
+        '  review_bind_host: "0.0.0.0"\n',
+        encoding="utf-8",
+    )
+
+    nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+    params = _parameters(_nodes_for_package(nodes, "lidar_to_camera_solver")[0])
+    assert params["stability_window_frames"] == 4
+    assert params["review_bind_host"] == "0.0.0.0"
+    assert params["stability_max_translation_m"] == 0.005, (
+        "unnamed key keeps its default"
+    )
+
+
+def test_a_misspelled_assisted_key_is_refused(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """Silently ignoring an unknown key would leave the operator tuning a value
+    that never reaches the node -- the failure would look like the gate not
+    working rather than like a typo."""
+    config_path = tmp_path / "misspelled.yaml"
+    config_path.write_text(
+        (CONFIG_ROOT / "seyond_left.yaml").read_text(encoding="utf-8")
+        + "\nassisted:\n  stability_window_frame: 4\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="stability_window_frame"):
+        calibrate_launch.generate_nodes(_LaunchContext(config_path))

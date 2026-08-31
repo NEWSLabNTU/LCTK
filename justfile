@@ -280,6 +280,27 @@ solid CONFIG='solid_600_handheld.yaml':
         enable_overlay:=true \
         enable_judge:=false
 
+# `solver_mode` stays a switch: `just solver_mode=continuous lidar-camera` and
+# `just solver_mode=manual lidar-camera` still run the original paths unchanged.
+# Launch assisted calibration (auto-capture + review page on :8080)
+assisted CONFIG='seyond_left.yaml':
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    SHARE=$(ros2 pkg prefix lctk_launch --share)
+    play_launch launch \
+        --web-addr 0.0.0.0:8000 \
+        lctk_launch calibrate.launch.py \
+        config_file:=$SHARE/config/examples/{{ CONFIG }} \
+        debug_mode:={{ debug_mode }} \
+        log_level:={{ log_level }} \
+        mode:={{ mode }} \
+        enable_rviz:={{ rviz_enabled }} \
+        rviz_config:=$SHARE/config/rviz/lidar_camera.rviz \
+        solver_mode:=assisted \
+        enable_overlay:={{ enable_overlay }} \
+        enable_judge:={{ enable_judge }}
+
 # Launch two-LiDAR calibration (config-driven)
 two-lidar:
     #!/usr/bin/env bash
