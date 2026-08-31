@@ -1681,6 +1681,17 @@ _session-path SESSION:
     fi
 ```
 
+**Shell trap in these recipes.** Assign `$(just _session-path …)` to a variable before
+using it; do not inline it as a command argument. Under `set -e` a failing command
+substitution aborts an *assignment* but not an *argument*, so the inline form would run
+`ros2 launch … session:=` with an empty path and fail somewhere downstream instead of at the
+lookup. The variable form is what makes an unknown session name fail with the lookup's own
+message.
+
+Also note `FROM` in `new TARGET FROM='…'` is a positional recipe parameter, not a just
+variable: the invocation is `just new <new-path> <template-path-or-name>`, and
+`just new <path> FROM=x` would pass the literal string `FROM=x` as the template.
+
 - [ ] **Step 4: Write `sessions/README.md`**
 
 Explain what a session is, the directory contents, that `session:=` is always an explicit
