@@ -70,13 +70,24 @@ Verified after the fix on dataset 3: **zero rejections**, assisted mode auto-cap
 and serves a real 1920×1080 preview, and `continuous` solves and publishes the extrinsic at
 14.3 Hz with 1.26–1.50 px reprojection error.
 
-## Still open
+## Follow-up (2026-09-01)
 
-The `board-detection-2d` experiment scripts still name `config/board/bbox.json5` as the pcap
-reference. They should point at `sample_data_bbox.json5`; nobody has re-run those benchmarks
-to see what the wrong box did to their numbers.
+**The experiment reference is fixed.** The `board-detection-2d` scripts and
+`tests/test_bbox_ref.py` now read `sessions/sample3-hollow-velodyne/bbox.json5`. They had
+been reading the wrong box and were failing on it: the test asserts a centre of
+`[2.6, 0, 0.35]` while `bbox.json5` held `[-1.04, -1.5, 7.0]`, and the first confirmed
+board at `(2.256, -0.059, 0.074)` falls outside the old box entirely. That suite is now
+green at 250 tests, so the benchmark numbers were being computed against a box the boards
+were never inside.
 
-More generally: **nothing runs the shipped sample data end to end.** That is what let two
-silent failures stack up unnoticed, and it is the real gap here. A smoke check that plays
-dataset 3 and asserts a non-zero board-detection count would have caught both on the commit
-that introduced them.
+The crop box also stopped being shareable by construction: it lives in the session that owns
+the recording, which is what the sessions work
+([design](../superpowers/specs/2026-08-31-calibration-sessions-design.md)) was for.
+
+**The end-to-end gap is still open.** The pipeline was verified by hand on 2026-09-01 —
+dataset 3 plays, the detector reports zero rejections, `continuous` publishes the extrinsic
+at ~14.5 Hz — but *nothing automates that*. Every test in the suite is unit-level. A smoke
+check that plays dataset 3 and asserts a non-zero board-detection count is still the thing
+that would have caught both original failures on the commit that introduced them, and it is
+still missing. Hand-verification does not close this; it only proves the check would pass
+today.

@@ -1,7 +1,7 @@
 # Calibration sessions — design
 
 - **Date:** 2026-08-31
-- **Status:** Approved, not yet implemented
+- **Status:** Implemented 2026-09-01; verified end to end on dataset 3 (detections non-empty, zero detector rejections, extrinsic at ~17 Hz), from a relocated session outside the repo, and with plain `ros2 launch` from `/tmp`
 - **Area:** `lctk_launch`, `lctk_sample_data`, justfile, `sessions/`
 - **Breaking:** yes — `config/examples/*.yaml` is replaced by `sessions/`
 
