@@ -50,6 +50,7 @@ setup(
     entry_points={
         "console_scripts": [
             "tf_tree_broadcaster = lctk_launch.tf_tree_broadcaster:main",
+            "lctk_session = lctk_launch.session_cli:main",
         ],
     },
 )
