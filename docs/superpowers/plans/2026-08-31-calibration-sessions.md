@@ -1815,9 +1815,223 @@ repo's existing treatment of `bags/`.
 
 - [ ] **Step 3: Create the six sessions**
 
-For each, write `session.yaml` carrying the old file's `markers:`, `sync:` and `pairs:`
-verbatim, plus the new `data:` section, and move its session-local files in. Give each a
-`README.md` saying what the recording is and whether the data ships.
+Each gets a `README.md` saying what the recording is and whether the data ships. The
+manifests, in full — `markers:`, `sync:` and `pairs:` are carried over unchanged from the
+example each replaces, so any difference below is deliberate and called out above.
+
+`sessions/sample3-hollow-velodyne/session.yaml` — the shipped demo. Note the lidar device is
+`top`, not `top_lidar`, so the derived topics reproduce today's names exactly:
+
+```yaml
+name: sample3-hollow-velodyne
+description: >
+  Dataset 3 from lctk_sample_data: a VLP-32C pcap and a camera avi, hollow 1000 board,
+  one board placement. The data ships in git. This is what `just demo` runs.
+
+data:
+  kind: pcap_avi
+  dir: $(find-pkg-share lctk_sample_data)/data/3
+  lidar: { model: vlp32c, rpm: 600 }
+  camera: { info_url: $(session-dir)/camera_info.yaml }
+
+devices:
+  lidars:
+    top: { frame_id: velodyne_top }
+  cameras:
+    front_center: { frame_id: camera_front_center }
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne_bbox.json5
+    bbox_config: $(session-dir)/bbox.json5
+    pairs:
+      - [top, front_center]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+```
+
+`sessions/seyond-left/session.yaml`:
+
+```yaml
+name: seyond-left
+description: >
+  Seyond Falcon plus the left camera, live sensors. No recording ships for this rig.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    seyond_lidar:
+      frame_id: seyond
+      pointcloud_topic: /lidar/falcon/iv_points
+  cameras:
+    left_camera:
+      frame_id: camera_left
+      image_topic: /camera/left/image_raw
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
+    pairs:
+      - [seyond_lidar, left_camera]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+```
+
+`sessions/seyond-right/session.yaml` — the device is `right_camera`, correcting the
+`left_camera` copy-paste described above:
+
+```yaml
+name: seyond-right
+description: >
+  Seyond Falcon plus the right camera, live sensors. No recording ships for this rig.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    seyond_lidar:
+      frame_id: seyond
+      pointcloud_topic: /lidar/falcon/iv_points
+  cameras:
+    right_camera:
+      frame_id: camera_right
+      image_topic: /camera/right/image_raw
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
+    pairs:
+      - [seyond_lidar, right_camera]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+```
+
+`sessions/solid600-handheld-zed/session.yaml` — the 50 ms window is deliberate, the board
+is hand-held:
+
+```yaml
+name: solid600-handheld-zed
+description: >
+  Solid 600 mm target held by hand, Velodyne plus a ZED. Live sensors; no recording
+  ships. The sync window is tighter than the hollow sessions because the board moves.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    top_lidar:
+      frame_id: velodyne
+      pointcloud_topic: /velodyne_points
+  cameras:
+    front_center:
+      frame_id: zed_left_camera_frame_optical
+      image_topic: /sensing/camera/zed/rgb/color/rect/image
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/solid_600_aruco_1_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/solid_600/velodyne.json5
+    pairs:
+      - [top_lidar, front_center]
+
+sync: { tolerance_ms: 50, queue_size: 100, drop_policy: reject_new }
+```
+
+`sessions/twolidar-vlp32-falcon/session.yaml` — the topics are the ones the bag actually
+records, which is the M-26 fix. `front_lidar` keeps its per-device detector override:
+
+```yaml
+name: twolidar-vlp32-falcon
+description: >
+  Two lidars, no camera: a VLP-32C and a solid-state Falcon observing one board.
+  The TWO_LIDAR_* recordings are gitignored -- see
+  ros/lctk_sample_data/bags/README.md to obtain one, then place or symlink it at
+  $(session-dir)/bag, or point `path:` somewhere else.
+
+data:
+  kind: bag
+  path: $(session-dir)/bag
+
+devices:
+  lidars:
+    top_lidar:
+      frame_id: velodyne
+      pointcloud_topic: /lidar/vlp32/velodyne_points
+    front_lidar:
+      frame_id: seyond
+      pointcloud_topic: /lidar/falcon/iv_points
+      detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [top_lidar, front_lidar]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+```
+
+`sessions/vehicle-multisensor/session.yaml` — a schema demonstration, not a rig that exists:
+
+```yaml
+name: vehicle-multisensor
+description: >
+  Two lidars and four cameras across three markers, showing the multi-pair schema.
+  There is no recording and no rig behind this; it exists to document the format.
+
+data:
+  kind: live
+
+devices:
+  lidars:
+    L1: { frame_id: lidar_front, pointcloud_topic: /sensing/lidar/front/points }
+    L2: { frame_id: lidar_rear, pointcloud_topic: /sensing/lidar/rear/points }
+  cameras:
+    C1: { frame_id: camera_front_left, image_topic: /sensing/camera/front_left/image }
+    C2: { frame_id: camera_front_right, image_topic: /sensing/camera/front_right/image }
+    C3: { frame_id: camera_rear_left, image_topic: /sensing/camera/rear_left/image }
+    C4: { frame_id: camera_rear_right, image_topic: /sensing/camera/rear_right/image }
+
+reference_frame: L1
+
+markers:
+  M1:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [L1, C1]
+      - [L1, C2]
+  M2:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [L2, C3]
+      - [L2, C4]
+  M3:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [L1, L2]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+```
+
+Files that move into `sessions/sample3-hollow-velodyne/`:
+
+```bash
+git mv ros/lctk_launch/config/board/sample_data_bbox.json5 \
+       sessions/sample3-hollow-velodyne/bbox.json5
+git mv ros/lctk_launch/config/camera/front_center_camera_info.yaml \
+       sessions/sample3-hollow-velodyne/camera_info.yaml
+```
 
 - [ ] **Step 4: Delete `config/examples/` and the orphaned crop boxes**
 
