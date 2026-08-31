@@ -24,6 +24,8 @@ __main__/
 /install/
 /log/
 /build_logs/
+# ROS 2 launch/run logs written under ros/ when a node is started from there
+/ros/log/
 
 # Cargo and Rust workspace artifacts
 /.cargo/

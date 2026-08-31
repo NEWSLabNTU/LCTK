@@ -11,7 +11,7 @@
   "bg_warmup_frames": 20,
   "strip_plane_dist": 0.05,
   "strip_plane_min_frac": 0.08,
-  "cluster_eps": 0.30,
+  "cluster_eps": 0.15,
   "cluster_min_points": 20,
   "vertical_gap_deg": 0.0,
   "merge_seed_min_points": 40,
