@@ -1802,8 +1802,20 @@ git rm ros/lctk_launch/config/board/bbox.json5 \
        ros/lctk_launch/config/board/sample_data_bbox.json5
 ```
 
-Before deleting each crop box, `grep -rn` its name across the tree and move it into the
-session that uses it. Anything with no user is deleted rather than kept as a mystery file —
+Ownership was already established by grep across `ros/` and `experiments/` on 2026-08-31,
+so this is settled rather than exploratory:
+
+| crop box | user |
+|---|---|
+| `sample_data_bbox.json5` | `config/examples/sample_data.yaml` -> becomes `sessions/sample3-hollow-velodyne/bbox.json5` |
+| `bbox.json5` | `experiments/board-detection-2d/tests/test_bbox_ref.py` only, as its pcap reference -- and per M-29 that reference is wrong, because this file was retuned for a Seyond rosbag. Repoint the experiment at `sessions/sample3-hollow-velodyne/bbox.json5` and delete this one. |
+| `bbox_v1.json5` | none |
+| `bbox-seyond.json5` | none |
+| `bbox-vlp.json5` | none |
+| `bbox_2_lidar_seyond.json5` | none |
+| `bbox_2_lidar_vlp32.json5` | none |
+
+Re-run the grep before deleting to confirm nothing has been added since. Anything with no user is deleted rather than kept as a mystery file —
 that ambiguity is what M-29 was made of. The `board-detection-2d` experiment references
 `config/board/bbox.json5` as its pcap reference; repoint it at
 `sessions/sample3-hollow-velodyne/bbox.json5`.
