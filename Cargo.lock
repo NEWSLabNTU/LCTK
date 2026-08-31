@@ -519,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "builtin_interfaces"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "rosidl_runtime_rs",
 ]
@@ -1289,7 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "geometry_msgs"
-version = "4.9.0"
+version = "4.9.2"
 dependencies = [
  "rosidl_runtime_rs",
  "std_msgs",
@@ -2851,7 +2851,7 @@ checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "sensor_msgs"
-version = "4.9.0"
+version = "4.9.2"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -3027,7 +3027,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "std_msgs"
-version = "4.9.0"
+version = "4.9.2"
 dependencies = [
  "builtin_interfaces",
  "rosidl_runtime_rs",
@@ -3035,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "std_srvs"
-version = "4.9.0"
+version = "4.9.2"
 dependencies = [
  "rosidl_runtime_rs",
 ]
@@ -3386,7 +3386,7 @@ dependencies = [
 
 [[package]]
 name = "visualization_msgs"
-version = "4.9.0"
+version = "4.9.2"
 dependencies = [
  "builtin_interfaces",
  "geometry_msgs",
@@ -3798,15 +3798,15 @@ checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
 
 [[patch.unused]]
 name = "action_msgs"
-version = "1.2.2"
+version = "1.2.3"
 
 [[patch.unused]]
 name = "lifecycle_msgs"
-version = "1.2.2"
+version = "1.2.3"
 
 [[patch.unused]]
 name = "rcl_interfaces"
-version = "1.2.2"
+version = "1.2.3"
 
 [[patch.unused]]
 name = "rmw_dds_common"
@@ -3814,11 +3814,11 @@ version = "1.6.0"
 
 [[patch.unused]]
 name = "rosgraph_msgs"
-version = "1.2.2"
+version = "1.2.3"
 
 [[patch.unused]]
 name = "statistics_msgs"
-version = "1.2.2"
+version = "1.2.3"
 
 [[patch.unused]]
 name = "unique_identifier_msgs"
