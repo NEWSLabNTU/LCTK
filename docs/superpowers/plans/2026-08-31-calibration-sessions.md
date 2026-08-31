@@ -443,8 +443,11 @@ def test_verify_bag_topics_refuses_and_lists_what_the_bag_has(tmp_path):
     with pytest.raises(SessionError) as excinfo:
         verify_bag_topics(bag, ["/velodyne_points"])
     message = str(excinfo.value)
-    assert "/velodyne_points" in message
-    assert "/lidar/vlp32/velodyne_points" in message
+    # "/velodyne_points" is a substring of "/lidar/vlp32/velodyne_points", so
+    # asserting both would pass even if the message never named what was missing.
+    # Pin the two halves separately instead.
+    assert "does not publish /velodyne_points" in message
+    assert "It records: /lidar/vlp32/velodyne_points" in message
 
 
 def test_live_needs_no_paths():
