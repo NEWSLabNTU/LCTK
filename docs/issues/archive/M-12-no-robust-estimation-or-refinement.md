@@ -26,7 +26,7 @@ over the concatenated correspondence set. There is:
 One bad pose in the buffer corrupts the whole calibration and there is no way to notice or
 exclude it. Bad poses are easy to produce: a partially occluded board, a grazing-incidence view
 where ICP settles into a poor local minimum, a frame where the LiDAR board pose snapped to the
-wrong origin corner ([M-14](../M-14-corner-order-brittle.md)). All 16 of that pose's corners are
+wrong origin corner ([M-14](./M-14-corner-order-brittle.md)). All 16 of that pose's corners are
 outliers *together* (they share one rigid `T_board`), which is exactly the correlated-outlier
 regime least-squares handles worst.
 

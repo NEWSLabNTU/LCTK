@@ -53,6 +53,8 @@ from lidar_to_camera_solver.detection_buffer import (
     Refused,
     RejectionCode,
     Solved,
+    pose_reprojection_rms,
+    reject_outlier_poses,
 )
 from lidar_to_camera_solver.detection_format import (
     decode_detection_archive,
@@ -115,6 +117,11 @@ def rotation_vector_to_euler(rvec: np.ndarray, *, degrees: bool = False) -> np.n
 
 class LidarToCameraSolver(Node):
     """ROS services and publication around :class:`DetectionBuffer`."""
+
+    # M-12 lives in detection_buffer next to the solve it guards; it is surfaced here
+    # because the node class is the package's public seam -- one implementation, two names.
+    _pose_reprojection_rms = staticmethod(pose_reprojection_rms)
+    _reject_outlier_poses = staticmethod(reject_outlier_poses)
 
     def __init__(self):
         super().__init__("lidar_to_camera_solver")
@@ -1054,6 +1061,20 @@ class LidarToCameraSolver(Node):
         self, rvec: np.ndarray, tvec: np.ndarray
     ) -> TransformStamped:
         rotation_matrix, _ = cv2.Rodrigues(rvec)
+
+        # M-01: publish with ROS TF semantics.
+        #
+        # solvePnP returns (R, t) with p_cam = R @ p_lidar + t -- that is T_camera<-lidar.
+        # A transform labelled `frame_id=lidar, child_frame_id=camera` means the *opposite* in
+        # TF: the camera's pose expressed in lidar coordinates. Publishing the raw solve under
+        # those labels pointed every tf2 consumer the wrong way, and `pointcloud_image_overlay`
+        # inverts this message back before `projectPoints` -- the two must move together.
+        #
+        # The dumped JSON keeps the raw rvec/tvec -- that is what `lctk_autoware_export`
+        # consumes, and it is deliberately not touched here.
+        rotation_matrix = rotation_matrix.T
+        tvec = -rotation_matrix @ tvec.reshape(3, 1)
+
         quaternion = rotation_matrix_to_quaternion(rotation_matrix)
         message = TransformStamped()
         message.header = Header()

@@ -4,7 +4,7 @@
 - **Branch investigated:** `feat/bbox-free` (HEAD `8ca3d8d`, plus `33e4ab9` rename in history)
 - **Type:** investigation write-up (source walkthrough), no code changed
 - **Related:** [M-17](../../issues/M-17-initial-pose-rewrite-unverified-bbox-path.md),
-  [M-14](../../issues/M-14-corner-order-brittle.md),
+  [M-14](../../issues/archive/M-14-corner-order-brittle.md),
   [M-03 (archived)](../../issues/archive/M-03-hardcoded-plane-normal-x.md)
 
 > **Update 2026-08-13 — two of this document's findings have been acted on.** The core diagnosis
@@ -391,7 +391,7 @@ The converged pose is re-indexed so the lowest corner becomes the model's `botto
 the frame by `90° × index`. The ambiguity is acknowledged but only *warned* about
 (`main.rs:1601-1622`), and the warning text itself names "a diamond-mounted board" as the case where
 the two lowest corners tie. That is the M-14 finding
-([`docs/issues/M-14-corner-order-brittle.md`](../../issues/M-14-corner-order-brittle.md)), whose
+([`docs/issues/M-14-corner-order-brittle.md`](../../issues/archive/M-14-corner-order-brittle.md)), whose
 recommended fix — *"Break the symmetry in the target, not in the code… Score all 4 candidate in-plane
 rotations by ICP loss against the asymmetric hole layout"* — is precisely the machinery that would
 also make `initial_inplane_rotation_deg` unnecessary. It is still open.

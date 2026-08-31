@@ -95,7 +95,7 @@ Two safe, verifiable parts landed; the deeper algorithm change is left with a pl
   but is a detector-algorithm change whose improvement can only be validated with
   board captures near 45° roll — not reproducible headlessly here. The lower-risk
   route is the H-09 per-pose reprojection residual, which makes a 90°-permuted pose
-  trivially detectable and lets [M-12](./archive/M-12-no-robust-estimation-or-refinement.md)
+  trivially detectable and lets [M-12](./M-12-no-robust-estimation-or-refinement.md)
   reject it.
 - **Camera cross-validation** of the LiDAR-derived in-plane orientation against the
   ArUco IDs (part 1b) — needs the image-orientation path.
@@ -123,12 +123,12 @@ with the H-09 per-pose reprojection residual now that `lctk_quality` has landed.
 ## Update (2026-08-13) — the frame changed under part 2
 
 Phase 1 of the corner-aligned board-frame work
-([M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md)) redefined the board model's canonical
+([M-20](./M-20-board-frame-edge-aligned-vs-diamond-naming.md)) redefined the board model's canonical
 frame: the origin is now the plate **centre** and the in-plane axes run corner to corner. Part 2 of
 this issue is therefore no longer "two implementations that happen to agree" — the Rust and the two
 Python implementations are now on **different conventions**, and the resulting extrinsic error is
 wrong by 45° in-plane plus a ~707 mm origin shift. That is tracked as
-[H-11](./H-11-camera-solvers-stale-board-frame.md).
+[H-11](../H-11-camera-solvers-stale-board-frame.md).
 
 Two things improved for this issue specifically:
 
@@ -149,7 +149,7 @@ Two things improved for this issue specifically:
   `rust/calibration-target/tests/geometry_contract.rs::both_targets_match_shared_marker_world_golden`,
   reading the same golden, relocated to `fixtures/targets/marker_corners_world.golden.json` with a
   generator at `fixtures/targets/generate_marker_corners_world.py`. The cross-language seam this
-  bullet describes is unchanged in kind; see [H-11](./H-11-camera-solvers-stale-board-frame.md) for
+  bullet describes is unchanged in kind; see [H-11](../H-11-camera-solvers-stale-board-frame.md) for
   the current list of that golden's consumers (H-11 also carries the correction that
   `ros/advanced_extrinsic_solver` no longer exists under that name).
 

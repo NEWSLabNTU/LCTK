@@ -5,7 +5,7 @@
 - **Status:** Open
 - **Verified:** By code trace (2026-08-28) — the config, both sample-data launch files, the
   recorded-bag README, and the justfile were all read directly
-- **Related:** [M-16](./M-16-l2l-pipeline-untested.md), [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md)
+- **Related:** [M-16](./archive/M-16-l2l-pipeline-untested.md), [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md)
 
 ## Problem
 
@@ -51,7 +51,7 @@ beforehand, confirmed via `git show 24224c8^:ros/lctk_launch/config/examples/two
 
 The two-LiDAR path is unrunnable out of the box via the one documented recipe (`just two-lidar`),
 silently: the graph starts, nodes come up, and nothing ever arrives — there is no error, just an
-indefinitely empty pipeline. This compounds [M-16](./M-16-l2l-pipeline-untested.md): if the
+indefinitely empty pipeline. This compounds [M-16](./archive/M-16-l2l-pipeline-untested.md): if the
 "two-lidar variant" of `just sample-data` that M-16's suggested fix refers to doesn't exist, M-16's
 prescribed verification procedure can't be followed as written either. It's also possible this is
 part of why the L2L pipeline's field validation ([H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md),

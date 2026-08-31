@@ -18,7 +18,7 @@ now expected and will score as badly wrong. Invert such a file once:
     T_new = numpy.linalg.inv(T_old)
 """
 
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import rclpy

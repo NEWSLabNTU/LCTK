@@ -26,7 +26,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
 | [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
 | [H-15](./H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
-| [M-01](./M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
+| [M-01](./archive/M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
 | [M-04](./archive/M-04-l2l-wallclock-staleness.md) | Medium | L2L staleness check uses wall-clock vs sensor stamp | 🟢 |
@@ -39,9 +39,9 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-11](./archive/M-11-solvers-ignore-distortion.md) | Medium | Solvers hardcode `dist_coeffs = 0`, never read `camera_info.d` | 🟢 |
 | [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) | Medium | No outlier rejection and no LM refinement in the extrinsic solve | 🟢 |
 | [M-13](./archive/M-13-icp-quality-not-propagated.md) | Medium | Board-pose uncertainty measured, then discarded before the solver | 🟢 |
-| [M-14](./M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
+| [M-14](./archive/M-14-corner-order-brittle.md) | Medium | Board origin corner picked by gravity; corner order duplicated, unchecked | 🟡 |
 | [M-15](./archive/M-15-bbox-quaternion-order-comment.md) | Medium | `bbox.json5` documents the quaternion `(w,x,y,z)`; the wire format is `(x,y,z,w)` | 🟢 |
-| [M-16](./M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
+| [M-16](./archive/M-16-l2l-pipeline-untested.md) | Medium | LiDAR-to-LiDAR pipeline has never been run end-to-end | 🔴 |
 | [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md) | Medium | Shared initial-pose rewrite leaves the bbox path's "unchanged" guarantee unproven | 🔴 |
 | [M-18](./archive/M-18-root-cargo-config-missing-rust-tests-unrunnable.md) | Medium | No root `.cargo/config.toml` → Rust test suite unrunnable and the L-16 guard is inert | 🟢 |
 | [M-19](./M-19-debug-assertions-compiled-out.md) | Medium | Every `debug_assert!` compiled out of `just build` and `just test`; the 51 in `hollow-board-config` are also rotation-invariant | 🔴 |
@@ -143,6 +143,48 @@ board-local coordinates *into* it, so the convention sits on both sides of the p
 side leaves a 45° in-plane error that the symmetric 2×2 marker grid absorbs with a low reprojection
 error — silent — alongside a ~707 mm origin shift that probably would be noticed. LiDAR-to-LiDAR
 calibration is unaffected: both of its sides come from the same detector.
+
+## Conflux submodule audit (2026-08-15) — merged from `main` 2026-08-31
+
+These came in with the `main` merge and cover the **conflux submodule**, not LCTK itself.
+They carry their own ID sequence, so several IDs appear twice in this directory with entirely
+different meanings: this table's M-17/M-18, L-17/L-18/L-19, H-11/H-13/H-14, C-05, M-20 and
+M-23 are *not* the LCTK findings of the same name listed above. Match by filename, never by ID.
+
+All are 🟢 fixed; the remediation is written up in
+[phase-7](../roadmap/phase-7-conflux-sync-correctness.md), [phase-8](../roadmap/phase-8-conflux-staleness-subsystem.md)
+and [phase-9](../roadmap/phase-9-conflux-api-and-tooling.md).
+
+| ID | Severity | Finding | Status |
+|----|----------|---------|--------|
+| [C-05](./archive/C-05-conflux-ffi-sync-wedges.md) | Critical | Conflux FFI synchronizer wedges permanently after a stream divergence | 🟢 |
+| [H-11](./archive/H-11-conflux-staleness-anchored-to-construction.md) | High | Conflux staleness expiry is anchored to construction time, not message arrival | 🟢 |
+| [H-12](./archive/H-12-conflux-two-divergent-pipelines.md) | High | conflux has two divergent pipelines; the test suite covers the one production does not use | 🟢 |
+| [H-13](./archive/H-13-conflux-tokio-tests-never-compiled.md) | High | Conflux tokio integration tests had not compiled for an unknown period; `just test` hid it | 🟢 |
+| [H-14](./archive/H-14-conflux-third-sync-implementation.md) | High | A third, independent synchronization implementation lives in `conflux-ros2` | 🟢 |
+| [M-17](./archive/M-17-conflux-timer-wheel-loses-messages.md) | Medium | Conflux staleness timer wheel skips slots and misplaces messages | 🟢 |
+| [M-17](./archive/M-17-judge-ground-truth-wrong-rig.md) | Medium | The checked-in judge ground truth does not describe the shipped sample data | 🟢 |
+| [M-18](./archive/M-18-conflux-immediate-expiration-is-a-stub.md) | Medium | `enable_immediate_expiration` spawns a task that does nothing | 🟢 |
+| [M-19](./archive/M-19-conflux-staleness-tracks-rejected-messages.md) | Medium | Staleness tracks messages before the ordering check, so rejected messages become ghost entries | 🟢 |
+| [M-20](./archive/M-20-conflux-expiration-only-removes-front.md) | Medium | Expired messages are only removed if they sit at the front of a buffer | 🟢 |
+| [M-21](./archive/M-21-conflux-two-time-bases-for-expiry.md) | Medium | Expiry is defined in two incompatible time bases (wall clock vs message stamp) | 🟢 |
+| [M-22](./archive/M-22-conflux-last-ts-never-resets.md) | Medium | A stream whose clock goes backwards is permanently dead (`last_ts` never resets) | 🟢 |
+| [M-23](./archive/M-23-conflux-stall-is-unobservable.md) | Medium | A stalled synchronizer is unobservable — statistics look perfect while nothing is emitted | 🟢 |
+| [M-24](./archive/M-24-conflux-py-buffer-size-validation.md) | Medium | `conflux_py` reported an invalid `buffer_size` as a generic RuntimeError, and `__del__` ran on a partially built object | 🟢 |
+| [M-25](./archive/M-25-conflux-py-tests-never-ran.md) | Medium | `just test-python` collected zero tests and reported success | 🟢 |
+| [L-17](./archive/L-17-conflux-is-empty-means-any-empty.md) | Low | `is_empty()` returns true when *any* buffer is empty | 🟢 |
+| [L-18](./archive/L-18-conflux-result-not-exported.md) | Low | `last_push_result` returns an opaque int; `ConfluxResult` is neither exported nor constructible | 🟢 |
+| [L-19](./archive/L-19-conflux-py-swallows-import-error.md) | Low | `conflux_py/__init__.py` swallows real ImportErrors, hiding `ROS2Synchronizer` | 🟢 |
+| [L-20](./archive/L-20-conflux-window-zero-sentinel.md) | Low | `window_size_ms = 0` is a magic sentinel for "infinite window" | 🟢 |
+| [L-21](./archive/L-21-conflux-buf-size-min-unexplained.md) | Low | `buf_size >= 2` is enforced without explanation | 🟢 |
+| [L-22](./archive/L-22-conflux-cpp-has-no-tests.md) | Low | `just test-cpp` reports success while `conflux_cpp` has zero tests | 🟢 |
+| [L-23](./archive/L-23-conflux-core-dead-code.md) | Low | conflux-core carries a half-built feedback path, a dead assert, and large commented-out blocks | 🟢 |
+| [L-24](./archive/L-24-conflux-sync-is-ready-latency.md) | Low | `sync()` holds a matched pair until every stream has two messages | 🟢 |
+| [L-25](./archive/L-25-conflux-docs-stale-test-count.md) | Low | conflux CLAUDE.md documents a test count the suite does not have | 🟢 |
+| [L-26](./archive/L-26-anyio-breaks-pytest.md) | Low | A pip `--user` `anyio` breaks pytest workspace-wide before collection | 🟢 |
+| [L-27](./archive/L-27-conflux-cpp-lint-red.md) | Low | `ament_lint` is red on `conflux_cpp`, including generated and build-artifact files | 🟢 |
+| [L-28](./archive/L-28-just-test-pytest-missing.md) | Low | `just test` invoked a bare `pytest`, so the Python suites never ran | 🟢 |
+| [L-29](./archive/L-29-symlink-install-stale-launch.md) | Low | Deleting a launch file leaves a dangling symlink that breaks the next build | 🟢 |
 
 ## Verified against live source
 C-01, H-01, H-02 were confirmed by reading the current code during the audit; the rest of the

@@ -4,7 +4,7 @@
 - **Area:** lidar_board_detector / Stage-3b initial pose
 - **Status:** Open
 - **Verified:** By code review (2026-08-11, spec axis) against the sub-project-2 design's global constraint
-- **Related:** [M-14](./M-14-corner-order-brittle.md), [M-16](./M-16-l2l-pipeline-untested.md)
+- **Related:** [M-14](./archive/M-14-corner-order-brittle.md), [M-16](./archive/M-16-l2l-pipeline-untested.md)
 
 ## Problem
 

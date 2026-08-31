@@ -8,7 +8,7 @@
 - **Verified:** 2026-08-13 — `extrinsic_solver_node/main.py:475-575`, `advanced_extrinsic_solver/main.py:1589-1656` (path predates the `ecba23c` rename to `lidar_to_camera_solver`), read against the landed `rust/hollow-board-config/src/lib.rs` (deleted W5-E2; successor `rust/calibration-target/src/lib.rs`)
 - **Spec (the fix):** [`2026-08-14-lidar-to-camera-solver-diamond-frame.md`](../superpowers/specs/2026-08-14-lidar-to-camera-solver-diamond-frame.md) — **this is the target.** Closing H-11 means implementing that spec's three stages. It fixes the names, the staging and the validation gate; the description below is the diagnosis it was written from.
 - **Spec (the cause):** [`2026-08-13-corner-aligned-board-frame.md`](../superpowers/specs/2026-08-13-corner-aligned-board-frame.md) — Phase 1, see "Out of Scope" and "Why the phase gap needs a guard rather than a note"
-- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./M-14-corner-order-brittle.md) (the duplicated corner layout — closed by the Phase 2 geometry extraction), [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) (the estimator asymmetry — closed by Phase 2 Stage 2), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps to version 4), [L-22](./archive/L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) and [L-23](./L-23-debug-mode-parameter-never-read.md) (found while scoping the fix)
+- **Related:** [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) (the Phase 1 issue), [M-14](./archive/M-14-corner-order-brittle.md) (the duplicated corner layout — closed by the Phase 2 geometry extraction), [M-12](./archive/M-12-no-robust-estimation-or-refinement.md) (the estimator asymmetry — closed by Phase 2 Stage 2), [C-01](./archive/C-01-aruco-corners-discarded.md), [H-10](./archive/H-10-dump-load-regresses-c01.md) (the saved-file format this bumps to version 4), [L-22](./archive/L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) and [L-23](./L-23-debug-mode-parameter-never-read.md) (found while scoping the fix)
 
 ## Problem
 
@@ -53,7 +53,7 @@ leaves two errors, and they are not equally visible:
 1. **A 45° in-plane rotation — silent.** The marker grid is a symmetric 2×2, so a quarter-turn's
    worth of rotational error still produces a clean-looking PnP solve with low reprojection error.
    Nothing in the pipeline reports it. This is the same class of failure as
-   [M-14](./M-14-corner-order-brittle.md)'s corner permutation and
+   [M-14](./archive/M-14-corner-order-brittle.md)'s corner permutation and
    [H-09](./archive/H-09-no-extrinsic-quality-metric.md)'s central point: the system has no way to
    tell you it is not working.
 2. **An origin shift of `board_width/√2` ≈ 707 mm — probably caught.** The board-local origin moved
@@ -68,7 +68,7 @@ runtime guard is required.
   current tree — live, or exported to Autoware via `lctk_autoware_export` — carries the error above.
 - **LiDAR-to-LiDAR calibration is unaffected and must keep working.** Both sides of that solve come
   from `lidar_board_detector`, so the convention cancels. Whatever guard lands must not block it
-  ([M-16](./M-16-l2l-pipeline-untested.md)).
+  ([M-16](./archive/M-16-l2l-pipeline-untested.md)).
 - **Saved detections predate the change.** Files written before Phase 1 are `version: 3`
   (see CLAUDE.md, "Detection File Format"), which records no frame convention at all, so a v3 file
   cannot be told apart from a post-change one.
@@ -112,7 +112,7 @@ silent 45° error.
    test directory should assert the Python implementations against the same file — and, per the
    2026-08-28 note below, `ros/lidar_to_camera_solver/test/test_marker_corners_world_golden.py`
    already exists and does exactly that. That also discharges
-   [M-14](./M-14-corner-order-brittle.md)'s "corner order is defined twice and never verified", and
+   [M-14](./archive/M-14-corner-order-brittle.md)'s "corner order is defined twice and never verified", and
    the shared golden is the natural place to finally collapse the two copies into one helper.
 3. **Add the frame-convention check.** The publishing half already exists:
    `lidar_board_detector` publishes `corner_aligned_plate_center_v1` as a `std_msgs/String`, once,

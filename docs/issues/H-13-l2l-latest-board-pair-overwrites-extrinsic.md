@@ -4,7 +4,7 @@
 - **Area:** lidar_to_lidar_solver
 - **Status:** Open
 - **Reported:** 2026-08-19, observed during two-LiDAR field validation
-- **Related:** [M-16](./M-16-l2l-pipeline-untested.md), [H-12](./H-12-continuous-solver-forgets-prior-placements.md), [M-13](./archive/M-13-icp-quality-not-propagated.md)
+- **Related:** [M-16](./archive/M-16-l2l-pipeline-untested.md), [H-12](./H-12-continuous-solver-forgets-prior-placements.md), [M-13](./archive/M-13-icp-quality-not-propagated.md)
 
 ## What happened
 
