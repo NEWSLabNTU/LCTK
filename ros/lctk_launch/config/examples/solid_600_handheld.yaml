@@ -39,13 +39,13 @@
 devices:
   lidars:
     top_lidar:
-      pointcloud_topic: /sensing/lidar/top/pointcloud_raw
-      frame_id: velodyne_top
+      pointcloud_topic: /velodyne_points
+      frame_id: velodyne
 
   cameras:
     front_center:
-      image_topic: /sensing/camera/front_center/image_raw
-      frame_id: camera_front_center
+      image_topic: /sensing/camera/zed/rgb/color/rect/image
+      frame_id: zed_left_camera_frame_optical
 
 # Synchronizer window -- see the tolerance_ms note above; this is narrower
 # than the hollow-target examples because this target is expected to move

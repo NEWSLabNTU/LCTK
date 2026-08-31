@@ -13,7 +13,7 @@
   fiducial: {
     kind: "square_aruco_grid",
     dictionary: "DICT_5X5_1000",
-    marker_ids: [1],
+    marker_ids: [24],
     paper_side: "600mm",
     paper_center: {
       toward_left_corner: "0mm",

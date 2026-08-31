@@ -247,17 +247,38 @@ lidar-camera CONFIG='seyond_left.yaml':
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
+    SHARE=$(ros2 pkg prefix lctk_launch --share)
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:=$(ros2 pkg prefix lctk_launch --share)/config/examples/{{ CONFIG }} \
+        config_file:=$SHARE/config/examples/{{ CONFIG }} \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
         mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
+        rviz_config:=$SHARE/config/rviz/lidar_camera.rviz \
         solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
         enable_judge:={{ enable_judge }}
+
+# Development only, remove later
+solid CONFIG='solid_600_handheld.yaml':
+    #!/usr/bin/env bash
+    set -eo pipefail
+    source install/setup.bash
+    SHARE=$(ros2 pkg prefix lctk_launch --share)
+    play_launch launch \
+        --web-addr 0.0.0.0:8000 \
+        lctk_launch calibrate.launch.py \
+        config_file:=$SHARE/config/examples/{{ CONFIG }} \
+        debug_mode:=true \
+        log_level:=info \
+        mode:=realtime \
+        enable_rviz:=true \
+        rviz_config:=$SHARE/config/rviz/solid_board.rviz \
+        solver_mode:=manual \
+        enable_overlay:=true \
+        enable_judge:=false
 
 # Launch two-LiDAR calibration (config-driven)
 two-lidar:
@@ -327,7 +348,7 @@ calibrate config_file:
         enable_judge:={{ enable_judge }}
 
 # Launch interactive manual solver controller
-manual-solver-controller:
+extrinsic-solver-controller:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
@@ -338,3 +359,9 @@ republish which:
       --ros-args \
       -r in/compressed:=/camera/{{ which }}/image_raw/compressed \
       -r out:=/camera/{{ which }}/image_raw
+
+republish-zed:
+    ros2 run image_transport republish compressed raw \
+    --ros-args \
+    -r in/compressed:=/sensing/camera/zed/rgb/color/rect/image/compressed \
+    -r out:=/sensing/camera/zed/rgb/color/rect/image
