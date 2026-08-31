@@ -24,20 +24,35 @@ into a browser.
 
 ## Running it
 
+Assisted mode is `solver_mode:=assisted` on any [session](./sessions.md):
+
 ```bash
-just assisted                       # default config, or:
-just assisted solid_600_handheld.yaml
+ros2 launch lctk_launch session.launch.py \
+    session:=/path/to/sessions/seyond-left \
+    solver_mode:=assisted
 ```
 
 Then open <http://localhost:8080>.
 
-Equivalently, through the config-driven launch:
+If the data is already flowing — a live rig, or a bag you are playing yourself — start only
+the calibration half:
 
 ```bash
 ros2 launch lctk_launch calibrate.launch.py \
-    config_file:=/path/to/config.yaml \
+    config_file:=/path/to/sessions/seyond-left/session.yaml \
     solver_mode:=assisted
 ```
+
+The `just` shorthand resolves a bare session name and fills in `solver_mode:=assisted`:
+
+```bash
+just assisted                          # defaults to the seyond-left session
+just assisted solid600-handheld-zed
+just solver_mode=assisted run <session>   # the same thing, spelled generally
+```
+
+The review archive is written where the session's `assisted.review_archive_path` says,
+conventionally `$(session-dir)/out/detections.json`.
 
 ## The workflow
 

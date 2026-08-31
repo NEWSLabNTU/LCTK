@@ -23,9 +23,9 @@ by the body of `demo.launch.py`.
 The cost is not hypothetical. Three findings in the tracker are this one bug wearing
 different clothes:
 
-- **[M-26](../../issues/M-26-two-lidar-example-topics-unreachable.md)** — `two_lidar.yaml`
+- **[M-26](../../issues/archive/M-26-two-lidar-example-topics-unreachable.md)** — `two_lidar.yaml`
   names topics no in-repo data source publishes.
-- **[M-27](../../issues/M-27-solid-600-handheld-topics-alias-sample-data.md)** —
+- **[M-27](../../issues/archive/M-27-solid-600-handheld-topics-alias-sample-data.md)** —
   `solid_600_handheld.yaml`'s placeholder topics collide with the sample-data playback,
   so it silently calibrates against the wrong recording.
 - **[M-29](../../issues/M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)** —

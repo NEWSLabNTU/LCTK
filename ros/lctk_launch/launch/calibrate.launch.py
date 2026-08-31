@@ -24,7 +24,9 @@ Modes:
 policy are a physical judgement about the scene, not about live-vs-recorded
 data, so they come from the config file's `sync:` section instead.
 
-See config/examples/ for example configurations.
+See sessions/ (installed at share/lctk_launch/sessions/) for maintained
+configurations; a session manifest is a calibration config plus a `data:`
+section, which this launch file does not read.
 """
 
 from dataclasses import asdict

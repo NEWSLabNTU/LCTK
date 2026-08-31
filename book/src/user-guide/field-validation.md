@@ -50,7 +50,7 @@ If you are reusing a YAML from before Phase 8, edit it before you get to the fie
 
    For a **moving, hand-held board**, tighten `tolerance_ms`. A mis-paired camera frame and LiDAR
    sweep is not merely noisy — it is *wrong*, because the board is not where the other sensor saw
-   it. `config/examples/solid_600_handheld.yaml` states 50 ms, and says plainly that the number is
+   it. The `solid600-handheld-zed` session states 50 ms, and says plainly that the number is
    intent rather than measurement. Confirming it is one of your first tasks; see
    [the sync line](#the-sync-line).
 
@@ -75,34 +75,53 @@ If you are reusing a YAML from before Phase 8, edit it before you get to the fie
 
 4. **Per-LiDAR overrides**: rename `board_config:` to `detector_config:` under
    `devices.lidars.<name>`. This is how two differently-sampled LiDARs share one target;
-   `config/examples/two_lidar.yaml` does exactly that.
+   the `twolidar-vlp32-falcon` session does exactly that.
 
-Copy `config/examples/seyond_left.yaml` (LiDAR + camera) or `two_lidar.yaml` (two LiDARs) as your
-template. Both are 45–50 lines and current.
-
-**Check it parses before you travel.** The parser loads and validates the target manifest, so this
-catches most mistakes without any sensor:
+Configs are **sessions** now: one directory per run, holding the manifest plus everything
+session-local to that recording. Scaffold from the closest shipped one rather than editing a
+config in place — `seyond-left` for LiDAR + camera, `twolidar-vlp32-falcon` for two LiDARs:
 
 ```bash
 source install/setup.bash
-ros2 launch lctk_launch calibrate.launch.py config_file:=/path/to/your.yaml enable_rviz:=false
+ros2 run lctk_launch lctk_session new ~/calib/my-rig \
+    --from $(ros2 pkg prefix lctk_launch --share)/sessions/seyond-left
+```
+
+Then edit `~/calib/my-rig/session.yaml`. See [Calibration Sessions](./sessions.md) for the
+manifest format and the `data:` section.
+
+**Check it before you travel.** `lctk_session check` resolves every path in the manifest,
+confirms the data exists, verifies bag topics against the bag's own `metadata.yaml`, and prints
+the topics and frames each device will actually use — without starting a graph. This is the
+single highest-value command in this runbook:
+
+```bash
+ros2 run lctk_launch lctk_session check ~/calib/my-rig
 ```
 
 ## Running a session
 
 Four terminals, same as before.
 
-**Terminal 1 — the graph.** For a bring-your-own-bag config:
+**Terminal 1 — the graph.** If the session declares `kind: bag`, this also plays the bag:
 
 ```bash
-just solver_mode=manual enable_judge=false lidar-camera your_config.yaml
+ros2 launch lctk_launch session.launch.py \
+    session:=~/calib/my-rig solver_mode:=manual enable_judge:=false
 ```
 
-`lidar-camera` takes a **bare filename** resolved inside the installed
-`config/examples/` directory. For a config living elsewhere, use the full path form:
+Or, through the justfile, which additionally resolves a bare session *name* against
+`./sessions/` and the installed share:
 
 ```bash
-just solver_mode=manual enable_judge=false calibrate /abs/path/to/your.yaml
+just solver_mode=manual enable_judge=false run ~/calib/my-rig
+```
+
+`session:=` is always an explicit path — there is no search path. If you are playing the data
+yourself, run only the calibration half against the manifest:
+
+```bash
+just solver_mode=manual enable_judge=false calibrate ~/calib/my-rig/session.yaml
 ```
 
 > **Always pass `enable_judge=false` for a field session.** The justfile defaults it to `true`, and
@@ -114,12 +133,19 @@ Useful overrides: `mode=offline` (default; RELIABLE QoS, right for bags), `debug
 (default; publishes the LiDAR `debug/*` clouds and the ArUco overlay image), `log_level=debug` (this
 is what raises log verbosity — `debug_mode` does not), `rviz_enabled=false`.
 
-**Terminal 2 — the data.** `just two-lidar` and `just lidar-camera` do **not** play anything. Play
-your bag yourself:
+**Terminal 2 — the data.** Only needed if your session declares `kind: live`, or if you chose
+the calibration-only form above. `just two-lidar` still plays nothing; `session.launch.py`
+plays whatever the manifest's `data:` section declares, and nothing under `live`. To play a
+bag yourself:
 
 ```bash
 ros2 bag play /path/to/your.bag --clock
 ```
+
+If you point a session's `data.kind: bag` at that recording instead, startup verifies your
+device topics against the bag's `metadata.yaml` and refuses a name the bag does not publish,
+listing the names it does. That check is why a mistyped topic is now an error rather than a
+graph that launches cleanly and detects nothing.
 
 If your bag carries `CompressedImage`, republish to raw first — the locator subscribes to `Image`:
 
@@ -379,10 +405,11 @@ universal thresholds have been invented ahead of your first datasets.
 The fastest sanity check that the pipeline works at all uses data already in the repo:
 
 ```bash
-just sample-data                                     # terminal 1
-just enable_judge=false calibrate \
-  $(ros2 pkg prefix lctk_launch --share)/config/examples/sample_data.yaml   # terminal 2
+just enable_judge=false demo
 ```
+
+which is `ros2 launch lctk_launch session.launch.py session:=<share>/sessions/sample3-hollow-velodyne`
+— the shipped session plays its own pcap and avi, so there is no second terminal.
 
 Known target, known data, no bag preparation. If that produces detections and a solve, the pipeline
 is healthy and the problem is in your config or your bag. If it does not, the problem is upstream of

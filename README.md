@@ -191,17 +191,32 @@ just debug_mode=true rviz_enabled=true log_level=debug lidar-camera
 
 ### Using Your Own Data
 
-Sensors and calibration pairs are described in a YAML config; point `just calibrate`
-at it (see the [Configuration](#configuration-files) section and
-`ros/lctk_launch/config/examples/`). Topics live in the config, not in justfile
-variables.
+One directory describes one run — where the data comes from and everything needed to
+calibrate against it. Copy the closest shipped session from `sessions/` and edit it; see
+the [Calibration Sessions](book/src/user-guide/sessions.md) guide.
+
+```bash
+# Scaffold from a shipped session, then edit its session.yaml
+ros2 run lctk_launch lctk_session new ~/calib/rig-b \
+    --from $(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
+
+# Validate before launching anything: resolves every path, checks the data exists,
+# verifies bag topics, and prints the topics and frames each device will use
+ros2 run lctk_launch lctk_session check ~/calib/rig-b
+
+# Run it end to end -- LCTK starts the bag or pcap playback itself
+ros2 launch lctk_launch session.launch.py session:=~/calib/rig-b
+```
+
+`session:=` is always an explicit path; `just run <name-or-path>` adds bare-name lookup on
+top. If you would rather play the data yourself, run only the calibration half:
 
 ```bash
 # Play your rosbag in one terminal
 ros2 bag play your_data.bag
 
-# Run the config-driven pipeline against your config in another terminal
-just calibrate /path/to/your_config.yaml
+# Run the config-driven pipeline against your session manifest in another terminal
+just calibrate ~/calib/rig-b/session.yaml
 
 # For live sensors, use realtime QoS
 just mode=realtime calibrate /path/to/your_config.yaml

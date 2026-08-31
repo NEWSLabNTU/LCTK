@@ -1,10 +1,10 @@
 # M-27 · `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback
 
 - **Severity:** Medium
-- **Area:** lctk_launch / config/examples
-- **Status:** Open
+- **Area:** lctk_launch / sessions (was `config/examples`)
+- **Status:** Fixed (2026-09-01)
 - **Verified:** By code trace (2026-08-28) against `lctk_sample_data/launch/lidar_camera.launch.xml`
-- **Related:** [L-19 (archived)](./archive/L-19-aruco-config-required-but-unused-for-lidar.md)
+- **Related:** [L-19 (archived)](./L-19-aruco-config-required-but-unused-for-lidar.md)
 
 ## Problem
 
@@ -75,3 +75,37 @@ Pick one:
 Either way, note in the header comment that "placeholder matching the sample-data convention" is a
 double-edged property until a real solid-600 recording exists to fill the aliased topics
 correctly.
+
+## Resolution (2026-09-01)
+
+Fixed by the calibration-sessions change, and fixed at the level this issue's "why the
+identity gate does not catch this" section identified: the collision was never really about
+topic *names*, it was about a config that declared no data source at all and so could be
+pointed at anyone's.
+
+**A session declares where its data comes from.** `solid_600_handheld.yaml` is gone;
+`sessions/solid600-handheld-zed/session.yaml` replaces it and states `data.kind: live` — no
+recording ships for this rig, and the manifest now says so rather than leaving it to a header
+comment. Its camera topic is the ZED's real one
+(`/sensing/camera/zed/rgb/color/rect/image`), which no shipped playback publishes.
+
+**The aliasing is structurally gone, not merely renamed.** The sample-data recording is now
+its own session, `sample3-hollow-velodyne`, with `data.kind: pcap_avi` — and under `pcap_avi`
+topics are **derived** from the device names, never stated. Stating one is refused at parse
+time. So the hollow-board playback's topics are a consequence of that session's own device
+names, and a second session cannot inherit them by following a naming convention. Running
+either session starts its own data source; there is no longer a "run this config alongside
+that playback" step in which the two could be mismatched.
+
+That is why suggested fix 1 and 2 — both of which were about choosing less collidable
+placeholder names — were not taken. Renaming a placeholder makes the collision less likely;
+making each session own its data source makes the pairing explicit, so there is no free
+placeholder to collide.
+
+**What is still true.** As the "why the identity gate does not catch this" section explains,
+nothing in the running software observes the physical board's true identity independently of
+what the config told the detector to look for, so pointing a solid-600 session at
+hollow-board data by hand remains possible. What has changed is that it now takes a
+deliberate edit to the manifest's `data:` section instead of happening for free.
+`ros2 run lctk_launch lctk_session check <session>` prints the data source and every device
+topic before the run, which is where such an edit becomes visible.

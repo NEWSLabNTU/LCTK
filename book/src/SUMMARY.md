@@ -8,6 +8,7 @@
 
 - [Installation](./user-guide/installation.md)
 - [Quick Start](./user-guide/quickstart.md)
+- [Calibration Sessions](./user-guide/sessions.md)
 - [LiDAR-Camera Calibration](./user-guide/lidar-camera.md)
 - [Multi-LiDAR Calibration](./user-guide/multi-lidar.md)
 - [Assisted Capture](./user-guide/assisted-capture.md)

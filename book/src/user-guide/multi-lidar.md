@@ -49,13 +49,22 @@ You need the same **1m x 1m hollow board**:
 
 ### 1. Prepare Your Data
 
-`just two-lidar` only starts the **calibration pipeline** (`calibrate.launch.py` with
-`config/examples/two_lidar.yaml`) — it does not play back any sensor data itself. Play the
-two-LiDAR data separately, in another terminal, before or alongside it:
+The `twolidar-vlp32-falcon` [session](./sessions.md) declares `data.kind: bag` pointing at
+`$(session-dir)/bag`, so `session.launch.py` plays the recording and starts the calibration
+pipeline together:
 
 ```bash
 # The recorded two-LiDAR bags are gitignored -- see ros/lctk_sample_data/bags/README.md
-# to obtain them, then:
+# to obtain one, then place or symlink it at sessions/twolidar-vlp32-falcon/bag
+source install/setup.bash
+ros2 launch lctk_launch session.launch.py \
+    session:=$(ros2 pkg prefix lctk_launch --share)/sessions/twolidar-vlp32-falcon
+```
+
+`just two-lidar` instead starts the **calibration pipeline only** (`calibrate.launch.py`), so
+with it you play the bag yourself in another terminal:
+
+```bash
 ros2 bag play ros/lctk_sample_data/bags/TWO_LIDAR_<name>
 ```
 
@@ -64,9 +73,12 @@ Or record your own:
 - Record data from both sensors simultaneously (`ros2 bag record -a`)
 - Keep board stationary for 30-60 seconds per position
 
-`two_lidar.yaml` names its devices `top_lidar` (`/velodyne_points`, frame `velodyne`) and
-`front_lidar` (`/iv_points`, frame `seyond`) — point your own recording at those topics, or edit
-the config to match yours.
+The session names its devices `top_lidar` (`/lidar/vlp32/velodyne_points`, frame `velodyne`)
+and `front_lidar` (`/lidar/falcon/iv_points`, frame `seyond`) — the topics the shipped
+recordings actually publish. Under `kind: bag` those names are checked against the bag's own
+`metadata.yaml` at startup, and a name the bag does not publish is refused with the list of
+names it does. Point your own recording at those topics, or edit the manifest to match yours
+and let the check confirm it.
 
 ### 2. Launch Calibration
 
@@ -131,7 +143,8 @@ as it arrives (see `ros/lidar_to_lidar_solver/lidar_to_lidar_solver/main.py`, wh
 source of truth for every parameter above — the package has no README of its own yet).
 
 The synchronizer window is configured the same way as LiDAR-camera: it lives in the calibration
-config's required `sync:` section (e.g. `config/examples/two_lidar.yaml`'s `sync.tolerance_ms`) —
+config's required `sync:` section (e.g. `sessions/twolidar-vlp32-falcon/session.yaml`'s
+`sync.tolerance_ms`) —
 see "Synchronizer Parameters (Conflux)" in the top-level `CLAUDE.md`.
 
 ## Tips for Good Calibration

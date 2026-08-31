@@ -78,7 +78,7 @@ rviz_enabled := "false"
 Override at runtime:
 
 ```bash
-just demo rviz_enabled=true debug_mode=false
+just rviz_enabled=true debug_mode=false demo
 ```
 
 ### Cargo Profiles

@@ -7,7 +7,7 @@
   six migrated convergence tests that fail before the fix and pass after it
 - **Related:** [M-21](./M-21-icp-stable-pose-exit-unreachable.md) (ICP termination),
   [M-17](./M-17-initial-pose-rewrite-unverified-bbox-path.md) (the other unverified initial-pose
-  path), [M-27](./M-27-solid-600-handheld-topics-alias-sample-data.md)
+  path), [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md)
 
 > **Numbering note.** This was filed as H-14 and is referred to by that number in commit
 > `fcf9f06`, which carries the fix. A later `git fetch` showed `origin/main` had already allocated

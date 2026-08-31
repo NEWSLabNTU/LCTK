@@ -15,8 +15,8 @@ LCTK (LiDAR and Camera Toolkit) is a set of libraries and tools for calibrating 
 # Build the project
 just build
 
-# Launch calibration
-just lidar-camera
+# Launch a calibration session
+just demo
 
 # See all commands
 just
@@ -91,20 +91,28 @@ just lint       # Full lint (rustfmt + clippy + ruff; clippy takes minutes)
 just lint-py    # Fast ruff-only lint
 just audit      # cargo-audit for RUSTSEC advisories (runs in the sourced build env)
 
-just lidar-camera   # Launch config-driven calibration (default config: seyond_left.yaml)
-just demo           # Launch demo (sample data + calibration pipeline)
-just sample-data    # Launch sample data playback
+just sessions       # List the shipped sessions
+just check <name>   # Validate a session without launching a graph
+just run <name>     # Run a session end to end (data source + calibration graph)
+just demo           # Alias for `just run sample3-hollow-velodyne`
+just new <path>     # Scaffold a session from an existing one
+just sample-data    # Launch sample data playback on its own
 just rviz           # Launch RViz
 
-# Config-driven calibration (preferred)
-just calibrate /path/to/config.yaml
+# `run` takes a session name (resolved against ./sessions/ then the installed
+# share) or an explicit path. The ros2 interface underneath takes only a path.
+just run /abs/path/to/my-session
 
-# Justfile variables (override with just var=value command)
-just demo mode=realtime              # Use realtime mode (BEST_EFFORT QoS, no buffering)
-just demo mode=offline               # Use offline mode (RELIABLE QoS, default)
-just demo solver_mode=manual         # Use service-driven multi-pose buffering
+# Calibration graph only, against an explicit config file
+just calibrate /path/to/session.yaml
+
+# Justfile variables go BEFORE the recipe name -- `just demo mode=realtime`
+# is parsed as a recipe argument and fails.
+just mode=realtime demo              # Use realtime mode (BEST_EFFORT QoS, no buffering)
+just mode=offline demo               # Use offline mode (RELIABLE QoS, default)
+just solver_mode=manual demo         # Use service-driven multi-pose buffering
 just assisted                        # Auto-capture still, novel poses; review at :8080
-just demo debug_mode=false           # Disable debug output
+just debug_mode=false demo           # Disable debug output
 
 # Documentation (run from book/ directory)
 just build          # Build docs
@@ -372,8 +380,8 @@ obtain them. To record more: `ros2 bag record -a` alongside `just sample-data`.
 
 **Usage:**
 ```bash
-just demo mode=offline    # For recorded/sample-data playback (default)
-just demo mode=realtime   # For live sensors
+just mode=offline demo    # For recorded/sample-data playback (default)
+just mode=realtime demo   # For live sensors
 ```
 
 ### Performance Profiling Results
@@ -407,19 +415,60 @@ claim about the current one.
   0.012 and the detector then silently accepted nothing (see `docs/issues/archive/C-04-board-detector-gate-unreachable.md`).
 - Realtime mode has higher latency variance due to message skipping
 
-### Config-Driven Calibration (Preferred)
+### Calibration Sessions (Preferred)
 
-The unified calibration interface uses YAML configuration files to define sensors and calibration pairs. This automatically generates the required nodes.
+A **session** is one directory describing one run: where the data comes from, and everything
+needed to calibrate against it. It replaces the old split between a playback launch file that
+hard-coded a recording and a `config/examples/*.yaml` that restated its topics by hand — a
+split whose disagreements were always silent. Full guide: `book/src/user-guide/sessions.md`;
+design: `docs/superpowers/specs/2026-08-31-calibration-sessions-design.md`.
+
+Shipped sessions live in `sessions/` and install to `share/lctk_launch/sessions/`.
+`config/examples/` is **deleted**; there is no automatic migration.
 
 **Usage:**
 ```bash
-# With sample data
-just sample-data                    # Terminal 1: Start data playback
-just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/sample_data.yaml  # Terminal 2
+# End to end: data source + calibration graph
+ros2 launch lctk_launch session.launch.py session:=/path/to/sessions/sample3-hollow-velodyne
 
-# Or with ros2 launch directly
-ros2 launch lctk_launch calibrate.launch.py config_file:=/path/to/config.yaml
+# Data only, then calibration only (a live rig, or a bag you play yourself)
+ros2 launch lctk_launch session_data.launch.py session:=/path/to/<session>
+ros2 launch lctk_launch calibrate.launch.py config_file:=/path/to/<session>/session.yaml
+
+# Validate a session without launching a graph -- resolves every path, checks the
+# data exists, verifies bag topics, prints the topics and frames each device will use
+ros2 run lctk_launch lctk_session check /path/to/<session>
+ros2 run lctk_launch lctk_session list
+ros2 run lctk_launch lctk_session new /path/to/new --from /path/to/template
 ```
+
+`session:=` is **always an explicit path** (directory or `session.yaml`). There is no search
+path and no `LCTK_SESSION_PATH`: an implicit location would assume both where sessions live
+and where the user is standing. Bare-name lookup lives in the justfile instead — `just run
+<name-or-path>`, `just check`, `just sessions`, `just new`, `just demo`.
+
+**The `data:` section** decides who owns the topic names, because what is knowable differs:
+
+| `kind` | required | topics | what launches |
+|---|---|---|---|
+| `pcap_avi` | `dir` (holds `lidar.pcap`, `video.avi`) | **derived** from device names; stating one is refused | the `lctk_sample_data` playback |
+| `bag` | `path` (rosbag2 dir with `metadata.yaml`) | **stated**, then verified against the bag | `ros2 bag play --clock` |
+| `live` | none | **stated** | nothing |
+
+Derived names are `/sensing/lidar/<device>/pointcloud_raw`,
+`/sensing/lidar/<device>/velodyne_packets`, `/sensing/camera/<device>/image_raw`,
+`/sensing/camera/<device>/camera_info` — exactly `lidar_camera.launch.xml`'s old defaults.
+
+`$(session-dir)` expands to the manifest's directory. Use it for every session-local file
+(`bbox.json5`, `camera_info.yaml`, `rviz.rviz`, `out/detections.json`) so the directory stays
+relocatable. Using it outside a session directory is refused, not silently emptied.
+
+If a session ships `rviz.rviz`, `session.launch.py` forwards it as `rviz_config`; an explicit
+`rviz_config:=` still wins. The judge's ground truth is *not* session-local yet —
+`calibrate.launch.py` declares no argument to forward one through.
+
+A manifest with no `data:` section still parses, so `calibrate.launch.py` keeps working
+against plain configs.
 
 **Configuration Format:**
 ```yaml
@@ -464,7 +513,7 @@ sync:
 
 A per-lidar `detector_config` under `devices.lidars.<name>` overrides the marker-level one. That is
 how two differently-sampled LiDARs (a spinning VLP-32C and a solid-state Falcon, say) share one
-target while each keeps its own sensor-specific tuning; `config/examples/two_lidar.yaml` does
+target while each keeps its own sensor-specific tuning; `sessions/twolidar-vlp32-falcon/` does
 exactly this.
 
 The legacy `type`/`board_config`/`aruco_config` marker keys (and a lidar device's `board_config`
@@ -532,17 +581,22 @@ Buffer overflow warnings are rate-limited and logged automatically:
 [WARN] Buffer overflow on '/topic': 15/100 messages rejected (15.0%), policy=REJECT_NEW, buffer_size=64
 ```
 
-**Example Configs:**
-- `config/examples/sample_data.yaml` - Single lidar + camera (matches `just sample-data`); the one
-  maintained example still in bbox mode, via `hollow_1000/velodyne_bbox.json5`
-- `config/examples/seyond_left.yaml` - Single Seyond lidar + camera, left mount
-- `config/examples/seyond_right.yaml` - Single Seyond lidar + camera, right mount
-- `config/examples/two_lidar.yaml` - Two lidars, no camera: `top_lidar` takes the marker-level
-  Velodyne preset, `front_lidar` overrides it with the Seyond one
-- `config/examples/vehicle.yaml` - Multi-sensor vehicle setup
-- `config/examples/solid_600_handheld.yaml` - Selects the solid 600 mm target with an EXPERIMENTAL
-  preset; no recording for it ships in the repo. Its 50 ms sync window is tighter than the hollow
-  examples' because the intended recording is a hand-held, moving board
+**Shipped Sessions** (`sessions/`, one directory each, every one with its own README):
+- `sample3-hollow-velodyne` - `pcap_avi`, dataset 3. The only session still in bbox mode, via
+  `hollow_1000/velodyne_bbox.json5` plus its own `bbox.json5`. The data ships in git; this is
+  what `just demo` runs. Its lidar device is named `top`, which is what makes the derived
+  topics reproduce the old `/sensing/lidar/top/pointcloud_raw`
+- `seyond-left` - `live`. Seyond Falcon + left camera; ships `rviz.rviz`
+- `seyond-right` - `live`. Seyond Falcon + right camera. The old example named this device
+  `left_camera` while giving it the right camera's topic and frame; the session corrects it
+- `twolidar-vlp32-falcon` - `bag` (`TWO_LIDAR_1`, gitignored). Two lidars, no camera;
+  `front_lidar` overrides the marker-level Velodyne preset with the Seyond one. Its topics are
+  the ones the bag actually records, verified at parse time (M-26)
+- `vehicle-multisensor` - `live`. Two lidars, four cameras, three markers. A schema
+  demonstration; there is no rig behind it
+- `solid600-handheld-zed` - `live`. Solid 600 mm target with an EXPERIMENTAL preset; no
+  recording ships. Its 50 ms sync window is tighter than the hollow sessions' because the
+  board is hand-held and moving. Ships `rviz.rviz` (M-27)
 
 ### LiDAR-to-LiDAR Calibration
 

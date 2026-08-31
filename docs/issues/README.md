@@ -48,8 +48,8 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-20](./archive/M-20-board-frame-edge-aligned-vs-diamond-naming.md) | Medium | Board model's axes run along edges while every accessor names a diamond → `initial_inplane_rotation_deg: 45.0` mandatory | 🟢 |
 | [M-21](./M-21-icp-stable-pose-exit-unreachable.md) | Medium | ICP's "stable pose" exit needs ~5× more iterations than any preset allows → `icp_pose_weight_threshold` is inert | 🔴 |
 | [M-22](./archive/M-22-root-cargo-patch-block-single-source.md) | Medium | Root `.cargo/config.toml` copied from one package → clean clone cannot build at all | 🟢 |
-| [M-26](./M-26-two-lidar-example-topics-unreachable.md) | Medium | `two_lidar.yaml` names topics no in-repo data source ever publishes | 🔴 |
-| [M-27](./M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🔴 |
+| [M-26](./archive/M-26-two-lidar-example-topics-unreachable.md) | Medium | `two_lidar.yaml` names topics no in-repo data source ever publishes | 🟢 |
+| [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🟢 |
 | [M-28](./M-28-generator-geometry-cell-handedness-disagree.md) | Medium | ArUco generator and target geometry bind cells with opposite handedness (2x2 targets) | 🔴 |
 | [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |

@@ -65,33 +65,42 @@ Or record your own:
 
 ### 2. Launch Calibration
 
-Run the demo (sample data + calibration):
+A run is described by a [session](./sessions.md): one directory holding the data source and
+everything needed to calibrate against it. The shipped `sample3-hollow-velodyne` session plays
+its own pcap and avi, so this is the whole thing:
+
 ```bash
-just demo
+source install/setup.bash
+ros2 launch lctk_launch session.launch.py \
+    session:=$(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
 ```
 
-Or run calibration separately with your own data:
+Through the justfile, which resolves a bare session name:
+
 ```bash
-just lidar-camera
+just demo                   # the same session
+just run <name-or-path>     # any other session
 ```
+
+For your own data, scaffold a session and edit its manifest — see
+[Calibration Sessions](./sessions.md).
 
 ### 3. Monitor Progress
 
 Open `http://localhost:8000` to see the web UI.
 
 Check detection rates (should be >1 Hz). Topics are namespaced `<lidar>_<marker>` / `<camera>` /
-`<lidar>_<camera>` from your config's device and marker names; the sample-data config
-(`config/examples/sample_data.yaml`) names them `top_lidar`, `calibration_board` and
-`front_center`:
+`<lidar>_<camera>` from your session's device and marker names; `sample3-hollow-velodyne` names
+them `top`, `calibration_board` and `front_center`:
 ```bash
 source install/setup.bash
 ros2 topic hz /calibration/front_center/aruco_detections
-ros2 topic hz /calibration/top_lidar_calibration_board/calibration_board_detections
+ros2 topic hz /calibration/top_calibration_board/calibration_board_detections
 ```
 
 View the calibration result:
 ```bash
-ros2 topic echo /calibration/top_lidar_front_center/extrinsic_transform
+ros2 topic echo /calibration/top_front_center/extrinsic_transform
 ```
 
 ### 4. Validate Results

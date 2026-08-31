@@ -4,7 +4,7 @@
 - **Area:** lctk_launch / config/board, calibration-target-detector
 - **Status:** 🟢 Fixed (2026-08-31)
 - **Verified:** By running `just sample-data` + `calibrate.launch.py` on dataset 3 and reading the detector's own log
-- **Related:** [C-04 (archived)](./archive/C-04-board-detector-gate-unreachable.md), [M-27](./M-27-solid-600-handheld-topics-alias-sample-data.md)
+- **Related:** [C-04 (archived)](./archive/C-04-board-detector-gate-unreachable.md), [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md)
 
 ## Problem
 

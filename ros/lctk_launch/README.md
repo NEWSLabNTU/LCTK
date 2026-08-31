@@ -22,15 +22,33 @@ A LiDAR-LiDAR pair instead generates a **lidar_to_lidar_solver** node consuming 
 
 ### Basic Usage
 
+A **session** is one directory describing one run — a `session.yaml` manifest plus the files
+that belong to that recording. `session.launch.py` starts the data source the manifest
+declares and then the calibration graph:
+
+```bash
+ros2 launch lctk_launch session.launch.py \
+    session:=$(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
+```
+
+`session:=` is always an explicit path — to the session directory or to its `session.yaml`.
+There is no search path. See `book/src/user-guide/sessions.md`, and `sessions/README.md` for
+the manifest format.
+
+When the data is already flowing — a live rig, or a bag you play yourself — run only the
+calibration half:
+
 ```bash
 ros2 launch lctk_launch calibrate.launch.py \
-    config_file:=/path/to/your_config.yaml
+    config_file:=/path/to/session.yaml
 ```
 
 `config_file` is a YAML document describing sensor topics/frames, calibration markers (each
 naming a Target Definition + Detector Tuning preset), calibration pairs, and a required `sync:`
-section. See `config/examples/sample_data.yaml` for a complete example and the "Configuration
-Format" section of the repo root `CLAUDE.md` for the full schema.
+section. A session manifest is exactly that plus a `data:` section, which
+`calibrate.launch.py` ignores. See `sessions/sample3-hollow-velodyne/session.yaml` for a
+complete example and the "Configuration Format" section of the repo root `CLAUDE.md` for the
+full schema.
 
 ### With Debug Logging and RViz
 
@@ -45,14 +63,29 @@ ros2 launch lctk_launch calibrate.launch.py \
 ### Two-LiDAR Example
 
 ```bash
-ros2 launch lctk_launch calibrate.launch.py \
-    config_file:=$(ros2 pkg prefix lctk_launch)/share/lctk_launch/config/examples/two_lidar.yaml
+ros2 launch lctk_launch session.launch.py \
+    session:=$(ros2 pkg prefix lctk_launch --share)/sessions/twolidar-vlp32-falcon
 ```
 
-Equivalently, via the justfile: `just calibrate /path/to/your_config.yaml` (see the repo root
-`README.md`).
+That session's bag is gitignored — see `ros/lctk_sample_data/bags/README.md` to obtain one.
+
+Equivalently, via the justfile: `just run <name-or-path>`, or `just calibrate
+/path/to/session.yaml` for the calibration half alone (see the repo root `README.md`).
 
 ## Launch Arguments
+
+### session.launch.py
+
+| Argument      | Default    | Description                                                          |
+|---------------|------------|----------------------------------------------------------------------|
+| `session`     | (required) | Explicit path to a session directory or its `session.yaml`. No search path. |
+| `rviz_config` | (empty)    | Empty means: use the session's `rviz.rviz` if it ships one, else `calibrate.launch.py`'s default. An explicit value wins over both. |
+
+Every `calibrate.launch.py` argument below except `config_file` and `rviz_config` is declared
+here with the same name and default, and forwarded.
+
+`session_data.launch.py` takes `session` alone, and starts only the data source the manifest
+declares (`pcap_avi` playback, `ros2 bag play`, or nothing under `live`).
 
 ### calibrate.launch.py
 
@@ -68,9 +101,9 @@ Equivalently, via the justfile: `just calibrate /path/to/your_config.yaml` (see 
 | `enable_overlay` | `false`      | Launch `pointcloud_image_overlay` for visual verification (one per pair)    |
 | `enable_judge`   | `false`      | Launch the calibration quality judge (one per pair)                         |
 
-(The `just calibrate` / `just demo` recipes pass their own defaults for several of these — see
-the repo root `README.md`'s "Configuration Variables" section — which differ from the launch
-file's own defaults above.)
+(The `just calibrate` / `just run` / `just demo` recipes pass their own defaults for several
+of these — see the repo root `README.md`'s "Configuration Variables" section — which differ
+from the launch file's own defaults above.)
 
 The old XML arguments `aruco_config_file:=` and `board_config_file:=` no longer exist on any
 maintained launch path; per-marker config is now supplied inside `config_file`'s YAML via

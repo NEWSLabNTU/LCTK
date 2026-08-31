@@ -242,10 +242,10 @@ test: _check-rust-tests-collectable
     # reached. Must be the system python3 (see _check-python-env).
     python3 -m pytest ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
-# Launch a lidar-camera session. Identical to `just run` -- kept as the name
-# most of the docs and muscle memory reach for. The RViz layout is no longer
-# named here: a session ships its own `rviz.rviz` and session.launch.py picks
-# it up, so the layout lives with the rig it was framed for.
+# Identical to `just run` -- kept as the name muscle memory reaches for. The
+# RViz layout is no longer named here: a session ships its own `rviz.rviz` and
+# session.launch.py picks it up, so the layout lives with the rig it was framed for.
+# Run a lidar-camera session end to end
 lidar-camera SESSION='seyond-left':
     #!/usr/bin/env bash
     set -eo pipefail
@@ -268,6 +268,7 @@ lidar-camera SESSION='seyond-left':
 
 # Development only, remove later. A `just run` with the solid-board bench
 # settings baked in; the RViz layout comes from the session's own rviz.rviz.
+# Run a solid-board session with the bench settings
 solid SESSION='solid600-handheld-zed':
     #!/usr/bin/env bash
     set -eo pipefail
@@ -290,8 +291,8 @@ solid SESSION='solid600-handheld-zed':
 
 # `solver_mode` stays a switch: `just solver_mode=continuous lidar-camera` and
 # `just solver_mode=manual lidar-camera` still run the original paths unchanged.
-# Launch assisted calibration (auto-capture + review page on :8080). Equivalent
-# to `just solver_mode=assisted run <session>`.
+# Equivalent to `just solver_mode=assisted run <session>`.
+# Launch assisted calibration (auto-capture + review page on :8080)
 assisted SESSION='seyond-left':
     #!/usr/bin/env bash
     set -eo pipefail
