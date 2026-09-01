@@ -41,7 +41,7 @@ Worth checking the other ament_python packages for the same omission while in th
 
 ## Related
 
-- [H-11](../H-11-camera-solvers-stale-board-frame.md) — the Phase 2 work that supersedes this package
+- [H-11](./H-11-camera-solvers-stale-board-frame.md) — the Phase 2 work that supersedes this package
 - [L-23](../L-23-debug-mode-parameter-never-read.md) — the other dead-metadata finding from the same trace
 
 ## Resolution (2026-08-28)

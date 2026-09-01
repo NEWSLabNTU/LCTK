@@ -24,7 +24,6 @@
   <exec_depend>gscam</exec_depend>
   <exec_depend>aruco_locator_node</exec_depend>
   <exec_depend>lidar_board_detector</exec_depend>
-  <exec_depend>extrinsic_solver_node</exec_depend>
   <exec_depend>lidar_to_camera_solver</exec_depend>
   <exec_depend>lidar_to_lidar_solver</exec_depend>
   <exec_depend>lctk_target</exec_depend>

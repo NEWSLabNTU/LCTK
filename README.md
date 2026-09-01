@@ -56,7 +56,7 @@ graph TB
 
     %% Calibration & Visualization
     subgraph CalibrationViz[Calibration & Visualization]
-        SOLVER[extrinsic_solver_node]
+        SOLVER[lidar_to_camera_solver]
         OVERLAY[pointcloud_image_overlay]
         VIZ[Visualization<br/>Tools]
     end

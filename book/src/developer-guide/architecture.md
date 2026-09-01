@@ -260,7 +260,6 @@ LCTK/
 ├── ros/                     # ROS 2 packages
 │   ├── aruco_locator_node/
 │   ├── lidar_board_detector/
-│   ├── extrinsic_solver_node/       # Superseded; pending deletion
 │   ├── lidar_to_camera_solver/
 │   ├── lctk_launch/         # Launch files and configs
 │   │   └── config/

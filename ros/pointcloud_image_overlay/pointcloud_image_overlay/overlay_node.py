@@ -89,7 +89,7 @@ def transform_to_rvec_tvec(
     and translation vector (tvec) format used by OpenCV's projectPoints function.
 
     Args:
-        transform: ROS TransformStamped message (from extrinsic_solver_node)
+        transform: ROS TransformStamped message (from lidar_to_camera_solver)
 
     Returns:
         tuple: (rvec, tvec) - rotation vector and translation vector for OpenCV
@@ -299,7 +299,7 @@ class EducationalOverlayNode(Node):
         Educational Callback: Handle live extrinsic calibration updates
 
         This demonstrates real-time calibration - instead of loading a static file,
-        we receive live updates from the extrinsic_solver_node as it refines the
+        we receive live updates from lidar_to_camera_solver as it refines the
         calibration between LiDAR and camera coordinate systems.
 
         Args:

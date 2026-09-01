@@ -11,8 +11,7 @@ exclude = [
     # Launch-only package without Cargo.toml
     "ros/lctk_launch",
     "ros/lctk_sample_data",
-    # Python package without Cargo.toml
-    "ros/extrinsic_solver_node",
+    # Python packages without Cargo.toml
     "ros/lidar_to_camera_solver",
     "ros/interactive_solver_controller",
     "ros/filter_box_tuner",

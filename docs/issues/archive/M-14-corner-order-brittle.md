@@ -128,7 +128,7 @@ frame: the origin is now the plate **centre** and the in-plane axes run corner t
 this issue is therefore no longer "two implementations that happen to agree" — the Rust and the two
 Python implementations are now on **different conventions**, and the resulting extrinsic error is
 wrong by 45° in-plane plus a ~707 mm origin shift. That is tracked as
-[H-11](../H-11-camera-solvers-stale-board-frame.md).
+[H-11](./H-11-camera-solvers-stale-board-frame.md).
 
 Two things improved for this issue specifically:
 
@@ -149,7 +149,7 @@ Two things improved for this issue specifically:
   `rust/calibration-target/tests/geometry_contract.rs::both_targets_match_shared_marker_world_golden`,
   reading the same golden, relocated to `fixtures/targets/marker_corners_world.golden.json` with a
   generator at `fixtures/targets/generate_marker_corners_world.py`. The cross-language seam this
-  bullet describes is unchanged in kind; see [H-11](../H-11-camera-solvers-stale-board-frame.md) for
+  bullet describes is unchanged in kind; see [H-11](./H-11-camera-solvers-stale-board-frame.md) for
   the current list of that golden's consumers (H-11 also carries the correction that
   `ros/advanced_extrinsic_solver` no longer exists under that name).
 

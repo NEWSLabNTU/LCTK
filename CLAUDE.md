@@ -31,7 +31,6 @@ just
   - `aruco_locator_node/` - ArUco marker detection from camera images
   - `aruco_generator_node/` - Prints the ArUco board pattern from a Target Definition (`--target-config`)
   - `lidar_board_detector/` - Calibration board detection from point clouds
-  - `extrinsic_solver_node/` - Superseded LiDAR-camera solver (unreachable from config-driven launch; pending deletion)
   - `lidar_to_camera_solver/` - LiDAR-camera solver with continuous, manual and assisted modes
   - `interactive_solver_controller/` - Rich TUI driving `lidar_to_camera_solver`
   - `lidar_to_lidar_solver/` - LiDAR-to-LiDAR calibration solver
@@ -551,9 +550,7 @@ hand `detect_markers` a rectified image.
 
 The maintained `lidar_to_camera_solver` and `lidar_to_lidar_solver` use
 `lctk_sync.DetectionPairSource`, which owns Conflux, finite-window validation, replay recovery,
-freshness/skew checks and operator diagnosis. The legacy `extrinsic_solver_node` still calls Conflux
-directly, is unreachable from config-driven launch, and is scheduled for deletion by the
-diamond-frame plan.
+freshness/skew checks and operator diagnosis.
 
 These three node parameters are populated by `calibrate.launch.py` from the calibration config's
 required `sync:` section (see Configuration Format above) — there is no mode-derived fallback, and

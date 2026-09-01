@@ -22,7 +22,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-08](./archive/H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./archive/H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
 | [H-10](./archive/H-10-dump-load-regresses-c01.md) | High | dump→load drops ArUco corners → silently re-introduces C-01 | 🟢 |
-| [H-11](./H-11-camera-solvers-stale-board-frame.md) | High | Camera solvers still use the old edge-aligned board frame → extrinsic wrong by 45°, half of it silently | 🔴 |
+| [H-11](./archive/H-11-camera-solvers-stale-board-frame.md) | High | Camera solvers used the old edge-aligned board frame → extrinsic wrong by 45°, half of it silently | 🟢 |
 | [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
 | [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
 | [H-15](./H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
@@ -133,18 +133,18 @@ two-LiDAR rig on 2026-08-14** — the board's `+Y` arrow points at the physicall
 which is what rules out the `−45°` conjugation that would have produced an identical-looking diamond
 with the corner labels a quarter turn out — so M-20 is now 🟢.
 
-The two Python solvers reimplement the board's marker geometry themselves and have **not** been
-updated — that is [H-11](./H-11-camera-solvers-stale-board-frame.md), Phase 2, deferred because the
-available recordings carry no camera stream. The 2026-08-14 validation does not touch it: with the
-LiDAR side now confirmed correct, H-11's 45° error is a **confirmed live defect**, not a predicted
-one.
+The camera-side board-frame mismatch tracked by [H-11](./archive/H-11-camera-solvers-stale-board-frame.md)
+is fixed. Stage 1 ported the maintained `lidar_to_camera_solver` to the corner-aligned,
+plate-centre frame and Stage 2 put both operating modes on that backend. Stage 3 removed the
+superseded `extrinsic_solver_node` and its stale references. The 45° error was real when filed;
+it is no longer present on any supported config-driven calibration path.
 
-Read that issue before running any LiDAR-camera calibration from this tree. The failure is the
-tracker's recurring shape once again: the board pose is a board→sensor transform and the solvers feed
-board-local coordinates *into* it, so the convention sits on both sides of the product. Changing one
-side leaves a 45° in-plane error that the symmetric 2×2 marker grid absorbs with a low reprojection
-error — silent — alongside a ~707 mm origin shift that probably would be noticed. LiDAR-to-LiDAR
-calibration is unaffected: both of its sides come from the same detector.
+Read the archived issue for the historical failure mode and validation caveat before running any
+LiDAR-camera calibration from this tree. The board pose is a board→sensor transform and the solver
+feeds board-local coordinates *into* it, so the convention sits on both sides of the product. A
+mismatch would leave a 45° in-plane error that the symmetric 2×2 marker grid absorbs with a low
+reprojection error — silent — alongside a ~707 mm origin shift that probably would be noticed.
+LiDAR-to-LiDAR calibration is unaffected: both of its sides come from the same detector.
 
 ## Conflux submodule audit (2026-08-15) — merged from `main` 2026-08-31
 

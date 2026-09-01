@@ -12,7 +12,7 @@ survives the diff. This is the phase-7 Decision section's diagnosed
 session-level multi-pose cue, realized on data that already exists.
 
 It is NOT a literal single-session multi-pose buffer (what
-`advanced_extrinsic_solver` does): these are five independent captures of one
+`lidar_to_camera_solver` does): these are five independent captures of one
 room, a related but distinct instance of the same persistent-vs-transient
 occupancy cue. Report it as such.
 """

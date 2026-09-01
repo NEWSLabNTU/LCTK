@@ -45,7 +45,6 @@ LCTK/
 ├── ros/                    # ROS 2 packages
 │   ├── aruco_locator_node/
 │   ├── lidar_board_detector/
-│   ├── extrinsic_solver_node/
 │   ├── lctk_interfaces/
 │   ├── lctk_launch/
 │   └── ...

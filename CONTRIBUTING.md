@@ -37,10 +37,8 @@ Core reusable functionality implemented as pure Rust libraries (no ROS dependenc
   clouds
 
 #### Python ROS 2 Nodes
-- **[extrinsic_solver_node](ros/extrinsic_solver_node/)** - Superseded LiDAR-camera solver;
-  unreachable from config-driven launch, pending deletion
 - **[lidar_to_camera_solver](ros/lidar_to_camera_solver/)** - LiDAR-camera solver
-  (continuous and manual modes)
+  (continuous, manual and assisted modes)
 - **[interactive_solver_controller](ros/interactive_solver_controller/)** - Rich TUI driving
   `lidar_to_camera_solver`
 - **[lidar_to_lidar_solver](ros/lidar_to_lidar_solver/)** - LiDAR-to-LiDAR calibration solver
@@ -99,20 +97,13 @@ Core reusable functionality implemented as pure Rust libraries (no ROS dependenc
   - `/calibration/lidar_board_detector/debug/initial_board_marker` (visualization_msgs/MarkerArray)
   - `/calibration/lidar_board_detector/debug/icp_stats` (std_msgs/String)
 
-#### Extrinsic Solver Node
-- **Package**: `extrinsic_solver_node`
-- **Node Name**: `/calibration/extrinsic_solver/extrinsic_solver_node`
-- **Subscribes**:
-  - `/calibration/aruco_locator/aruco_detections` (vision_msgs/Detection2DArray)
-  - `/calibration/lidar_board_detector/calibration_board_detections` (vision_msgs/Detection3DArray)
-  - `/sensing/camera/front_center/camera_info` (sensor_msgs/CameraInfo)
+#### LiDAR-to-camera Solver
+- **Package**: `lidar_to_camera_solver`
+- **Node Name**: `/calibration/<lidar>_<camera>/lidar_to_camera_solver`
+- **Modes**: `continuous` (latest-pair auto-solve), `manual` (multi-pose buffer), or
+  `assisted` (stillness-gated capture and review)
 - **Publishes**:
-  - `/calibration/extrinsic_solver/extrinsic_transform` (geometry_msgs/TransformStamped)
-  - `/calibration/extrinsic_solver/calibration_quality` (std_msgs/String)
-  - `/calibration/extrinsic_solver/image_with_detections` (sensor_msgs/Image)
-- **Debug Topics**:
-  - `/calibration/extrinsic_solver/debug/recent_aruco_detections` (vision_msgs/Detection2DArray)
-  - `/calibration/extrinsic_solver/debug/recent_board_detections` (vision_msgs/Detection3DArray)
+  - `/calibration/<lidar>_<camera>/extrinsic_transform` (geometry_msgs/TransformStamped)
 
 ### Sensor Input Nodes
 
@@ -146,7 +137,7 @@ Core reusable functionality implemented as pure Rust libraries (no ROS dependenc
   - `/sensing/lidar/top/pointcloud_raw` (sensor_msgs/PointCloud2)
   - `/sensing/camera/front_center/image_raw` (sensor_msgs/Image)
   - `/sensing/camera/front_center/camera_info` (sensor_msgs/CameraInfo)
-  - `/calibration/extrinsic_solver/extrinsic_transform` (geometry_msgs/TransformStamped)
+  - `/calibration/<lidar>_<camera>/extrinsic_transform` (geometry_msgs/TransformStamped)
 - **Publishes**:
   - `/calibration/pointcloud_overlay` (Rerun visualization)
 
@@ -161,7 +152,7 @@ LCTK follows a hierarchical topic naming convention:
 ### Calibration Pipeline
 - `/calibration/aruco_locator/` - ArUco detection results
 - `/calibration/lidar_board_detector/` - Board detection results
-- `/calibration/extrinsic_solver/` - Calibration computation results
+- `/calibration/<lidar>_<camera>/` - LiDAR-camera calibration results
 
 ### Debug Topics
 - `/calibration/<node_name>/debug/` - Debug information for specific nodes

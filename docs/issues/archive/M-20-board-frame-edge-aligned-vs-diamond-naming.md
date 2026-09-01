@@ -2,11 +2,11 @@
 
 - **Severity:** Medium
 - **Area:** `rust/hollow-board-config` / board detection
-- **Status:** Fixed (2026-08-14) — Phase 1 (the Rust model, the detector node, the presets) landed 2026-08-13 and was field-validated on the two-LiDAR rig 2026-08-14; see [Field validation](#field-validation-2026-08-14) below. The camera-side remainder is **not** tracked by this issue — it is [H-11](../H-11-camera-solvers-stale-board-frame.md), Phase 2
+- **Status:** Fixed (2026-08-14) — Phase 1 (the Rust model, the detector node, the presets) landed 2026-08-13 and was field-validated on the two-LiDAR rig 2026-08-14; see [Field validation](#field-validation-2026-08-14) below. The camera-side remainder is **not** tracked by this issue — it is [H-11](./H-11-camera-solvers-stale-board-frame.md), Phase 2
 - **Verified:** 2026-08-13 — source walkthrough; detection empirically fails at `0.0` and works at `45.0`. Fix validated 2026-08-14 against the `TWO_LIDAR_*` recordings on the real Seyond + Velodyne rig
 - **Analysis:** [`2026-08-12-initial-board-pose-inplane-rotation.md`](../../superpowers/specs/2026-08-12-initial-board-pose-inplane-rotation.md)
 - **Implementation spec:** [`2026-08-13-corner-aligned-board-frame.md`](../../superpowers/specs/2026-08-13-corner-aligned-board-frame.md)
-- **Related:** [M-14](./M-14-corner-order-brittle.md), [M-17](../M-17-initial-pose-rewrite-unverified-bbox-path.md), [M-19](../M-19-debug-assertions-compiled-out.md), [L-21 (archived)](./L-21-find-correspondences-duplicated-tests-wrong-body.md), [H-11](../H-11-camera-solvers-stale-board-frame.md)
+- **Related:** [M-14](./M-14-corner-order-brittle.md), [M-17](../M-17-initial-pose-rewrite-unverified-bbox-path.md), [M-19](../M-19-debug-assertions-compiled-out.md), [L-21 (archived)](./L-21-find-correspondences-duplicated-tests-wrong-body.md), [H-11](./H-11-camera-solvers-stale-board-frame.md)
 
 ## Problem
 
@@ -53,7 +53,7 @@ supported rig and survives only as a genuine escape hatch.
 Phased: Phase 1 is the Rust model, the detector node, configs, and a frame-convention tag that makes
 the phase boundary loud. Phase 2 — the two camera-side solver reimplementations, their tag check, and
 the saved-file format bump — is deferred because the available recordings contain no camera stream,
-and is tracked as [H-11](../H-11-camera-solvers-stale-board-frame.md).
+and is tracked as [H-11](./H-11-camera-solvers-stale-board-frame.md).
 
 ## Phase 1 status (2026-08-13)
 
@@ -120,7 +120,7 @@ Phase 1 was run against the real two-LiDAR rig (Seyond + Velodyne VLP-32C) using
 - **Nothing camera-side.** The `TWO_LIDAR_*` bags carry no camera stream. The two Python solvers
   still build marker geometry in the old edge-aligned frame, so the LiDAR-camera path remains
   actively wrong with half the error silent. That is
-  [H-11](../H-11-camera-solvers-stale-board-frame.md), Phase 2, tracked separately — closing M-20
+  [H-11](./H-11-camera-solvers-stale-board-frame.md), Phase 2, tracked separately — closing M-20
   does not imply the camera path is sound.
 - **The crop-box (`bbox`) detection path**, which was not exercised or measured by this run —
   [M-17](../M-17-initial-pose-rewrite-unverified-bbox-path.md).
