@@ -26,6 +26,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
 | [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
 | [H-15](./H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
+| [H-16](./H-16-play-launch-does-not-replay-execute-process.md) | High | `play_launch` replays `Node` actions only, so a `kind: bag` session's `ExecuteProcess` player ran during the recording pass and the recording played into an empty graph | 🟢 |
 | [H-17](./H-17-solid-600-preset-detects-nothing.md) | High | The `solid_600` detector preset rejects every frame of real data | 🔴 |
 | [M-01](./archive/M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
@@ -53,6 +54,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🟢 |
 | [M-28](./M-28-generator-geometry-cell-handedness-disagree.md) | Medium | ArUco generator and target geometry bind cells with opposite handedness (2x2 targets) | 🔴 |
 | [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
+| [M-30](./M-30-bag-playback-qos-mismatch-is-silent.md) | Medium | A `kind: bag` session in the default `offline` mode silently receives no LiDAR: recorded BEST_EFFORT QoS cannot feed a RELIABLE subscriber | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |

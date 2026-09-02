@@ -54,3 +54,42 @@ def test_python_launch_file_parses(path: Path):
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError as error:
         pytest.fail(f"{path.relative_to(REPO_ROOT)} does not parse: {error}")
+
+
+def test_no_launch_file_starts_a_data_source_with_execute_process():
+    """`play_launch` records and replays `Node` actions only.
+
+    Every `just` recipe drives the graph through `play_launch`, which runs the
+    launch tree twice: a recording pass, then a replay that actually starts the
+    nodes. `ExecuteProcess` is not part of what it records, so such an action
+    runs during the *recording* pass -- when no node exists yet -- and never
+    appears in the replay at all. A bag player written that way plays the whole
+    recording into an empty graph, and the detectors come up after it has
+    finished.
+
+    Nothing about that failure is visible: the launch reports success, the
+    playback reports success, and no detection ever happens. `just demo` cannot
+    catch it either, because the pcap_avi path is entirely Node actions.
+
+    So the rule is: anything that produces or consumes data is a `Node`. If a
+    future action genuinely cannot be one, it needs its own answer to "what
+    starts this during the replay?" before this test is relaxed.
+    """
+    offenders = []
+    for path in PY_LAUNCH:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # Parse rather than grep: the comment in session_data.launch.py
+        # explaining this very rule names the class, and a substring check flags
+        # its own documentation.
+        used = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "ExecuteProcess"
+            for node in ast.walk(tree)
+        )
+        if used:
+            offenders.append(str(path.relative_to(REPO_ROOT)))
+    assert not offenders, (
+        "these launch files use ExecuteProcess, which play_launch does not "
+        f"replay: {', '.join(offenders)}"
+    )

@@ -273,6 +273,27 @@ actually wired in.
    find build install -xtype l -delete
    ```
 
+9. **`play_launch` never starts an `ExecuteProcess`** (H-16, guarded by a test): every
+   `just` recipe drives the graph through `play_launch`, which runs the launch tree twice —
+   a recording pass, then a replay that actually starts the nodes. It records **`Node`
+   actions only**; `play_log/<run>/node/` has one directory per node and no category for
+   anything else. An `ExecuteProcess` therefore executes during the *recording* pass, when
+   no node exists yet, and is absent from the replay entirely.
+
+   `session_data.launch.py` started `ros2 bag play` that way, so under any `just` recipe a
+   `kind: bag` session played its whole recording into an empty graph and the detectors came
+   up after it had finished — with the launch, the playback and every node all reporting
+   success. `just demo` could not catch it (the `pcap_avi` path is all `Node` actions) and
+   neither could `just smoke` (it calls `ros2 launch` directly, where `ExecuteProcess`
+   behaves normally).
+
+   **Anything in a launch file that produces or consumes data must be a `Node`.** The bag
+   player is now `lctk_bag_play`, a `lctk_launch` console script, which additionally waits
+   for its subscribers to exist before playing — bag topics replay BEST_EFFORT/VOLATILE, so
+   a subscriber that arrives late gets nothing that was already sent.
+   `test_launch_files_are_well_formed.py` fails if any launch file constructs an
+   `ExecuteProcess`.
+
 ## Coding Guidelines
 
 - **Temporary files**: Create temporary files and scripts in `$project/tmp/` directory, not `/tmp/`

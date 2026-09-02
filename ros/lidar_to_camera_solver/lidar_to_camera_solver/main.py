@@ -417,7 +417,7 @@ class LidarToCameraSolver(Node):
             ("camera_target_identity_topic", CAMERA_TARGET_IDENTITY_TOPIC),
             # Assisted mode only.  Read once in _start_assisted; ignored by the
             # other two modes, which never construct the subsystems that use them.
-            ("stability_window_frames", 10),
+            ("stability_window_s", 1.0),
             ("stability_max_translation_m", 0.005),
             ("stability_max_rotation_deg", 0.5),
             ("stability_cooldown_s", 1.0),
@@ -443,7 +443,7 @@ class LidarToCameraSolver(Node):
         """
 
         self._stillness = StillnessTracker(
-            window_frames=self._integer_parameter("stability_window_frames"),
+            window_s=self._double_parameter("stability_window_s"),
             max_translation_m=self._double_parameter("stability_max_translation_m"),
             max_rotation_deg=self._double_parameter("stability_max_rotation_deg"),
             cooldown_s=self._double_parameter("stability_cooldown_s"),

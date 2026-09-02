@@ -26,6 +26,7 @@ NAMES = [
     "solid600-handheld-zed",
     "twolidar-vlp32-falcon",
     "vehicle-multisensor",
+    "vlp32-zed-hollow",
 ]
 
 # The four sampleN sessions besides dataset 3 have never been run: their target,
@@ -40,15 +41,23 @@ UNVERIFIED_SAMPLES = ["sample1", "sample2", "sample4", "sample5"]
 # the entire point of M-26 -- so where the bag is absent the session genuinely
 # cannot be parsed, and skipping is the honest outcome rather than weakening
 # the check to make it pass everywhere.
-_TWO_LIDAR_BAG = SESSIONS / "twolidar-vlp32-falcon" / "bag"
-_NEEDS_BAG = pytest.mark.skipif(
-    not _TWO_LIDAR_BAG.is_dir(),
-    reason=(
-        f"no recording at {_TWO_LIDAR_BAG}; the TWO_LIDAR_* bags are gitignored "
-        "-- see ros/lctk_sample_data/bags/README.md to obtain one and symlink it "
-        "there"
-    ),
-)
+# The same holds for solid600-handheld-zed, whose recording is a field capture
+# that has never been small enough to ship.
+BAG_SESSIONS = [
+    "twolidar-vlp32-falcon",
+    "vlp32-zed-hollow",
+]
+
+
+def _needs_bag(name: str):
+    bag = SESSIONS / name / "bag"
+    return pytest.mark.skipif(
+        not bag.is_dir(),
+        reason=(
+            f"no recording at {bag}; see {SESSIONS / name / 'README.md'} for "
+            "where to obtain it and symlink it there"
+        ),
+    )
 
 
 def _manifest(name: str) -> str:
@@ -65,9 +74,7 @@ def test_the_shipped_session_list_is_exactly_what_is_on_disk():
 @pytest.mark.parametrize(
     "name",
     [
-        pytest.param(
-            name, marks=[_NEEDS_BAG] if name == "twolidar-vlp32-falcon" else []
-        )
+        pytest.param(name, marks=[_needs_bag(name)] if name in BAG_SESSIONS else [])
         for name in NAMES
     ],
 )
@@ -108,7 +115,7 @@ def test_the_sample_session_carries_its_own_crop_box():
     assert bbox.is_file()
 
 
-@_NEEDS_BAG
+@_needs_bag("twolidar-vlp32-falcon")
 def test_the_two_lidar_session_names_the_topics_the_bag_records():
     """M-26: the old config named /velodyne_points; the bag records
     /lidar/vlp32/velodyne_points. Parsing verifies against metadata.yaml, so this
@@ -118,7 +125,7 @@ def test_the_two_lidar_session_names_the_topics_the_bag_records():
     assert topics == {"/lidar/vlp32/velodyne_points", "/lidar/falcon/iv_points"}
 
 
-@_NEEDS_BAG
+@_needs_bag("twolidar-vlp32-falcon")
 def test_the_two_lidar_session_keeps_its_per_device_detector_override():
     """The per-LiDAR detector_config override is the feature this session exists
     to demonstrate: a spinning VLP-32C and a solid-state Falcon share one target

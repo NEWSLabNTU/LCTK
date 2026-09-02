@@ -95,7 +95,8 @@ def resolve_config_path(path: str, session_dir: Path | None = None) -> str:
 
 DATA_KINDS = ("pcap_avi", "bag", "live")
 
-_DATA_KEYS = {"kind", "dir", "path", "lidar", "camera"}
+_DATA_KEYS = {"kind", "dir", "path", "lidar", "camera", "republish"}
+_REPUBLISH_KEYS = {"from", "to"}
 _LIDAR_KEYS = {"model", "rpm"}
 _CAMERA_KEYS = {"info_url"}
 
@@ -110,6 +111,8 @@ class DataSource:
     lidar_model: str = "vlp32c"
     lidar_rpm: float = 600.0
     camera_info_url: str | None = None
+    # (compressed source, raw output) pairs bridged by image_transport.
+    republish: tuple[tuple[str, str], ...] = ()
 
 
 def derived_lidar_topics(device: str) -> dict[str, str]:
@@ -140,6 +143,41 @@ def _reject_unknown(section: str, raw: dict, known: set[str]) -> None:
             f"unknown key(s) in '{section}': {', '.join(sorted(unknown))}. "
             f"Known keys: {', '.join(sorted(known))}"
         )
+
+
+def _parse_republish(raw: object) -> tuple[tuple[str, str], ...]:
+    """Validate `data.republish` into (compressed source, raw output) pairs.
+
+    A ZED records `sensor_msgs/CompressedImage` and nothing in this tree
+    subscribes to one -- `aruco_locator_node` takes `sensor_msgs/Image` only. The
+    bridge is a one-line `image_transport republish`, but running it by hand in a
+    second terminal makes it something an operator can forget, and forgetting it
+    produces the pipeline's worst failure shape: every node healthy, no camera
+    data, no error. Declaring it here puts it in the graph the session launches.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise SessionError(
+            f"'data.republish' must be a list of "
+            f"{{from: <compressed topic>, to: <raw topic>}}, "
+            f"got {type(raw).__name__}"
+        )
+    pairs = []
+    for index, entry in enumerate(raw):
+        where = f"data.republish[{index}]"
+        if not isinstance(entry, dict):
+            raise SessionError(f"{where} must be a mapping with 'from' and 'to'")
+        _reject_unknown(where, entry, _REPUBLISH_KEYS)
+        source, target = entry.get("from"), entry.get("to")
+        if not source or not target:
+            raise SessionError(f"{where} requires both 'from' and 'to'")
+        if source == target:
+            raise SessionError(
+                f"{where} republishes {source} onto itself, which would loop"
+            )
+        pairs.append((str(source), str(target)))
+    return tuple(pairs)
 
 
 def parse_data(raw: object, session_dir: Path) -> DataSource:
@@ -178,6 +216,7 @@ def parse_data(raw: object, session_dir: Path) -> DataSource:
         "lidar_model": str(lidar.get("model", "vlp32c")),
         "lidar_rpm": float(lidar.get("rpm", 600.0)),
         "camera_info_url": info_url,
+        "republish": _parse_republish(raw.get("republish")),
     }
 
     if kind == "live":
@@ -216,15 +255,21 @@ def bag_topics(bag: Path) -> list[str]:
     ]
 
 
-def verify_bag_topics(bag: Path, wanted: list[str]) -> None:
+def verify_bag_topics(
+    bag: Path, wanted: list[str], produced: list[str] | None = None
+) -> None:
     """Refuse a manifest naming a topic the bag does not contain.
 
     This is M-26 caught at startup: `two_lidar.yaml` named `/velodyne_points`
     while the recording publishes `/lidar/vlp32/velodyne_points`, and the result
     was a pipeline that launched cleanly and sat silent forever. Listing what the
     bag does have turns the error into its own fix.
+
+    `produced` names topics the session creates from the bag rather than reads
+    out of it -- an `image_transport republish` bridge -- so they count as
+    available even though no recording contains them.
     """
-    available = bag_topics(bag)
+    available = bag_topics(bag) + list(produced or ())
     missing = [topic for topic in wanted if topic not in available]
     if missing:
         raise SessionError(

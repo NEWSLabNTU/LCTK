@@ -253,3 +253,62 @@ def test_a_missing_data_section_is_refused(tmp_path):
 def test_an_unknown_key_in_data_is_refused(tmp_path):
     with pytest.raises(SessionError, match="pcap_dir"):
         parse_data({"kind": "live", "pcap_dir": "x"}, tmp_path)
+
+
+# --- data.republish -------------------------------------------------------
+#
+# A ZED records CompressedImage and nothing in this tree subscribes to one, so a
+# session against such a bag needs an image_transport bridge. Declaring it in the
+# manifest keeps it in the launched graph; leaving it to a second terminal makes
+# it forgettable, and forgetting it produces a healthy-looking graph with a dead
+# camera half.
+
+
+def test_republish_defaults_to_empty(tmp_path):
+    source = parse_data({"kind": "live"}, tmp_path)
+    assert source.republish == ()
+
+
+def test_republish_parses_from_and_to(tmp_path):
+    source = parse_data(
+        {
+            "kind": "live",
+            "republish": [{"from": "/img/compressed", "to": "/img"}],
+        },
+        tmp_path,
+    )
+    assert source.republish == (("/img/compressed", "/img"),)
+
+
+def test_republish_refuses_a_non_list(tmp_path):
+    with pytest.raises(SessionError, match="must be a list"):
+        parse_data({"kind": "live", "republish": {"from": "/a", "to": "/b"}}, tmp_path)
+
+
+def test_republish_refuses_a_half_declared_pair(tmp_path):
+    with pytest.raises(SessionError, match="requires both 'from' and 'to'"):
+        parse_data({"kind": "live", "republish": [{"from": "/a"}]}, tmp_path)
+
+
+def test_republish_refuses_a_self_loop(tmp_path):
+    with pytest.raises(SessionError, match="onto itself"):
+        parse_data(
+            {"kind": "live", "republish": [{"from": "/a", "to": "/a"}]}, tmp_path
+        )
+
+
+def test_republish_refuses_an_unknown_key(tmp_path):
+    with pytest.raises(SessionError):
+        parse_data(
+            {"kind": "live", "republish": [{"from": "/a", "to": "/b", "qos": 1}]},
+            tmp_path,
+        )
+
+
+def test_verify_bag_topics_counts_a_republished_topic_as_available(tmp_path):
+    bag = write_bag(tmp_path, ["/img/compressed"])
+    # Without the bridge the raw topic is genuinely missing...
+    with pytest.raises(SessionError):
+        verify_bag_topics(bag, ["/img"])
+    # ...and with it, the session creates the topic rather than reading it.
+    verify_bag_topics(bag, ["/img"], produced=["/img"])

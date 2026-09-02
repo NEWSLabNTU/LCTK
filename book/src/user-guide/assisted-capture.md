@@ -77,12 +77,34 @@ conventionally `$(session-dir)/out/detections.json`.
 A pair is queued only if it passes both.
 
 **Stillness** — the board's pose must stay within `stability_max_translation_m` and
-`stability_max_rotation_deg` across `stability_window_frames` consecutive synchronized pairs.
+`stability_max_rotation_deg` across the last `stability_window_s` seconds, and at least
+three synchronized pairs must land inside that window.
 
 The gate measures the **span across the window**, not the frame-to-frame delta. A board
 drifting steadily at 1 mm per frame has a negligible per-frame delta and is plainly not
 still; only the span sees it. Getting that wrong would auto-capture exactly the slow drift
 you would then have to find by hand in review.
+
+The window is a **duration**, not a count of pairs, and the difference is not cosmetic.
+Synchronized pairs arrive irregularly — the board leaves the field of view, an ICP fit is
+rejected, a sweep returns too few points — so a fixed number of pairs covers an
+unpredictable amount of time. On the 58 s `solid600-handheld-zed` recording a ten-pair
+window ran from 0.48 s to 19.42 s, median 1.30 s, with 71 of 195 windows shorter than a
+second. A frame count is therefore simultaneously too permissive during a dense burst and
+unboundedly stale across a dropout.
+
+The three-pair floor is the other half of that gate: a time window on its own is not
+evidence, because with sparse detections two pairs a second apart satisfy a one-second
+window while saying nothing about what the board did in between. When either half is
+unmet the page's banner says which, and names the measured value — `filling the window:
+0.62/1.00 s` or `too few detections: 2 in the last 1.00 s (need 3)` — so the number you
+tune against is the one you were shown.
+
+**Tune the stillness tolerances loose.** This gate is not the quality filter; the queue
+below is. Every captured pair arrives with a preview, its own reprojection RMS and a drop
+button, and the rows sort worst-first — so a marginal capture costs you one click, while a
+capture the gate refused costs you walking the board back to that spot and holding it
+again. Where a threshold is uncertain, take the permissive end.
 
 **Novelty** — the pose must form a new placement under
 `lctk_quality.distinct_placements`, by default 5 cm and 5°.
@@ -103,7 +125,7 @@ section.
 ```yaml
 assisted:
   # Stillness gate
-  stability_window_frames: 10        # consecutive synced pairs the pose must hold
+  stability_window_s: 1.0            # seconds of pose history the gate measures over
   stability_max_translation_m: 0.005 # translation span allowed across the window
   stability_max_rotation_deg: 0.5    # rotation span allowed across the window
   stability_cooldown_s: 1.0          # minimum gap between two auto-captures

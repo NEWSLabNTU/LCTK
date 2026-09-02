@@ -135,7 +135,7 @@ class AssistedSettings:
     a setting neither uses. The defaults here are the node's own.
     """
 
-    stability_window_frames: int = 10
+    stability_window_s: float = 1.0
     stability_max_translation_m: float = 0.005
     stability_max_rotation_deg: float = 0.5
     stability_cooldown_s: float = 1.0
@@ -347,6 +347,20 @@ class CalibrationConfigParser:
                 f"'assisted' section must be a mapping, got "
                 f"{type(assisted_config).__name__}"
             )
+        if "stability_window_frames" in assisted_config:
+            raise ValueError(
+                "The 'assisted' section sets retired schema key "
+                "'stability_window_frames'. The stillness window is now a "
+                "duration: replace it with 'stability_window_s' (seconds, "
+                "default 1.0). There is no automatic translation, and the "
+                "frame count is not divisible by a frame rate: detection "
+                "pairs arrive irregularly, so on the one recording this was "
+                "measured against a ten-pair window spanned anywhere from "
+                "0.48 s to 19.42 s. Choosing the duration the board must "
+                "hold is the operator's call, the same reason a saved "
+                "detection archive is not migrated automatically (see "
+                "lidar_to_camera_solver/detection_format.py)."
+            )
         known = {f.name for f in fields(AssistedSettings)}
         unknown = set(assisted_config) - known
         if unknown:
@@ -355,7 +369,17 @@ class CalibrationConfigParser:
                 f"{', '.join(sorted(unknown))}. Known keys: "
                 f"{', '.join(sorted(known))}"
             )
-        self._assisted = AssistedSettings(**assisted_config)
+        # The path-valued keys go through the same substitution every other path
+        # in a manifest does. Without this they reach the node as the literal
+        # string "$(session-dir)/out/detections.json", and the export button
+        # writes into a directory named `$(session-dir)` -- a failure that only
+        # shows up at the moment an operator tries to keep their capture.
+        resolved = dict(assisted_config)
+        for key in ("review_archive_path", "export_autoware_target"):
+            value = resolved.get(key)
+            if value:
+                resolved[key] = resolve_config_path(str(value), self._session_dir)
+        self._assisted = AssistedSettings(**resolved)
 
     def _parse_sync(self, sync_config: dict | None) -> None:
         """Parse and validate the required `sync:` section.
@@ -514,7 +538,8 @@ class CalibrationConfigParser:
         assert self._data.path is not None  # parse_data guarantees it for 'bag'
         wanted = [lidar.pointcloud_topic for lidar in self.lidars.values()]
         wanted += [camera.image_topic for camera in self.cameras.values()]
-        verify_bag_topics(self._data.path, wanted)
+        produced = [target for _, target in self._data.republish]
+        verify_bag_topics(self._data.path, wanted, produced)
 
     def _parse_devices(self, devices_config: dict) -> None:
         """Parse device definitions."""

@@ -988,7 +988,7 @@ def test_assisted_defaults_reach_the_solver_when_no_section_is_given(
     nodes = calibrate_launch.generate_nodes(_LaunchContext(_session("seyond-left")))
 
     params = _parameters(_nodes_for_package(nodes, "lidar_to_camera_solver")[0])
-    assert params["stability_window_frames"] == 10
+    assert params["stability_window_s"] == 1.0
     assert params["stability_max_translation_m"] == 0.005
     assert params["novelty_position_tol_m"] == 0.05
     assert params["review_bind_host"] == "127.0.0.1"
@@ -1006,7 +1006,7 @@ def test_an_assisted_section_overrides_only_what_it_names(
     config_path = tmp_path / "assisted.yaml"
     config_path.write_text(
         _session("seyond-left").read_text(encoding="utf-8") + "\nassisted:\n"
-        "  stability_window_frames: 4\n"
+        "  stability_window_s: 2.5\n"
         '  review_bind_host: "0.0.0.0"\n',
         encoding="utf-8",
     )
@@ -1014,7 +1014,7 @@ def test_an_assisted_section_overrides_only_what_it_names(
     nodes = calibrate_launch.generate_nodes(_LaunchContext(config_path))
 
     params = _parameters(_nodes_for_package(nodes, "lidar_to_camera_solver")[0])
-    assert params["stability_window_frames"] == 4
+    assert params["stability_window_s"] == 2.5
     assert params["review_bind_host"] == "0.0.0.0"
     assert params["stability_max_translation_m"] == 0.005, (
         "unnamed key keeps its default"
@@ -1030,12 +1030,36 @@ def test_a_misspelled_assisted_key_is_refused(
     config_path = tmp_path / "misspelled.yaml"
     config_path.write_text(
         _session("seyond-left").read_text(encoding="utf-8")
-        + "\nassisted:\n  stability_window_frame: 4\n",
+        + "\nassisted:\n  stability_window_second: 4\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="stability_window_frame"):
+    with pytest.raises(ValueError, match="stability_window_second"):
         calibrate_launch.generate_nodes(_LaunchContext(config_path))
+
+
+def test_the_retired_frame_count_window_key_names_its_replacement(
+    calibrate_launch: ModuleType, tmp_path: Path
+):
+    """`stability_window_frames` is retired, not migrated.
+
+    A frame count cannot be converted to a duration: detection pairs arrive
+    irregularly, so ten of them span anywhere from half a second to nineteen.
+    Quietly reinterpreting the number would make the config's meaning depend on
+    the detection rate of whatever recording happened to be playing.
+    """
+    config_path = tmp_path / "retired.yaml"
+    config_path.write_text(
+        _session("seyond-left").read_text(encoding="utf-8")
+        + "\nassisted:\n  stability_window_frames: 10\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="stability_window_s") as excinfo:
+        calibrate_launch.generate_nodes(_LaunchContext(config_path))
+    message = str(excinfo.value)
+    assert "retired" in message
+    assert "stability_window_frames" in message
 
 
 def test_each_solver_gets_its_own_review_port(calibrate_launch: ModuleType):

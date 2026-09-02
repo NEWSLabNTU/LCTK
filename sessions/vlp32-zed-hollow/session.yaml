@@ -1,0 +1,38 @@
+name: vlp32-zed-hollow
+description: >
+  VLP-32C plus a ZED against the static hollow 1000 mm target. `kind: live`
+  deliberately: the calib_sey_vlp_zed capture is eight ~9.6 s bags holding one
+  board placement each, and a multi-pose calibration means replaying several of
+  them by hand into a graph that stays up. Naming one bag here would pin the
+  session to a single placement, which is not the workflow. The recordings also
+  carry /iv_points from a Seyond Falcon; switch pointcloud_topic, frame_id and
+  detector_config to exercise that preset instead.
+
+data:
+  kind: live
+  # The ZED records CompressedImage and nothing here subscribes to one, so the
+  # bridge belongs in the graph even though this session plays no data itself:
+  # the operator replays bags into it by hand and would otherwise need a second
+  # terminal running `just republish-zed`.
+  republish:
+    - from: /sensing/camera/zed/rgb/color/rect/image/compressed
+      to: /sensing/camera/zed/rgb/color/rect/image
+
+devices:
+  lidars:
+    vlp32_lidar:
+      frame_id: velodyne
+      pointcloud_topic: /velodyne_points
+  cameras:
+    zed_camera:
+      frame_id: zed_left_camera_frame_optical
+      image_topic: /sensing/camera/zed/rgb/color/rect/image
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [vlp32_lidar, zed_camera]
+
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }

@@ -242,7 +242,11 @@ def assisted_harness(
     solver.pair_source = _PairSource()
     solver._preview_store = _PreviewStore()
     solver._stillness = StillnessTracker(
-        window_frames=3,
+        # `hold()` below steps the clock 0.1 s per pair, so a 0.25 s window is
+        # satisfied by the fourth pair of a hold: three inside the window plus
+        # one bracketing it.  Short on purpose -- these tests are about the
+        # capture policy around the tracker, not about the window itself.
+        window_s=0.25,
         max_translation_m=0.005,
         max_rotation_deg=0.5,
         cooldown_s=0.0,

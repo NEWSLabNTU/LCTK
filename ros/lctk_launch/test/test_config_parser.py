@@ -1023,3 +1023,42 @@ if __name__ == "__main__":
     print()
     print(f"{passed} passed, {failed} failed")
     sys.exit(0 if failed == 0 else 1)
+
+
+def test_assisted_paths_get_the_same_substitution_as_every_other_path(tmp_path):
+    """`$(session-dir)` must expand in the assisted section too.
+
+    It did not, so a session following the documented convention handed the node
+    the literal string and the review page's "Export archive" button would have
+    written into a directory named `$(session-dir)`. The failure surfaces only
+    when an operator finishes a capture and tries to keep it, which is the worst
+    possible moment to discover it.
+    """
+    session = tmp_path / "a-session"
+    session.mkdir()
+    (session / "session.yaml").write_text(
+        """
+name: a-session
+devices:
+  lidars:
+    top: {frame_id: velodyne, pointcloud_topic: /points}
+  cameras:
+    cam: {frame_id: optical, image_topic: /image}
+markers:
+  board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/solid_600_aruco_1_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/solid_600/velodyne.json5
+    pairs: [[top, cam]]
+sync: {tolerance_ms: 50, queue_size: 100, drop_policy: reject_new}
+assisted:
+  review_archive_path: $(session-dir)/out/detections.json
+""",
+        encoding="utf-8",
+    )
+
+    pipeline = parse_config(str(session / "session.yaml"))
+
+    assert pipeline.assisted.review_archive_path == str(
+        session / "out" / "detections.json"
+    )
+    assert "$(" not in pipeline.assisted.review_archive_path

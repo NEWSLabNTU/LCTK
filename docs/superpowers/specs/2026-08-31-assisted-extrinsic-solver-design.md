@@ -99,7 +99,7 @@ lidar ─────► lidar_board_detector ──► board_detections ─┘
                                           │ StillnessTracker                      │
                                           │  |Δt| < max_translation_m and         │
                                           │  |Δθ| < max_rotation_deg across       │
-                                          │  window_frames consecutive pairs      │
+                                          │  the last window_s seconds of pairs   │
                                           └───────────────────┬───────────────────┘
                                                               │ held still
                                           ┌───────────────────▼───────────────────┐
@@ -221,7 +221,7 @@ these come from the calibration config through `calibrate.launch.py`:
 
 | parameter | meaning |
 |---|---|
-| `stability.window_frames` | consecutive synced pairs the pose must stay within tolerance |
+| `stability.window_s` | seconds of pose history the pose must stay within tolerance across (at least 3 pairs must land in it) |
 | `stability.max_translation_m` | translation span allowed across the window |
 | `stability.max_rotation_deg` | rotation span allowed across the window |
 | `stability.cooldown_s` | minimum gap between two auto-captures |
