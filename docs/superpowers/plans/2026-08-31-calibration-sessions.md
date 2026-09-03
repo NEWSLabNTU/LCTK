@@ -2245,5 +2245,5 @@ Point the copy's `data.dir` at a path that does not exist and confirm
 
 ```bash
 git add -A && git commit -m "fix(sessions): address full-verification findings"
-git push origin feat/selectable-calibration-targets
+git push origin feat/single-source-target-definition
 ```

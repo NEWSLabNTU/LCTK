@@ -72,7 +72,7 @@ Nothing asserted that ICP converges to the right answer **from a perturbed seed*
 single property this class of bug cannot survive, and it was the one property no test had.
 
 It was also invisible in the field because, per
-`docs/roadmap/phase-8-selectable-calibration-targets.md` ("Outstanding items no packet owns"), the
+`docs/roadmap/phase-8-single-source-target-definition.md` ("Outstanding items no packet owns"), the
 new detection path has never been run against real data — every Phase 8 gate is headless. The
 throughput and ICP-quality figures quoted in CLAUDE.md were measured in January 2026 against the
 pre-migration implementation.

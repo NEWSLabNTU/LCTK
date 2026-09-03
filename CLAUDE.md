@@ -388,7 +388,7 @@ just mode=realtime demo   # For live sensors
 Profiling conducted on sample data (2026-01-18). These numbers predate the Phase 8 selectable-target
 detector path (Target Definition / Detector Tuning split); the new path has not yet been re-profiled
 against real data — see "Outstanding items no packet owns" in
-`docs/roadmap/phase-8-selectable-calibration-targets.md`. The numbers below were real when measured
+`docs/roadmap/phase-8-single-source-target-definition.md`. The numbers below were real when measured
 and are kept rather than deleted, but treat them as a baseline from the prior implementation, not a
 claim about the current one.
 

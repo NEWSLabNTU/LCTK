@@ -23,16 +23,16 @@ default:
 # The conflux packages LCTK depends on (conflux_cpp + conflux_py) are built
 # first by `build-conflux`; the rest of ros/conflux (conflux, conflux-ros2)
 # is excluded because it uses a git rclrs that conflicts with our crates.io rclrs.
-build: build-conflux
+build: _check-python-env
     #!/usr/bin/env bash
     set -eo pipefail
     source /opt/ros/humble/setup.bash
-    # M-18: colcon-cargo-ros2 writes its [patch.crates-io] block only into per-package
-    # .cargo/config.toml files, so at the workspace root cargo has no patches and dies
-    # on the yanked sensor_msgs. Synthesise a root config from a per-package one before
-    # the L-16 guard below, which reads it. On a never-yet-built tree there is no
-    # per-package config to copy either; that is fine, colcon is about to create them
-    # and the post-build sync will pick them up.
+    # M-18: the workspace root needs a [patch.crates-io] block or cargo re-resolves the
+    # wildcard ROS message crates and dies on the yanked sensor_msgs. colcon-cargo-ros2
+    # >= 0.5.3 writes that block into the root .cargo/config.toml itself, in which case
+    # this is a no-op; on older versions it synthesises the root config from the
+    # per-package ones. On a never-yet-built tree there is nothing to read either way --
+    # that is fine, colcon is about to create it and the post-build call picks it up.
     ./setup/scripts/sync-root-cargo-config.sh || \
         echo "no per-package cargo config yet; root config will be synthesised after colcon"
     # L-16 guard: colcon-cargo-ros2 generates Rust bindings once, then marks itself done
@@ -64,7 +64,7 @@ build: build-conflux
 
     colcon build \
         --base-paths ros \
-        --packages-ignore conflux conflux_cpp conflux_py \
+        --packages-ignore conflux \
         --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         --cargo-args --profile=test-release
@@ -78,16 +78,6 @@ build: build-conflux
 # conflux_cpp builds the libconflux_ffi.so that conflux_py loads via ctypes; the
 # solver nodes import conflux_py and fail to start without it. Only these two
 # packages are selected so the git-rclrs conflux/conflux-ros2 packages are skipped.
-build-conflux: _check-python-env
-    #!/usr/bin/env bash
-    set -eo pipefail
-    source /opt/ros/humble/setup.bash
-    colcon build \
-        --base-paths ros \
-        --packages-select conflux_cpp conflux_py \
-        --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-
 # Guard: this project runs against the SYSTEM python that ROS 2 Humble and apt's OpenCV were
 # built against. A pip `--user` install lands in ~/.local/lib/python3.10/site-packages, which
 # precedes /usr/lib/python3/dist-packages on sys.path and silently shadows the apt package.
@@ -105,34 +95,8 @@ build-conflux: _check-python-env
 #
 # Never `pip3 install --user` setuptools, numpy, or scipy on this machine.
 _check-python-env:
-    #!/usr/bin/env bash
-    set -eo pipefail
-    fail=0
+    @bash setup/scripts/check-python-env.sh
 
-    for pkg in setuptools numpy scipy; do
-        location=$(python3 -c "import $pkg; print($pkg.__file__)" 2>/dev/null) || continue
-        version=$(python3 -c "import $pkg; print($pkg.__version__)" 2>/dev/null) || continue
-        if [[ "$location" != /usr/lib/python3/dist-packages/* ]]; then
-            echo "error: $pkg $version shadows the apt package that ROS 2 Humble needs." >&2
-            echo "       found: $location" >&2
-            echo "       Fix with:  pip3 uninstall -y $pkg" >&2
-            echo "" >&2
-            fail=1
-        fi
-    done
-
-    # The failure that actually bites at runtime: cv2 cannot import under a numpy it was not
-    # built against. Check it directly rather than inferring it from version numbers.
-    if ! python3 -c 'import cv2' 2>/dev/null; then
-        echo "error: 'import cv2' fails. The solver nodes import cv2 and will crash at startup." >&2
-        python3 -c 'import cv2' 2>&1 | tail -1 | sed 's/^/       /' >&2
-        echo "       Usually a pip numpy shadowing apt's; fix with:  pip3 uninstall -y numpy" >&2
-        fail=1
-    fi
-
-    [[ $fail -eq 0 ]]
-
-# Set up development environment (install all dependencies)
 setup *args:
     ./setup.sh {{ args }}
 
@@ -240,7 +204,7 @@ test: _check-rust-tests-collectable
     # `pytest-3` script but no bare `pytest` on PATH, so the plain name exits 127 and the
     # Python half never runs. Same failure class as M-18 -- a suite that silently is not
     # reached. Must be the system python3 (see _check-python-env).
-    python3 -m pytest ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
+    python3 -m pytest setup/test/ ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
 # Identical to `just run` -- kept as the name muscle memory reaches for. The
 # RViz layout is no longer named here: a session ships its own `rviz.rviz` and

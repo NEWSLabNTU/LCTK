@@ -1,11 +1,11 @@
-# Spec: Selectable calibration targets
+# Spec: Single-source calibration target definition
 
 - **Date:** 2026-08-21
 - **Status:** Accepted
 - **Selected direction:** Keep both the existing hollow target and the new solid target behind one
   interface
-- **Decision record:** [ADR 0003](../../adr/0003-selectable-calibration-targets.md)
-- **Implementation plan:** [Phase 8](../../roadmap/phase-8-selectable-calibration-targets.md)
+- **Decision record:** [ADR 0003](../../adr/0003-single-source-target-definition.md)
+- **Implementation plan:** [Phase 8](../../roadmap/phase-8-single-source-target-definition.md)
 - **Related:** `2026-08-13-corner-aligned-board-frame.md`,
   `2026-08-14-lidar-to-camera-solver-diamond-frame.md`, H-11, L-19, M-17, M-21
 
@@ -705,6 +705,6 @@ Questions are resolved one at a time during the grilling session.
 
 ## Decision record
 
-[ADR 0003](../../adr/0003-selectable-calibration-targets.md) records why both targets share one
+[ADR 0003](../../adr/0003-single-source-target-definition.md) records why both targets share one
 interface, why selection is fixed per launch, and why the hollow adapter remains until the solid
 target has replacement field evidence.

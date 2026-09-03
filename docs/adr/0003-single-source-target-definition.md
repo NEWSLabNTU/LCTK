@@ -1,9 +1,9 @@
-# 0003. Calibration targets share one interface and are selected once per launch
+# 0003. Calibration targets share one authoritative definition, bound once per launch
 
 - **Date:** 2026-08-23
 - **Status:** accepted
-- **Accepted design:** [Selectable calibration targets](../superpowers/specs/2026-08-21-selectable-calibration-targets.md)
-- **Implementation plan:** [Phase 8](../roadmap/phase-8-selectable-calibration-targets.md)
+- **Accepted design:** [Single-source calibration target definition](../superpowers/specs/2026-08-21-single-source-target-definition.md)
+- **Implementation plan:** [Phase 8](../roadmap/phase-8-single-source-target-definition.md)
 
 ## Context
 

@@ -1,200 +1,87 @@
 # LCTK Development Environment Setup
-# Usage: just setup          - Run full setup
-#        just resume         - Resume from last failure
-#        just <step>         - Run specific step
-#        just clean-markers  - Reset all checkpoints
+#
+# The preferred entry point is `./setup.sh` from the project root -- it gates on `just`
+# itself and drives the selector. These recipes stay as the per-step interface.
+#
+# Usage: just -f setup/justfile <step>    - run one step (and its dependencies)
+#        just -f setup/justfile setup     - run the default selection
+#        just -f setup/justfile status    - verify every step against the machine
+#        just -f setup/justfile verify    - same, non-zero exit if a required step fails
+#        just -f setup/justfile clean-markers
+#
+# The step table -- ids, dependencies, install scripts, sizes and verifiers -- lives in
+# `setup/steps.py`, not here. Recipes below are one-line delegations so the TUI, the
+# marker engine and this file cannot drift from one another.
 
 set shell := ["bash", "-uc"]
 set positional-arguments
 
-# Directories
 root_dir := justfile_directory()
-marker_dir := root_dir / ".markers"
-scripts_dir := root_dir / "scripts"
-project_root := root_dir / ".."
+steps := root_dir / "steps.py"
 
-# Architecture detection
-arch := `uname -m`
-
-# Export for child scripts
-export PROJECT_ROOT := project_root
-export ARCH := arch
-
-# Colors for output
-green := '\033[0;32m'
-yellow := '\033[0;33m'
-red := '\033[0;31m'
-blue := '\033[0;34m'
-nc := '\033[0m'
-
-# Default recipe - show help
+# Show available steps
 default:
     @just --list
 
-# Full setup (runs all steps in order)
-setup: _init _setup-submodules system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust _setup-cuda _setup-dev-tools rosdep-init ros-deps
-    @printf "{{green}}========================================{{nc}}\n"
-    @printf "{{green}}LCTK development environment setup completed!{{nc}}\n"
-    @printf "{{green}}========================================{{nc}}\n"
-    @printf "\n"
-    @printf "Next steps:\n"
-    @printf "1. Reload your shell: {{blue}}source ~/.bashrc{{nc}}\n"
-    @printf "2. Source ROS 2:      {{blue}}source /opt/ros/humble/setup.bash{{nc}}\n"
-    @printf "3. Build project:     {{blue}}just build{{nc}}\n"
-    @printf "4. Run sample data:   {{blue}}just sample-data{{nc}}\n"
+# Run the default selection (everything not marked optional)
+setup:
+    @python3 "{{steps}}" plan | while read -r step; do python3 "{{steps}}" run "$step" || exit 1; done
+    @just verify
 
-# Alias for setup (resume from where it left off due to markers)
+# Alias for setup; markers make it resume where it left off
 resume: setup
 
-# Conditional submodule update (based on UPDATE_SUBMODULES env var)
-_setup-submodules:
-    #!/usr/bin/env bash
-    if [[ "${UPDATE_SUBMODULES:-n}" == "y" ]]; then
-        just submodules
-    else
-        printf "{{yellow}}-> submodules skipped (user choice){{nc}}\n"
-        printf "{{yellow}}Note:{{nc}} Run 'just submodules' to update later\n"
-    fi
+# === Individual steps ===
+# Each delegates to the engine, which resolves dependencies, checks the content-hashed
+# marker, runs the script, and then verifies the software is actually present.
 
-# Conditional CUDA install (based on INSTALL_CUDA env var)
-_setup-cuda:
-    #!/usr/bin/env bash
-    if [[ "${INSTALL_CUDA:-n}" == "y" ]]; then
-        just cuda
-    else
-        printf "{{yellow}}-> cuda skipped (user choice){{nc}}\n"
-        printf "{{yellow}}Note:{{nc}} Run 'just cuda' to install later\n"
-    fi
+system-base:            ; @just _run system-base
+build-tools:            ; @just _run build-tools
+python:                 ; @just _run python
+ros2:                   ; @just _run ros2
+rosdep-init:            ; @just _run rosdep-init
+ros-deps:               ; @just _run ros-deps
+rust:                   ; @just _run rust
+just-runner:            ; @just _run just
+colcon-rust:            ; @just _run colcon-rust
+python-guard:           ; @just _run python-guard
+opencv:                 ; @just _run opencv
+opencv-45-prefix:       ; @just _run opencv-45-prefix
+gstreamer:              ; @just _run gstreamer
+network-libs:           ; @just _run network-libs
+geometric-libs:         ; @just _run geometric-libs
+lint-tools:             ; @just _run lint-tools
+cuda:                   ; @just _run cuda
+dev-tools-debug:        ; @just _run dev-tools-debug
+dev-tools-docs:         ; @just _run dev-tools-docs
+submodules:             ; @just _run submodules
 
-# Conditional dev tools install (based on INSTALL_DEV_TOOLS env var)
-_setup-dev-tools:
-    #!/usr/bin/env bash
-    if [[ "${INSTALL_DEV_TOOLS:-y}" == "y" ]]; then
-        just dev-tools
-    else
-        printf "{{yellow}}-> dev-tools skipped (user choice){{nc}}\n"
-        printf "{{yellow}}Note:{{nc}} Run 'just dev-tools' to install later\n"
-    fi
+# === Utilities ===
 
-# === Individual Setup Steps ===
-
-# Update git submodules (discards local changes)
-submodules: _init
-    @just _run submodules "{{scripts_dir}}/update-submodules.sh"
-
-# Install basic system packages
-system-base: _init
-    @just _run system-base "{{scripts_dir}}/install-system-base.sh"
-
-# Install C++ development and build tools
-build-tools: _init system-base
-    @just _run build-tools "{{scripts_dir}}/install-build-tools.sh"
-
-# Install ROS 2 Humble
-ros2: _init system-base
-    @just _run ros2 "{{scripts_dir}}/install-ros2.sh"
-
-# Install Rust toolchain
-rust: _init system-base
-    @just _run rust "{{scripts_dir}}/install-rust.sh"
-
-# Install Python environment
-python: _init ros2
-    @just _run python "{{scripts_dir}}/install-python.sh"
-
-# Install OpenCV and related libraries
-opencv: _init system-base
-    @just _run opencv "{{scripts_dir}}/install-opencv.sh"
-
-# Side-install OpenCV 4.5.4 headers into a private prefix (JetPack hosts, where
-# NVIDIA's libopencv-dev 4.8.0 owns /usr/include/opencv4 and has no aruco module)
-opencv-45-prefix: _init
-    @"{{scripts_dir}}/install-opencv-4.5-prefix.sh"
-
-# Install GStreamer for video processing
-gstreamer: _init system-base
-    @just _run gstreamer "{{scripts_dir}}/install-gstreamer.sh"
-
-# Install geometric computation libraries (SFCGAL)
-geometric-libs: _init system-base
-    @just _run geometric-libs "{{scripts_dir}}/install-geometric-libs.sh"
-
-# Install network packet capture libraries
-network-libs: _init system-base
-    @just _run network-libs "{{scripts_dir}}/install-network-libs.sh"
-
-# Install colcon-cargo-ros2 for Rust ROS 2 integration
-colcon-rust: _init ros2 rust
-    @just _run colcon-rust "{{scripts_dir}}/install-colcon-rust.sh"
-
-# Install CUDA toolkit (optional)
-cuda: _init system-base
-    @just _run cuda "{{scripts_dir}}/install-cuda.sh"
-
-# Install development and testing tools (optional)
-dev-tools: _init system-base
-    @just _run dev-tools "{{scripts_dir}}/install-dev-tools.sh"
-
-# Initialize rosdep database
-rosdep-init: _init ros2
-    @just _run rosdep-init "{{scripts_dir}}/rosdep-init.sh"
-
-# Install ROS dependencies from package.xml files
-ros-deps: _init rosdep-init
-    @just _run ros-deps "{{scripts_dir}}/install-ros-deps.sh"
-
-# === Utility Recipes ===
-
-# Initialize marker directory
-_init:
-    @mkdir -p "{{marker_dir}}"
-
-# Run a script with marker check
-_run name cmd:
-    #!/usr/bin/env bash
-    if [[ -f "{{marker_dir}}/{{name}}" ]]; then
-        printf "{{green}}[done]{{nc}} {{name}}\n"
-        exit 0
-    fi
-    printf "{{yellow}}->{{nc}} Running {{name}}...\n"
-    set -e
-    {{cmd}}
-    touch "{{marker_dir}}/{{name}}"
-    printf "{{green}}[done]{{nc}} {{name}}\n"
-
-# Clean all markers (force re-run of all steps)
-clean-markers:
-    rm -rf "{{marker_dir}}"
-    @printf "{{yellow}}->{{nc}} Markers cleared. Next 'just setup' will run all steps.\n"
-
-# Clean specific marker
-clean-marker name:
-    rm -f "{{marker_dir}}/{{name}}"
-    @printf "{{yellow}}->{{nc}} Marker '{{name}}' cleared.\n"
-
-# Show setup status
+# Show what is installed, checked against the machine rather than against markers
 status:
+    @python3 "{{steps}}" status
+
+# Run every verifier; non-zero exit if a required step is missing
+verify *args:
+    @python3 "{{steps}}" verify "$@"
+
+# Print the execution order for a selection (default: everything non-optional)
+plan *args:
+    @python3 "{{steps}}" plan "$@"
+
+# Clear all markers, forcing every step to re-run
+clean-markers:
+    @python3 "{{steps}}" clean
+
+# Clear one step's marker
+clean-marker name:
+    @python3 "{{steps}}" clean "$1"
+
+# Run one step with its dependencies
+_run name:
     #!/usr/bin/env bash
-    echo "LCTK Setup Status"
-    echo "================="
-    echo ""
-    echo "Core Components:"
-    for step in system-base build-tools ros2 rust python opencv gstreamer geometric-libs network-libs colcon-rust rosdep-init ros-deps; do
-        if [[ -f "{{marker_dir}}/$step" ]]; then
-            printf "  {{green}}[done]{{nc}} %s\n" "$step"
-        else
-            printf "  {{red}}[    ]{{nc}} %s\n" "$step"
-        fi
+    set -eo pipefail
+    python3 "{{steps}}" plan "{{name}}" | while read -r step; do
+        python3 "{{steps}}" run "$step" || exit 1
     done
-    echo ""
-    echo "Optional Components:"
-    for step in submodules cuda dev-tools; do
-        if [[ -f "{{marker_dir}}/$step" ]]; then
-            printf "  {{green}}[done]{{nc}} %s\n" "$step"
-        else
-            printf "  {{yellow}}[skip]{{nc}} %s (optional)\n" "$step"
-        fi
-    done
-    echo ""
-    echo "To re-run a step: just clean-marker <step> && just <step>"
-    echo "To re-run all:    just clean-markers && just setup"

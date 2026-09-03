@@ -6,7 +6,7 @@ the part that must stay reproducible and reviewable: manifest validation, interv
 selection, structured per-frame evidence, denominators, and artifact indexing.
 
 The normalized input boundary is intentional.  ROS diagnostics have changed while
-the selectable-target migration is in progress, and silently guessing a topic or a
+the single-source-target migration is in progress, and silently guessing a topic or a
 message field would make a field report impossible to audit.  A future bag adapter
 can depend on this module without changing the committed report format.
 """

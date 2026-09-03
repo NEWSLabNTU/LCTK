@@ -38,6 +38,21 @@ cd "$repo_root"
 
 out=.cargo/config.toml
 
+# colcon-cargo-ros2 >= 0.5.3 writes the workspace-root config itself, with
+# root-relative patch paths and its own BEGIN/END markers, which is exactly what this
+# script was synthesising by hand. When that block is present and its paths resolve,
+# M-18's workaround has nothing to do and must not fail the build by looking for a
+# per-package layout that no longer exists.
+if [[ -f "$out" ]] && grep -q '^# BEGIN colcon-cargo-ros2 generated patches' "$out"; then
+    first_patch=$(grep -m1 -oP '(?<=path = ")[^"]+' "$out" || true)
+    if [[ -n "$first_patch" && -d "$first_patch" ]]; then
+        echo "root .cargo/config.toml written by colcon-cargo-ros2; nothing to sync."
+        exit 0
+    fi
+    echo "warning: colcon-cargo-ros2 wrote $out but '$first_patch' does not exist;" >&2
+    echo "         falling back to synthesising from per-package configs." >&2
+fi
+
 # Pick sources deterministically so the generated file is stable across runs
 # (an unstable file would churn cargo fingerprints on every build).
 mapfile -t sources < <(find ros -mindepth 3 -maxdepth 3 \

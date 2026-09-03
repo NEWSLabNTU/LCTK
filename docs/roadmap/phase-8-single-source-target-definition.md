@@ -1,9 +1,9 @@
-# Phase 8: Selectable Calibration Targets
+# Phase 8: Single-Source Calibration Target Definition
 
 - **Status:** Headless implementation complete; field validation (W7-B) outstanding
 - **Date:** 2026-08-28
-- **Spec:** [Selectable calibration targets](../superpowers/specs/2026-08-21-selectable-calibration-targets.md)
-- **Decision:** [ADR 0003](../adr/0003-selectable-calibration-targets.md)
+- **Spec:** [Single-source calibration target definition](../superpowers/specs/2026-08-21-single-source-target-definition.md)
+- **Decision:** [ADR 0003](../adr/0003-single-source-target-definition.md)
 
 ## Current implementation state
 
@@ -1001,7 +1001,7 @@ thresholds. Promotion is a small separate config/docs commit per preset.
 Every dispatched packet receives:
 
 ```text
-Implement packet <ID> from docs/roadmap/phase-8-selectable-calibration-targets.md.
+Implement packet <ID> from docs/roadmap/phase-8-single-source-target-definition.md.
 Read CLAUDE.md, the accepted spec, ADR 0003, and the packet's dependencies.
 Edit only <owned paths>. Preserve unrelated/user changes.
 Do not broaden into listed adjacent issues.
