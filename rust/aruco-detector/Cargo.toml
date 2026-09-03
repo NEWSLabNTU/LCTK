@@ -6,13 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cv-convert = { workspace = true, features = ["nalgebra", "opencv"] }
-measurements = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
 indexmap = { workspace = true }
 log = { workspace = true }
-noisy_float = { workspace = true }
 aruco-config = { version = "0.1.0", path = "../aruco-config", features = ["with-opencv"] }
 itertools = { workspace = true }
 sensor_msgs.workspace = true
@@ -25,10 +22,6 @@ features = ["aruco", "calib3d"]
 
 [dependencies.nalgebra]
 workspace = true
-
-[dependencies.newslab-geom-algo]
-git = "https://github.com/NEWSLabNTU/newslab-geom-algo.git"
-tag = "v0.2.1"
 
 [dev-dependencies.opencv]
 workspace = true

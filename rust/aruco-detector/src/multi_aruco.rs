@@ -1,24 +1,21 @@
 use anyhow::{ensure, Context, Result};
 use aruco_config::{ArucoDetectorParams, MultiArucoPattern};
 use calibration_target::ValidatedTarget;
-use cv_convert::{OpenCvPose, TryToCv};
 use indexmap::IndexSet;
-use itertools::{iproduct, izip};
+use itertools::izip;
 use log::info;
-use measurements::Length;
 use nalgebra::{Isometry3, Point2, Point3};
-use noisy_float::prelude::*;
 use opencv::{
     aruco,
     aruco::Dictionary,
     calib3d, core as core_cv,
-    core::{Mat, Point2f, Point3d, Ptr, Vector},
+    core::{Mat, Point2f, Ptr, Vector},
     prelude::*,
     types::VectorOfMat,
 };
 use sensor_msgs::msg::CameraInfo;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, ops::Div as _};
+use std::collections::HashMap;
 
 /// An ArUco marker on an image.
 #[derive(Clone, Debug)]
@@ -74,22 +71,10 @@ impl ImageMarker {
     }
 }
 
-/// An ArUco marker on an image with pose estimation.
-#[derive(Clone, Debug)]
-pub struct ImagePoseMarker {
-    pub id: i32,
-    pub corners: [Point2<f32>; 4],
-    pub pose: Isometry3<f64>,
-}
-
 #[derive(Clone, Debug)]
 pub struct ImageDetection {
     id: Vector<i32>,
     corners: VectorOfMat,
-    marker_size: Length,
-    camera_matrix: Mat,
-    distortion_coefs: Mat,
-    pattern: MultiArucoPattern,
 }
 
 // HACK: workaround that Mat is not Sync.
@@ -114,29 +99,6 @@ impl ImageDetection {
         })
     }
 
-    pub fn estimate_pose(self) -> Result<PoseEstimation> {
-        // compute marker poses
-        let mut rvec = Vector::<Point3d>::new();
-        let mut tvec = Vector::<Point3d>::new();
-
-        aruco::estimate_pose_single_markers(
-            &self.corners,
-            self.marker_size.as_meters() as f32,
-            &self.camera_matrix,
-            &self.distortion_coefs,
-            &mut rvec,
-            &mut tvec,
-            &mut core_cv::no_array(),
-            // EstimateParameters::create()?,
-        )?;
-
-        Ok(PoseEstimation {
-            image_det: self,
-            tvec,
-            rvec,
-        })
-    }
-
     /// Get a reference to the image detection's id.
     pub fn id(&self) -> &Vector<i32> {
         &self.id
@@ -146,183 +108,6 @@ impl ImageDetection {
     pub fn corners(&self) -> &VectorOfMat {
         &self.corners
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct PoseEstimation {
-    image_det: ImageDetection,
-    tvec: Vector<Point3d>,
-    rvec: Vector<Point3d>,
-}
-
-impl PoseEstimation {
-    pub fn markers(&self) -> impl Iterator<Item = ImagePoseMarker> + '_ {
-        izip!(
-            &self.image_det.corners,
-            &self.image_det.id,
-            &self.rvec,
-            &self.tvec
-        )
-        .map(|(corners_mat, id, rvec, tvec)| {
-            // Extract corner points from Mat (4x1x2 or 1x4x2 matrix)
-            let mut corners_vec = Vec::new();
-            for i in 0..4 {
-                let pt: &Point2f = corners_mat
-                    .at_2d(0, i)
-                    .unwrap_or_else(|_| corners_mat.at_2d(i, 0).unwrap());
-                corners_vec.push(Point2::new(pt.x, pt.y));
-            }
-            let pose: Isometry3<f64> = OpenCvPose { rvec, tvec }.try_to_cv().unwrap();
-
-            ImagePoseMarker {
-                id,
-                corners: corners_vec.try_into().unwrap(),
-                pose,
-            }
-        })
-    }
-
-    pub fn fit_icp(self, params: Params) -> Result<IcpRegression> {
-        let Self {
-            tvec,
-            image_det: ImageDetection { pattern, .. },
-            ..
-        } = &self;
-        let MultiArucoPattern {
-            num_squares_per_side,
-            ..
-        } = *pattern;
-        let Params {
-            max_icp_iterations,
-            icp_pose_weight_threshold,
-            icp_rejection_threshold,
-            ..
-        } = params;
-        ensure!(
-            max_icp_iterations >= 1,
-            "max_icp_iterations must be positive, but get 0"
-        );
-        let square_size = pattern.square_size();
-
-        let init_source_points = || {
-            iproduct!(0..num_squares_per_side, 0..num_squares_per_side).map(|(row, col)| {
-                let x = (col as f64 - num_squares_per_side as f64 / 2.0 + 0.5) * square_size;
-                let y = (row as f64 - num_squares_per_side as f64 / 2.0 + 0.5) * square_size;
-                Point3::new(x.as_meters(), y.as_meters(), 0.0)
-            })
-        };
-
-        // let max_icp_iterations = 10000;
-        // let icp_pose_weight_threshold = 5e-13;
-        const TERMINATION_STEP: usize = 16;
-
-        let target_points: Vec<_> = tvec.iter().map(|p| Point3::new(p.x, p.y, p.z)).collect();
-
-        let (pose, icp_losses, _) =
-            (0..max_icp_iterations).fold((Isometry3::identity(), vec![], 0), |state, _step| {
-                // check step count
-                let (_, _, termination_count) = state;
-                if termination_count > TERMINATION_STEP {
-                    return state;
-                }
-
-                let (pose, mut losses, termination_count) = state;
-
-                let align_pose: Isometry3<f64> = {
-                    let source_points = init_source_points().map(|p| {
-                        let p: [f64; 3] = p.into();
-                        Point3::from(p)
-                    });
-                    let target_points = target_points.iter().map(|&p| {
-                        let p: [f64; 3] = p.into();
-                        Point3::from(p)
-                    });
-
-                    let pairs = izip!(source_points, target_points);
-                    newslab_geom_algo::kabsch_na(pairs).unwrap()
-                };
-
-                let new_termination_count = {
-                    let pose_weight = {
-                        let translation_weight = align_pose.translation.vector.norm().powi(2);
-                        let rotation_weight = align_pose
-                            .rotation
-                            .axis_angle()
-                            .map(|(_, angle)| angle)
-                            .unwrap_or(0.0);
-                        translation_weight + rotation_weight
-                    };
-                    if pose_weight <= icp_pose_weight_threshold.raw() {
-                        termination_count + 1
-                    } else {
-                        0
-                    }
-                };
-
-                let new_pose = align_pose * pose;
-
-                let loss = {
-                    let source_points = init_source_points();
-
-                    izip!(source_points, target_points.iter())
-                        .map(|(source_point, target_point)| (source_point - target_point).norm())
-                        .sum::<f64>()
-                        .div(target_points.len() as f64)
-                };
-                losses.push(loss);
-
-                (new_pose, losses, new_termination_count)
-            });
-
-        let min_icp_loss = icp_losses.iter().cloned().map(r64).min().map(R64::raw);
-
-        // reject result if loss is too large
-        let is_valid = matches!(min_icp_loss, Some(loss) if loss <= icp_rejection_threshold.raw());
-        let pose = is_valid.then_some(pose);
-
-        Ok(IcpRegression {
-            pose_est: self,
-            pose,
-            min_icp_loss,
-            icp_losses,
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct IcpRegression {
-    pose_est: PoseEstimation,
-    pose: Option<Isometry3<f64>>,
-    min_icp_loss: Option<f64>,
-    icp_losses: Vec<f64>,
-}
-
-impl IcpRegression {
-    pub fn markers(&self) -> impl Iterator<Item = ImagePoseMarker> + '_ {
-        self.pose_est.markers()
-    }
-
-    /// Get the icp regression's pose.
-    pub fn pose(&self) -> Option<Isometry3<f64>> {
-        self.pose
-    }
-
-    /// Get the icp regression's min icp loss.
-    pub fn min_icp_loss(&self) -> Option<f64> {
-        self.min_icp_loss
-    }
-
-    /// Get a reference to the icp regression's icp losses.
-    pub fn icp_losses(&self) -> &[f64] {
-        self.icp_losses.as_ref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Params {
-    pub max_icp_iterations: usize,
-    pub icp_pose_weight_threshold: R64,
-    pub icp_rejection_threshold: R64,
 }
 
 #[derive(Debug, Clone)]
@@ -356,17 +141,12 @@ impl Builder {
         } = self;
 
         let MultiArucoPattern {
-            board_size,
-            board_border_size,
             num_squares_per_side,
-            marker_square_size_ratio,
             border_bits,
             ref marker_ids,
             ..
         } = pattern;
 
-        let square_size = (board_size - board_border_size * 2.0) / num_squares_per_side as f64;
-        let marker_size = square_size * marker_square_size_ratio.raw();
         let marker_ids: IndexSet<u32> = marker_ids.iter().cloned().collect();
 
         // check if marker IDs are unique
@@ -382,7 +162,6 @@ impl Builder {
             pattern,
             camera_info,
             detector_params,
-            marker_size,
             marker_ids,
         })
     }
@@ -393,7 +172,6 @@ pub struct Detector {
     pattern: MultiArucoPattern,
     camera_info: CameraInfo,
     detector_params: ArucoDetectorParams,
-    marker_size: Length,
     marker_ids: IndexSet<u32>,
 }
 
@@ -477,7 +255,6 @@ impl Detector {
             ref pattern,
             ref marker_ids,
             ref detector_params,
-            marker_size,
             ..
         } = *self;
         let MultiArucoPattern {
@@ -487,10 +264,6 @@ impl Detector {
         } = *pattern;
 
         let dictionary: Ptr<Dictionary> = dictionary.to_opencv_dictionary()?;
-
-        // Carried in the ImageDetection for pose estimation. `mat` is never warped by them.
-        let camera_matrix = self.camera_matrix()?;
-        let distortion_coefs = self.distortion_coefs()?;
 
         // find aruco markers, with sub-pixel corner refinement (H-08) on the RAW image
         let (aruco_corners_vec, aruco_ids) = {
@@ -547,10 +320,6 @@ impl Detector {
         Ok(Some(ImageDetection {
             id: aruco_ids,
             corners: aruco_corners_vec,
-            marker_size,
-            camera_matrix,
-            distortion_coefs,
-            pattern: pattern.clone(),
         }))
     }
 
