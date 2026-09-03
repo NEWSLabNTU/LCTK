@@ -4,7 +4,7 @@
   observable effect at any value, and every detection burns the full iteration budget in a stage
   `CLAUDE.md` already names the pipeline's ~100 ms bottleneck
 - **Area:** calibration-target-detector (`src/perforated.rs`), board detector configs
-- **Status:** Open
+- **Status:** Fixed (2026-09-03) — see Resolution below
 - **Verified:** 2026-08-14 — measured by instrumenting `BoardIcpIterator::step` from the
   since-deleted `rust/hollow-board-detector/tests/test_icp_correctness.rs` (W5-E1/E2, Phase 8) on a
   noiseless synthetic 0.5 m board; code read at the deleted crate's `src/algo.rs:381-386` (the
@@ -12,10 +12,10 @@
   successor `PerforatedBoardIcpIterator` in `rust/calibration-target-detector/src/perforated.rs`
   and corroborated on the new 1 m target geometry — see the dated update at the bottom of this
   file.
-- **Related:** [C-04](./archive/C-04-board-detector-gate-unreachable.md),
-  [L-01](./archive/L-01-fit-board-icp-false-success.md),
-  [L-21](./archive/L-21-find-correspondences-duplicated-tests-wrong-body.md),
-  [M-18](./archive/M-18-root-cargo-config-missing-rust-tests-unrunnable.md)
+- **Related:** [C-04](./C-04-board-detector-gate-unreachable.md),
+  [L-01](./L-01-fit-board-icp-false-success.md),
+  [L-21](./L-21-find-correspondences-duplicated-tests-wrong-body.md),
+  [M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md)
 
 ## Problem
 
@@ -87,7 +87,7 @@ less.
    1e-13 (as `config/multi_wayside/detector.json5` does) or anything else and observe *no difference
    whatsoever* in the detector's output. This is the tracker's recurring shape yet again — a control
    that appears to work and does nothing — and it is exactly the trap
-   [C-04](./archive/C-04-board-detector-gate-unreachable.md) sprang with `icp_good_fit_threshold`,
+   [C-04](./C-04-board-detector-gate-unreachable.md) sprang with `icp_good_fit_threshold`,
    with the polarity reversed: there a gate could never *pass*, here a gate can never *fire*.
 2. **Runs always exhaust the budget.** The remaining exits are the loss gate and
    `state.iteration >= max_icp_iterations`. The shipped `icp_rejection_threshold` is 0.005–0.008,
@@ -95,13 +95,13 @@ less.
    0.026–0.029 m for a VLP-32C — so on live data the loss gate cannot fire either, and **every**
    detection runs its full 50 or 100 iterations. `max_icp_iterations` is the de-facto termination
    criterion of this detector. That is the same observation
-   [C-04](./archive/C-04-board-detector-gate-unreachable.md) recorded in passing
+   [C-04](./C-04-board-detector-gate-unreachable.md) recorded in passing
    ("`max_icp_iterations: 50` truncates convergence — the loss is still decreasing when ICP stops"),
    now quantified: at step 50 the pose weight is still ~4.6e-4, roughly 5× the configured
    threshold and two orders of magnitude above the settled value.
 3. **Stopping at the cap is reported as an ordinary result.** `termination_reason` says
    `"Max iterations reached: N"`, which the library-side success test treats as a *successful* fit —
-   that is [L-01](./archive/L-01-fit-board-icp-false-success.md), and this finding is why the
+   that is [L-01](./L-01-fit-board-icp-false-success.md), and this finding is why the
    "non-converged" branch is not an edge case but the norm.
 
 ## Analysis — why convergence is this slow (not proven)
@@ -151,9 +151,9 @@ goes through a `run_icp` helper that steps *before* consulting the predicate, an
 error rather than on control flow), and the trap is documented in that helper's doc comment — but
 the API shape that invites it is still there.
 
-This is the same family as [L-21](./archive/L-21-find-correspondences-duplicated-tests-wrong-body.md)
+This is the same family as [L-21](./L-21-find-correspondences-duplicated-tests-wrong-body.md)
 (tests that ran, passed, and exercised nothing that mattered), and it went unnoticed the longer for
-[M-18](./archive/M-18-root-cargo-config-missing-rust-tests-unrunnable.md), which left the Rust suite
+[M-18](./M-18-root-cargo-config-missing-rust-tests-unrunnable.md), which left the Rust suite
 unrunnable from the workspace root.
 
 ## Suggested fix
@@ -233,3 +233,64 @@ the 0.5 m board; the migrated suite needs **5000** on the 1 m manifest (both are
 iteration caps, well above any shipped preset). This is a different geometry and a fixed sign bug
 (H-15) between the two measurements, so the two cap values are not expected to match and neither
 should be read as more precise than "several hundred to a couple thousand."
+
+## Resolution (2026-09-03)
+
+Fixed by collapsing perforated ICP termination onto a single configurable stability window,
+`icp_good_fit_threshold` / `icp_stable_pose_iterations` — commits `bad371b`, `1494c2f`, `f5b3b26`,
+`3ba419e`, `2e294d8`.
+
+- **The unreachable hard-coded bar is gone.** `termination_count > 100` is replaced by a
+  validated, positive `icp_stable_pose_iterations` (`stable_pose_iterations` on
+  `PerforatedIcpConfig`), default **3**, compared with `>=` rather than `>`. `validate()` rejects
+  `0` at config-load time, so the knob this issue found inert (`icp_pose_weight_threshold`, now
+  `pose_weight_threshold`) has an actually-reachable exit to feed: three consecutive quiet
+  iterations, not the ~600–1800 the old bar demanded against a 50–100-iteration cap. This directly
+  closes the finding: the shipped presets no longer need "a factor of 2–5" more budget than they
+  have — a converging run can reach `StablePose` inside the caps that ship today.
+- **`MaxIterations` is now an explicit failed hypothesis**, not an ordinary result reported as
+  success. `should_terminate`, `termination_kind` and `successful_termination` share one explicit
+  precedence — `hard-invalid -> GoodFit -> StablePose -> MaxIterations` — and only `GoodFit` and
+  `StablePose` count as successful termination. Hitting the iteration cap without ever going quiet
+  or converging is reported and ranked as a failure, which is the other side of what this issue's
+  "Why it matters" §3 flagged (`termination_reason: "Max iterations reached: N"` read as a
+  successful fit, tracked separately as L-01).
+- **Residual termination and structural acceptance are now separate concerns**, not because a
+  post-ICP residual gate got stricter but because that gate is **gone**. `icp_good_fit_threshold`
+  (`good_fit_threshold_m`) decides only when the loop *stops* (`state.avg_loss <
+  good_fit_threshold_m`, strict `<`); it no longer doubles as a final acceptance test on the
+  result. Whether a `GoodFit`/`StablePose` result is trustworthy enough to publish is decided
+  afterward, by structural evidence alone — minimum final inlier points, minimum loss separation
+  between the best and second-best hypothesis, minimum cutout-rim correspondences — with hypothesis
+  ranking (`second_best_loss_m` / `loss_separation_m`, both `Option<f64>`, `None` meaning "no
+  successful runner-up" rather than a `NaN` sentinel) restricted to hypotheses that terminated
+  successfully in the first place. The two overlapping thresholds this issue's "Problem" section
+  quoted (`icp_rejection_threshold` alongside the unreachable stable-pose bar) no longer exist as
+  two things to keep straight; there is one termination threshold and a downstream evidence check,
+  and neither substitutes for the other.
+- A board config that still sets the deleted `icp_rejection_threshold` key is now rejected at load
+  with a message naming `icp_good_fit_threshold` and `icp_stable_pose_iterations` as the
+  replacement, rather than silently ignored.
+- **The "second, related wart" and the correspondence-model slow-convergence analysis above are
+  superseded, not merely patched around.** With `icp_stable_pose_iterations: 3` the stable-pose
+  exit is reachable directly, so neither the initial-state-reports-terminate quirk nor the
+  ~600–1800-iteration convergence budget is load-bearing for this issue's original complaint
+  (an inert knob and a budget that is always exhausted) any more; both remain accurate descriptions
+  of `should_terminate`'s shape and are left as-is above rather than rewritten.
+- Test coverage: `bad371b`/`1494c2f`/`f5b3b26` carry unit and integration coverage for the new
+  precedence, config validation and stale-key diagnostic as they land; `2e294d8` adds the dedicated
+  pin — hard-invalid precedence, a genuine `StablePose` success strictly above the good-fit
+  threshold, the two-or-more-successful-hypothesis separation gate, the zero-successful diagnostic,
+  the structural gates, and `validate()` rejecting `stable_pose_iterations == 0` /
+  `max_iterations == 0`. The workspace suite went from 155 to 169 tests, all passing.
+
+**Camera-frame board pose, separately:** this issue's own analysis lived entirely inside
+`rust/calibration-target-detector`'s LiDAR-side ICP and never claimed the ArUco detector estimated
+camera-frame pose. It is recorded here because the same cleanup effort also closed the adjacent gap
+the L-12 archive flagged for a future phase: `rust/aruco-detector` carried a dormant, uncalled
+`estimate_pose` / ICP path (`PoseEstimation`, `ImagePoseMarker`, `fit_icp`, `IcpRegression`) that
+L-12 chose to keep against a hypothetical future use. Commit `3ba419e` deletes that path outright
+rather than reviving it. Camera-frame board pose, PnP initialization, refinement and the extrinsic
+solve remain owned solely by `ros/lidar_to_camera_solver`, now recorded as a decision in the
+accepted `docs/adr/0004-lidar-camera-solver-owns-camera-board-pose.md`, which explicitly supersedes
+L-12's deferred rationale.

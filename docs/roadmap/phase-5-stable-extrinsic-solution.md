@@ -171,9 +171,14 @@ Two changes, either of which helps and which compose:
    point patch, because the normals span directions independently of how far the points spread.
    Zhou, Li & Kaess (IROS 2018) reduce the minimum to **one** board pose by combining line and
    plane correspondences.
-   *The machinery already exists and is dead code*: `Detector::estimate_pose`
-   (`rust/aruco-detector/src/multi_aruco.rs:83-104`) has zero callers
-   ([L-12](../issues/archive/L-12-dead-solver-crates.md)).
+   *The machinery no longer exists.* `Detector::estimate_pose` (formerly
+   `rust/aruco-detector/src/multi_aruco.rs:83-104`) was dead code with zero callers when
+   [L-12](../issues/archive/L-12-dead-solver-crates.md) chose to keep it against this stage's
+   IPPE need; that decision was superseded and the API deleted rather than wired up —
+   [ADR-0004](../adr/0004-lidar-camera-solver-owns-camera-board-pose.md) makes
+   `ros/lidar_to_camera_solver` the sole owner of camera-frame board pose, so this stage's
+   IPPE-on-ArUco-corners step would need new code there, not a revival of the ArUco crate's
+   pose path.
 
 2. **Bundle-adjust the board poses together with the extrinsic.**
    Stop treating `T_board` as ground truth. Optimise `{T_extrinsic, T_board^(1..K)}` jointly
