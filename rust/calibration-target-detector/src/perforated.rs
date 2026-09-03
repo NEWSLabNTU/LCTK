@@ -409,16 +409,16 @@ pub fn estimate_perforated_pose(
         // `MaxIterations` from `TooFewInliers`.
         let mut all_indices = [0usize, 1, 2, 3];
         rank_by_loss(&hypotheses, &mut all_indices);
-        let worst_best = &hypotheses[all_indices[0]];
+        let least_bad_failure = &hypotheses[all_indices[0]];
         return Err(PerforatedRejection::IcpFailure {
             evidence: PerforatedEvidence {
-                best_loss_m: worst_best.state.avg_loss,
+                best_loss_m: least_bad_failure.state.avg_loss,
                 second_best_loss_m: None,
                 loss_separation_m: None,
-                cutout_rim_correspondences: worst_best.cutout_rim_correspondences,
-                iteration_count: worst_best.state.iteration,
-                total_correspondences: worst_best.state.total_correspondences,
-                termination: termination_kind(&worst_best.state, config),
+                cutout_rim_correspondences: least_bad_failure.cutout_rim_correspondences,
+                iteration_count: least_bad_failure.state.iteration,
+                total_correspondences: least_bad_failure.state.total_correspondences,
+                termination: termination_kind(&least_bad_failure.state, config),
             },
         });
     };

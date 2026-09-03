@@ -1268,6 +1268,38 @@ impl CalibrationBoardLocatorNode {
                     detection.pose.translation.y,
                     detection.pose.translation.z
                 );
+                // Why a *publish*-side evidence log, when rejections already log
+                // theirs: `termination` is what separates a `GoodFit` accept
+                // (residual strictly below `icp_good_fit_threshold`) from a
+                // `StablePose` accept, which succeeds on pose stability alone and
+                // never examines the residual.  Without this line the two are
+                // indistinguishable downstream, and establishing which one a rig
+                // is actually running on takes a temporary code patch -- it did on
+                // 2026-09-03.  `second_best_loss_m` is `none` whenever exactly one
+                // quarter-turn hypothesis succeeded, which is also the case where
+                // `min_hypothesis_loss_separation_m` is skipped entirely.
+                match &detection.diagnostics {
+                    TargetDetectionDiagnostics::CutoutIcp(evidence) => log_debug!(
+                        LOGGER_NAME,
+                        "target accepted: target={}@{} termination={:?} best_loss_m={:.6} second_best_loss_m={} separation_m={} rim_correspondences={} iterations={} total_correspondences={}",
+                        detection.target_identity.target_id,
+                        detection.target_identity.revision,
+                        evidence.termination,
+                        evidence.best_loss_m,
+                        Self::format_optional_loss_m(evidence.second_best_loss_m),
+                        Self::format_optional_loss_m(evidence.loss_separation_m),
+                        evidence.cutout_rim_correspondences,
+                        evidence.iteration_count,
+                        evidence.total_correspondences,
+                    ),
+                    TargetDetectionDiagnostics::Solid(evidence) => log_debug!(
+                        LOGGER_NAME,
+                        "target accepted: target={}@{} covered_edges={}",
+                        detection.target_identity.target_id,
+                        detection.target_identity.revision,
+                        evidence.covered_edge_count,
+                    ),
+                }
                 if let Some(debug_pubs) = board_debug_publishers {
                     let markers =
                         Self::create_target_markers(target, detection.pose, &msg.header, "", 0)?;
@@ -2977,6 +3009,25 @@ mod covariance_tests {
         }
     }
 
+    #[test]
+    fn format_optional_loss_m_renders_both_branches() {
+        assert_eq!(
+            CalibrationBoardLocatorNode::format_optional_loss_m(Some(0.012_345_6)),
+            "0.012346"
+        );
+        assert_eq!(
+            CalibrationBoardLocatorNode::format_optional_loss_m(None),
+            "none (no successful runner-up)"
+        );
+    }
+}
+
+/// Tests for the detector-config load boundary: the removed-key diagnostic and
+/// round-tripping every shipped preset through `load_detector_config`.
+#[cfg(test)]
+mod config_loading_tests {
+    use super::*;
+
     /// The removed `icp_rejection_threshold` key must be rejected with an actionable
     /// message rather than silently ignored by `DetectorTuning`'s `#[serde(flatten)]`.
     #[test]
@@ -3038,8 +3089,7 @@ mod covariance_tests {
     /// tolerates that syntax on a real preset that no longer carries the removed key.
     #[test]
     fn load_detector_config_accepts_a_real_shipped_preset() {
-        let text =
-            include_str!("../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5");
+        let text = include_str!("../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5");
         let mut path = std::env::temp_dir();
         path.push(format!(
             "lctk_shipped_preset_load_test_{}.json5",
@@ -3104,18 +3154,6 @@ mod covariance_tests {
             std::fs::remove_file(&path).ok();
             result.unwrap_or_else(|error| panic!("preset {name} failed to load: {error}"));
         }
-    }
-
-    #[test]
-    fn format_optional_loss_m_renders_both_branches() {
-        assert_eq!(
-            CalibrationBoardLocatorNode::format_optional_loss_m(Some(0.012_345_6)),
-            "0.012346"
-        );
-        assert_eq!(
-            CalibrationBoardLocatorNode::format_optional_loss_m(None),
-            "none (no successful runner-up)"
-        );
     }
 }
 
