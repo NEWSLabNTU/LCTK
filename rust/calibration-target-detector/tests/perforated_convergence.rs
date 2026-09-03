@@ -300,10 +300,15 @@ fn observation_seeding_pose(
 /// every one of these tests spuriously rejects with `MaxIterations`, regardless
 /// of how good the pose actually is.
 ///
-/// `stable_pose_iterations` is fixed here at 100, matching the legacy
-/// hard-coded `termination_count > 100` boundary M-21 found unreachable at any
-/// shipped iteration budget, so the iteration counts measured and quoted in
-/// comments below stay accurate. Only `good_fit_threshold_m` varies per test.
+/// `stable_pose_iterations` is fixed here at 100, matching the *magnitude* of
+/// the legacy hard-coded `termination_count > 100` boundary M-21 found
+/// unreachable at any shipped iteration budget -- not the exact comparison.
+/// The new state machine's `termination_count >= stable_pose_iterations`
+/// fires one iteration earlier than the legacy `termination_count > 100`
+/// would (`>= 100` vs `> 100`), a fixed one-iteration difference immaterial
+/// at the ~1800-iteration scale `test_convergence_counter_increases` measures
+/// below, so the iteration counts quoted in comments there stay accurate.
+/// Only `good_fit_threshold_m` varies per test.
 fn convergence_tuning(max_iterations: usize, good_fit_threshold_m: f64) -> PerforatedIcpConfig {
     PerforatedIcpConfig::new(
         max_iterations,

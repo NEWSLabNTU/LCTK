@@ -653,6 +653,28 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_zero_stable_pose_iterations() {
+        let mut cfg = config();
+        cfg.stable_pose_iterations = 0;
+        let error = cfg.validate().unwrap_err();
+        assert!(
+            error.to_string().contains("stable_pose_iterations"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_zero_max_iterations() {
+        let mut cfg = config();
+        cfg.max_iterations = 0;
+        let error = cfg.validate().unwrap_err();
+        assert!(
+            error.to_string().contains("max_iterations"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn initial_state_requires_a_step_before_termination_check() {
         let target = target();
         let iterator = PerforatedBoardIcpIterator::new(&target, config()).unwrap();
@@ -697,6 +719,106 @@ mod tests {
         state.avg_loss = cfg.good_fit_threshold_m / 2.0;
         state.iteration = cfg.max_iterations;
         assert_eq!(iterator.termination_reason(&state), "Converged (good fit)");
+    }
+
+    /// Every one of the three hard-invalid conditions must classify ahead of
+    /// `GoodFit`, `StablePose` and `MaxIterations` even when all three of
+    /// those conditions are simultaneously satisfied. This pins the
+    /// `termination_kind`/`should_terminate` precedence contract (M-21): the
+    /// hard-invalid checks mean the state itself cannot support a pose
+    /// estimate, regardless of how good the residual or update history look.
+    #[test]
+    fn hard_invalid_conditions_beat_good_residual_stable_count_and_iteration_limit() {
+        let target = target();
+        let mut cfg = config();
+        cfg.max_iterations = 10;
+        cfg.stable_pose_iterations = 3;
+        cfg.min_inlier_points = 3;
+        let iterator = PerforatedBoardIcpIterator::new(&target, cfg).unwrap();
+
+        // Baseline state satisfying all three "successful/terminal" conditions
+        // at once: `avg_loss` below the good-fit threshold, `termination_count`
+        // at the stable-pose window, and `iteration` at the cap.
+        let mut state = iterator.initial_state(Isometry3::identity(), structural_points());
+        state.iteration = cfg.max_iterations;
+        state.avg_loss = cfg.good_fit_threshold_m / 2.0;
+        state.total_correspondences = 4;
+        state.good_correspondences = 4;
+        state.correspondences = vec![(Point3::origin(), Point3::origin()); 4];
+        state.termination_count = cfg.stable_pose_iterations;
+
+        // Sanity: with a valid inlier/correspondence count, this baseline really
+        // would classify as GoodFit (the highest-precedence "successful" reason).
+        assert_eq!(
+            termination_kind(&state, cfg),
+            IcpTermination::GoodFit,
+            "baseline state must actually satisfy GoodFit before being broken"
+        );
+
+        // TooFewInliers beats all three.
+        state.inlier_points = vec![Point3::origin(); 2];
+        assert!(iterator.should_terminate(&state));
+        assert_eq!(termination_kind(&state, cfg), IcpTermination::TooFewInliers);
+        assert_eq!(
+            iterator.termination_reason(&state),
+            "Insufficient inlier points: 2 < 3"
+        );
+        state.inlier_points = structural_points();
+
+        // TooFewKabschPoints beats all three.
+        state.good_correspondences = 2;
+        assert!(iterator.should_terminate(&state));
+        assert_eq!(
+            termination_kind(&state, cfg),
+            IcpTermination::TooFewKabschPoints
+        );
+        assert_eq!(
+            iterator.termination_reason(&state),
+            "Insufficient points for Kabsch: 2"
+        );
+        state.good_correspondences = 4;
+
+        // NoCorrespondences beats all three.
+        state.correspondences = Vec::new();
+        assert!(iterator.should_terminate(&state));
+        assert_eq!(
+            termination_kind(&state, cfg),
+            IcpTermination::NoCorrespondences
+        );
+        assert_eq!(
+            iterator.termination_reason(&state),
+            "No correspondences found"
+        );
+    }
+
+    /// A `StablePose` termination is a genuine successful outcome even when the
+    /// residual sits well above `good_fit_threshold_m` -- not merely at or past
+    /// the boundary (`termination_order_and_stable_pose_boundary_match_legacy_contract`
+    /// covers the boundary itself). `successful_termination` must treat it the
+    /// same as `GoodFit`.
+    #[test]
+    fn stable_pose_succeeds_with_residual_well_above_the_good_fit_threshold() {
+        let target = target();
+        let mut cfg = config();
+        cfg.max_iterations = 10;
+        cfg.stable_pose_iterations = 3;
+        let iterator = PerforatedBoardIcpIterator::new(&target, cfg).unwrap();
+        let mut state = iterator.initial_state(Isometry3::identity(), structural_points());
+        state.iteration = 5;
+        state.total_correspondences = 4;
+        state.good_correspondences = 4;
+        state.correspondences = vec![(Point3::origin(), Point3::origin()); 4];
+        state.termination_count = cfg.stable_pose_iterations;
+        // 1000x the threshold -- unambiguously "above", not a boundary case.
+        state.avg_loss = cfg.good_fit_threshold_m * 1000.0;
+
+        assert!(iterator.should_terminate(&state));
+        assert_eq!(termination_kind(&state, cfg), IcpTermination::StablePose);
+        assert!(successful_termination(&state, cfg));
+        assert_eq!(
+            iterator.termination_reason(&state),
+            "Converged (stable pose)"
+        );
     }
 
     #[test]
@@ -746,6 +868,66 @@ mod tests {
             PerforatedRejection::AmbiguousCutoutEvidence { .. }
                 | PerforatedRejection::IcpFailure { .. }
         ));
+    }
+
+    /// The two-or-more-successful branch, exercised concretely: fed the correct
+    /// quadrant's own full grid-plus-rim evidence but with a deliberately loose
+    /// `good_fit_threshold_m`, all four quarter-turn hypotheses reach `GoodFit`
+    /// on the very first step (the plate outline is symmetric under a quarter
+    /// turn; only the three cutouts break the symmetry, and they cost the wrong
+    /// quadrants only a small extra residual). That leaves >= 2 successful
+    /// hypotheses, so the ranking/separation machinery in
+    /// `estimate_perforated_pose` genuinely runs, not just the `None`-runner-up
+    /// path `asymmetric_cutout_evidence_selects_the_correct_quadrant` exercises.
+    /// A `min_hypothesis_loss_separation_m` set above the measured gap between
+    /// best and runner-up then forces the existing separation gate to reject
+    /// with `Some(..)` evidence, not the loose `AmbiguousCutoutEvidence |
+    /// IcpFailure` either-or `symmetric_or_weak_cutout_evidence_never_falls_back_to_square_orientation`
+    /// above settles for.
+    #[test]
+    fn two_successful_hypotheses_enforce_the_loss_separation_gate() {
+        let target = target();
+        let observation = observation();
+        let expected_pose = pose_from_candidate(&observation, 2);
+        let points = perforated_samples(&target, expected_pose);
+        let mut cfg = config();
+        // Loose enough that the wrong quadrants also reach GoodFit (measured:
+        // their first-step residual is ~3.9e-3 on this fixture, the true
+        // quadrant's is ~2.4e-17), but the separation requirement is set above
+        // that measured gap so the gate -- not a convergence failure -- is what
+        // rejects.
+        cfg.good_fit_threshold_m = 0.5;
+        cfg.min_hypothesis_loss_separation_m = 0.01;
+        let rejection = estimate_perforated_pose(&target, &observation, points, cfg).unwrap_err();
+        let PerforatedRejection::AmbiguousCutoutEvidence {
+            evidence,
+            required_separation_m,
+        } = rejection
+        else {
+            panic!("expected AmbiguousCutoutEvidence with >= 2 successful hypotheses, got {rejection:?}");
+        };
+        assert_eq!(required_separation_m, cfg.min_hypothesis_loss_separation_m);
+        // The best hypothesis (the true quadrant) converged essentially exactly.
+        assert!(evidence.best_loss_m < 1e-9, "{}", evidence.best_loss_m);
+        // A runner-up existed and was reported -- the whole point of this test:
+        // the `None` path is covered elsewhere, this pins the `Some` path.
+        let second_best = evidence
+            .second_best_loss_m
+            .expect("two-or-more-successful branch must report a runner-up loss");
+        let separation = evidence
+            .loss_separation_m
+            .expect("two-or-more-successful branch must report a separation");
+        assert_relative_eq!(
+            second_best - evidence.best_loss_m,
+            separation,
+            epsilon = 1e-12
+        );
+        assert!(
+            separation < cfg.min_hypothesis_loss_separation_m,
+            "separation {separation} should be below the required {}",
+            cfg.min_hypothesis_loss_separation_m
+        );
+        assert_eq!(evidence.termination, IcpTermination::GoodFit);
     }
 
     #[test]
@@ -808,6 +990,107 @@ mod tests {
             estimate_perforated_pose(&target, &observation, poor, cfg).unwrap_err(),
             PerforatedRejection::IcpFailure { .. }
         ));
+    }
+
+    /// The minimum-inlier structural gate names its own reason: too few input
+    /// points must classify as `TooFewInliers`, not merely "some IcpFailure or
+    /// other" the way `finite_failed_termination_states_do_not_become_pose_authority`
+    /// above settles for.
+    #[test]
+    fn too_few_inlier_points_rejects_as_too_few_inliers() {
+        let target = target();
+        let observation = observation();
+        let pose = pose_from_candidate(&observation, 0);
+        let too_few = [Point3::new(-0.1, 0.0, 0.0), Point3::new(0.1, 0.0, 0.0)]
+            .map(|point| pose.transform_point(&point))
+            .to_vec();
+        let rejection =
+            estimate_perforated_pose(&target, &observation, too_few, config()).unwrap_err();
+        let PerforatedRejection::IcpFailure { evidence } = rejection else {
+            panic!("expected IcpFailure, got {rejection:?}");
+        };
+        assert_eq!(evidence.termination, IcpTermination::TooFewInliers);
+        assert_eq!(evidence.second_best_loss_m, None);
+        assert_eq!(evidence.loss_separation_m, None);
+    }
+
+    /// Zero successful hypotheses must still reject with the *lowest-loss*
+    /// failed attempt as diagnostic evidence, not an arbitrary one of the four.
+    /// Verified here by independently re-driving all four hypotheses through
+    /// the same public iterator surface used elsewhere in this file and
+    /// confirming `evidence.best_loss_m` is their true minimum, not merely *a*
+    /// finite number.
+    #[test]
+    fn zero_successful_hypotheses_preserve_the_lowest_loss_failure_diagnostically() {
+        let target = target();
+        let observation = observation();
+        let pose = pose_from_candidate(&observation, 0);
+        let poor: Vec<_> = perforated_samples(&target, pose)
+            .into_iter()
+            .map(|point| point + (pose * Vector3::z_axis()).into_inner() * 0.02)
+            .collect();
+        let mut cfg = config();
+        cfg.max_iterations = 1;
+
+        let iterator = PerforatedBoardIcpIterator::new(&target, cfg).unwrap();
+        let mut losses = [0.0; 4];
+        for (candidate_index, loss) in losses.iter_mut().enumerate() {
+            let initial = pose_from_candidate(&observation, candidate_index);
+            let mut state = iterator.initial_state(initial, poor.clone());
+            loop {
+                state = iterator.step(&state);
+                if iterator.should_terminate(&state) {
+                    break;
+                }
+            }
+            // None of the four may accidentally succeed, or this fixture is not
+            // exercising the zero-successful-hypotheses branch this test is
+            // named for.
+            assert_eq!(termination_kind(&state, cfg), IcpTermination::MaxIterations);
+            *loss = state.avg_loss;
+        }
+        let min_loss = losses.iter().copied().fold(f64::INFINITY, f64::min);
+
+        let rejection = estimate_perforated_pose(&target, &observation, poor, cfg).unwrap_err();
+        let PerforatedRejection::IcpFailure { evidence } = rejection else {
+            panic!("expected IcpFailure, got {rejection:?}");
+        };
+        assert_relative_eq!(evidence.best_loss_m, min_loss, epsilon = 1e-12);
+        assert_eq!(evidence.termination, IcpTermination::MaxIterations);
+        assert_eq!(evidence.second_best_loss_m, None);
+        assert_eq!(evidence.loss_separation_m, None);
+    }
+
+    /// The cutout-rim structural gate remains active even when the winning
+    /// hypothesis converges cleanly and publishes no separation objection (a
+    /// single successful hypothesis, as in `asymmetric_cutout_evidence_selects_the_correct_quadrant`):
+    /// too few observed points actually sitting on a cutout rim must still
+    /// reject with `WeakCutoutEvidence`, never fall back to publishing the
+    /// square-only fit.
+    #[test]
+    fn weak_cutout_evidence_rejects_a_converged_pose_with_too_few_rim_points() {
+        let target = target();
+        let observation = observation();
+        let expected_pose = pose_from_candidate(&observation, 2);
+        let points = perforated_samples(&target, expected_pose);
+        let mut cfg = config();
+        // Unreachable by construction: the fixture samples far fewer rim points
+        // than this.
+        cfg.min_cutout_rim_correspondences = 1_000_000;
+        let rejection = estimate_perforated_pose(&target, &observation, points, cfg).unwrap_err();
+        let PerforatedRejection::WeakCutoutEvidence {
+            evidence,
+            required_rim_correspondences,
+        } = rejection
+        else {
+            panic!("expected WeakCutoutEvidence, got {rejection:?}");
+        };
+        assert_eq!(
+            required_rim_correspondences,
+            cfg.min_cutout_rim_correspondences
+        );
+        assert!(evidence.cutout_rim_correspondences < required_rim_correspondences);
+        assert_eq!(evidence.termination, IcpTermination::GoodFit);
     }
 
     #[test]

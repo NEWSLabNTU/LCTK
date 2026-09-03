@@ -3052,6 +3052,71 @@ mod covariance_tests {
 
         result.expect("shipped preset without the stale key must load cleanly");
     }
+
+    /// The sibling test above only round-trips one of the five shipped presets
+    /// (`hollow_1000/velodyne_bbox.json5`). Loading all five here catches a
+    /// future preset edit that breaks parsing on any of them -- including that
+    /// the two `solid_600` presets, which carry no perforated-ICP key at all
+    /// (`icp_stable_pose_iterations`, cutout separation/tolerance), still parse
+    /// cleanly on the serde defaults for those fields.
+    #[test]
+    fn load_detector_config_accepts_every_shipped_preset() {
+        let presets: &[(&str, &str)] = &[
+            (
+                "hollow_1000/velodyne",
+                include_str!("../../lctk_launch/config/board/hollow_1000/velodyne.json5"),
+            ),
+            (
+                "hollow_1000/velodyne_bbox",
+                include_str!("../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5"),
+            ),
+            (
+                "hollow_1000/seyond",
+                include_str!("../../lctk_launch/config/board/hollow_1000/seyond.json5"),
+            ),
+            (
+                "solid_600/velodyne",
+                include_str!("../../lctk_launch/config/board/solid_600/velodyne.json5"),
+            ),
+            (
+                "solid_600/seyond",
+                include_str!("../../lctk_launch/config/board/solid_600/seyond.json5"),
+            ),
+        ];
+        for (name, text) in presets {
+            // Confirm the fixture itself matches what this test claims about it:
+            // the two solid_600 presets carry no perforated-ICP key.
+            let is_solid = name.starts_with("solid_600/");
+            assert_eq!(
+                text.contains("icp_stable_pose_iterations"),
+                !is_solid,
+                "{name}: expected icp_stable_pose_iterations presence to track hollow vs solid"
+            );
+
+            let mut path = std::env::temp_dir();
+            path.push(format!(
+                "lctk_all_presets_test_{}_{}.json5",
+                std::process::id(),
+                name.replace('/', "_")
+            ));
+            std::fs::write(&path, text).unwrap();
+            let result = CalibrationBoardLocatorNode::load_detector_config(path.to_str().unwrap());
+            std::fs::remove_file(&path).ok();
+            result.unwrap_or_else(|error| panic!("preset {name} failed to load: {error}"));
+        }
+    }
+
+    #[test]
+    fn format_optional_loss_m_renders_both_branches() {
+        assert_eq!(
+            CalibrationBoardLocatorNode::format_optional_loss_m(Some(0.012_345_6)),
+            "0.012346"
+        );
+        assert_eq!(
+            CalibrationBoardLocatorNode::format_optional_loss_m(None),
+            "none (no successful runner-up)"
+        );
+    }
 }
 
 // Ported from the now-deleted `rust/hollow-board-detector/tests/test_voxel_downsample.rs`
