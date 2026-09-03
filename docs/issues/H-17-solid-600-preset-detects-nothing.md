@@ -253,3 +253,58 @@ Two measurement notes for whoever picks that up:
   `bag_play.py` accepts `--play-arg`, but `session.launch.py` does not expose it, so
   there is no way to force reliable playback QoS through a session. Exposing it would
   make this measurable and is a natural M-30 follow-up.
+
+## Candidate formation, 2026-09-04
+
+The remaining blocker was attacked with a deterministic offline harness --
+`rust/board-cluster-detector/tests/h17_candidate_diagnostic.rs`, `#[ignore]`d because it
+needs frames exported by `tmp/export_diag.py`. It runs the real pipeline stages on real
+frames outside ROS, which the ROS path cannot do reproducibly: `realtime` drops frames
+nondeterministically and `offline` receives nothing from a bag (M-30).
+
+It reports, per frame, where the biggest cluster dies. On 12 frames spread across
+`newtype_1`, with the shipped preset:
+
+| outcome | frames |
+|---|---|
+| passes the patch gate | 5 |
+| biggest cluster 35-51 points vs `patch_min_points: 60` | 4 |
+| flatness 0.0466-0.0607 vs `flatness_rms_max: 0.045` | 3 |
+
+**`patch_min_points` lowered 60 -> 40.** A 600 mm plate at 7-8 m returns 35-420 points
+depending on how many rings cross it; 60 was inherited from the 1000 mm perforated plate
+and cuts genuine boards at the sparse end. Offline candidate rate rises **42% -> 75%**
+(5/12 -> 9/12), and logged ROS rejections fall 113 -> 55.
+
+**`flatness_rms_max` deliberately NOT relaxed.** The three frames failing it measure
+0.0466-0.0607, while clean board-only clusters measure 0.012-0.030, so those clusters are
+carrying the holder. Raising the gate would admit clutter, and flatness is what does the
+discriminating that coverage never did.
+
+### Two hypotheses tested and disproven
+
+Recorded because both are plausible enough to be re-proposed:
+
+- **The session's self-warmup absorbs the board.** The shipped session builds its
+  background from `newtype_1`'s own opening frames rather than the board-free
+  `newtype_background` bag. Running the harness against both gives *identical* results --
+  same candidate count, same failure reasons, same cluster sizes. The README's claim that
+  the operator carries the board in after warmup holds.
+- **Realtime warmup samples frames spread across the bag, so the board enters the
+  background at several positions.** A background built from 20 frames at stride 28 gives
+  7/12 candidates against 9/12 from 20 consecutive frames -- worse, but nowhere near
+  enough to explain the ROS behaviour.
+
+### Open: ROS and offline still disagree
+
+Offline the pipeline now yields candidates in 75% of frames. The same preset through the
+ROS node still produces one non-empty detection per run. Checked and excluded: the node's
+tuning (only `stance_floor` is overridden, to 0), the downsample path (`detect_for_target`
+applies `finite_only` + `voxel_downsample(bbf_voxel)` internally, matching the harness),
+the background source, and the possibility of a nested `bbox_free.board` block shadowing
+the top-level fields (the preset is flat).
+
+That discrepancy is the next thing to chase, and the harness is the tool for it. Making
+`session.launch.py` expose `bag_play.py`'s existing `--play-arg` would allow reliable
+playback QoS and hence a frame-for-frame comparison against the harness -- currently
+impossible, and the single most useful next step.

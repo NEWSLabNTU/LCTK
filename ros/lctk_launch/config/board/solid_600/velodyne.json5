@@ -17,7 +17,16 @@
   "merge_seed_min_points": 40,
   "merge_offset_tol": 0.02,
   "merge_dist_factor": 1.6,
-  "patch_min_points": 60,
+  // H-17: 40, not the 60 inherited from the 1000 mm perforated plate. A 600 mm solid
+  // plate at 7-8 m returns 35-420 points depending on how many rings cross it, measured
+  // over real frames; 60 cuts genuine boards at the sparse end. Per-frame diagnostic on
+  // 12 real frames: 4 of 12 were rejected here with clusters of 35-51 points, all of
+  // them the plate. Discrimination stays with flatness and the extent gates.
+  //
+  // flatness_rms_max is deliberately NOT relaxed alongside it. Three further frames fail
+  // it at 0.0466-0.0607, but clean board-only clusters measure 0.012-0.030, so those
+  // clusters are carrying the holder and raising the gate would admit clutter.
+  "patch_min_points": 40,
   "flatness_rms_max": 0.045,
   "patch_extent_lo_frac": 0.5,
   "patch_extent_hi_diag_frac": 1.8,
