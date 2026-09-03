@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from lctk_launch.session import DEFAULT_RVIZ_CONFIG_PARTS
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DATA_LAUNCH = PACKAGE_ROOT / "launch" / "session_data.launch.py"
@@ -202,16 +203,42 @@ def test_a_session_local_rviz_layout_is_forwarded(tmp_path):
     assert arguments["rviz_config"] == str(directory / module.SESSION_RVIZ)
 
 
-def test_a_session_without_a_layout_leaves_the_calibrate_default_alone(tmp_path):
-    """Not passing the argument is not the same as passing a copy of its default.
+def test_a_session_without_a_layout_names_the_default_rather_than_omitting_it(tmp_path):
+    """A session with no rviz.rviz must still reach RViz with a real layout.
 
-    Restating calibration.rviz here would give one default two homes, free to
-    drift apart; saying nothing lets calibrate.launch.py stay its only owner.
+    This test used to assert the opposite -- that `rviz_config` is *absent*
+    from the forwarded arguments, on the reasoning that saying nothing leaves
+    `calibrate.launch.py` the default's only owner. That reasoning is sound and
+    the assertion held, but the behaviour it was standing in for did not:
+    `session.launch.py` declares `rviz_config` so it can distinguish an untyped
+    argument from a typed one, and a launch configuration set in a parent scope
+    is inherited by every launch file it includes. The included
+    `DeclareLaunchArgument` therefore never applied its default, and RViz was
+    started as `-d ""`, opening its stock layout instead of this repo's.
+
+    Observed on `sessions/solid600-handheld-seyond` (which ships no rviz.rviz)
+    as `rviz2 -d  --ros-args`, with an empty path.
+
+    So the assertion now checks the reachable outcome -- a concrete default is
+    named -- and `DEFAULT_RVIZ_CONFIG_PARTS` in `lctk_launch.session` keeps the
+    single-owner property the old docstring wanted.
     """
     module = load(SESSION_LAUNCH, "session_launch_rviz_absent")
     directory = make_pcap_session(tmp_path)
     includes = module.generate_session(_Context(directory, **FORWARDED_DEFAULTS))
-    assert "rviz_config" not in _calibrate_arguments(includes)
+    chosen = _calibrate_arguments(includes)["rviz_config"]
+    assert chosen != "", "an empty rviz_config is what opens RViz's stock layout"
+    # The value is a PathJoinSubstitution over [FindPackageShare(...), *parts].
+    # Its `.substitutions` is a list of lists (each element is normalised to a
+    # list of substitutions), so flatten before reading the literal tail -- that
+    # tail is what identifies the layout without performing a launch context.
+    literals = [
+        part.text
+        for group in chosen.substitutions
+        for part in group
+        if getattr(part, "text", None) is not None
+    ]
+    assert literals == list(DEFAULT_RVIZ_CONFIG_PARTS), literals
 
 
 def test_an_explicit_rviz_config_beats_the_session_layout(tmp_path):

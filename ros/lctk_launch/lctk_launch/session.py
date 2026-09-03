@@ -17,6 +17,24 @@ from pathlib import Path
 
 MANIFEST_NAME = "session.yaml"
 
+# An RViz layout is a per-experiment thing, so a session may ship its own under
+# this name next to its manifest.
+SESSION_RVIZ_NAME = "rviz.rviz"
+
+# The fallback layout, as share-relative parts, for a session that ships none.
+#
+# It lives here rather than in a launch file because BOTH `calibrate.launch.py`
+# and `session.launch.py` need it and a launch file cannot import another launch
+# file. Keeping one copy is not cosmetic: `session.launch.py` declares
+# `rviz_config` so it can tell "the operator typed nothing" from "the operator
+# typed the default", and a launch configuration set in a parent scope is
+# inherited by every `IncludeLaunchDescription` beneath it. That means
+# `calibrate.launch.py`'s own `DeclareLaunchArgument` default never applies when
+# it is included from `session.launch.py` -- the parent's value wins. A session
+# with no `rviz.rviz` therefore used to reach RViz as `-d ""`, which opens the
+# stock layout rather than this one.
+DEFAULT_RVIZ_CONFIG_PARTS = ("config", "rviz", "calibration.rviz")
+
 _FIND_PKG_SHARE = re.compile(r"\$\(find-pkg-share\s+([^)]+)\)")
 _SESSION_DIR = re.compile(r"\$\(session-dir\)")
 

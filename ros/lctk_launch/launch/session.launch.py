@@ -17,11 +17,15 @@ from launch.actions import (
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
-from lctk_launch.session import resolve_session
+from lctk_launch.session import (
+    DEFAULT_RVIZ_CONFIG_PARTS,
+    SESSION_RVIZ_NAME,
+    resolve_session,
+)
 
 # An RViz layout is a per-experiment thing -- which displays are open, which
 # topics they point at -- so a session may ship its own next to its manifest.
-SESSION_RVIZ = "rviz.rviz"
+SESSION_RVIZ = SESSION_RVIZ_NAME
 
 _FORWARDED = (
     ("debug_mode", "false", "Enable debug topics"),
@@ -46,11 +50,17 @@ def _rviz_config(context, session_dir) -> dict:
     """Decide which RViz layout the calibration graph should open.
 
     Three sources, in falling order of how specific they are to this run: what
-    the operator typed, what the session ships, and `calibrate.launch.py`'s own
-    default. Typing `rviz_config:=` means it, so an explicit value wins over the
-    session file; passing nothing back leaves the calibrate default untouched
-    rather than restating it here, which would leave two copies of one default
-    to drift apart.
+    the operator typed, what the session ships, and the repo-wide fallback.
+    Typing `rviz_config:=` means it, so an explicit value wins over the session
+    file.
+
+    All three branches return a concrete path. An earlier version returned `{}`
+    for the third, meaning "let `calibrate.launch.py` apply its own default",
+    which does not work: this file declares `rviz_config` (so it can tell an
+    untyped argument from a typed one), and a launch configuration set in a
+    parent scope is inherited by every included launch file, so the empty value
+    won and RViz opened with no layout at all. The default is shared as parts
+    via `lctk_launch.session` instead, so naming it here cannot drift.
     """
     explicit = LaunchConfiguration("rviz_config").perform(context).strip()
     if explicit:
@@ -58,7 +68,13 @@ def _rviz_config(context, session_dir) -> dict:
     session_layout = session_dir / SESSION_RVIZ
     if session_layout.is_file():
         return {"rviz_config": str(session_layout)}
-    return {}
+    # Name the fallback rather than dropping the key. Returning `{}` here looks
+    # like it leaves `calibrate.launch.py` to apply its own default, but a
+    # launch configuration set in a parent scope is inherited by everything it
+    # includes, so the empty `rviz_config` declared below wins and RViz opens
+    # with `-d ""` -- the stock layout, not this repo's. Both files read the
+    # same parts from `lctk_launch.session`, so there is still one default.
+    return {"rviz_config": _share(*DEFAULT_RVIZ_CONFIG_PARTS)}
 
 
 def generate_session(context, *args, **kwargs) -> list:
@@ -99,10 +115,14 @@ def generate_launch_description() -> LaunchDescription:
     arguments.append(
         DeclareLaunchArgument(
             "rviz_config",
-            # Deliberately empty rather than calibrate.launch.py's real default,
-            # so "the operator passed nothing" stays distinguishable from "the
-            # operator passed the default". Only the first may be overridden by
-            # a session's own rviz.rviz.
+            # Deliberately empty, so "the operator passed nothing" stays
+            # distinguishable from "the operator passed a path" -- only the
+            # former may be overridden by a session's own rviz.rviz.
+            #
+            # This empty value is also why `_rviz_config` must name a fallback
+            # rather than staying silent: declaring the argument here puts it in
+            # the parent scope, and every included launch file inherits it, so
+            # an unset value is not "unset" downstream. It is "".
             default_value="",
             description=(
                 "Path to an RViz config. Empty means: use the session's "

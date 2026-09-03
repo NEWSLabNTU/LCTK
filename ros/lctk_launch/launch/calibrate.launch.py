@@ -43,6 +43,7 @@ from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from lctk_launch.session import DEFAULT_RVIZ_CONFIG_PARTS
 
 
 def _identity_topic_for_detection(detection_topic: str) -> str:
@@ -447,13 +448,11 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "rviz_config",
+                # Shared with session.launch.py via lctk_launch.session so the
+                # two cannot drift; see DEFAULT_RVIZ_CONFIG_PARTS for why the
+                # default has to be named in both places rather than only here.
                 default_value=PathJoinSubstitution(
-                    [
-                        FindPackageShare("lctk_launch"),
-                        "config",
-                        "rviz",
-                        "calibration.rviz",
-                    ]
+                    [FindPackageShare("lctk_launch"), *DEFAULT_RVIZ_CONFIG_PARTS]
                 ),
                 description="Path to RViz config file. Override for different setups, e.g. two_lidar_calibration.rviz",
             ),

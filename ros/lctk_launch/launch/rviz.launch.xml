@@ -1,45 +1,37 @@
 <?xml version="1.0"?>
 <!--
-    Launch file for RViz visualization of calibration process.
+    RViz visualization for the calibration graph.
 
-    This launch file starts RViz with a pre-configured setup optimized for
-    LiDAR-Camera calibration visualization, including:
-    - Camera image with ArUco marker overlays
-    - Point cloud displays with debug information
-    - Board detection markers and visualization
-    - Proper coordinate frame setup
+    Started by calibrate.launch.py when enable_rviz is true. The layout comes
+    from rviz_config, which session.launch.py points at a session's own
+    rviz.rviz when it ships one.
 
     Usage:
     ros2 launch lctk_launch rviz.launch.xml
 -->
 <launch>
-    <!-- Launch Arguments -->
     <arg name="rviz_config"
          default="$(find-pkg-share lctk_launch)/config/rviz/calibration.rviz"
          description="Path to RViz configuration file"/>
 
-    <arg name="use_namespace"
-         default="false"
-         description="Whether to run RViz in a namespace"/>
+    <!--
+        One node, and deliberately no respawn.
 
-    <arg name="namespace"
-         default="visualization"
-         description="Namespace for RViz node"/>
+        This file used to declare the node twice: once namespaced under
+        `if="$(var use_namespace)"`, once bare under the matching `unless`, for
+        a `use_namespace` argument that no caller ever passed. Two declarations
+        sharing the name `rviz2` is a second window waiting to happen, and the
+        branch that would have justified it was unreachable, so both are gone.
 
-    <!-- RViz Node -->
-    <node pkg="rviz2"
-          exec="rviz2"
-          name="rviz2"
-          namespace="$(var namespace)" if="$(var use_namespace)"
-          output="screen"
-          respawn="true"
-          args="-d $(var rviz_config)"/>
-
+        The `respawn` flag is gone too. RViz is an operator's viewer, not a
+        pipeline stage: closing the window is a deliberate act, and respawning
+        it turns that into a window which will not stay shut. Nothing
+        downstream consumes RViz, so its exit is not a failure the graph needs
+        to recover from.
+    -->
     <node pkg="rviz2"
           exec="rviz2"
           name="rviz2"
           output="screen"
-          unless="$(var use_namespace)"
-          respawn="true"
           args="-d $(var rviz_config)"/>
 </launch>
