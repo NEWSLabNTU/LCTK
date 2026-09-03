@@ -1,0 +1,94 @@
+name: solid600-handheld-seyond
+description: >
+  Solid 600 mm target held by hand, Seyond Falcon plus a ZED, walked around an
+  underground car park. The same recordings as solid600-handheld-zed, read
+  through the Falcon instead of the VLP-32C: both sensors are in every
+  newtype_* bag, so this is the same scene seen by a denser sensor.
+
+  Why it exists: a VLP-32C crosses a 600 mm plate with about four rings, which
+  keeps the LiDAR detection rate low and starves assisted mode of the still,
+  novel placements it selects from. The Falcon samples the same plate far more
+  densely, so more frames survive to the review page. The sync window stays
+  tight because the board moves.
+
+data:
+  kind: bag
+  # Gitignored field capture -- symlink one in; see README.md.
+  path: $(session-dir)/bag
+  # The ZED records CompressedImage and nothing in this tree subscribes to one
+  # (aruco_locator_node takes sensor_msgs/Image), so the bridge belongs in the
+  # launched graph rather than in a second terminal an operator can forget.
+  republish:
+    - from: /sensing/camera/zed/rgb/color/rect/image/compressed
+      to: /sensing/camera/zed/rgb/color/rect/image
+
+devices:
+  lidars:
+    seyond_lidar:
+      frame_id: seyond
+      pointcloud_topic: /iv_points
+  cameras:
+    front_center:
+      frame_id: zed_left_camera_frame_optical
+      image_topic: /sensing/camera/zed/rgb/color/rect/image
+
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/solid_600_aruco_1_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/solid_600/seyond.json5
+    pairs:
+      - [seyond_lidar, front_center]
+
+sync: { tolerance_ms: 50, queue_size: 100, drop_policy: reject_new }
+
+assisted:
+  review_archive_path: $(session-dir)/out/detections.json
+
+  # INHERITED FROM solid600-handheld-zed, AND NOT RE-MEASURED FOR THE FALCON.
+  # Everything below was derived from the VLP-32C's pose stream on these same
+  # bags. The scene is identical, so the board's real motion is identical and
+  # the numbers are a defensible starting point -- but the quantity they were
+  # fitted to is pose noise, and a denser sensor has less of it. In particular
+  # the 13.5 mm floor quoted below is a VLP-32C floor; the Falcon's will be
+  # lower, which means 50 mm may be looser than this rig needs. Re-measure
+  # before treating these as tuned.
+  #
+  # Measured against this recording with the 1.0 s default window (the node's
+  # `stability_window_s`), and deliberately biased loose.
+  #
+  # Loose because the gates are not the quality filter -- the review page is.
+  # Every captured pair arrives with a preview, its own reprojection RMS and a
+  # drop button, rows sorted worst-first, so a marginal capture costs one click
+  # while a missed hold costs walking the board back to that spot and holding it
+  # again. Those costs are not symmetric, so where the data supports a range,
+  # these take the permissive end.
+  #
+  # The numbers, re-measured after the stillness window became a duration (the
+  # previous 30 mm / 8.0 deg were derived over ten-*pair* windows, which on this
+  # recording spanned 0.48 s to 19.42 s -- median 1.30 s, 71 of 195 shorter than
+  # a second -- so they were not measured over a second of anything):
+  #
+  #   * The operator holds the board three times: t~35.1-35.5, t~42.5-43.6 and
+  #     t~49.2-54.4. Their tightest 1 s translation spans are 39 mm, 17 mm and
+  #     13.5 mm; 13.5 mm is this rig's floor (a 600 mm plate at ~7 m), so the
+  #     node's 5 mm default is unreachable here by construction.
+  #   * 30 mm silently drops the first hold entirely. 50 mm takes all three and
+  #     additionally splits the long third hold into two placements more than
+  #     5 cm apart, which the board really did occupy -- 4 buffered pairs, the
+  #     same on two recorded pose streams and on the live end-to-end run,
+  #     against 2 before this change.
+  #   * The ceiling on loosening is where captures stop landing in a hold: at
+  #     >=90 mm with >=8 deg, and at >=120 mm with >=7.5 deg, captures appear at
+  #     t~33 with 1 s translation spans of 100-330 mm, which is a walking board.
+  #     50 mm sits well inside that.
+  stability_max_translation_m: 0.050
+  # Unchanged at 8.0, and still a noise-tolerant number rather than a physical
+  # one. Few LiDAR returns land on a 600 mm plate at ~7 m, so the fitted
+  # orientation is noisy: the tightest 1 s rotation span anywhere in the
+  # recording is 3.91 deg, and the tracker reports 6-8 deg while the translation
+  # span says 20 mm -- a board that is plainly not rotating. Nothing below
+  # ~5 deg captures anything here, and 7.8 through 8.8 deg give an identical
+  # result on both replays, so this sits on a plateau rather than on a spike.
+  # It wants re-measuring against a closer capture, where the orientation fit
+  # would be worth trusting.
+  stability_max_rotation_deg: 8.0

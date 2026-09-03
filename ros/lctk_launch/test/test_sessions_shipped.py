@@ -23,6 +23,7 @@ NAMES = [
     "sample5",
     "seyond-left",
     "seyond-right",
+    "solid600-handheld-seyond",
     "solid600-handheld-zed",
     "twolidar-vlp32-falcon",
     "vehicle-multisensor",
@@ -44,6 +45,12 @@ UNVERIFIED_SAMPLES = ["sample1", "sample2", "sample4", "sample5"]
 # The same holds for solid600-handheld-zed, whose recording is a field capture
 # that has never been small enough to ship.
 BAG_SESSIONS = [
+    # Both solid600-* sessions are `kind: bag` against the same gitignored
+    # field capture. solid600-handheld-zed was missing from this list, so on
+    # any machine without the symlink its parse test failed rather than
+    # skipping -- it only passed here because the symlink happened to exist.
+    "solid600-handheld-seyond",
+    "solid600-handheld-zed",
     "twolidar-vlp32-falcon",
     "vlp32-zed-hollow",
 ]
