@@ -63,6 +63,7 @@ module is the wrong shape).
 | [0001](./0001-detection-pair-source.md) | The synchronized detection pair is one module, and it refuses an infinite window | accepted |
 | [0002](./0002-detection-buffer.md) | The detection buffer owns every estimate derived from its captures | accepted |
 | [0003](./0003-single-source-target-definition.md) | Calibration targets share one authoritative definition, bound once per launch | accepted |
+| [0004](./0004-lidar-camera-solver-owns-camera-board-pose.md) | The LiDAR-to-camera solver owns camera-frame board pose | accepted |
 
 Reviews:
 

@@ -25,6 +25,30 @@ Sensor- and operating-range-specific settings controlling how observations of a 
 are found and accepted.
 _Avoid_: Target Definition, board geometry
 
+**Camera-Frame Board Pose**:
+The board pose in camera coordinates recovered from target marker geometry and image corners for an extrinsic solve. The LiDAR-to-camera solver owns this solve; camera marker detection and LiDAR target detection provide its observations.
+_Avoid_: ArUco ICP pose, LiDAR board pose, extrinsic transform
+
+**ICP Termination**:
+The condition that ends an iterative pose-refinement attempt. A Good-Fit Termination and a Stable-Pose Termination are successful outcomes; an Iteration-Limit Termination or invalid state is unsuccessful.
+_Avoid_: Final acceptance, convergence status
+
+**Good-Fit Termination**:
+An ICP attempt ending because its current residual is below the configured good-fit threshold. It is a successful ICP outcome.
+_Avoid_: Final acceptance gate, rejection threshold
+
+**Stable-Pose Termination**:
+An ICP attempt ending because successive pose updates remain stable for the required stability window. It is successful even when the residual remains above the good-fit threshold.
+_Avoid_: Good fit, iteration limit
+
+**Iteration-Limit Termination**:
+An ICP attempt reaching its configured iteration limit without a Good-Fit or Stable-Pose Termination. It is an unsuccessful ICP outcome.
+_Avoid_: Max-iteration success, final acceptance
+
+**Structural Evidence**:
+Target-specific geometric support that distinguishes the winning pose from competing hypotheses. It includes sufficient inlier support, a clear loss advantage over alternatives, and cutout-rim support; it is separate from residual quality.
+_Avoid_: Good fit, convergence, raw point count
+
 **LiDAR Orientation Reference**:
 The physical evidence that identifies a Calibration Target's named in-plane axes to a LiDAR: either
 asymmetric cutouts or a required local axis aligned with mounting-up.
