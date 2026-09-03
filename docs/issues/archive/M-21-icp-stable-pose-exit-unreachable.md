@@ -245,9 +245,9 @@ Fixed by collapsing perforated ICP termination onto a single configurable stabil
   `PerforatedIcpConfig`), default **3**, compared with `>=` rather than `>`. `validate()` rejects
   `0` at config-load time, so the knob this issue found inert (`icp_pose_weight_threshold`, now
   `pose_weight_threshold`) has an actually-reachable exit to feed: three consecutive quiet
-  iterations, not the ~600–1800 the old bar demanded against a 50–100-iteration cap. This directly
-  closes the finding: the shipped presets no longer need "a factor of 2–5" more budget than they
-  have — a converging run can reach `StablePose` inside the caps that ship today.
+  iterations, not the ~600–1800 the old bar demanded against a 50–100-iteration cap.
+  **Reachability is now budget-dependent, and only one shipped preset clears it** — measured, not
+  assumed; see "Reachability re-measured" below.
 - **`MaxIterations` is now an explicit failed hypothesis**, not an ordinary result reported as
   success. `should_terminate`, `termination_kind` and `successful_termination` share one explicit
   precedence — `hard-invalid -> GoodFit -> StablePose -> MaxIterations` — and only `GoodFit` and
@@ -283,6 +283,94 @@ Fixed by collapsing perforated ICP termination onto a single configurable stabil
   threshold, the two-or-more-successful-hypothesis separation gate, the zero-successful diagnostic,
   the structural gates, and `validate()` rejecting `stable_pose_iterations == 0` /
   `max_iterations == 0`. The workspace suite went from 155 to 169 tests, all passing.
+
+### Reachability re-measured (2026-09-03)
+
+The resolution above originally claimed the stable-pose exit was reachable "inside the caps that
+ship today", full stop. That was an inference, not a measurement, and it is only half right. This
+section records the measurement that settles it.
+
+**Method.** Temporary per-hypothesis instrumentation was added to `estimate_perforated_pose` in
+`rust/calibration-target-detector/src/perforated.rs`, recording for every quarter-turn hypothesis
+its terminal `iteration`, `avg_loss`, `termination_kind`, `termination_count`, and the first
+iteration at which `pose_weight` dropped to or below `pose_weight_threshold`. It was run against
+shipped sample dataset 3 (`sessions/sample3-hollow-velodyne`, VLP-32C pcap) on the bbox detection
+path — the only shipped recording that reaches perforated ICP at all (see "What the sample data
+cannot show" below). Two probe configs, differing from `hollow_1000/velodyne_bbox.json5` only in
+the fields named, and never committed:
+
+1. `icp_good_fit_threshold: 1e-12`, `max_icp_iterations: 5000`,
+   `icp_stable_pose_iterations: 1000000` — makes both successful exits unreachable so the loop runs
+   to the cap, giving the *uncensored* first-quiet iteration.
+2. `icp_good_fit_threshold: 1e-12`, `max_icp_iterations: 100` (`hollow_1000/velodyne.json5`'s
+   shipped cap), `icp_stable_pose_iterations: 3` (shipped) — asks directly whether `StablePose`
+   fires at a shipped budget.
+
+`icp_pose_weight_threshold` was left at the shipped `1e-4` in both.
+
+**Result 1 — the first quiet iteration.** Probe 1, 55 hypotheses: **min 49, median 112, max 291**
+(mean 152), with a clear split by initial quarter-turn (hypotheses 0 and 2 quieten at 49–112;
+hypotheses 1 and 3 at 146–291). Once quiet, the pose stays quiet — `termination_count` reached
+4918 of 5000 — so `StablePose` fires at approximately `first_quiet + (stable_pose_iterations - 1)`.
+M-21's original estimate of "in the hundreds" was right for half the hypotheses and roughly a
+factor of two too pessimistic for the other half.
+
+**Result 2 — `StablePose` at a shipped cap.** Probe 2, 2208 hypotheses across 733 frames at
+`max_icp_iterations: 100`:
+
+| termination | hypotheses | share |
+|---|---|---|
+| `StablePose` | 678 | 30.7 % |
+| `MaxIterations` | 1530 | 69.3 % |
+
+**491 detections were published on `StablePose` alone**, against 61 rejections. Their `avg_loss`
+ran 0.0215–0.0272 (mean 0.0250) — every one of them far above the probe's
+`icp_good_fit_threshold`, because `StablePose` does not examine the residual at all.
+
+**Verdict.** `StablePose` is:
+
+- **reachable** at `hollow_1000/velodyne.json5`'s `max_icp_iterations: 100` — 30.7 % of hypotheses
+  on real data;
+- **not reachable** at `hollow_1000/velodyne_bbox.json5`'s and `hollow_1000/seyond.json5`'s
+  `max_icp_iterations: 50` — no hypothesis in either probe went quiet early enough
+  (`first_quiet + 2 <= 50` held for 0 of 55 in probe 1). The Seyond figure is inferred from
+  Velodyne data; a Falcon has not been measured.
+
+So the knob this issue filed as inert is now configurable, validated, **and reachable — but only on
+the 100-iteration preset**. Raising `max_icp_iterations` or `icp_pose_weight_threshold` is what
+would make it reachable on the two 50-iteration presets; neither was changed, because both are
+tuning decisions outside the cleanup's scope.
+
+**This exposes an unbounded-residual accept path.** `StablePose` is a *successful* termination that
+publishes without consulting `avg_loss`, and it only gets the chance to fire on a frame where the
+residual stayed at or above `icp_good_fit_threshold` for the entire budget — precisely a frame
+`GoodFit` has already judged a bad fit. On `velodyne.json5` that path is open today. It is tracked
+as [M-31](../M-31-perforated-icp-parked-termination-findings.md), not fixed here: closing it means
+either a new `stable_pose_max_residual_m` config key or dropping `StablePose` from the successful
+set, and both exceed what this cleanup was authorised to change.
+
+**What the sample data cannot show.** The same session run with `hollow_1000/velodyne.json5`
+itself (`detection_mode: bbox_free`) never reaches ICP on dataset 3: 550 frames report
+`no candidate clusters survived foreground extraction` and 60 report
+`square fit residual exceeded square_icp_residual_max`, for zero ICP hypotheses and zero
+detections. Dataset 3 holds a single static board placement, which the background-subtraction
+foreground stage absorbs. **No shipped recording exercises the bbox-free presets the real rigs
+use end to end**, which is why the probes above run on the bbox path instead. This is the same
+gap M-29's post-mortem named and it is still open.
+
+**Separately, this measurement confirms the two bbox-free presets were dead before this branch.**
+At `44098ef`, `successful_termination` was `state.avg_loss < config.rejection_threshold_m ||
+state.termination_count > 100` — the second disjunct being the unreachable bar this issue is
+about. `hollow_1000/velodyne.json5` set `icp_rejection_threshold: 0.005` and
+`hollow_1000/seyond.json5` set `0.015`. Measured `avg_loss` on real dataset-3 board points is
+0.0224–0.0278 (n = 1100 hypotheses over 275 frames, mean 0.0256) — the VLP-32C range-noise floor.
+Neither threshold is reachable from that distribution, so neither preset could accept a single
+detection: a third instance of the C-04 / M-29 accept-nothing shape, in the presets the real rigs
+use. Only `velodyne_bbox.json5`, whose `icp_rejection_threshold` M-29 had already raised to
+`0.035`, was live — which is why `just demo` could not catch it. This branch fixes all three by
+deleting the key, and the `velodyne_bbox` path is unchanged: re-run after the cleanup, it produced
+**275 detections, 0 rejections, 100 % `GoodFit`, every hypothesis terminating at iteration 1** with
+`avg_loss` 0.0224–0.0278.
 
 **Camera-frame board pose, separately:** this issue's own analysis lived entirely inside
 `rust/calibration-target-detector`'s LiDAR-side ICP and never claimed the ArUco detector estimated
