@@ -50,7 +50,6 @@
   "solid_minimum_occupied_longitudinal_bins": 2,
   "max_icp_iterations": 50,
   "icp_pose_weight_threshold": 1e-4,
-  "icp_rejection_threshold": 0.008,
   "icp_good_fit_threshold": 0.05,
   "icp_outlier_threshold": 0.050,
   "icp_damping_factor": 0.5,

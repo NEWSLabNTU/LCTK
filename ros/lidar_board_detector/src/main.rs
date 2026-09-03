@@ -90,10 +90,6 @@ fn default_icp_pose_weight_threshold() -> f64 {
     1e-4
 }
 
-fn default_icp_rejection_threshold() -> f64 {
-    0.008
-}
-
 fn default_icp_good_fit_threshold() -> f64 {
     0.035
 }
@@ -179,8 +175,6 @@ struct DetectorConfig {
     max_icp_iterations: usize,
     #[serde(default = "default_icp_pose_weight_threshold")]
     icp_pose_weight_threshold: f64,
-    #[serde(default = "default_icp_rejection_threshold")]
-    icp_rejection_threshold: f64,
     #[serde(default = "default_icp_good_fit_threshold")]
     icp_good_fit_threshold: f64,
     #[serde(default = "default_icp_outlier_threshold")]
@@ -1052,7 +1046,33 @@ impl CalibrationBoardLocatorNode {
         }
 
         let path = PathBuf::from(file_path);
-        Self::load_json5_file(&path)
+        let text = fs::read_to_string(&path)?;
+        Self::check_no_stale_icp_rejection_threshold(&text)?;
+        let config: DetectorConfig = json5::from_str(&text)?;
+        Ok(config)
+    }
+
+    /// `icp_rejection_threshold` was removed: perforated ICP termination is
+    /// now decided by the single loss threshold `icp_good_fit_threshold`
+    /// (plus `icp_stable_pose_iterations` for stability). A config file that
+    /// still sets the old key is silently ignored by serde's `#[serde(flatten)]`
+    /// tuning field rather than rejected, so probe the raw JSON5 for it here
+    /// and fail loudly with the replacement named.
+    fn check_no_stale_icp_rejection_threshold(text: &str) -> Result<()> {
+        let value: serde_json::Value = json5::from_str(text)?;
+        let has_stale_key = value
+            .as_object()
+            .is_some_and(|map| map.contains_key("icp_rejection_threshold"));
+        if has_stale_key {
+            return Err(anyhow!(
+                "detector config still sets the removed key 'icp_rejection_threshold'. \
+                 Perforated ICP termination is now governed by 'icp_good_fit_threshold' \
+                 (the single loss-based termination threshold) and, for perforated targets, \
+                 'icp_stable_pose_iterations' (consecutive stable updates required before \
+                 stopping early). Delete 'icp_rejection_threshold' from the config."
+            ));
+        }
+        Ok(())
     }
 
     fn load_target(file_path: &str) -> Result<ValidatedTarget> {
@@ -1665,13 +1685,14 @@ impl CalibrationBoardLocatorNode {
             ),
             TargetRejectReason::PerforatedIcpFailure { evidence } => log_info!(
                 LOGGER_NAME,
-                "target rejected: target={}@{} reason=perforated_icp_failure rim_correspondences={} iterations={} total_correspondences={} best_loss_m={:.6}",
+                "target rejected: target={}@{} reason=perforated_icp_failure rim_correspondences={} iterations={} total_correspondences={} best_loss_m={:.6} termination={:?}",
                 identity.target_id,
                 identity.revision,
                 evidence.cutout_rim_correspondences,
                 evidence.iteration_count,
                 evidence.total_correspondences,
-                evidence.best_loss_m
+                evidence.best_loss_m,
+                evidence.termination
             ),
         }
     }
@@ -2954,6 +2975,82 @@ mod covariance_tests {
             }
             TargetPoseEstimate::Detected(_) => panic!("empty edge evidence must reject"),
         }
+    }
+
+    /// The removed `icp_rejection_threshold` key must be rejected with an actionable
+    /// message rather than silently ignored by `DetectorTuning`'s `#[serde(flatten)]`.
+    #[test]
+    fn stale_icp_rejection_threshold_key_is_rejected_with_actionable_message() {
+        let text = r#"{
+            icp_rejection_threshold: 0.008,
+            icp_good_fit_threshold: 0.035
+        }"#;
+        let error =
+            CalibrationBoardLocatorNode::check_no_stale_icp_rejection_threshold(text).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("icp_rejection_threshold"),
+            "error must name the removed key: {message}"
+        );
+        assert!(
+            message.contains("icp_good_fit_threshold"),
+            "error must name the replacement: {message}"
+        );
+        assert!(
+            message.contains("icp_stable_pose_iterations"),
+            "error must mention the new stable-pose option: {message}"
+        );
+    }
+
+    #[test]
+    fn config_without_stale_key_passes_the_diagnostic() {
+        let text = r#"{ icp_good_fit_threshold: 0.035, icp_stable_pose_iterations: 3 }"#;
+        assert!(CalibrationBoardLocatorNode::check_no_stale_icp_rejection_threshold(text).is_ok());
+    }
+
+    /// Exercises the full load boundary (`load_detector_config`), not just the probe
+    /// function, so a regression that stops wiring the check into the actual load path
+    /// is caught.
+    #[test]
+    fn load_detector_config_rejects_a_file_with_the_stale_key() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "lctk_stale_icp_rejection_threshold_test_{}.json5",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"{ icp_rejection_threshold: 0.008, icp_good_fit_threshold: 0.035 }"#,
+        )
+        .unwrap();
+
+        let result = CalibrationBoardLocatorNode::load_detector_config(path.to_str().unwrap());
+        std::fs::remove_file(&path).ok();
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("icp_rejection_threshold"));
+        assert!(error.contains("icp_good_fit_threshold"));
+    }
+
+    /// The shipped presets are comment-laden, trailing-comma JSON5, not the bare object
+    /// literals the other tests above use. Confirms the stale-key probe's own JSON5 parse
+    /// (needed to inspect raw keys ahead of the strongly-typed `DetectorConfig` parse)
+    /// tolerates that syntax on a real preset that no longer carries the removed key.
+    #[test]
+    fn load_detector_config_accepts_a_real_shipped_preset() {
+        let text =
+            include_str!("../../lctk_launch/config/board/hollow_1000/velodyne_bbox.json5");
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "lctk_shipped_preset_load_test_{}.json5",
+            std::process::id()
+        ));
+        std::fs::write(&path, text).unwrap();
+
+        let result = CalibrationBoardLocatorNode::load_detector_config(path.to_str().unwrap());
+        std::fs::remove_file(&path).ok();
+
+        result.expect("shipped preset without the stale key must load cleanly");
     }
 }
 

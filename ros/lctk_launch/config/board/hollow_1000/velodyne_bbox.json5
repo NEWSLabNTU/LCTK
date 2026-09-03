@@ -115,11 +115,12 @@
     // -- ICP --
     "max_icp_iterations": 50,
     "icp_pose_weight_threshold": 1e-4,     // pose-change convergence threshold
-    "icp_rejection_threshold": 0.035,      // max accepted per-iteration ICP loss; MUST stay above the
-                                           // VLP-32C noise floor (~0.022-0.029 measured) or the
-                                           // perforated ICP rejects every frame silently (C-04)
-    "icp_good_fit_threshold": 0.035,       // max mean point-to-model dist to ACCEPT (m); keep above sensor noise floor
+    "icp_good_fit_threshold": 0.035,       // single loss-based ICP termination threshold (m): ICP stops
+                                           // once mean point-to-model distance drops to/below this. MUST
+                                           // stay above the VLP-32C noise floor (~0.022-0.029 measured)
+                                           // or the perforated ICP silently accepts nothing (C-04, M-29)
     "icp_outlier_threshold": 0.050,        // correspondence outlier reject dist (effectively disabled)
     "icp_damping_factor": 0.5,             // pose-update damping
     "icp_min_inlier_points": 500,          // min inliers to keep iterating ICP (lower for sparse/far boards)
+    "icp_stable_pose_iterations": 3,       // consecutive stable pose updates before early stop
 }
