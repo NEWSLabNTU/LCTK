@@ -113,10 +113,11 @@ Detector Tuning entirely and now live only in the Target Definition above:
   // ICP pose refinement (values as shipped in hollow_1000/velodyne.json5)
   "max_icp_iterations": 100,              // Seyond preset ships 50
   "icp_good_fit_threshold": 0.035,        // Single loss-based ICP termination threshold (m): ICP
-                                           // stops once mean point-to-model distance drops to/below
-                                           // this. For hollow targets this must stay above the
-                                           // sensor's range-noise floor (~0.022-0.029 m for a
-                                           // VLP-32C) or it silently accepts nothing.
+                                           // stops once mean point-to-model distance drops strictly
+                                           // below this (equality does not terminate). For hollow
+                                           // targets this must stay above the sensor's range-noise
+                                           // floor (~0.022-0.029 m for a VLP-32C) or it silently
+                                           // accepts nothing.
   "icp_stable_pose_iterations": 3,        // Perforated targets only: consecutive stable pose
                                            // updates required before ICP stops early
 
