@@ -191,7 +191,7 @@ the same role `marker_layout_golden.rs` used to play).
 > **Camera-side status.** The two Python solvers reimplement the marker
 > layout independently and still use the **previous, edge-aligned** frame.
 > Until that is corrected, LiDAR-camera calibration is not trustworthy —
-> see `docs/issues/H-11-camera-solvers-stale-board-frame.md` in the repo.
+> see `docs/issues/archive/H-11-camera-solvers-stale-board-frame.md` in the repo.
 > LiDAR-to-LiDAR calibration is unaffected, because both sides of it come
 > from the same detector.
 

@@ -199,7 +199,7 @@ from solid configurations.
 
 **Files:**
 
-- Update `docs/issues/M-21-icp-stable-pose-exit-unreachable.md` with the resolution and move it to
+- Update `docs/issues/archive/M-21-icp-stable-pose-exit-unreachable.md` with the resolution and move it to
   `docs/issues/archive/` after implementation is verified.
 - Update `docs/issues/README.md` and any active phase/spec documentation that describes the old
   threshold roles or ArUco ownership.

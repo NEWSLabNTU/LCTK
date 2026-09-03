@@ -46,7 +46,7 @@ The board must be visible to both sensors simultaneously.
 > previous edge-aligned one. The resulting extrinsic is wrong by a 45°
 > in-plane rotation, and that half of the error is *silent* — the
 > reprojection error stays low. See
-> `docs/issues/H-11-camera-solvers-stale-board-frame.md`. LiDAR-to-LiDAR
+> `docs/issues/archive/H-11-camera-solvers-stale-board-frame.md`. LiDAR-to-LiDAR
 > calibration is unaffected.
 
 ## Step-by-Step Process
