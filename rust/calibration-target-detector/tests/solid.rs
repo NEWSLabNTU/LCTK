@@ -51,6 +51,7 @@ fn observation_with_square_fit(
             center,
             theta: 0.0,
             residual: 0.0,
+            geometric_residual: 0.0,
             corners_2d: [
                 [center[0] + half, center[1] + half],
                 [center[0] - half, center[1] + half],

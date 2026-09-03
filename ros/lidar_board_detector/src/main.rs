@@ -2731,6 +2731,7 @@ mod covariance_tests {
             center: [0.0, 0.0],
             theta: 0.0,
             residual: 0.01,
+            geometric_residual: 0.0,
             corners_2d: [[0.3, 0.3], [-0.3, 0.3], [-0.3, -0.3], [0.3, -0.3]],
         };
         let bbox_observation =
@@ -2990,6 +2991,7 @@ mod covariance_tests {
             center: [0.0, 0.0],
             theta: 0.0,
             residual: 0.0,
+            geometric_residual: 0.0,
             corners_2d: [[0.3, 0.3], [-0.3, 0.3], [-0.3, -0.3], [0.3, -0.3]],
         };
         let observation =

@@ -311,8 +311,16 @@ pub fn detect_for_target(
         let coords = project_to_plane(&cand.points, &cand.plane);
         let seed = seed_center(&coords, &params);
         let fit = fit_fixed_square(&coords, target_side.as_metres(), Some(seed), None);
+        // Which residual gates acceptance, and what it is measured against. When
+        // `square_geometric_residual_max` is set the geometric half decides, because the
+        // coverage half is unreachable for a small target at range (H-17); theta is
+        // still selected by the full residual either way.
+        let (gate_value, gate_threshold) = match tuning.square_geometric_residual_max {
+            Some(max) => (fit.map(|f| f.geometric_residual), max),
+            None => (fit.map(|f| f.residual), tuning.square_icp_residual_max),
+        };
         let fit = match fit {
-            Some(f) if f.residual < tuning.square_icp_residual_max => f,
+            Some(f) if gate_value.is_some_and(|v| v < gate_threshold) => f,
             // Failed square fit: report the residual (NaN when the fit itself
             // returned nothing, e.g. too few points) against its threshold.
             Some(f) => {
@@ -320,8 +328,8 @@ pub fn detect_for_target(
                     &mut square_furthest,
                     RejectReason::SquareResidual,
                     RejectDetail {
-                        measured: f.residual,
-                        threshold: tuning.square_icp_residual_max,
+                        measured: gate_value.unwrap_or(f.residual),
+                        threshold: gate_threshold,
                     },
                     &cand.points,
                 );
@@ -333,7 +341,7 @@ pub fn detect_for_target(
                     RejectReason::SquareResidual,
                     RejectDetail {
                         measured: f64::NAN,
-                        threshold: tuning.square_icp_residual_max,
+                        threshold: gate_threshold,
                     },
                     &cand.points,
                 );

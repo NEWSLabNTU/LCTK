@@ -2,7 +2,8 @@
 
 - **Severity:** High
 - **Area:** lidar_board_detector / config/board/solid_600
-- **Status:** Open (root-caused; fix is a code change, see "Two candidate fixes")
+- **Status:** Partially fixed 2026-09-04 -- the coverage gate is decoupled and no longer
+  blocks; candidate formation is now the remaining blocker
 - **Found:** 2026-08-31, first run of the solid target against real sensor data
 - **Data:** `~/Downloads/new_LCTK_board/` (`newtype_background`, `newtype_1`, `newtype_2`),
   ZED + VLP-32C + Seyond, from the 2026-08-12 capture
@@ -199,3 +200,56 @@ at all -- so the id travels with the board rather than being fixed in the room. 
 
 With the id correct the locator detects reliably and the solver receives `counts=(1, 0)`.
 Everything above is the remaining LiDAR-side failure, which is still open.
+
+## Fix applied 2026-09-04: the gate is decoupled from the theta search
+
+`square_fit.rs` now reports the residual's two halves separately. `SquareFit.residual` is
+unchanged and still selects theta -- the coverage term has to keep doing that, or a
+mis-rotated or over-large enclosing square is barely penalised. The new
+`SquareFit.geometric_residual` is the geometric half alone: the mean distance of points
+falling *outside* the modelled square, over side.
+
+A new optional tuning field, `square_geometric_residual_max`, gates acceptance on that
+half instead of the combined number. It defaults to unset, so every existing preset and
+the golden parity fixtures keep their exact behaviour; only the `solid_600` presets set
+it, at **0.05**.
+
+That threshold is measured, not chosen: the geometric residual over 30 real board
+clusters was median 0.0082 and max 0.0276, while a point cloud twice the model's size
+scores above 0.05 (pinned by `geometric_residual_still_rejects_points_outside_the_square`).
+Discrimination stays with `flatness_rms_max`, the extent gates and isolation -- which is
+where it already lived, since coverage was never separating board from clutter here
+(board median 0.684 against non-board 0.553).
+
+### Result on the real recording
+
+Run against `sessions/solid600-handheld-zed`, whose bag is `new_LCTK_board/newtype_1`:
+
+| | square-residual rejections | board detections |
+|---|---|---|
+| before (combined gate, 0.45) | 18 of 127 frames | 0 |
+| after (geometric gate, 0.05) | **0** | first non-zero detection observed |
+
+The gate this issue was filed about no longer blocks anything. Parity is untouched: the
+same four Method-B fixtures fail before and after, which is the separate
+fixture-provenance problem, not a regression here.
+
+### What remains
+
+Every rejection is now `no candidate clusters survived foreground extraction`, and the
+detection rate is still roughly 1%. That is a **different** defect from the one this
+issue diagnosed: candidate formation hands the square fit worse point sets than the data
+supports. The gap was already visible in the original investigation -- the node's best
+residual was 0.752 where the same metric over hand-clustered board points gave 0.436 --
+and it is what should be attacked next.
+
+Two measurement notes for whoever picks that up:
+
+- `patch_min_points: 40` and `icp_min_inlier_points: 50` cut logged rejections from 113 to
+  43 but did **not** raise the detection count, so they are not justified yet and were
+  reverted. The remaining values are the inherited 60 and 100.
+- Rates could not be compared cleanly because `mode:=realtime` drops frames
+  nondeterministically, and `mode:=offline` receives nothing from a bag (M-30).
+  `bag_play.py` accepts `--play-arg`, but `session.launch.py` does not expose it, so
+  there is no way to force reliable playback QoS through a session. Exposing it would
+  make this measurable and is a natural M-30 follow-up.

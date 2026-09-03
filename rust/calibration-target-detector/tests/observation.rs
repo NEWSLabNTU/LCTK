@@ -24,6 +24,7 @@ fn evidence(normal: Vector3<f64>) -> SquarePlaneObservation {
             center: [0.25, -0.5],
             theta: 0.0,
             residual: 0.0,
+            geometric_residual: 0.0,
             corners_2d: [
                 [0.25 + half, -0.5 + half],
                 [0.25 - half, -0.5 + half],

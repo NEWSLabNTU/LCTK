@@ -271,6 +271,7 @@ fn observation_seeding_pose(
         center: [0.0, 0.0],
         theta: 0.0,
         residual: 0.0,
+        geometric_residual: 0.0,
         corners_2d: [[half, 0.0], [0.0, half], [-half, 0.0], [0.0, -half]],
     };
     // `sensor_up` only feeds `TargetSquarePlaneObservation::orientation`, which

@@ -24,6 +24,20 @@
   "side_tol": 0.20,
   "cell_m": 0.02,
   "square_icp_residual_max": 0.45,
+  // H-17: gate on the square fit's GEOMETRIC residual, not the combined one.
+  //
+  // The combined residual adds a perimeter-coverage term that a 600 mm plate at 7-8 m
+  // cannot satisfy: the VLP-32C's rings are ~15 cm apart, so ~half the perimeter bins
+  // never hold a point and the best residual any real frame produced was 0.4513 against
+  // a 0.45 gate -- 127 frames, zero accepted. Coverage still selects theta; it just no
+  // longer decides acceptance.
+  //
+  // 0.05 comes from measurement, not preference: the geometric residual over 30 real
+  // board clusters was median 0.0082, max 0.0276, while a cloud twice the model's size
+  // scores above 0.05. Discrimination is left to flatness_rms_max, the extent gates and
+  // isolation, which is where it already lived -- coverage was never separating board
+  // from clutter here (board median 0.684 vs non-board 0.553).
+  "square_geometric_residual_max": 0.05,
   "up_axis": [0.0, 0.0, 1.0],
   "stance_floor": 0.9,
   "isolation": false,

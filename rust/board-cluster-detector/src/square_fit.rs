@@ -28,8 +28,14 @@ pub struct SquareFit {
     pub center: [f64; 2],
     /// Radians; determined mod 90 deg (4-fold symmetry).
     pub theta: f64,
-    /// Coverage residual, lower is better; ~0 is exact.
+    /// Coverage residual (geometric + perimeter coverage), lower is better; ~0 is
+    /// exact. This is the score the theta search minimises.
     pub residual: f64,
+    /// The geometric half of `residual` alone: mean distance of points outside the
+    /// square, over side. Unlike `residual` this stays meaningful when the sensor is
+    /// too sparse to reach the perimeter, so it is what an acceptance gate should use
+    /// for a small target at range (H-17).
+    pub geometric_residual: f64,
     /// Cyclic order (not necessarily CCW).
     pub corners_2d: [[f64; 2]; 4],
 }
@@ -54,7 +60,28 @@ fn percentile(sorted_vals: &[f64], p: f64) -> f64 {
 /// `rel` is points in the square's own axis-aligned frame, already centered
 /// on the candidate center (so the square occupies `[-side/2, side/2]^2`).
 /// Lower is better; 0 is an exact, fully-covered fit.
-fn coverage_residual(rel: &[[f64; 2]], side: f64) -> f64 {
+/// The two halves of the coverage residual, reported separately.
+///
+/// `geometric` is the mean distance of points falling OUTSIDE the fixed-size square,
+/// normalised by side. It measures how well the square models the points actually
+/// observed, and is near zero for a real plate however sparsely it is sampled.
+///
+/// `coverage` is the fraction of perimeter bins holding no nearby point. It is what
+/// gives the theta search a gradient -- an over-large or mis-rotated enclosing box is
+/// penalised by it -- but it is NOT a measure of fit quality when the sensor cannot
+/// reach the perimeter. A 600 mm plate at 7-8 m is crossed by about four VLP-32C rings,
+/// so roughly half its perimeter bins are unfillable by construction (H-17).
+///
+/// `total` is `geometric + coverage`, the historical single number: it still selects
+/// theta, so search behaviour is unchanged.
+#[derive(Debug, Clone, Copy)]
+pub struct ResidualTerms {
+    pub geometric: f64,
+    pub coverage: f64,
+    pub total: f64,
+}
+
+fn coverage_residual(rel: &[[f64; 2]], side: f64) -> ResidualTerms {
     let half = side / 2.0;
 
     // Term 1: mean per-point distance outside the square.
@@ -96,7 +123,12 @@ fn coverage_residual(rel: &[[f64; 2]], side: f64) -> f64 {
     }
     let coverage_penalty = misses as f64 / (4 * N_BINS_PER_SIDE) as f64;
 
-    mean_outside / side + coverage_penalty
+    let geometric = mean_outside / side;
+    ResidualTerms {
+        geometric,
+        coverage: coverage_penalty,
+        total: geometric + coverage_penalty,
+    }
 }
 
 /// Closed-form center (robust per-axis extent midpoint) + coverage residual
@@ -108,7 +140,11 @@ fn coverage_residual(rel: &[[f64; 2]], side: f64) -> f64 {
 /// The inverse transforms (`center_world = center_sq @ rot.T`,
 /// `corners_world = (corners_sq + center_sq) @ rot.T`) work out to the
 /// standard forward rotation `rot @ v`: `out_x = c*x - s*y`, `out_y = s*x + c*y`.
-fn fit_at_theta(coords: &[[f64; 2]], side: f64, theta: f64) -> (f64, [f64; 2], [[f64; 2]; 4]) {
+fn fit_at_theta(
+    coords: &[[f64; 2]],
+    side: f64,
+    theta: f64,
+) -> (ResidualTerms, [f64; 2], [[f64; 2]; 4]) {
     let (c, s) = (theta.cos(), theta.sin());
 
     let mut xs: Vec<f64> = Vec::with_capacity(coords.len());
@@ -138,7 +174,7 @@ fn fit_at_theta(coords: &[[f64; 2]], side: f64, theta: f64) -> (f64, [f64; 2], [
         .map(|p| [p[0] - center_sq[0], p[1] - center_sq[1]])
         .collect();
 
-    let residual = coverage_residual(&rel, side);
+    let terms = coverage_residual(&rel, side);
 
     let half = side / 2.0;
     let corners_sq = [[half, half], [-half, half], [-half, -half], [half, -half]];
@@ -153,24 +189,28 @@ fn fit_at_theta(coords: &[[f64; 2]], side: f64, theta: f64) -> (f64, [f64; 2], [
         ])
     });
 
-    (residual, center_world, corners_world)
+    (terms, center_world, corners_world)
 }
 
 fn best_over(coords: &[[f64; 2]], side: f64, thetas: &[f64]) -> SquareFit {
+    // Theta is still selected by the FULL residual: the coverage term is what penalises
+    // a mis-rotated or over-large enclosing square, so removing it from the search would
+    // leave rotation nearly unconstrained. Only the reported geometric half is new.
     let mut best_residual = f64::INFINITY;
-    let mut best: Option<(f64, [f64; 2], [[f64; 2]; 4])> = None;
+    let mut best: Option<(f64, f64, [f64; 2], [[f64; 2]; 4])> = None;
     for &theta in thetas {
-        let (residual, center, corners) = fit_at_theta(coords, side, theta);
-        if residual < best_residual {
-            best_residual = residual;
-            best = Some((theta, center, corners));
+        let (terms, center, corners) = fit_at_theta(coords, side, theta);
+        if terms.total < best_residual {
+            best_residual = terms.total;
+            best = Some((theta, terms.geometric, center, corners));
         }
     }
-    let (theta, center, corners) = best.expect("thetas must be non-empty");
+    let (theta, geometric, center, corners) = best.expect("thetas must be non-empty");
     SquareFit {
         center,
         theta,
         residual: best_residual,
+        geometric_residual: geometric,
         corners_2d: corners,
     }
 }

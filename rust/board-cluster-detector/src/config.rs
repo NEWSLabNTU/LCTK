@@ -24,6 +24,23 @@ pub struct DetectorTuning {
     pub stance_floor: f64,
     #[serde(default = "d_square_res")]
     pub square_icp_residual_max: f64,
+    /// Optional acceptance gate on the square fit's GEOMETRIC residual alone, replacing
+    /// `square_icp_residual_max` when set.
+    ///
+    /// The default residual sums a geometric term (points falling outside the modelled
+    /// square) and a perimeter-coverage term. Coverage is load-bearing for the theta
+    /// search but is unreachable as a gate when the sensor cannot sample the perimeter:
+    /// a 600 mm plate at 7-8 m is crossed by about four VLP-32C rings, so roughly half
+    /// its perimeter bins can never hold a point and the best achievable residual sits
+    /// above any sane threshold (H-17).
+    ///
+    /// Set this for a small target at range, where the geometric term still separates a
+    /// real plate (~0.01) from a bad fit, and let flatness/extent/isolation do the
+    /// discriminating that coverage cannot. Leave unset to keep the historical
+    /// behaviour exactly -- which is what every existing preset and parity fixture
+    /// depends on.
+    #[serde(default)]
+    pub square_geometric_residual_max: Option<f64>,
     #[serde(default)]
     pub isolation: bool,
     #[serde(default = "d_iso_density")]
@@ -213,6 +230,7 @@ pub fn production_tuning(up_axis: [f64; 3], cluster_min_points: usize) -> Detect
         flatness_rms_max: 0.045, // production override of serde default
         stance_floor: 0.9,       // production override of serde default
         square_icp_residual_max: d_square_res(),
+        square_geometric_residual_max: None,
         isolation: true, // production override of serde default
         isolation_max_density: d_iso_density(),
         strip_plane_dist: d_strip_plane_dist(),
