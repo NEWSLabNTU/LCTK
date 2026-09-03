@@ -65,6 +65,11 @@ nothing automates.
 - **`icp_rejection_threshold` raised to `0.035`** in `hollow_1000/velodyne_bbox.json5`, with a
   comment naming the noise floor and the failure mode so the next person does not tighten it
   back.
+  > **Superseded (2026-09-03).** `icp_rejection_threshold` no longer exists: the perforated ICP
+  > termination cleanup collapsed it onto `icp_good_fit_threshold`, and a config still carrying
+  > the old key is now refused at load with an actionable error. Set `icp_good_fit_threshold`
+  > instead — see [M-21](archive/M-21-icp-stable-pose-exit-unreachable.md). The finding and
+  > evidence above stand as recorded; only the key name changed.
 
 Verified after the fix on dataset 3: **zero rejections**, assisted mode auto-captures a pair
 and serves a real 1920×1080 preview, and `continuous` solves and publishes the extrinsic at

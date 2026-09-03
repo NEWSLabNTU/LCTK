@@ -121,6 +121,12 @@ Detector Tuning entirely and now live only in the Target Definition above:
   "icp_stable_pose_iterations": 3,        // Perforated targets only: consecutive stable pose
                                            // updates required before ICP stops early
 
+  // Structural acceptance gates (perforated targets only). Values shown are the
+  // code defaults; see "Structural acceptance gates" below for what each protects.
+  "min_hypothesis_loss_separation_m": 1e-4,
+  "min_cutout_rim_correspondences": 1,
+  "cutout_rim_tolerance_m": 0.03,
+
   "detection_mode": "bbox_free"           // "bbox" (Rust-level default) | "bbox_free" (shipped default)
 }
 ```
@@ -130,6 +136,23 @@ Detector Tuning entirely and now live only in the Target Definition above:
   `size_xyz` (see Bounding Box below)
 - **Noisy point clouds:** Increase `plane_ransac_max_iterations`
 - **False detections:** Decrease `plane_ransac_inlier_threshold`
+
+#### Structural acceptance gates (perforated targets only)
+
+`icp_good_fit_threshold` decides when ICP *stops*. It is not an acceptance test — there is no
+post-ICP residual gate any more, so the three keys below are what actually decide whether a
+terminated hypothesis is published. All three have code defaults and are stated explicitly in
+the three `hollow_1000` presets so they are visible when tuning.
+
+| Key | Default | What it protects against |
+|-----|---------|--------------------------|
+| `min_hypothesis_loss_separation_m` | `1e-4` | A wrong quarter-turn winning on a near-tie. Each observation runs four ICP attempts, one per quarter-turn initial pose; the best two *successful* attempts must differ in `avg_loss` by at least this much. **Applied only when two or more hypotheses succeed** — a single successful hypothesis publishes without a separation comparison, even if a *failed* hypothesis had a lower loss. |
+| `min_cutout_rim_correspondences` | `1` | A pose selected by the plate's square outline alone, with no cutout evidence — the ambiguity the perforated detector exists to resolve. A good frame shows on the order of 250 rim correspondences, so the default of `1` is close to a no-op; raise it to make cutout evidence genuinely required. |
+| `cutout_rim_tolerance_m` | `0.03` | Sets the band width, in metres, around a cutout rim within which a correspondence counts toward the gate above. Too wide and plate-interior points are miscounted as rim evidence; too narrow and a correctly-posed board fails the count on sensor range noise. |
+
+Solid targets use `square_icp_residual_max` and the outer-edge evidence gates instead; none of
+the three keys above applies to them.
+
 
 #### `sensor_up_axis` and `initial_inplane_rotation_deg`
 

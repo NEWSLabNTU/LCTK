@@ -15,10 +15,15 @@ fn target() -> ValidatedTarget {
 fn tuning() -> PerforatedIcpConfig {
     // good_fit_threshold_m is tight (was `rejection_threshold_m` before the M-21
     // termination cleanup collapsed the two): it is now the loop's own
-    // termination threshold, and these fixtures use noiseless synthetic points
-    // that converge to near-exact residual, so a loose value would leave the
-    // loop exiting via `MaxIterations` -- now an unconditional failure -- well
-    // before `avg_loss` gets anywhere near it.
+    // termination threshold, so it controls how *early* `GoodFit` fires --
+    // looser exits sooner, tighter exits later. These fixtures use noiseless
+    // synthetic points that converge to a near-exact residual, so even 1e-8 is
+    // reached well inside `max_iterations`; keeping it there makes the facade
+    // exercise real convergence rather than accepting whatever pose the first
+    // iteration happened to produce. Contrast `perforated_convergence.rs`,
+    // whose noisy manifest cannot reach a residual that small, and where the
+    // threshold must instead be loose enough that `GoodFit` fires at all
+    // before `MaxIterations` -- now an unconditional failure.
     PerforatedIcpConfig::new(40, 0.2, 0.5, 1e-8, 3, 1e-8, 3, 0.0001, 1, 1e-5)
 }
 

@@ -116,11 +116,31 @@
     "max_icp_iterations": 50,
     "icp_pose_weight_threshold": 1e-4,     // pose-change convergence threshold
     "icp_good_fit_threshold": 0.035,       // single loss-based ICP termination threshold (m): ICP stops
-                                           // once mean point-to-model distance drops to/below this. MUST
-                                           // stay above the VLP-32C noise floor (~0.022-0.029 measured)
-                                           // or the perforated ICP silently accepts nothing (C-04, M-29)
+                                           // once mean point-to-model distance drops STRICTLY BELOW this
+                                           // (equality does not terminate). MUST stay above the VLP-32C
+                                           // noise floor (~0.022-0.029 measured): below it `GoodFit` can
+                                           // never fire, so the perforated ICP either accepts nothing at
+                                           // all or -- where `StablePose` is reachable at the configured
+                                           // `max_icp_iterations` -- accepts on stability alone, with the
+                                           // residual unbounded (C-04, M-29, M-21)
     "icp_outlier_threshold": 0.050,        // correspondence outlier reject dist (effectively disabled)
     "icp_damping_factor": 0.5,             // pose-update damping
     "icp_min_inlier_points": 500,          // min inliers to keep iterating ICP (lower for sparse/far boards)
     "icp_stable_pose_iterations": 3,       // consecutive stable pose updates before early stop
+
+    // -- structural acceptance gates (perforated targets only) --
+    // These decide whether a *terminated* hypothesis is trustworthy enough to
+    // publish. Since the termination cleanup there is no post-ICP residual gate
+    // in front of them, so they are the acceptance criteria; the values below are
+    // the code defaults, stated explicitly so they are visible when tuning.
+    "min_hypothesis_loss_separation_m": 1e-4, // min avg_loss gap between the best and second-best
+                                           // *successful* quarter-turn hypothesis; guards a wrong
+                                           // quarter-turn winning on a near-tie. Only applied when two
+                                           // or more hypotheses succeed -- a lone success is unchecked
+    "min_cutout_rim_correspondences": 1,   // min correspondences landing on a cutout rim; guards a pose
+                                           // selected by the plate outline alone with no cutout evidence.
+                                           // A good frame shows ~250, so 1 is close to a no-op -- raise
+                                           // it to make cutout evidence genuinely required
+    "cutout_rim_tolerance_m": 0.03,        // band width (m) around a cutout rim within which a
+                                           // correspondence counts toward the gate above
 }

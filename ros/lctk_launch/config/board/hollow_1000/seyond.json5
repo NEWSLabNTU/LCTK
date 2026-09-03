@@ -47,4 +47,22 @@
   "icp_damping_factor": 0.5,
   "icp_min_inlier_points": 300,
   "icp_stable_pose_iterations": 3,
+
+  // -- structural acceptance gates (perforated targets only) --
+  // These decide whether a *terminated* hypothesis is trustworthy enough to
+  // publish. Since the termination cleanup there is no post-ICP residual gate
+  // in front of them, so they are the acceptance criteria; the values below
+  // are the code defaults, stated explicitly so they are visible when tuning.
+  "min_hypothesis_loss_separation_m": 1e-4, // Minimum avg_loss gap between the best and the
+                                          // second-best *successful* quarter-turn hypothesis.
+                                          // Guards against a wrong quarter-turn winning on a
+                                          // near-tie. Only applied when two or more hypotheses
+                                          // succeed; a lone success publishes unchecked.
+  "min_cutout_rim_correspondences": 1,    // Minimum correspondences landing on a cutout rim.
+                                          // Guards against a pose selected by the plate's square
+                                          // outline alone, with no cutout evidence. A good frame
+                                          // shows ~250, so the default of 1 is close to a no-op --
+                                          // raise it to make cutout evidence genuinely required.
+  "cutout_rim_tolerance_m": 0.03,         // Band width (m) around a cutout rim within which a
+                                          // correspondence counts toward the gate above.
 }
