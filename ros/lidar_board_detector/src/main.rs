@@ -1604,6 +1604,16 @@ impl CalibrationBoardLocatorNode {
             .collect()
     }
 
+    /// Renders an optional loss/separation evidence field for an operator log
+    /// line. `None` means no successful runner-up hypothesis existed -- render
+    /// that plainly rather than via `{:?}`, and never drop the field.
+    fn format_optional_loss_m(value: Option<f64>) -> String {
+        match value {
+            Some(value) => format!("{value:.6}"),
+            None => "none (no successful runner-up)".to_owned(),
+        }
+    }
+
     fn log_rejection(reason: &TargetRejectReason, identity: &TargetIdentity) {
         match reason {
             TargetRejectReason::BoardUpAlignment {
@@ -1633,12 +1643,12 @@ impl CalibrationBoardLocatorNode {
                 required_separation_m,
             } => log_info!(
                 LOGGER_NAME,
-                "target rejected: target={}@{} reason=ambiguous_cutout_evidence best_loss_m={:.6} second_best_loss_m={:.6} separation_m={:.6} required_separation_m={:.6}",
+                "target rejected: target={}@{} reason=ambiguous_cutout_evidence best_loss_m={:.6} second_best_loss_m={} separation_m={} required_separation_m={:.6}",
                 identity.target_id,
                 identity.revision,
                 evidence.best_loss_m,
-                evidence.second_best_loss_m,
-                evidence.loss_separation_m,
+                Self::format_optional_loss_m(evidence.second_best_loss_m),
+                Self::format_optional_loss_m(evidence.loss_separation_m),
                 required_separation_m
             ),
             TargetRejectReason::WeakCutoutEvidence {
@@ -2768,8 +2778,8 @@ mod covariance_tests {
             selected_quadrant: 0,
             diagnostics: TargetDetectionDiagnostics::CutoutIcp(CutoutIcpEvidence {
                 best_loss_m: 0.001,
-                second_best_loss_m: 0.01,
-                loss_separation_m: 0.009,
+                second_best_loss_m: Some(0.01),
+                loss_separation_m: Some(0.009),
                 cutout_rim_correspondences: 12,
                 iteration_count: 3,
                 total_correspondences: 20,

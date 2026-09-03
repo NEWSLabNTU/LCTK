@@ -307,8 +307,11 @@ pub struct PerforatedPoseEstimate {
     pub pose: Isometry3<f64>,
     pub winning_candidate_index: usize,
     pub best_loss_m: f64,
-    pub second_best_loss_m: f64,
-    pub loss_separation_m: f64,
+    /// `None` when no successful runner-up hypothesis existed, never a
+    /// synthetic sentinel.
+    pub second_best_loss_m: Option<f64>,
+    /// `None` exactly when `second_best_loss_m` is `None`.
+    pub loss_separation_m: Option<f64>,
     pub cutout_rim_correspondences: usize,
     pub iteration_count: usize,
     pub total_correspondences: usize,
@@ -319,8 +322,11 @@ pub struct PerforatedPoseEstimate {
 #[derive(Debug, Clone)]
 pub(crate) struct PerforatedEvidence {
     pub(crate) best_loss_m: f64,
-    pub(crate) second_best_loss_m: f64,
-    pub(crate) loss_separation_m: f64,
+    /// `None` when no successful runner-up hypothesis existed, never a
+    /// synthetic sentinel.
+    pub(crate) second_best_loss_m: Option<f64>,
+    /// `None` exactly when `second_best_loss_m` is `None`.
+    pub(crate) loss_separation_m: Option<f64>,
     pub(crate) cutout_rim_correspondences: usize,
     pub(crate) iteration_count: usize,
     pub(crate) total_correspondences: usize,
@@ -379,49 +385,80 @@ pub fn estimate_perforated_pose(
             state,
         }
     });
-    let mut ranked = [0usize, 1, 2, 3];
-    ranked.sort_by(|&left, &right| {
-        hypotheses[left]
-            .state
-            .avg_loss
-            .total_cmp(&hypotheses[right].state.avg_loss)
-            .then_with(|| left.cmp(&right))
-    });
-    let best = &hypotheses[ranked[0]];
-    let second = &hypotheses[ranked[1]];
-    let separation = second.state.avg_loss - best.state.avg_loss;
+    // Classify before ranking. Only `GoodFit`/`StablePose` states are
+    // publication candidates -- `MaxIterations` and every hard-invalid state
+    // are discarded here, not merely outranked. `StablePose` does not itself
+    // examine `avg_loss` (it only counts consecutive quiet updates), so a
+    // state can reach it with a non-finite loss -- NaN from a degenerate
+    // correspondence set, say. Such a state must never win a ranking
+    // comparison or reach publication, so the finite check sits right here,
+    // alongside the success classification, rather than as a separate gate
+    // applied only to whatever `sort` happened to put first.
+    let mut successful_indices: Vec<usize> = (0..hypotheses.len())
+        .filter(|&index| {
+            successful_termination(&hypotheses[index].state, config)
+                && hypotheses[index].state.avg_loss.is_finite()
+        })
+        .collect();
+    rank_by_loss(&hypotheses, &mut successful_indices);
+
+    let Some(&best_index) = successful_indices.first() else {
+        // Zero successful hypotheses: reject, but keep the lowest-loss failed
+        // attempt as diagnostic evidence -- it is never published, and it
+        // reports its own real `termination_kind` so an operator can tell
+        // `MaxIterations` from `TooFewInliers`.
+        let mut all_indices = [0usize, 1, 2, 3];
+        rank_by_loss(&hypotheses, &mut all_indices);
+        let worst_best = &hypotheses[all_indices[0]];
+        return Err(PerforatedRejection::IcpFailure {
+            evidence: PerforatedEvidence {
+                best_loss_m: worst_best.state.avg_loss,
+                second_best_loss_m: None,
+                loss_separation_m: None,
+                cutout_rim_correspondences: worst_best.cutout_rim_correspondences,
+                iteration_count: worst_best.state.iteration,
+                total_correspondences: worst_best.state.total_correspondences,
+                termination: termination_kind(&worst_best.state, config),
+            },
+        });
+    };
+    let best = &hypotheses[best_index];
+    let runner_up = successful_indices.get(1).map(|&index| &hypotheses[index]);
+    let separation = runner_up.map(|second| second.state.avg_loss - best.state.avg_loss);
     let evidence = || PerforatedEvidence {
         best_loss_m: best.state.avg_loss,
-        second_best_loss_m: second.state.avg_loss,
+        second_best_loss_m: runner_up.map(|second| second.state.avg_loss),
         loss_separation_m: separation,
         cutout_rim_correspondences: best.cutout_rim_correspondences,
         iteration_count: best.state.iteration,
         total_correspondences: best.state.total_correspondences,
         termination: termination_kind(&best.state, config),
     };
-    if !best.state.avg_loss.is_finite() {
-        return Err(PerforatedRejection::IcpFailure {
-            evidence: evidence(),
-        });
-    }
-    if !successful_termination(&best.state, config) {
-        return Err(PerforatedRejection::IcpFailure {
-            evidence: evidence(),
-        });
-    }
     // Iterator convergence alone is still subject to the legacy production
     // caller's final inlier gate.  There is no separate post-ICP residual
     // check: `good_fit_threshold_m` already decided termination above.
+    //
+    // This is arguably redundant now: `inlier_points` is cloned unchanged
+    // into every one of the four attempts, so an observation with too few
+    // inlier points makes all four classify `TooFewInliers` (hard-invalid)
+    // and get discarded above, well before this line runs. Kept anyway --
+    // it is the caller-facing statement of the requirement, and a future
+    // change to how the loop seeds `inlier_points` per attempt must not
+    // silently lose this gate.
     if best.state.inlier_points.len() < config.min_inlier_points {
         return Err(PerforatedRejection::IcpFailure {
             evidence: evidence(),
         });
     }
-    if separation < config.min_hypothesis_loss_separation_m {
-        return Err(PerforatedRejection::AmbiguousCutoutEvidence {
-            evidence: evidence(),
-            required_separation_m: config.min_hypothesis_loss_separation_m,
-        });
+    // Skipped, not defaulted, when there is no successful runner-up: a single
+    // successful hypothesis publishes without a separation comparison.
+    if let Some(separation) = separation {
+        if separation < config.min_hypothesis_loss_separation_m {
+            return Err(PerforatedRejection::AmbiguousCutoutEvidence {
+                evidence: evidence(),
+                required_separation_m: config.min_hypothesis_loss_separation_m,
+            });
+        }
     }
     if best.cutout_rim_correspondences < config.min_cutout_rim_correspondences {
         return Err(PerforatedRejection::WeakCutoutEvidence {
@@ -429,18 +466,31 @@ pub fn estimate_perforated_pose(
             required_rim_correspondences: config.min_cutout_rim_correspondences,
         });
     }
-    let best = hypotheses[ranked[0]].clone();
     Ok(PerforatedPoseEstimate {
         pose: best.state.board_pose,
         winning_candidate_index: best.candidate_index,
         best_loss_m: best.state.avg_loss,
-        second_best_loss_m: hypotheses[ranked[1]].state.avg_loss,
+        second_best_loss_m: runner_up.map(|second| second.state.avg_loss),
         loss_separation_m: separation,
         cutout_rim_correspondences: best.cutout_rim_correspondences,
         iteration_count: best.state.iteration,
         total_correspondences: best.state.total_correspondences,
         termination: termination_kind(&best.state, config),
     })
+}
+
+/// Sorts hypothesis indices ascending by `avg_loss`, breaking ties by
+/// candidate index. The one deterministic ordering used both to rank
+/// successful hypotheses for publication and to pick the most-plausible
+/// failed attempt for rejection diagnostics.
+fn rank_by_loss(hypotheses: &[PerforatedHypothesisResult; 4], indices: &mut [usize]) {
+    indices.sort_by(|&left, &right| {
+        hypotheses[left]
+            .state
+            .avg_loss
+            .total_cmp(&hypotheses[right].state.avg_loss)
+            .then_with(|| left.cmp(&right))
+    });
 }
 
 /// `GoodFit` and `StablePose` are the only successful outcomes; `MaxIterations`
@@ -713,7 +763,15 @@ mod tests {
         .unwrap();
         assert!(estimate.iteration_count > 0);
         assert_eq!(estimate.winning_candidate_index, expected_index);
-        assert!(estimate.loss_separation_m >= config().min_hypothesis_loss_separation_m);
+        // Under this fixture's tight `good_fit_threshold_m`, only the correct
+        // quadrant's initial pose actually converges (`GoodFit`); the other
+        // three quarter turns exhaust `max_iterations` without settling and
+        // are discarded as failed hypotheses before ranking. That leaves a
+        // single successful hypothesis, so per the hypothesis policy it
+        // publishes without a separation comparison: `None`, not a
+        // synthetic/zero separation.
+        assert_eq!(estimate.second_best_loss_m, None);
+        assert_eq!(estimate.loss_separation_m, None);
         assert!(estimate.cutout_rim_correspondences >= config().min_cutout_rim_correspondences);
         assert_relative_eq!(
             estimate.pose.translation.vector,

@@ -230,8 +230,11 @@ pub enum TargetDetectionDiagnostics {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CutoutIcpEvidence {
     pub best_loss_m: f64,
-    pub second_best_loss_m: f64,
-    pub loss_separation_m: f64,
+    /// `None` when no successful runner-up hypothesis existed, never a
+    /// synthetic sentinel.
+    pub second_best_loss_m: Option<f64>,
+    /// `None` exactly when `second_best_loss_m` is `None`.
+    pub loss_separation_m: Option<f64>,
     pub cutout_rim_correspondences: usize,
     pub iteration_count: usize,
     pub total_correspondences: usize,
