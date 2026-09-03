@@ -13,7 +13,13 @@ fn target() -> ValidatedTarget {
 }
 
 fn tuning() -> PerforatedIcpConfig {
-    PerforatedIcpConfig::new(40, 0.2, 0.5, 1e-8, 1e-8, 0.005, 3, 0.0001, 1, 1e-5)
+    // good_fit_threshold_m is tight (was `rejection_threshold_m` before the M-21
+    // termination cleanup collapsed the two): it is now the loop's own
+    // termination threshold, and these fixtures use noiseless synthetic points
+    // that converge to near-exact residual, so a loose value would leave the
+    // loop exiting via `MaxIterations` -- now an unconditional failure -- well
+    // before `avg_loss` gets anywhere near it.
+    PerforatedIcpConfig::new(40, 0.2, 0.5, 1e-8, 3, 1e-8, 3, 0.0001, 1, 1e-5)
 }
 
 fn observation() -> TargetSquarePlaneObservation {

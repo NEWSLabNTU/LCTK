@@ -282,23 +282,29 @@ fn observation_seeding_pose(
 
 /// Tuning shared by the convergence tests.
 ///
-/// `rejection_threshold_m` is the parameter to get right, and it is *not* just
-/// the iterator's own early-exit: `estimate_perforated_pose` refuses to publish
-/// a detection at all unless the winning hypothesis stopped via
-/// `avg_loss < rejection_threshold_m` ("good fit") or `termination_count > 100`
-/// ("stable pose") -- hitting `max_iterations` is never accepted, however good
-/// the final residual is (`max_iteration_exit_cannot_publish_despite_good_loss_
-/// rims_and_separation` in `perforated.rs` pins exactly this). The stable-pose
-/// exit needs on the order of 1800 iterations on this manifest (see
-/// `test_convergence_counter_increases`), far more than a seeded-correction test
-/// needs to run, so `rejection_threshold_m` has to be loose enough that the
-/// *good-fit* exit is actually reached within `max_iterations` -- set it too
-/// tight (as an earlier draft of this file did, mirroring the deleted crate's
-/// `create_convergence_config`, which zeroed the equivalent threshold because
-/// its crate had no such publish gate at all) and every one of these tests
-/// spuriously rejects with `MaxIterations`, regardless of how good the pose
-/// actually is.
-fn convergence_tuning(max_iterations: usize, rejection_threshold_m: f64) -> PerforatedIcpConfig {
+/// `good_fit_threshold_m` is the parameter to get right. As of the M-21
+/// termination cleanup it is also the iterator's own early-exit threshold, not
+/// a separate post-ICP gate: `estimate_perforated_pose` refuses to publish a
+/// detection at all unless the winning hypothesis stopped via `avg_loss <
+/// good_fit_threshold_m` ("good fit") or `termination_count >=
+/// stable_pose_iterations` ("stable pose") -- hitting `max_iterations` is
+/// never accepted, however good the final residual is
+/// (`max_iteration_exit_cannot_publish_despite_good_rims_and_separation` in
+/// `perforated.rs` pins exactly this). The stable-pose exit needs on the order
+/// of 1800 iterations on this manifest (see `test_convergence_counter_increases`),
+/// far more than a seeded-correction test needs to run, so `good_fit_threshold_m`
+/// has to be loose enough that the *good-fit* exit is actually reached within
+/// `max_iterations` -- set it too tight (as an earlier draft of this file did,
+/// mirroring the deleted crate's `create_convergence_config`, which zeroed the
+/// equivalent threshold because its crate had no such publish gate at all) and
+/// every one of these tests spuriously rejects with `MaxIterations`, regardless
+/// of how good the pose actually is.
+///
+/// `stable_pose_iterations` is fixed here at 100, matching the legacy
+/// hard-coded `termination_count > 100` boundary M-21 found unreachable at any
+/// shipped iteration budget, so the iteration counts measured and quoted in
+/// comments below stay accurate. Only `good_fit_threshold_m` varies per test.
+fn convergence_tuning(max_iterations: usize, good_fit_threshold_m: f64) -> PerforatedIcpConfig {
     PerforatedIcpConfig::new(
         max_iterations,
         0.2, // outlier_threshold_m: generous; correspondences from a seed off
@@ -307,10 +313,8 @@ fn convergence_tuning(max_iterations: usize, rejection_threshold_m: f64) -> Perf
         0.5,  // damping_factor
         1e-9, // pose_weight_threshold: tight, so the stable-pose exit is a
         // late-iteration event rather than an early false-positive.
-        rejection_threshold_m,
-        0.05, // good_fit_threshold_m: the facade's final quality gate. Looser than
-        // any `rejection_threshold_m` used below, so it never independently
-        // rejects a run that already passed the good-fit/stable-pose gate.
+        100, // stable_pose_iterations: see the doc comment above.
+        good_fit_threshold_m,
         3,    // min_inlier_points
         1e-6, // min_hypothesis_loss_separation_m
         1,    // min_cutout_rim_correspondences
@@ -430,7 +434,7 @@ fn converged_pose_lands_the_corners_on_the_true_corners() {
 
     let points = evidence_points(&target, &truth, GRID_SIZE);
     let observation = observation_seeding_pose(&target, seed);
-    // 2000 iterations, `rejection_threshold_m = 1e-6`: the good-fit exit needs
+    // 2000 iterations, `good_fit_threshold_m = 1e-6`: the good-fit exit needs
     // real headroom on this manifest (measured against a corrected reference
     // implementation -- see the top-of-file bug writeup -- the seeded hypothesis
     // needs ~824 iterations to cross `1e-6`; a tighter threshold or a smaller cap
@@ -487,7 +491,7 @@ fn test_identity_transformation_convergence() {
     let points = evidence_points(&target, &truth, GRID_SIZE);
     let observation = observation_seeding_pose(&target, truth);
     // Seeded exactly at the truth, the very first correspondence pass already
-    // has (near) zero residual, so `rejection_threshold_m = 1e-9` is reached on
+    // has (near) zero residual, so `good_fit_threshold_m = 1e-9` is reached on
     // the first step regardless of `max_iterations`; 25 is only a safety cap.
     let config = convergence_tuning(25, 1e-9);
     let detection = detected(estimator(&target, config).estimate(observation, points));
@@ -687,7 +691,7 @@ fn test_convergence_counter_increases() {
     // 5000, not the 2000 the other tests use: reaching the stable-pose exit
     // needs materially more steps than reaching a good corner fit does (see the
     // M-21 reasoning above; measured ~1809 iterations), so the other tests' cap
-    // is not enough to observe it. `rejection_threshold_m = 0.0` is deliberate,
+    // is not enough to observe it. `good_fit_threshold_m = 0.0` is deliberate,
     // not just "small": at any positive threshold this manifest's good-fit exit
     // fires first (measured: `1e-9` reaches good-fit at ~1724 iterations, before
     // the stable-pose exit would), which would test the wrong exit path entirely.

@@ -110,6 +110,10 @@ fn default_icp_min_inlier_points() -> usize {
     100
 }
 
+fn default_icp_stable_pose_iterations() -> usize {
+    3
+}
+
 fn default_plane_ransac_max_iterations() -> usize {
     2_000
 }
@@ -185,6 +189,8 @@ struct DetectorConfig {
     icp_damping_factor: f64,
     #[serde(default = "default_icp_min_inlier_points")]
     icp_min_inlier_points: usize,
+    #[serde(default = "default_icp_stable_pose_iterations")]
+    icp_stable_pose_iterations: usize,
 
     // Solid adapter tuning.  Aliases make the flat deployment config readable
     // without creating a second target-specific parser.
@@ -247,7 +253,7 @@ impl DetectorConfig {
                     self.icp_outlier_threshold,
                     self.icp_damping_factor,
                     self.icp_pose_weight_threshold,
-                    self.icp_rejection_threshold,
+                    self.icp_stable_pose_iterations,
                     self.icp_good_fit_threshold,
                     self.icp_min_inlier_points,
                     self.min_hypothesis_loss_separation_m,

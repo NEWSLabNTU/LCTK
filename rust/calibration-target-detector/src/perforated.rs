@@ -19,10 +19,16 @@ pub struct PerforatedIcpConfig {
     outlier_threshold_m: f64,
     damping_factor: f64,
     pose_weight_threshold: f64,
-    rejection_threshold_m: f64,
-    /// Final quality gate, applied after the iterator terminates.  This mirrors
-    /// the legacy caller's `icp_good_fit_threshold` and is intentionally distinct
-    /// from the iterator's early-convergence threshold.
+    /// Consecutive completed updates whose pose weight is at or below
+    /// `pose_weight_threshold` before the iterator terminates with
+    /// [`IcpTermination::StablePose`] -- a successful termination even when
+    /// the residual is still above `good_fit_threshold_m`.
+    stable_pose_iterations: usize,
+    /// Residual threshold that ends ICP with [`IcpTermination::GoodFit`] once
+    /// `state.avg_loss` drops strictly below it.  This mirrors the legacy
+    /// caller's `icp_good_fit_threshold`; it is now the iterator's own
+    /// termination condition, not a separate gate applied after the loop
+    /// exits.
     good_fit_threshold_m: f64,
     min_inlier_points: usize,
     /// The winning quarter-turn must beat the runner up by at least this loss.
@@ -42,7 +48,7 @@ impl PerforatedIcpConfig {
         outlier_threshold_m: f64,
         damping_factor: f64,
         pose_weight_threshold: f64,
-        rejection_threshold_m: f64,
+        stable_pose_iterations: usize,
         good_fit_threshold_m: f64,
         min_inlier_points: usize,
         min_hypothesis_loss_separation_m: f64,
@@ -54,7 +60,7 @@ impl PerforatedIcpConfig {
             outlier_threshold_m,
             damping_factor,
             pose_weight_threshold,
-            rejection_threshold_m,
+            stable_pose_iterations,
             good_fit_threshold_m,
             min_inlier_points,
             min_hypothesis_loss_separation_m,
@@ -66,11 +72,15 @@ impl PerforatedIcpConfig {
         if self.max_iterations == 0 {
             bail!("perforated ICP max_iterations must be greater than zero");
         }
+        // `stable_pose_iterations` is a `usize` count, not one of the finite/
+        // non-negative floats validated in the loop below.
+        if self.stable_pose_iterations == 0 {
+            bail!("perforated ICP stable_pose_iterations must be greater than zero");
+        }
         for (name, value) in [
             ("outlier_threshold_m", self.outlier_threshold_m),
             ("damping_factor", self.damping_factor),
             ("pose_weight_threshold", self.pose_weight_threshold),
-            ("rejection_threshold_m", self.rejection_threshold_m),
             ("good_fit_threshold_m", self.good_fit_threshold_m),
             (
                 "min_hypothesis_loss_separation_m",
@@ -229,26 +239,35 @@ impl<'a> PerforatedBoardIcpIterator<'a> {
         }
     }
 
-    /// Legacy ordering: fit, stable-pose, iteration limit, input count, Kabsch count,
-    /// then no correspondences.  Do not reorder without changing M-21 behaviour.
+    /// New ordering (M-21): hard-invalid state first -- too few inlier points,
+    /// too few points for Kabsch, no correspondences -- then `GoodFit`, then
+    /// `StablePose`, then the iteration limit.  The hard-invalid checks stay
+    /// first because they mean the state itself cannot support a pose
+    /// estimate at all, regardless of how the residual or update history
+    /// looks; `GoodFit` outranks `StablePose` so a run that is both
+    /// well-converged and quiet is reported for the reason a caller actually
+    /// cares about.  This is a plain disjunction -- any one condition stops
+    /// the loop -- but every disjunct here is exactly the predicate
+    /// `termination_kind` uses to classify that same condition, in the same
+    /// order, so the two cannot drift apart: whichever disjunct trips first
+    /// here is what `termination_kind` reports once the loop has stopped.
     pub fn should_terminate(&self, state: &PerforatedIcpState) -> bool {
-        state.avg_loss < self.config.rejection_threshold_m
-            || state.termination_count > 100
-            || state.iteration >= self.config.max_iterations
-            || state.inlier_points.len() < self.config.min_inlier_points
+        state.inlier_points.len() < self.config.min_inlier_points
             || state.good_correspondences < 3
             || state.correspondences.is_empty()
+            || state.avg_loss < self.config.good_fit_threshold_m
+            || state.termination_count >= self.config.stable_pose_iterations
+            || state.iteration >= self.config.max_iterations
     }
 
+    /// Test-only diagnostic string, ordered exactly like [`should_terminate`]
+    /// but -- unlike [`termination_kind`], which assumes its precondition
+    /// (the state is already terminal) -- with an explicit `"Unknown"`
+    /// fallback for a state where nothing has tripped yet, so a test can
+    /// distinguish "still running" from a genuine terminal reason.
     #[cfg(test)]
     pub fn termination_reason(&self, state: &PerforatedIcpState) -> String {
-        if state.avg_loss < self.config.rejection_threshold_m {
-            "Converged (good fit)".to_owned()
-        } else if state.termination_count > 100 {
-            "Converged (stable pose)".to_owned()
-        } else if state.iteration >= self.config.max_iterations {
-            format!("Max iterations reached: {}", self.config.max_iterations)
-        } else if state.inlier_points.len() < self.config.min_inlier_points {
+        if state.inlier_points.len() < self.config.min_inlier_points {
             format!(
                 "Insufficient inlier points: {} < {}",
                 state.inlier_points.len(),
@@ -261,6 +280,12 @@ impl<'a> PerforatedBoardIcpIterator<'a> {
             )
         } else if state.correspondences.is_empty() {
             "No correspondences found".to_owned()
+        } else if state.avg_loss < self.config.good_fit_threshold_m {
+            "Converged (good fit)".to_owned()
+        } else if state.termination_count >= self.config.stable_pose_iterations {
+            "Converged (stable pose)".to_owned()
+        } else if state.iteration >= self.config.max_iterations {
+            format!("Max iterations reached: {}", self.config.max_iterations)
         } else {
             "Unknown".to_owned()
         }
@@ -385,12 +410,8 @@ pub fn estimate_perforated_pose(
         });
     }
     // Iterator convergence alone is still subject to the legacy production
-    // caller's final residual and inlier gates.
-    if best.state.avg_loss >= config.good_fit_threshold_m {
-        return Err(PerforatedRejection::IcpFailure {
-            evidence: evidence(),
-        });
-    }
+    // caller's final inlier gate.  There is no separate post-ICP residual
+    // check: `good_fit_threshold_m` already decided termination above.
     if best.state.inlier_points.len() < config.min_inlier_points {
         return Err(PerforatedRejection::IcpFailure {
             evidence: evidence(),
@@ -422,23 +443,39 @@ pub fn estimate_perforated_pose(
     })
 }
 
+/// `GoodFit` and `StablePose` are the only successful outcomes; `MaxIterations`
+/// -- reaching the iteration cap without either -- is unconditionally a failed
+/// hypothesis, and the hard-invalid states never reach this function's `true`
+/// branch at all.  Delegates to [`termination_kind`] so this crate has exactly
+/// one place that decides what counts as success.
 fn successful_termination(state: &PerforatedIcpState, config: PerforatedIcpConfig) -> bool {
-    state.avg_loss < config.rejection_threshold_m || state.termination_count > 100
+    matches!(
+        termination_kind(state, config),
+        IcpTermination::GoodFit | IcpTermination::StablePose
+    )
 }
 
+/// Classifies an already-terminal state (one for which
+/// [`PerforatedBoardIcpIterator::should_terminate`] returned `true`) into the
+/// single reason it stopped.  Precedence: hard-invalid state first (too few
+/// inlier points, too few points for Kabsch, no correspondences), then
+/// `GoodFit`, then `StablePose`; the final `else` is only reached once all of
+/// those are ruled out, which -- given the precondition -- means the
+/// iteration cap was hit.  Keep this in lockstep with `should_terminate`: the
+/// two must classify every state the same way.
 fn termination_kind(state: &PerforatedIcpState, config: PerforatedIcpConfig) -> IcpTermination {
-    if state.avg_loss < config.rejection_threshold_m {
-        IcpTermination::GoodFit
-    } else if state.termination_count > 100 {
-        IcpTermination::StablePose
-    } else if state.iteration >= config.max_iterations {
-        IcpTermination::MaxIterations
-    } else if state.inlier_points.len() < config.min_inlier_points {
+    if state.inlier_points.len() < config.min_inlier_points {
         IcpTermination::TooFewInliers
     } else if state.good_correspondences < 3 {
         IcpTermination::TooFewKabschPoints
-    } else {
+    } else if state.correspondences.is_empty() {
         IcpTermination::NoCorrespondences
+    } else if state.avg_loss < config.good_fit_threshold_m {
+        IcpTermination::GoodFit
+    } else if state.termination_count >= config.stable_pose_iterations {
+        IcpTermination::StablePose
+    } else {
+        IcpTermination::MaxIterations
     }
 }
 
@@ -542,8 +579,13 @@ mod tests {
             outlier_threshold_m: 0.2,
             damping_factor: 0.5,
             pose_weight_threshold: 1e-8,
-            rejection_threshold_m: 1e-8,
-            good_fit_threshold_m: 0.005,
+            stable_pose_iterations: 3,
+            // Tight: this crate's only termination threshold now, so it must
+            // do the job the old `rejection_threshold_m` did for these tests
+            // (drive the loop to near-exact convergence on noiseless synthetic
+            // data) rather than the old, much looser `good_fit_threshold_m`
+            // final-gate value, which the loop itself never used to enforce.
+            good_fit_threshold_m: 1e-8,
             min_inlier_points: 3,
             min_hypothesis_loss_separation_m: 0.0001,
             min_cutout_rim_correspondences: 1,
@@ -586,22 +628,23 @@ mod tests {
         let target = target();
         let mut cfg = config();
         cfg.max_iterations = 10;
+        cfg.stable_pose_iterations = 3;
         let iterator = PerforatedBoardIcpIterator::new(&target, cfg).unwrap();
         let mut state = iterator.initial_state(Isometry3::identity(), structural_points());
         state.iteration = 9;
-        state.avg_loss = cfg.rejection_threshold_m;
+        state.avg_loss = cfg.good_fit_threshold_m;
         state.total_correspondences = 4;
         state.good_correspondences = 4;
         state.correspondences = vec![(Point3::origin(), Point3::origin()); 4];
-        state.termination_count = 100;
+        state.termination_count = cfg.stable_pose_iterations - 1;
         assert!(!iterator.should_terminate(&state));
         assert_eq!(iterator.termination_reason(&state), "Unknown");
-        state.termination_count = 101;
+        state.termination_count = cfg.stable_pose_iterations;
         assert_eq!(
             iterator.termination_reason(&state),
             "Converged (stable pose)"
         );
-        state.avg_loss = cfg.rejection_threshold_m / 2.0;
+        state.avg_loss = cfg.good_fit_threshold_m / 2.0;
         state.iteration = cfg.max_iterations;
         assert_eq!(iterator.termination_reason(&state), "Converged (good fit)");
     }
@@ -710,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn max_iteration_exit_cannot_publish_despite_good_loss_rims_and_separation() {
+    fn max_iteration_exit_cannot_publish_despite_good_rims_and_separation() {
         let target = target();
         let observation = observation();
         let pose = pose_from_candidate(&observation, 2);
@@ -721,7 +764,15 @@ mod tests {
             .collect();
         let mut cfg = config();
         cfg.max_iterations = 1;
-        cfg.good_fit_threshold_m = 0.005;
+        // The single permitted step's residual is bound below by the ~1e-4
+        // normal offset (the pose update that would shrink it only lands on
+        // the *next* step, which never runs). Tighter than that offset, so
+        // this genuinely exercises a `MaxIterations` exit rather than one
+        // that also happens to satisfy `GoodFit` on its last iteration -- per
+        // the M-21 contract, a `GoodFit` residual on the final permitted
+        // iteration must win over `MaxIterations`, which is exactly NOT what
+        // this test wants to exercise.
+        cfg.good_fit_threshold_m = 1e-5;
         // Keep observed-rim evidence valid despite the deliberate normal offset;
         // this regression is solely about failed termination becoming authority.
         cfg.cutout_rim_tolerance_m = 2e-4;
