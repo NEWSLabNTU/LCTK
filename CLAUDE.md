@@ -588,6 +588,11 @@ undistorting first resamples them away. The detector maps the refined corners in
 frame with `undistortPoints`, so the corners on the wire pair with `K` and zero distortion. Do not
 hand `detect_markers` a rectified image.
 
+**Where the graph is decided:** `lctk_launch/node_plan.py` turns a parsed config plus the run's
+settings into an ordered list of `Message` / `NodeSpec` / `JudgeInclude` values, importing no launch
+types. `calibrate.launch.py` only maps those onto launch actions (ADR-0007). Add or change a node
+there, not in the launch file.
+
 **Generated Nodes:**
 - `lidar_board_detector` - One per unique (lidar, marker) pair
 - `aruco_locator_node` - One per camera

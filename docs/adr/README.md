@@ -66,6 +66,7 @@ module is the wrong shape).
 | [0004](./0004-lidar-camera-solver-owns-camera-board-pose.md) | The LiDAR-to-camera solver owns camera-frame board pose | accepted |
 | [0005](./0005-session-owns-transport-reliability.md) | The session owns transport reliability, resolved per device | accepted |
 | [0006](./0006-one-manifest-one-strictness.md) | One manifest, one strictness: every section refuses a key nothing reads | accepted |
+| [0007](./0007-node-plan-is-a-value.md) | The calibration graph is built as a value, and the launch file only realises it | accepted |
 
 Reviews:
 

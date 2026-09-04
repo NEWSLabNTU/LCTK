@@ -60,6 +60,11 @@ or what its recording offers. It is a property of whatever publishes the topic, 
 LCTK's own detection and transform topics are pinned and take no part in it.
 _Avoid_: Mode, offline, realtime, QoS profile
 
+**Node Plan**:
+Every node one calibration configuration runs, with its parameters and remappings, as an ordered
+value. It is built from the manifest plus the run's own settings, and carries no launch types.
+_Avoid_: Launch description, node list, generate_nodes
+
 **Detection Pair**:
 One genuinely simultaneous camera ArUco detection and LiDAR board detection describing the same
 observation instant.
