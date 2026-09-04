@@ -2,8 +2,9 @@
 
 - **Severity:** High
 - **Area:** lidar_board_detector / config/board/solid_600
-- **Status:** Partially fixed 2026-09-04 -- the coverage gate is decoupled and no longer
-  blocks; candidate formation is now the remaining blocker
+- **Status:** Fixed 2026-09-04 -- the coverage gate is decoupled, and the ROS-versus-offline
+  discrepancy that remained was `offline` mode receiving nothing from the bag (M-30), not a
+  detector defect. See "Resolved" below.
 - **Found:** 2026-08-31, first run of the solid target against real sensor data
 - **Data:** `~/Downloads/new_LCTK_board/` (`newtype_background`, `newtype_1`, `newtype_2`),
   ZED + VLP-32C + Seyond, from the 2026-08-12 capture
@@ -95,7 +96,7 @@ matters is the vertical ring gap.
 
 ### Why this is a C-04 repeat
 
-[C-04](./archive/C-04-board-detector-gate-unreachable.md) set `icp_good_fit_threshold`
+[C-04](./C-04-board-detector-gate-unreachable.md) set `icp_good_fit_threshold`
 below the sensor's noise floor, so the detector silently accepted nothing. This is the
 same shape with a different quantity: a gate placed beyond what the sensor can deliver,
 producing silence rather than an error. Both were invisible because the detector reports
@@ -186,7 +187,7 @@ data.
 
 ## Related
 
-- [C-04](./archive/C-04-board-detector-gate-unreachable.md) — the same failure class: a
+- [C-04](./C-04-board-detector-gate-unreachable.md) — the same failure class: a
   gate set beyond what the data can satisfy, producing silence rather than an error.
 ## The marker-ID finding (already fixed on this branch)
 
@@ -295,56 +296,99 @@ Recorded because both are plausible enough to be re-proposed:
   7/12 candidates against 9/12 from 20 consecutive frames -- worse, but nowhere near
   enough to explain the ROS behaviour.
 
-### Open: ROS and offline still disagree
+### Resolved: ROS and offline disagreed because the ROS runs were in `offline` mode
 
-Offline the pipeline now yields candidates in 75% of frames. The same preset through the
-ROS node still produces one non-empty detection per run. Checked and excluded: the node's
-tuning (only `stance_floor` is overridden, to 0), the downsample path (`detect_for_target`
-applies `finite_only` + `voxel_downsample(bbf_voxel)` internally, matching the harness),
-the background source, and the possibility of a nested `bbox_free.board` block shadowing
-the top-level fields (the preset is flat).
+Measured 2026-09-04, after both fixes above, on `sessions/solid600-handheld-vlp` against
+`newtype_1`. One session, one bag, one build; only `mode` differs:
 
-That discrepancy is the next thing to chase, and the harness is the tool for it.
+| `mode` | accepted detections | rejections |
+|---|---|---|
+| `realtime` | **90** | 108 |
+| `offline` | **0** | **0** |
 
-### `play_args` added, and what it ruled out
+**Zero rejections is the tell.** A detector that is rejecting frames logs why it rejected
+them; this one logged nothing because it never received a cloud. Its whole run is eleven
+lines of startup. The player says so directly:
+
+```text
+[WARN] [rosbag2_player]: New subscription discovered on topic '/velodyne_points',
+requesting incompatible QoS. No messages will be sent to it.
+Last incompatible policy: RELIABILITY_QOS_POLICY
+```
+
+That is [M-30](../M-30-bag-playback-qos-mismatch-is-silent.md): the recording replays with
+the QoS its publishers used, which for this rig's LiDAR is BEST_EFFORT, so `offline`'s
+RELIABLE subscriber is simply incompatible and receives nothing. The camera half keeps
+working, which is what makes the failure read as a broken LiDAR detector. The session
+README states `mode=realtime` is required for exactly this reason.
+
+So "one non-empty detection per run" was measuring the transport, not the detector.
+Through the node in `realtime`, on `newtype_1`:
+
+- before either fix above: **104** accepted detections
+- after both: **90**
+
+Both are around ninety times the symptom. The difference between them is run-to-run
+variance -- `realtime` drops frames nondeterministically, as the candidate-formation
+section notes -- not a regression.
+
+### `play_args`, and what reliable offline playback showed
 
 `session.launch.py` now takes `play_args`, forwarded one token per `--play-arg` to
 `bag_play.py`, so playback QoS can be overridden without switching the whole graph to
 realtime:
 
 ```bash
-just run <session>   # or:
 ros2 launch lctk_launch session.launch.py session:=... mode:=offline \
   play_args:="--qos-profile-overrides-path /path/to/qos.yaml"
 ```
 
-That was added to make the ROS run comparable with the harness, and it did its job --
-by ruling its own hypothesis out. Running the session `mode:=offline` with reliable
-playback QoS still yields **one** non-empty detection, and still processes only 116 of
-the bag's 578 LiDAR frames.
+It was added here to make the ROS run comparable with the offline harness, and it
+immediately narrowed the question. Run `mode:=offline` with reliable playback QoS, the
+node receives clouds -- but processes only **116 of the bag's 578 LiDAR frames**, and
+yields one non-empty detection.
 
-The 116 is now understood and is *not* a QoS problem: the detector cannot keep up with
-10 Hz playback, so the node's "store latest, skip stale" subscription (CLAUDE.md's
-ArcSwap pattern) drops roughly four frames in five. That also means warmup consumes the
-first 20 frames it *processes*, spanning ~10 s of bag rather than the opening second --
-so the harness was re-run with a background built exactly that way (`nodebg`, stride 5).
-It gives 7 of 12 candidates, no worse than the others.
+The 116 is understood and is *not* QoS: the detector cannot keep up with 10 Hz playback,
+so the node's "store latest, skip stale" subscription (CLAUDE.md's ArcSwap pattern) drops
+roughly four frames in five. That also means warmup consumes the first 20 frames it
+*processes*, spanning ~10 s of bag rather than the opening second -- so the harness was
+re-run with a background built exactly that way (`nodebg`, stride 5). It gives 7 of 12
+candidates, no worse than the other backgrounds.
 
-### The discrepancy is now well-bounded
+### Why this is closed, and the one thing still unproven
 
-Harness: 58-75% of frames yield a candidate, across four different backgrounds
-(board-free bag, session self-warmup, stride-28 spread, stride-5 node-like).
-Node: ~0.9%, one detection in 116 processed frames.
+Frame dropping explains the 116, not the accept rate inside it: `realtime` accepted 90 of
+198 processed frames (45%), reliable-QoS `offline` one of 116 (0.9%). The two runs differ
+in one other way, and it is the likely reconciler -- **the `realtime` runs were made with
+`vertical_gap_deg: 0.5` in `solid_600/velodyne.json5`, the reliable-QoS `offline` run with
+the shipped `1.0`.** At 1.0 deg a VLP-32C's own ring spacing can exceed the bar on a board
+held at range, so one plate arrives as several fragments and none survives the
+point-count gates. That value is now committed at 0.5, which makes the difference moot
+going forward.
 
-Excluded by measurement or inspection: playback QoS and frame dropping; the node's
-tuning (only `stance_floor` is overridden); the downsample path (`detect_for_target`
-applies `finite_only` + `voxel_downsample(bbf_voxel)` internally, and the background
-model voxelises at the same `bbf_voxel`); the background source; a nested
+This is recorded as the likely explanation, not a measured one: the confirming run is the
+same session `mode:=offline` with reliable `play_args` **and** the committed 0.5 preset.
+Anyone re-opening this should make that run first. The remaining offline-harness figure
+(candidates in 58-75% of frames across four backgrounds) is a real number worth improving
+on its own merits, not evidence of a defect.
+
+Excluded by measurement or inspection along the way: playback QoS and frame dropping; the
+node's tuning (only `stance_floor` is overridden); the downsample path
+(`detect_for_target` applies `finite_only` + `voxel_downsample(bbf_voxel)` internally, and
+the background model voxelises at the same `bbf_voxel`); the background source; a nested
 `bbox_free.board` block shadowing top-level fields (the preset is flat); and cropping
 (only the bbox path filters, bbox-free passes the cloud through).
 
-What has *not* been compared is the two paths on the same frame. That is now possible:
-run the session with `play_args` and `debug_mode:=true`, capture
-`debug/foreground_points` for a frame, and feed the same frame through the harness. If
-the foreground sets differ, the divergence is upstream of clustering; if they match, it
-is in `detect_for_target`'s own call into the generator.
+### What this does and does not change about the fixes above
+
+Both fixes stand on evidence that does not depend on the mistaken symptom:
+
+- The coverage gate genuinely was geometrically unreachable -- best achievable residual
+  0.436 against a 0.45 gate, measured over 30 real board clusters. Decoupling it from the
+  theta search is correct regardless.
+- `patch_min_points: 60 -> 40` rests on the offline harness, where clusters of 35-51
+  points died against a threshold inherited from the 1000 mm perforated plate.
+
+What changes is the framing: candidate formation was never "the remaining blocker" that
+kept the node silent, because the node was not silent in the mode it is documented to
+run in.

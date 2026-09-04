@@ -12,7 +12,7 @@ same operator, and differ only in which sensor the detector reads.
 
 A VLP-32C at 7–8 m crosses a 600 mm plate with roughly four rings: about 2.8 cm
 between points within a ring, but ~15 cm between rings. That is the measurement
-behind [H-17](../../docs/issues/H-17-solid-600-preset-detects-nothing.md), and it
+behind [H-17](../../docs/issues/archive/H-17-solid-600-preset-detects-nothing.md), and it
 caps how many frames yield a usable board cluster. Assisted mode selects still,
 geometrically-novel placements out of that stream, so a thin stream gives it
 little to choose from.
