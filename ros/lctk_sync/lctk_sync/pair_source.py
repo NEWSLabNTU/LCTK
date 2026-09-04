@@ -43,11 +43,11 @@ from lctk_sync.config import PairSourceConfig
 from lctk_sync.diagnosis import (
     SyncGroupSummary,
     format_sync_stats,
-    should_reset_for_new_epoch,
     sync_health_warning,
     sync_pair_staleness_error,
     sync_wait_diagnosis,
 )
+from lctk_sync.epoch import EpochRecovery
 
 
 @dataclass(frozen=True)
@@ -122,11 +122,10 @@ class DetectionPairSource:
         self._max_skew_ms: float = 0.0
         self._epoch_resets = 0
         self._last_epoch_reset_at = 0.0
-        # A reset is destructive: it clears the matching engine's buffers. Do not
-        # repeat it while waiting for the first group from the new epoch, or the
-        # epoch timer can erase a progressing stream once per tick.
-        self._epoch_reset_waiting_for_pair = False
-        self._last_epoch_received: dict = {}
+        # A reset is destructive: it clears the matching engine's buffers. Keep
+        # post-reset recovery in one state machine so the epoch timer cannot
+        # erase a progressing stream once per tick.
+        self._epoch_recovery = EpochRecovery()
         self._started_at = time.monotonic()
         self._last_received: dict = {}
         self._last_stats_line: str | None = None
@@ -263,7 +262,7 @@ class DetectionPairSource:
 
         # A group proves that the new matching engine has recovered. Re-arm epoch
         # detection so a later bag transition can still be handled.
-        self._epoch_reset_waiting_for_pair = False
+        self._epoch_recovery.mark_group()
 
         counts = tuple(len(getattr(msg, "detections", ())) for msg in messages)
         stamps = [self._stamp_s(msg) for msg in messages]
@@ -337,22 +336,13 @@ class DetectionPairSource:
         return time.monotonic() - self._last_group_at
 
     def _check_for_new_epoch(self):
-        received = dict(self._sync.statistics.messages_received)
-        if self._epoch_reset_waiting_for_pair:
-            # The source may keep delivering while conflux fills the fresh buffers.
-            # Updating the baseline keeps those messages from looking like another
-            # source transition once a recovered group eventually arrives.
-            self._last_epoch_received = received
-            return
-
-        if should_reset_for_new_epoch(
-            previous_received=self._last_epoch_received,
-            current_received=received,
+        stats = self._sync.statistics
+        if self._epoch_recovery.observe(
+            received=stats.messages_received,
             last_group_age_s=self._last_group_age_s(),
             age_since_start_s=time.monotonic() - self._started_at,
         ):
             self._reset_for_new_epoch()
-        self._last_epoch_received = received
 
     def _reset_for_new_epoch(self):
         """Start a fresh synchronizer after the recording restarted.
@@ -367,7 +357,6 @@ class DetectionPairSource:
         """
         self._epoch_resets += 1
         self._last_epoch_reset_at = time.monotonic()
-        self._epoch_reset_waiting_for_pair = True
         self._sync.reset()
         with self._cache_context():
             self._clear_cached_pair()

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 import rclpy
 from lctk_sync import DetectionPairSource, PairSourceConfig
+from lctk_sync.epoch import EpochRecovery
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from vision_msgs.msg import Detection2D, Detection2DArray, Detection3D, Detection3DArray
@@ -212,6 +213,7 @@ def test_admission_lock_serializes_identity_clear_with_cache_write():
     source._last_group_at = None
     source._last_skew_ms = None
     source._max_skew_ms = 0.0
+    source._epoch_recovery = EpochRecovery()
 
     pair = Group({"lidar1": message(10), "lidar2": message(10)})
     producer = threading.Thread(target=source._handle_group, args=(pair,))
@@ -291,6 +293,17 @@ def test_replayed_timestamp_epoch_resets_and_resumes_pairing(harness_factory):
     pairs_after_reset = len(harness.pairs)
     harness.publish(aruco_stamp=50.000, board_stamp=50.030)
     assert harness.spin_until(lambda: len(harness.pairs) > pairs_after_reset)
+
+    # The first recovered group must re-arm epoch detection so a later bag
+    # transition is still handled by the same source.
+    replay_stamp = 1.0
+    deadline = time.monotonic() + 3.0
+    while harness.source.epoch_resets < 2 and time.monotonic() < deadline:
+        harness.publish(aruco_stamp=replay_stamp, board_stamp=replay_stamp + 0.030)
+        replay_stamp += 0.1
+        harness.spin_for(0.03)
+
+    assert harness.source.epoch_resets == 2
 
 
 def test_epoch_reset_does_not_repeat_while_new_epoch_is_unpaired(harness_factory):

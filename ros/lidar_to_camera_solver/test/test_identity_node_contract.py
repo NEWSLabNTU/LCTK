@@ -14,6 +14,7 @@ import pytest
 import rclpy
 from lctk_interfaces.msg import CalibrationTargetIdentity
 from lctk_sync import DetectionPairSource, PairSourceConfig
+from lctk_sync.epoch import EpochRecovery
 from lctk_target import load_target
 from lidar_to_camera_solver import main as main_module
 from lidar_to_camera_solver.board_geometry import (
@@ -413,6 +414,7 @@ def test_delayed_continuous_pair_is_rejected_after_target_session_reset():
     source._last_group_at = None
     source._last_skew_ms = None
     source._max_skew_ms = 0.0
+    source._epoch_recovery = EpochRecovery()
     solver.pair_source = source
 
     group = Group({"aruco": message(10), "board": message(10)})
