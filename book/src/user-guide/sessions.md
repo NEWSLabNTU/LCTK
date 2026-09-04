@@ -193,7 +193,7 @@ explicit `rviz_config:=` on the command line wins over both — if you typed it,
 
 An RViz layout names the debug topics of specific devices, so it is session-local wherever it
 is specific: `sessions/seyond-left/rviz.rviz` and
-`sessions/solid600-handheld-zed/rviz.rviz` ship that way. `calibration.rviz` and
+`sessions/solid600-handheld-vlp/rviz.rviz` ship that way. `calibration.rviz` and
 `two_lidar_calibration.rviz` stay shared under `config/rviz/`.
 
 The judge's ground truth is the same shape of thing — it describes one rig — but it is not
@@ -286,7 +286,7 @@ is the point.
 | `sample5` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
 | `seyond-left` | `live` | Seyond Falcon + left camera; no recording ships |
 | `seyond-right` | `live` | Seyond Falcon + right camera; no recording ships |
-| `solid600-handheld-zed` | `live` | solid 600 mm target, hand-held, ZED; 50 ms sync window |
+| `solid600-handheld-vlp` | `live` | solid 600 mm target, hand-held, ZED; 50 ms sync window |
 | `twolidar-vlp32-falcon` | `bag`, `TWO_LIDAR_1` | the bag is gitignored — see `ros/lctk_sample_data/bags/README.md` |
 | `vehicle-multisensor` | `live` | a schema demonstration; no rig behind it |
 

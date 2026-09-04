@@ -49,7 +49,7 @@ so exactly once at startup. See
 
 The board never moves within a bag, so the novelty gate would capture one pair
 and then correctly refuse the rest. For assisted mode use
-[`solid600-handheld-zed`](../solid600-handheld-zed/), where the board is carried
+[`solid600-handheld-vlp`](../solid600-handheld-vlp/), where the board is carried
 around.
 
 ## Two LiDARs are in the recordings

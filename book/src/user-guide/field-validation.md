@@ -50,7 +50,7 @@ If you are reusing a YAML from before Phase 8, edit it before you get to the fie
 
    For a **moving, hand-held board**, tighten `tolerance_ms`. A mis-paired camera frame and LiDAR
    sweep is not merely noisy — it is *wrong*, because the board is not where the other sensor saw
-   it. The `solid600-handheld-zed` session states 50 ms, and says plainly that the number is
+   it. The `solid600-handheld-vlp` session states 50 ms, and says plainly that the number is
    intent rather than measurement. Confirming it is one of your first tasks; see
    [the sync line](#the-sync-line).
 

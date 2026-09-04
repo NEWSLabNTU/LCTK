@@ -57,7 +57,7 @@ one) via `detector_config`. No board geometry belongs here — that is the Targe
 - `two_lidar_calibration.rviz` - the two-lidar layout
 
 A layout that names one rig's device-specific debug topics belongs to that rig's session
-instead, as `rviz.rviz` — `sessions/seyond-left/` and `sessions/solid600-handheld-zed/` ship
+instead, as `rviz.rviz` — `sessions/seyond-left/` and `sessions/solid600-handheld-vlp/` ship
 theirs that way, and `session.launch.py` forwards them automatically.
 
 ### Calibration Configs

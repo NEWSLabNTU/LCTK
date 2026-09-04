@@ -62,7 +62,7 @@ Which side owns the topic names follows from what is knowable:
 |---|---|---|
 | `sample1`, `sample2`, `sample4`, `sample5` | `pcap_avi`, own `data/` | ship in git, **never run** — board, detector preset and rig geometry are all assumptions, and none has a measured crop box |
 | `sample3-hollow-velodyne` | `pcap_avi`, own `data/` | ships in git, verified end to end; `just demo` runs it |
-| `seyond-left`, `seyond-right`, `solid600-handheld-zed`, `vehicle-multisensor` | `live` | no recording ships |
+| `seyond-left`, `seyond-right`, `solid600-handheld-vlp`, `vehicle-multisensor` | `live` | no recording ships |
 | `twolidar-vlp32-falcon` | `bag` | the TWO_LIDAR_* bags are gitignored; symlink one in as `bag` |
 
 Read a session's own README before running it. The four unverified `sampleN`

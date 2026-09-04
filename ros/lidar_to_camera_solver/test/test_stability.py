@@ -9,7 +9,7 @@ only the span across the whole window sees it.
 The window is a **duration**, not a count of detection pairs. Pairs arrive
 irregularly -- the board leaves the field of view, an ICP fit is rejected, a
 sweep returns too few points -- so ten consecutive pairs can span half a second
-or nineteen. Measured on `sessions/solid600-handheld-zed`'s 58 s recording, a
+or nineteen. Measured on `sessions/solid600-handheld-vlp`'s 58 s recording, a
 ten-pair window ran from 0.48 s to 19.42 s, median 1.30 s, with 71 of 195
 windows shorter than one second. A frame count therefore says nothing about how
 long the board actually held.

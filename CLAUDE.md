@@ -612,7 +612,7 @@ Buffer overflow warnings are rate-limited and logged automatically:
   the ones the bag actually records, verified at parse time (M-26)
 - `vehicle-multisensor` - `live`. Two lidars, four cameras, three markers. A schema
   demonstration; there is no rig behind it
-- `solid600-handheld-zed` - `live`. Solid 600 mm target with an EXPERIMENTAL preset; no
+- `solid600-handheld-vlp` - `live`. Solid 600 mm target with an EXPERIMENTAL preset; no
   recording ships. Its 50 ms sync window is tighter than the hollow sessions' because the
   board is hand-held and moving. Ships `rviz.rviz` (M-27)
 

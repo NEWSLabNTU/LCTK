@@ -17,7 +17,7 @@ output of a synchronizer over LiDAR board detections and ArUco detections, and
 they arrive irregularly: the board leaves the field of view, an ICP fit is
 rejected, a sweep returns too few points. Ten consecutive pairs therefore say
 nothing about how long the board held. Measured on the 58 s recording behind
-`sessions/solid600-handheld-zed`, a ten-pair window ran from 0.48 s to 19.42 s
+`sessions/solid600-handheld-vlp`, a ten-pair window ran from 0.48 s to 19.42 s
 (median 1.30 s), with 71 of 195 windows shorter than one second -- so the
 frame-count window was simultaneously too permissive during a dense burst and
 unboundedly stale across a dropout.

@@ -47,7 +47,7 @@ The `just` shorthand resolves a bare session name and fills in `solver_mode:=ass
 
 ```bash
 just assisted                          # defaults to the seyond-left session
-just assisted solid600-handheld-zed
+just assisted solid600-handheld-vlp
 just solver_mode=assisted run <session>   # the same thing, spelled generally
 ```
 
@@ -88,7 +88,7 @@ you would then have to find by hand in review.
 The window is a **duration**, not a count of pairs, and the difference is not cosmetic.
 Synchronized pairs arrive irregularly — the board leaves the field of view, an ICP fit is
 rejected, a sweep returns too few points — so a fixed number of pairs covers an
-unpredictable amount of time. On the 58 s `solid600-handheld-zed` recording a ten-pair
+unpredictable amount of time. On the 58 s `solid600-handheld-vlp` recording a ten-pair
 window ran from 0.48 s to 19.42 s, median 1.30 s, with 71 of 195 windows shorter than a
 second. A frame count is therefore simultaneously too permissive during a dense burst and
 unboundedly stale across a dropout.

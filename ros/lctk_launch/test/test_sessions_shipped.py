@@ -24,7 +24,7 @@ NAMES = [
     "seyond-left",
     "seyond-right",
     "solid600-handheld-seyond",
-    "solid600-handheld-zed",
+    "solid600-handheld-vlp",
     "twolidar-vlp32-falcon",
     "vehicle-multisensor",
     "vlp32-zed-hollow",
@@ -42,15 +42,15 @@ UNVERIFIED_SAMPLES = ["sample1", "sample2", "sample4", "sample5"]
 # the entire point of M-26 -- so where the bag is absent the session genuinely
 # cannot be parsed, and skipping is the honest outcome rather than weakening
 # the check to make it pass everywhere.
-# The same holds for solid600-handheld-zed, whose recording is a field capture
+# The same holds for solid600-handheld-vlp, whose recording is a field capture
 # that has never been small enough to ship.
 BAG_SESSIONS = [
     # Both solid600-* sessions are `kind: bag` against the same gitignored
-    # field capture. solid600-handheld-zed was missing from this list, so on
+    # field capture. solid600-handheld-vlp was missing from this list, so on
     # any machine without the symlink its parse test failed rather than
     # skipping -- it only passed here because the symlink happened to exist.
     "solid600-handheld-seyond",
-    "solid600-handheld-zed",
+    "solid600-handheld-vlp",
     "twolidar-vlp32-falcon",
     "vlp32-zed-hollow",
 ]
@@ -150,7 +150,7 @@ def test_the_solid_session_keeps_its_tighter_sync_window():
     """50 ms, not the 100 ms every hollow session uses: the solid board is
     hand-held and moving, so a mis-paired frame is wrong rather than merely
     noisy. A migration that quietly normalised this to 100 should fail here."""
-    pipeline = parse_config(_manifest("solid600-handheld-zed"))
+    pipeline = parse_config(_manifest("solid600-handheld-vlp"))
     assert pipeline.sync.tolerance_ms == 50.0
 
 

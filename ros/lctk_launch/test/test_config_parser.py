@@ -107,7 +107,7 @@ def test_vehicle_config():
             marks=needs_two_lidar_bag,
         ),
         ("vehicle-multisensor", "hollow_1000_aruco_4"),
-        ("solid600-handheld-zed", "solid_600_aruco_1"),
+        ("solid600-handheld-vlp", "solid_600_aruco_1"),
     ],
 )
 def test_maintained_sessions_select_their_target(session_name, expected_target_id):
@@ -117,7 +117,7 @@ def test_maintained_sessions_select_their_target(session_name, expected_target_i
     Expressed per session rather than branching on the name inside the
     body, so this is also the guard against relabelling: the five configs
     that already recorded data against the hollow board must keep resolving
-    to hollow_1000_aruco_4 -- solid600-handheld-zed is the only one that
+    to hollow_1000_aruco_4 -- solid600-handheld-vlp is the only one that
     resolves to solid_600_aruco_1. A cutover bug that pointed an existing
     session at the wrong target_config would either point it at the wrong
     physical board (invalidating every recording made against it) or fail
@@ -272,7 +272,7 @@ def test_two_lidar_node_parity():
 
 
 def test_solid_600_handheld_config():
-    """solid600-handheld-zed parses to the single-pair pipeline it claims,
+    """solid600-handheld-vlp parses to the single-pair pipeline it claims,
     with the tighter sync window its hand-held (moving) board requires.
 
     100ms is what every hollow session uses for a board on a tripod;
@@ -280,7 +280,7 @@ def test_solid_600_handheld_config():
     move between a camera frame and a LiDAR sweep in a way a stationary
     board cannot.
     """
-    config_path = session_manifest("solid600-handheld-zed")
+    config_path = session_manifest("solid600-handheld-vlp")
     # Not pytest.skip: this session ships in the repo, so a missing file is a
     # deleted maintained config, not an absent optional fixture. Skipping
     # would hide the deletion behind a green run.

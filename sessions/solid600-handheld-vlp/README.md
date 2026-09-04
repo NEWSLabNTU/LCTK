@@ -1,4 +1,4 @@
-# solid600-handheld-zed
+# solid600-handheld-vlp
 
 Solid 600 mm target, hand-held, walked around an underground car park. VLP-32C
 plus a ZED.
@@ -13,7 +13,7 @@ novelty gate captures one placement and then correctly refuses everything after.
 It is a field capture, gitignored like the `TWO_LIDAR_*` bags. Symlink one in:
 
 ```bash
-ln -sfn /path/to/new_LCTK_board/newtype_1 sessions/solid600-handheld-zed/bag
+ln -sfn /path/to/new_LCTK_board/newtype_1 sessions/solid600-handheld-vlp/bag
 ```
 
 `newtype_1` is 58 s; `newtype_2` is a second take. A separate
@@ -28,7 +28,7 @@ recording's `metadata.yaml` at parse time (M-26).
 ## Running it
 
 ```bash
-just mode=realtime assisted solid600-handheld-zed
+just mode=realtime assisted solid600-handheld-vlp
 ```
 
 Then open <http://localhost:8080>. *Export archive* writes `out/detections.json`.

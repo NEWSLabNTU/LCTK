@@ -778,7 +778,7 @@ def test_maintained_sessions_use_only_the_new_target_schema(
 def test_solid_600_handheld_session_selects_solid_target(
     calibrate_launch: ModuleType,
 ):
-    """solid600-handheld-zed is the property the W5-D cutover exists to
+    """solid600-handheld-vlp is the property the W5-D cutover exists to
     demonstrate end to end: a maintained config selecting a target other
     than the hollow board, wired through a coherent LiDAR-camera graph, with
     its own (tighter) sync window intact.
@@ -793,7 +793,7 @@ def test_solid_600_handheld_session_selects_solid_target(
     """
 
     nodes = calibrate_launch.generate_nodes(
-        _LaunchContext(_session("solid600-handheld-zed"))
+        _LaunchContext(_session("solid600-handheld-vlp"))
     )
 
     detectors = _nodes_for_package(nodes, "lidar_board_detector")
