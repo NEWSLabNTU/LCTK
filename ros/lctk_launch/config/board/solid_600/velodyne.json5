@@ -13,7 +13,7 @@
   "strip_plane_min_frac": 0.08,
   "cluster_eps": 0.15,
   "cluster_min_points": 10,
-  "vertical_gap_deg": 1.0,
+  "vertical_gap_deg": 0.5,
   "merge_seed_min_points": 40,
   "merge_offset_tol": 0.02,
   "merge_dist_factor": 1.6,

@@ -56,7 +56,7 @@
   "initial_inplane_rotation_deg": 0.0,
   // Experimental solid-edge starting values. These fixture-derived values
   // await W7 real-bag tuning; they are not field-validated thresholds.
-  "solid_edge_band_m": 0.015,
+  "solid_edge_band_m": 0.03,
   "solid_minimum_edge_points": 8,
   "solid_minimum_points_per_covered_edge": 1,
   "solid_minimum_covered_edges": 3,
