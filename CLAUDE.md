@@ -561,6 +561,12 @@ how two differently-sampled LiDARs (a spinning VLP-32C and a solid-state Falcon,
 target while each keeps its own sensor-specific tuning; `sessions/twolidar-vlp32-falcon/` does
 exactly this.
 
+**Every section refuses a key nothing reads.** The top level, `devices`, each lidar and camera,
+each marker, `sync` and `assisted` all raise on an unknown key, naming it and listing what the
+section accepts (ADR-0006). A misspelled `sync_tolernace_ms` used to be discarded, after which
+`sync` reported `tolerance_ms` missing — true, and no help. `name:` and `description:` remain
+accepted although nothing reads them; a section may be documentation without being configuration.
+
 The legacy `type`/`board_config`/`aruco_config` marker keys (and a lidar device's `board_config`
 key) are now **retired**: `config_parser.py` raises a `ValueError` naming the offending key rather
 than parsing it, pointing at `target_config`/`detector_config` as the replacement. There is no

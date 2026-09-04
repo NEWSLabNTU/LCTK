@@ -26,6 +26,7 @@ from lctk_launch.session import (
     derived_camera_topics,
     derived_lidar_topics,
     parse_data,
+    reject_unknown_keys,
     resolve_config_path,
     verify_bag_topics,
 )
@@ -45,6 +46,46 @@ DEFAULT_ARUCO_DETECTOR_CONFIG = (
 
 # The only two drop policies Conflux's DetectionPairSource accepts.
 VALID_SYNC_DROP_POLICIES = ("reject_new", "drop_oldest")
+
+# Every key each manifest section accepts. `session.py` refuses an unknown key
+# under `data:` and has since sessions existed; these do the same for the rest of
+# the file, so one manifest has one strictness rather than two.
+#
+# Retired keys are deliberately absent. They are checked first, by name, with an
+# error saying what replaced them -- reaching the generic "unknown key" message
+# would lose that.
+#
+# `name` and `description` are read by nothing. They are kept because every
+# shipped manifest carries them and they are what an operator reads first; a
+# section can be documentation without being configuration.
+_TOP_LEVEL_KEYS = {
+    "name",
+    "description",
+    "qos",
+    "data",
+    "devices",
+    "markers",
+    "sync",
+    "assisted",
+    "reference_frame",
+}
+_DEVICES_KEYS = {"lidars", "cameras"}
+_LIDAR_DEVICE_KEYS = {
+    "frame_id",
+    "pointcloud_topic",
+    "detector_config",
+    "bbox_config",
+    "qos",
+}
+_CAMERA_DEVICE_KEYS = {"frame_id", "image_topic", "qos"}
+_MARKER_KEYS = {
+    "target_config",
+    "detector_config",
+    "bbox_config",
+    "aruco_detector_config",
+    "pairs",
+}
+_SYNC_KEYS = {"tolerance_ms", "queue_size", "drop_policy"}
 
 
 def resolve_package_path(path: str, session_dir: Path | None = None) -> str:
@@ -293,6 +334,13 @@ class CalibrationConfigParser:
         with open(self.config_path) as f:
             raw_config = yaml.safe_load(f)
 
+        if not isinstance(raw_config, dict):
+            raise SessionError(
+                f"{self.config_path} does not contain a YAML mapping; "
+                "a manifest is a mapping of sections."
+            )
+        reject_unknown_keys("the manifest", raw_config, _TOP_LEVEL_KEYS)
+
         # Read `data:` before the devices, because it decides how a device's
         # topic is obtained: derived under `pcap_avi`, stated under `bag`/`live`.
         # (The plan sketched this next to `_parse_sync`, which runs after the
@@ -419,24 +467,23 @@ class CalibrationConfigParser:
         The synchronizer window, buffer size and drop policy are a physical
         judgement about the scene -- how far the calibration target can move
         between a camera frame and a LiDAR sweep -- not something derivable
-        from whether the data is live or recorded (that split is `mode`,
-        which controls QoS only). This section is therefore required, with
-        no mode-derived fallback: a config missing it is refused here rather
-        than silently defaulting.
+        from whether the data is live or recorded. This section is therefore
+        required, with no fallback: a config missing it is refused here rather
+        than silently defaulting. (Transport reliability, which used to travel
+        with it under the `mode` argument, is now resolved per device by
+        `lctk_launch.transport`.)
         """
         if sync_config is None:
             raise ValueError(
                 "Missing required 'sync' section (tolerance_ms, queue_size, "
                 "drop_policy). The synchronizer window is a physical "
                 "judgement about the scene and must be stated explicitly in "
-                "the config; it is not derived from 'mode'."
+                "the config; nothing derives it for you."
             )
 
-        missing = [
-            key
-            for key in ("tolerance_ms", "queue_size", "drop_policy")
-            if key not in sync_config
-        ]
+        reject_unknown_keys("sync", sync_config, _SYNC_KEYS)
+
+        missing = [key for key in sorted(_SYNC_KEYS) if key not in sync_config]
         if missing:
             raise ValueError(
                 f"'sync' section is missing required key(s): {', '.join(missing)}"
@@ -601,6 +648,8 @@ class CalibrationConfigParser:
 
     def _parse_devices(self, devices_config: dict) -> None:
         """Parse device definitions."""
+        reject_unknown_keys("devices", devices_config, _DEVICES_KEYS)
+
         # Parse LiDARs
         for name, config in devices_config.get("lidars", {}).items():
             if "board_config" in config:
@@ -618,6 +667,7 @@ class CalibrationConfigParser:
                     "There is no migration tool for launch YAML; replace "
                     "'board_config' with 'detector_config' by hand."
                 )
+            reject_unknown_keys(f"devices.lidars.{name}", config, _LIDAR_DEVICE_KEYS)
             detector_config_override = config.get("detector_config")
             if detector_config_override:
                 detector_config_override = resolve_package_path(
@@ -641,6 +691,7 @@ class CalibrationConfigParser:
 
         # Parse cameras
         for name, config in devices_config.get("cameras", {}).items():
+            reject_unknown_keys(f"devices.cameras.{name}", config, _CAMERA_DEVICE_KEYS)
             self.cameras[name] = CameraDevice(
                 name=name,
                 image_topic=self._device_topic(
@@ -673,6 +724,8 @@ class CalibrationConfigParser:
                     "no migration tool for launch YAML; replace these keys "
                     "with 'target_config' and 'detector_config' by hand."
                 )
+            reject_unknown_keys(f"markers.{name}", config, _MARKER_KEYS)
+
             has_new_schema = "target_config" in config or "detector_config" in config
             if has_new_schema:
                 self._parse_new_marker(name, config)

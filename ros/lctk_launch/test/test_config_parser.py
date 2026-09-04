@@ -1204,3 +1204,141 @@ def test_an_unknown_qos_value_is_refused(tmp_path):
     )
     with pytest.raises(ValueError, match="expected one of"):
         parse_config(str(manifest))
+
+
+# --- one manifest, one strictness -------------------------------------------
+#
+# `data:` has refused unknown keys since sessions existed. The rest of the file
+# accepted anything, so a typo was discarded in silence and the section was then
+# reported as missing the key it was meant to be.
+
+
+def _live_session(tmp_path, top="", devices=None, markers=None, sync=None):
+    """A manifest with every section overridable, for schema tests."""
+    directory = tmp_path / "rig"
+    directory.mkdir(parents=True, exist_ok=True)
+    target = "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
+    detector = "$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5"
+    devices = devices or (
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n"
+    )
+    markers = markers or (
+        f"markers:\n  calibration_board:\n    target_config: {target}\n"
+        f"    detector_config: {detector}\n    pairs:\n      - [top, front_center]\n"
+    )
+    sync = (
+        sync
+        or "sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }\n"
+    )
+    manifest = directory / "session.yaml"
+    manifest.write_text(
+        f"name: rig\ndata: {{ kind: live }}\n{top}{devices}{markers}{sync}",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_a_stray_top_level_key_is_refused(tmp_path):
+    """`mode:` is the obvious one to try after it was deleted."""
+    manifest = _live_session(tmp_path, top="mode: realtime\n")
+    with pytest.raises((ValueError, SessionError), match="unknown key"):
+        parse_config(str(manifest))
+
+
+def test_name_and_description_stay_accepted(tmp_path):
+    """Read by nothing, carried by every shipped manifest, and worth keeping."""
+    manifest = _live_session(tmp_path, top="description: a rig\n")
+    assert parse_config(str(manifest)).lidars["top"].frame_id == "velodyne_top"
+
+
+def test_a_mistyped_sync_key_is_refused_by_name(tmp_path):
+    """Without this the typo is discarded and `sync` reports the key as missing.
+
+    The second message is true and useless: the key is right there in the file,
+    spelled wrong.
+    """
+    manifest = _live_session(
+        tmp_path,
+        sync="sync:\n  tolerance_ms: 100\n  queue_size: 100\n"
+        "  drop_policy: reject_new\n  tolernace_ms: 50\n",
+    )
+    with pytest.raises((ValueError, SessionError)) as excinfo:
+        parse_config(str(manifest))
+    assert "tolernace_ms" in str(excinfo.value)
+
+
+def test_a_mistyped_device_key_is_refused(tmp_path):
+    manifest = _live_session(
+        tmp_path,
+        devices="devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n      detecter_config: /x.json5\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    with pytest.raises((ValueError, SessionError), match="detecter_config"):
+        parse_config(str(manifest))
+
+
+def test_a_mistyped_camera_key_is_refused(tmp_path):
+    manifest = _live_session(
+        tmp_path,
+        devices="devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n      qos_profile: reliable\n",
+    )
+    with pytest.raises((ValueError, SessionError), match="qos_profile"):
+        parse_config(str(manifest))
+
+
+def test_a_mistyped_marker_key_is_refused(tmp_path):
+    target = "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
+    detector = "$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5"
+    manifest = _live_session(
+        tmp_path,
+        markers=f"markers:\n  calibration_board:\n    target_config: {target}\n"
+        f"    detector_config: {detector}\n    bbox_configs: /x.json5\n"
+        f"    pairs:\n      - [top, front_center]\n",
+    )
+    with pytest.raises((ValueError, SessionError), match="bbox_configs"):
+        parse_config(str(manifest))
+
+
+def test_a_stray_devices_section_key_is_refused(tmp_path):
+    manifest = _live_session(
+        tmp_path,
+        devices="devices:\n  lidar:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    with pytest.raises((ValueError, SessionError)) as excinfo:
+        parse_config(str(manifest))
+    message = str(excinfo.value)
+    # Without the guard this misspelling produces "reference_frame must be
+    # specified when no lidars are defined" -- true, and no help at all.
+    assert "unknown key" in message
+    assert "lidar" in message
+
+
+def test_a_retired_key_still_gets_its_own_message(tmp_path):
+    """The generic "unknown key" text would lose what replaced it.
+
+    So the retired-key checks run first, and the retired names are deliberately
+    absent from the accepted sets rather than listed there.
+    """
+    manifest = _live_session(
+        tmp_path,
+        devices="devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n      board_config: /x.json5\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    with pytest.raises((ValueError, SessionError)) as excinfo:
+        parse_config(str(manifest))
+    message = str(excinfo.value)
+    assert "retired schema key" in message
+    assert "detector_config" in message

@@ -79,6 +79,6 @@ run; it is a property of what publishes each topic, and the two shipped counter-
 what a graph-wide flag gets wrong. Also ruled out: overriding the player's QoS, which masks a
 genuine mismatch elsewhere by rewriting the recording's own claim (M-30's candidate 3).
 
-**Not addressed.** `config_parser.py` still accepts unknown keys at the top level and inside
-`devices:` and `markers:`, so a mistyped `qos` is discarded silently rather than refused. `data:`
-and `assisted:` do reject unknown keys. Unifying that is a separate decision.
+**Follow-on.** A mistyped `qos` would have been discarded silently, because `config_parser.py`
+accepted unknown keys everywhere except `assisted:`. That is closed by
+[ADR-0006](./0006-one-manifest-one-strictness.md).

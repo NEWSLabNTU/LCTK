@@ -154,7 +154,18 @@ def derived_camera_topics(device: str) -> dict[str, str]:
     }
 
 
-def _reject_unknown(section: str, raw: dict, known: set[str]) -> None:
+def reject_unknown_keys(section: str, raw: dict, known: set[str]) -> None:
+    """Refuse a section carrying a key nothing reads.
+
+    A silently ignored key is the manifest's version of every failure this
+    design exists to prevent: `sync_tolernace_ms` parses, is discarded, and the
+    section is then reported as missing the key it was meant to be. Naming the
+    offender and listing what is accepted turns that into its own fix.
+
+    Public because the manifest is parsed by two modules -- this one owns
+    `data:`, `config_parser` owns the rest -- and one file should not have two
+    strictnesses.
+    """
     unknown = set(raw) - known
     if unknown:
         raise SessionError(
@@ -186,7 +197,7 @@ def _parse_republish(raw: object) -> tuple[tuple[str, str], ...]:
         where = f"data.republish[{index}]"
         if not isinstance(entry, dict):
             raise SessionError(f"{where} must be a mapping with 'from' and 'to'")
-        _reject_unknown(where, entry, _REPUBLISH_KEYS)
+        reject_unknown_keys(where, entry, _REPUBLISH_KEYS)
         source, target = entry.get("from"), entry.get("to")
         if not source or not target:
             raise SessionError(f"{where} requires both 'from' and 'to'")
@@ -213,7 +224,7 @@ def parse_data(raw: object, session_dir: Path) -> DataSource:
         )
     if not isinstance(raw, dict):
         raise SessionError(f"'data' must be a mapping, got {type(raw).__name__}")
-    _reject_unknown("data", raw, _DATA_KEYS)
+    reject_unknown_keys("data", raw, _DATA_KEYS)
 
     kind = raw.get("kind")
     if kind not in DATA_KINDS:
@@ -222,9 +233,9 @@ def parse_data(raw: object, session_dir: Path) -> DataSource:
         )
 
     lidar = raw.get("lidar") or {}
-    _reject_unknown("data.lidar", lidar, _LIDAR_KEYS)
+    reject_unknown_keys("data.lidar", lidar, _LIDAR_KEYS)
     camera = raw.get("camera") or {}
-    _reject_unknown("data.camera", camera, _CAMERA_KEYS)
+    reject_unknown_keys("data.camera", camera, _CAMERA_KEYS)
 
     info_url = camera.get("info_url")
     if info_url is not None:
