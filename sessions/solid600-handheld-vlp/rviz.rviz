@@ -408,7 +408,9 @@ Visualization Manager:
               Enabled: true
               Name: Final board
               Namespaces:
-                {}
+                target_axes: true
+                target_fiducials: true
+                target_plate: true
               Topic:
                 Depth: 1
                 Durability Policy: Volatile
@@ -492,25 +494,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 25.91893768310547
+      Distance: 28.611188888549805
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 25.440595626831055
-        Y: 3.325498104095459
-        Z: -0.3131238520145416
+        X: 25.141273498535156
+        Y: 0.305410236120224
+        Z: -2.677088975906372
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: -0.009796801954507828
+      Pitch: 0.15020319819450378
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.158606767654419
+      Yaw: 3.1286067962646484
     Saved: ~
 Window Geometry:
   ArUco detection:
