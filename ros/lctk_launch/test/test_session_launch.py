@@ -335,13 +335,19 @@ def test_play_args_reach_the_bag_player_one_per_flag(data_launch, tmp_path):
 
 def test_play_args_defaults_to_nothing_extra(data_launch, tmp_path):
     directory = _bag_session(tmp_path / "plain")
-    arguments = _player_arguments(data_launch.generate_data_source(_Context(directory, play_args="")))
-    assert [a for a in arguments if a.startswith("--play-arg=")] == ["--play-arg=--clock"]
+    arguments = _player_arguments(
+        data_launch.generate_data_source(_Context(directory, play_args=""))
+    )
+    assert [a for a in arguments if a.startswith("--play-arg=")] == [
+        "--play-arg=--clock"
+    ]
 
 
 def test_play_args_keeps_a_quoted_path_with_spaces_together(data_launch, tmp_path):
     directory = _bag_session(tmp_path / "spaced")
     actions = data_launch.generate_data_source(
-        _Context(directory, play_args="--qos-profile-overrides-path '/tmp/a b/qos.yaml'")
+        _Context(
+            directory, play_args="--qos-profile-overrides-path '/tmp/a b/qos.yaml'"
+        )
     )
     assert "--play-arg=/tmp/a b/qos.yaml" in _player_arguments(actions)
