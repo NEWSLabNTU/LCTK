@@ -3,7 +3,7 @@
 Solid 600 mm target, hand-held, walked around an underground car park. **Seyond
 Falcon** plus a ZED.
 
-This is [`solid600-handheld-zed`](../solid600-handheld-zed/) read through the
+This is [`solid600-handheld-vlp`](../solid600-handheld-vlp/) read through the
 other LiDAR. Every `newtype_*` bag records both sensors — `/velodyne_points` and
 `/iv_points` — so the two sessions see the same scene, the same board and the
 same operator, and differ only in which sensor the detector reads.
@@ -53,3 +53,34 @@ RELIABLE subscriber receives nothing from it while the camera half keeps working
 - The `assisted:` stillness thresholds are inherited verbatim from the Velodyne
   session and were fitted to *its* pose noise. See the comment in
   `session.yaml`; they want re-measuring against the Falcon's pose stream.
+
+## Stillness tuning, and what it is measured from
+
+`stability_max_translation_m` is `0.120` here against `solid600-handheld-vlp`'s
+`0.050`. Measured 2026-09-04 on both takes: the inherited 50 mm produced 3-4
+distinct placements, and 120 mm produces 6 on `newtype_1` and 9 on `newtype_2`.
+
+**Measure it from the node, not from the detection topic.** The stillness gate
+runs on *synchronized pairs*, so a board detection whose ArUco partner missed
+the 50 ms sync window never reaches it. Replaying the board detection topic
+through `StillnessTracker` offline feeds it a denser stream than it ever sees,
+and overstates the result -- it predicted 7 placements where the node produced
+3. `lidar_to_camera_solver` now logs every stillness verdict at debug level:
+
+```bash
+just mode=realtime solver_mode=assisted log_level=debug run solid600-handheld-seyond
+grep "stillness:" play_log/<run>/node/lidar_to_camera_solver/err
+```
+
+Each line carries the reason, the 1 s translation and rotation spans, and how
+many pairs were in the window, which is what these thresholds are set against.
+
+## Known: the solve is DEGENERATE on both recordings
+
+Every solve on these bags reports `DEGENERATE` with a reprojection RMS around
+42 px, at 6 and at 9 placements alike. More placements did not improve it, so
+this is not the diversity problem the assisted mode's gates exist to prevent --
+the extra captures this tuning buys are necessary but not sufficient. The cause
+is not diagnosed here. Note the solid 600 target carries a single ArUco marker,
+which gives the camera side far less to constrain a pose with than the hollow
+1000's four.

@@ -1,7 +1,7 @@
 name: solid600-handheld-seyond
 description: >
   Solid 600 mm target held by hand, Seyond Falcon plus a ZED, walked around an
-  underground car park. The same recordings as solid600-handheld-zed, read
+  underground car park. The same recordings as solid600-handheld-vlp, read
   through the Falcon instead of the VLP-32C: both sensors are in every
   newtype_* bag, so this is the same scene seen by a denser sensor.
 
@@ -44,51 +44,50 @@ sync: { tolerance_ms: 50, queue_size: 100, drop_policy: reject_new }
 assisted:
   review_archive_path: $(session-dir)/out/detections.json
 
-  # INHERITED FROM solid600-handheld-zed, AND NOT RE-MEASURED FOR THE FALCON.
-  # Everything below was derived from the VLP-32C's pose stream on these same
-  # bags. The scene is identical, so the board's real motion is identical and
-  # the numbers are a defensible starting point -- but the quantity they were
-  # fitted to is pose noise, and a denser sensor has less of it. In particular
-  # the 13.5 mm floor quoted below is a VLP-32C floor; the Falcon's will be
-  # lower, which means 50 mm may be looser than this rig needs. Re-measure
-  # before treating these as tuned.
+  # MEASURED ON THE FALCON, 2026-09-04, on newtype_1 and newtype_2.
   #
-  # Measured against this recording with the 1.0 s default window (the node's
-  # `stability_window_s`), and deliberately biased loose.
+  # Method, and a correction worth keeping. The obvious approach -- record the
+  # board detection topic and replay it through StillnessTracker offline --
+  # measures the wrong stream: the gate runs on *synchronized pairs*, so a board
+  # detection whose ArUco partner missed the 50 ms window never reaches it. That
+  # offline sweep predicted 7 usable placements where the node produced 3. The
+  # numbers below come from the node itself, via the stillness verdict now
+  # logged at debug level in lidar_to_camera_solver.
   #
-  # Loose because the gates are not the quality filter -- the review page is.
-  # Every captured pair arrives with a preview, its own reprojection RMS and a
-  # drop button, rows sorted worst-first, so a marginal capture costs one click
-  # while a missed hold costs walking the board back to that spot and holding it
-  # again. Those costs are not symmetric, so where the data supports a range,
-  # these take the permissive end.
+  # A second way it was nearly measured wrong: three bag replays leaked into one
+  # recording, because a play_launch from an earlier launch was still alive and
+  # `pkill` had not reached it. 940 s of poses across three passes looks like a
+  # long, quiet recording. tmp/record_one_pass.sh now refuses to start if
+  # anything is running and fails if the bag header time goes backwards.
   #
-  # The numbers, re-measured after the stillness window became a duration (the
-  # previous 30 mm / 8.0 deg were derived over ten-*pair* windows, which on this
-  # recording spanned 0.48 s to 19.42 s -- median 1.30 s, 71 of 195 shorter than
-  # a second -- so they were not measured over a second of anything):
+  # The Falcon's 1 s translation-span floor is 8.7 mm (newtype_1) and 13.0 mm
+  # (newtype_2), against the VLP-32C's 13.5 mm: the denser sensor fits the
+  # plate more steadily, so the *noise* these thresholds sit above is smaller
+  # here than on the session this file was copied from.
   #
-  #   * The operator holds the board three times: t~35.1-35.5, t~42.5-43.6 and
-  #     t~49.2-54.4. Their tightest 1 s translation spans are 39 mm, 17 mm and
-  #     13.5 mm; 13.5 mm is this rig's floor (a 600 mm plate at ~7 m), so the
-  #     node's 5 mm default is unreachable here by construction.
-  #   * 30 mm silently drops the first hold entirely. 50 mm takes all three and
-  #     additionally splits the long third hold into two placements more than
-  #     5 cm apart, which the board really did occupy -- 4 buffered pairs, the
-  #     same on two recorded pose streams and on the live end-to-end run,
-  #     against 2 before this change.
-  #   * The ceiling on loosening is where captures stop landing in a hold: at
-  #     >=90 mm with >=8 deg, and at >=120 mm with >=7.5 deg, captures appear at
-  #     t~33 with 1 s translation spans of 100-330 mm, which is a walking board.
-  #     50 mm sits well inside that.
-  stability_max_translation_m: 0.050
-  # Unchanged at 8.0, and still a noise-tolerant number rather than a physical
-  # one. Few LiDAR returns land on a 600 mm plate at ~7 m, so the fitted
-  # orientation is noisy: the tightest 1 s rotation span anywhere in the
-  # recording is 3.91 deg, and the tracker reports 6-8 deg while the translation
-  # span says 20 mm -- a board that is plainly not rotating. Nothing below
-  # ~5 deg captures anything here, and 7.8 through 8.8 deg give an identical
-  # result on both replays, so this sits on a plateau rather than on a spike.
-  # It wants re-measuring against a closer capture, where the orientation fit
-  # would be worth trusting.
+  # Distinct placements the node actually captured, end to end, at 8 deg:
+  #
+  #      50 mm  (inherited VLP value)  ->  3-4, which is what prompted this
+  #     120 mm                         ->  6 (newtype_1), 9 (newtype_2)
+  #
+  # Six was the bar; 120 mm clears it on both recordings. On newtype_1 the gate
+  # fired 8 times and the novelty gate folded 2 of those into placements it
+  # already held, which is the gate doing its job rather than a loss.
+  #
+  # What loosening costs, stated plainly: the captured 1 s spans at this setting
+  # run 12-102 mm over 3-9 pairs, so some are the gate catching a slow moment
+  # mid-walk rather than a hold. That is the documented trade -- the gates are
+  # not the quality filter, the review page is, and a marginal capture costs one
+  # click while a missed hold costs walking the board back. The inherited 50 mm
+  # already captured mid-walk; loosening makes it more frequent, not new.
+  #
+  # Not fixed by this, and visible in the same runs: every solve reports
+  # DEGENERATE with a ~42 px reprojection RMS. More placements did not help,
+  # so it is not a diversity problem -- see the note in README.md.
+  stability_max_translation_m: 0.120
+  # Left at 8.0 deliberately. 12 deg does not improve the worst case (7 either
+  # way) and reduces the number of captures that are genuinely stationary,
+  # because rotation is the noise-dominated axis: few returns land on a 600 mm
+  # plate at 6 m, so the fitted orientation moves when the board does not.
+  # Loosening the axis that is mostly noise buys captures without buying holds.
   stability_max_rotation_deg: 8.0

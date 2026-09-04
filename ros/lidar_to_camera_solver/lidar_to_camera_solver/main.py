@@ -693,6 +693,18 @@ class LidarToCameraSolver(Node):
         stamp_s = self.get_clock().now().nanoseconds * 1e-9
         state = self._stillness.push(position, orientation, stamp_s)
         self._last_stillness = state
+        # Every verdict, at debug level, because tuning the thresholds without it
+        # means guessing. The obvious way to measure them -- record the board
+        # detection topic and replay it through StillnessTracker offline -- feeds
+        # the tracker a stream it never sees: this gate runs on *synchronized
+        # pairs*, so a board detection with no ArUco partner inside the sync
+        # window never reaches it. That mistake overestimated the usable captures
+        # on this rig by more than a factor of two.
+        self.get_logger().debug(
+            f"stillness: {state.reason} "
+            f"[{state.translation_span_m * 1000:.0f} mm / "
+            f"{state.rotation_span_deg:.1f} deg over {state.frames} pairs]"
+        )
         if not state.should_capture:
             return
 
