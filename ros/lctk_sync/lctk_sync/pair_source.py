@@ -122,6 +122,10 @@ class DetectionPairSource:
         self._max_skew_ms: float = 0.0
         self._epoch_resets = 0
         self._last_epoch_reset_at = 0.0
+        # A reset is destructive: it clears the matching engine's buffers. Do not
+        # repeat it while waiting for the first group from the new epoch, or the
+        # epoch timer can erase a progressing stream once per tick.
+        self._epoch_reset_waiting_for_pair = False
         self._last_epoch_received: dict = {}
         self._started_at = time.monotonic()
         self._last_received: dict = {}
@@ -257,6 +261,10 @@ class DetectionPairSource:
             )
             return
 
+        # A group proves that the new matching engine has recovered. Re-arm epoch
+        # detection so a later bag transition can still be handled.
+        self._epoch_reset_waiting_for_pair = False
+
         counts = tuple(len(getattr(msg, "detections", ())) for msg in messages)
         stamps = [self._stamp_s(msg) for msg in messages]
         skew_ms = (max(stamps) - min(stamps)) * 1000.0
@@ -330,6 +338,13 @@ class DetectionPairSource:
 
     def _check_for_new_epoch(self):
         received = dict(self._sync.statistics.messages_received)
+        if self._epoch_reset_waiting_for_pair:
+            # The source may keep delivering while conflux fills the fresh buffers.
+            # Updating the baseline keeps those messages from looking like another
+            # source transition once a recovered group eventually arrives.
+            self._last_epoch_received = received
+            return
+
         if should_reset_for_new_epoch(
             previous_received=self._last_epoch_received,
             current_received=received,
@@ -352,6 +367,7 @@ class DetectionPairSource:
         """
         self._epoch_resets += 1
         self._last_epoch_reset_at = time.monotonic()
+        self._epoch_reset_waiting_for_pair = True
         self._sync.reset()
         with self._cache_context():
             self._clear_cached_pair()

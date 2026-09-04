@@ -291,3 +291,30 @@ def test_replayed_timestamp_epoch_resets_and_resumes_pairing(harness_factory):
     pairs_after_reset = len(harness.pairs)
     harness.publish(aruco_stamp=50.000, board_stamp=50.030)
     assert harness.spin_until(lambda: len(harness.pairs) > pairs_after_reset)
+
+
+def test_epoch_reset_does_not_repeat_while_new_epoch_is_unpaired(harness_factory):
+    """A reset must not clear the fresh buffers again on every epoch timer tick."""
+    harness = harness_factory(epoch_check_interval_s=0.05)
+    harness.publish(aruco_stamp=100.000, board_stamp=100.030)
+    assert harness.spin_until(lambda: len(harness.pairs) == 1)
+
+    replay_stamp = 1.0
+    deadline = time.monotonic() + 3.0
+    while harness.source.epoch_resets == 0 and time.monotonic() < deadline:
+        harness.publish(aruco_stamp=replay_stamp, board_stamp=replay_stamp + 0.030)
+        replay_stamp += 0.1
+        harness.spin_for(0.03)
+
+    assert harness.source.epoch_resets == 1
+
+    # Keep both streams alive but outside the 50 ms matching window. With the old
+    # logic, the stale last-group age plus growing received counters caused another
+    # reset every timer tick; that repeatedly erased the fresh epoch's buffers.
+    for index in range(10):
+        stamp = 1000.0 + index
+        harness.publish(aruco_stamp=stamp, board_stamp=stamp + 0.2)
+        harness.spin_for(0.03)
+    harness.spin_for(0.2)
+
+    assert harness.source.epoch_resets == 1
