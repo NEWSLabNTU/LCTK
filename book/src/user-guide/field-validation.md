@@ -129,7 +129,7 @@ just solver_mode=manual enable_judge=false calibrate ~/calib/my-rig/session.yaml
 > from one historical rig. On any other rig it scores your solve against someone else's extrinsic
 > and prints confident-looking numbers that mean nothing.
 
-Useful overrides: `mode=offline` (default; RELIABLE QoS, right for bags), `debug_mode=true`
+Useful overrides: `debug_mode=true`
 (default; publishes the LiDAR `debug/*` clouds and the ArUco overlay image), `log_level=debug` (this
 is what raises log verbosity — `debug_mode` does not), `rviz_enabled=false`.
 

@@ -54,6 +54,12 @@ The physical evidence that identifies a Calibration Target's named in-plane axes
 asymmetric cutouts or a required local axis aligned with mounting-up.
 _Avoid_: Initial rotation, ICP orientation, camera marker orientation
 
+**Transport Reliability**:
+The reliability a sensor topic is subscribed with, resolved per device from what the session states
+or what its recording offers. It is a property of whatever publishes the topic, not of the graph;
+LCTK's own detection and transform topics are pinned and take no part in it.
+_Avoid_: Mode, offline, realtime, QoS profile
+
 **Detection Pair**:
 One genuinely simultaneous camera ArUco detection and LiDAR board detection describing the same
 observation instant.

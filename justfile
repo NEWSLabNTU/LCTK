@@ -8,9 +8,6 @@ set shell := ["bash", "-uc"]
 debug_mode := "true"
 log_level := "info"
 rviz_enabled := "true"
-# Transport QoS only: "offline" (RELIABLE) or "realtime" (BEST_EFFORT). The synchronizer
-# window, queue size and drop policy come from the config's required `sync:` section.
-mode := "offline"
 solver_mode := "continuous"
 enable_overlay := "true"
 enable_judge := "true"
@@ -224,7 +221,6 @@ lidar-camera SESSION='seyond-left':
         session:="$session_path" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
         solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
@@ -247,7 +243,6 @@ solid SESSION='solid600-handheld-zed':
         session:="$session_path" \
         debug_mode:=true \
         log_level:=info \
-        mode:=realtime \
         enable_rviz:=true \
         solver_mode:=manual \
         enable_overlay:=true \
@@ -271,7 +266,6 @@ assisted SESSION='seyond-left':
         session:="$session_path" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
         solver_mode:=assisted \
         enable_overlay:={{ enable_overlay }} \
@@ -291,7 +285,6 @@ two-lidar:
         rviz_config:=$SHARE/config/rviz/two_lidar_calibration.rviz \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
         solver_mode:={{ solver_mode }}
 
@@ -361,7 +354,6 @@ run SESSION:
         session:="$session_path" \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
         solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \
@@ -414,7 +406,6 @@ calibrate config_file:
         config_file:={{ config_file }} \
         debug_mode:={{ debug_mode }} \
         log_level:={{ log_level }} \
-        mode:={{ mode }} \
         enable_rviz:={{ rviz_enabled }} \
         solver_mode:={{ solver_mode }} \
         enable_overlay:={{ enable_overlay }} \

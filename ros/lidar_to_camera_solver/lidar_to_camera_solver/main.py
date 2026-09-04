@@ -326,25 +326,39 @@ class LidarToCameraSolver(Node):
             camera_topic=self._string_parameter("camera_target_identity_topic"),
         )
 
-        reliability = (
-            ReliabilityPolicy.BEST_EFFORT
-            if use_best_effort_qos
-            else ReliabilityPolicy.RELIABLE
+        # Two profiles, because this node has two kinds of endpoint and only one
+        # of them is anybody else's decision.
+        #
+        # The detection topics and the transform this node publishes are LCTK's
+        # own, ours on both ends, so they are pinned RELIABLE. The camera_info
+        # and the assisted-mode preview frame come from a camera we do not own,
+        # so they take the reliability the session resolved for that device (see
+        # lctk_launch/transport.py). Asking for RELIABLE against a BEST_EFFORT
+        # publisher receives nothing at all.
+        internal_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
         )
-        qos_profile = QoSProfile(
-            reliability=reliability,
+        sensor_qos = QoSProfile(
+            reliability=(
+                ReliabilityPolicy.BEST_EFFORT
+                if use_best_effort_qos
+                else ReliabilityPolicy.RELIABLE
+            ),
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
         self.get_logger().info(
-            f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
+            "QoS: detections and transforms RELIABLE; camera "
+            f"{'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'}"
         )
 
         self.transform_publisher = self.create_publisher(
-            TransformStamped, "extrinsic_transform", qos_profile
+            TransformStamped, "extrinsic_transform", internal_qos
         )
         self.axis_marker_publisher = self.create_publisher(
-            MarkerArray, "axis_markers", qos_profile
+            MarkerArray, "axis_markers", internal_qos
         )
         self.publishing_timer = self.create_timer(
             1.0 / publishing_rate, self._publishing_timer_callback
@@ -354,7 +368,7 @@ class LidarToCameraSolver(Node):
             topics=["aruco_detections", "calibration_board_detections"],
             msg_types=[Detection2DArray, Detection3DArray],
             config=pair_source_config,
-            qos=qos_profile,
+            qos=internal_qos,
             on_pair=(
                 self._continuous_pair_callback
                 if self.solver_mode == "continuous"
@@ -371,11 +385,11 @@ class LidarToCameraSolver(Node):
         else:
             camera_info_topic = "camera_info"
         self.camera_info_subscription = self.create_subscription(
-            CameraInfo, camera_info_topic, self.camera_info_callback, qos_profile
+            CameraInfo, camera_info_topic, self.camera_info_callback, sensor_qos
         )
         self.image_subscription = None
         if self.solver_mode == "assisted":
-            self._start_assisted(camera_topic, qos_profile)
+            self._start_assisted(camera_topic, sensor_qos)
         # Assisted is a multi-pose buffer too, so it gets the manual services: the
         # interactive controller still attaches, and dump/load stays reachable.
         if self.solver_mode in ("manual", "assisted"):
@@ -435,7 +449,7 @@ class LidarToCameraSolver(Node):
         for name, default in parameters:
             self.declare_parameter(name, default)
 
-    def _start_assisted(self, camera_topic: str, qos_profile: QoSProfile) -> None:
+    def _start_assisted(self, camera_topic: str, sensor_qos: QoSProfile) -> None:
         """Build the stillness gate, the preview store and the review server.
 
         Called only for ``solver_mode=assisted``.  Nothing here is reachable from
@@ -460,7 +474,7 @@ class LidarToCameraSolver(Node):
             # The image is for the reviewer, never for the solve, so it takes the
             # same QoS as the detections and keeps only the newest frame.
             self.image_subscription = self.create_subscription(
-                Image, camera_topic, self._image_callback, qos_profile
+                Image, camera_topic, self._image_callback, sensor_qos
             )
         else:
             self.get_logger().warn(

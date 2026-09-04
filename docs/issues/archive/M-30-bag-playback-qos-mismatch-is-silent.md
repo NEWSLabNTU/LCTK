@@ -2,9 +2,10 @@
 
 - **Severity:** Medium
 - **Area:** lctk_launch (sessions), calibrate.launch.py
-- **Status:** 🔴 Open
+- **Status:** 🟢 Fixed 2026-09-04 — the session owns transport reliability, resolved per
+  device from the recording, and the one silent pairing is refused at parse time
 - **Found:** 2026-09-02, first run of `solid600-handheld-zed` against its recording
-- **Related:** [M-26 (archived)](./archive/M-26-two-lidar-example-topics-unreachable.md), [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
+- **Related:** [M-26 (archived)](./M-26-two-lidar-example-topics-unreachable.md), [M-29](../M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
 
 ## Problem
 
@@ -47,10 +48,10 @@ once, at startup, by `rosbag2_player`, above hundreds of lines of healthy sync
 statistics. `just smoke` covers only `pcap_avi` sessions, where the mismatch
 cannot occur.
 
-## Workaround
+## Workaround (historical)
 
-`just mode=realtime run <session>` for any bag session. Documented in
-`sessions/solid600-handheld-zed/README.md`.
+`just mode=realtime run <session>` for any bag session, documented in the affected
+sessions' READMEs. Both the flag and the workaround are gone; see the resolution below.
 
 ## Candidate fixes
 
@@ -67,3 +68,39 @@ cannot occur.
 
 (1) is preferred: it is a check, not a behaviour change, and it cannot make an
 existing session behave differently.
+
+## Resolution
+
+Candidate fixes (1) and (2) landed together, because neither is sufficient alone: a check
+needs something to check *against*, and a manifest key that nothing verifies is one more
+thing to get wrong silently.
+
+`lctk_launch/transport.py` resolves the reliability of each **sensor** topic in three steps:
+what the manifest states (`qos:` on a device, or top-level as a session default), else what
+the recording offers (`offered_qos_profiles` from `metadata.yaml`, which `session.py` was
+already opening for M-26's topic check), else `best_effort` — the only value compatible with
+a publisher of either kind. Stating `reliable` for a topic a recording offers `best_effort`
+is refused at parse time with the topic named, which is (1).
+
+The `mode` argument is deleted, and with it `play_args`, which existed only to work around
+`mode` being unable to express what the bag already knew. Candidate (3) is therefore moot:
+nothing overrides the player, and the recording's own claim is never rewritten.
+
+**A second bug fell out of the same measurement.** `TWO_LIDAR_1` records a RELIABLE Falcon
+beside a BEST_EFFORT VLP-32, so no single graph-wide answer could serve both. `just
+mode=offline run twolidar-vlp32-falcon` — the documented invocation, with no mode override —
+left the VLP-32 detector without a single cloud while the Falcon detector warmed up
+normally, and had been doing so unnoticed. After the change both detectors reach
+`background warmup 19/20` within milliseconds of each other.
+
+That is also why LCTK's own detection and transform topics are now pinned RELIABLE inside
+the nodes rather than following the sensor answer: two detectors with different input
+reliability feed one lidar-to-lidar solver, which can only ask for one thing.
+
+Queue depth stopped travelling with reliability at the same time. The two `mode` branches
+selected whole different rclrs profiles that differed 10 against 1 — undocumented, and
+noticed only while tracing this — but the nodes discard stale frames with the store-latest
+ArcSwap pattern, so a depth of 1 only cost frames during a burst. It is fixed at 10.
+
+Guarded by `ros/lctk_launch/test/test_transport.py` and four tests in `test_config_parser.py`,
+including the mixed-reliability recording that produced the two-lidar failure.

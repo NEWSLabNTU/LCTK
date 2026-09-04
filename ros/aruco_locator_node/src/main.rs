@@ -269,13 +269,20 @@ impl ArucoLocatorNode {
         // and derives the camera_info topic from the image topic namespace
         let image_topic = "image";
 
-        // Configure QoS for sensor input topics
+        // Reliability for this camera's image and camera_info, resolved per
+        // device by the session (see lctk_launch/transport.py). Asking for
+        // RELIABLE against a BEST_EFFORT publisher receives nothing at all.
+        //
+        // Depth stays 10 in both cases; it used to fall to 1 alongside
+        // BEST_EFFORT, which cost frames during a burst without preventing any
+        // staleness the node does not already handle.
         let qos_profile = if use_best_effort_qos {
-            let mut qos = QoSProfile::sensor_data_default();
-            qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 }; // Prevent buffering delays
-            qos
+            QoSProfile {
+                history: rclrs::QoSHistoryPolicy::KeepLast { depth: 10 },
+                ..QoSProfile::sensor_data_default() // BEST_EFFORT
+            }
         } else {
-            QoSProfile::default() // Reliable for rosbag playback
+            QoSProfile::default() // RELIABLE, depth 10
         };
 
         // First create image subscription to get the resolved topic name
@@ -305,20 +312,14 @@ impl ArucoLocatorNode {
             camera_info_topic
         );
 
-        // Create detection publisher with QoS matching the mode
-        // - BEST_EFFORT (realtime): Low latency, may drop messages
-        // - RELIABLE (offline): No message drops, suitable for rosbag playback
+        // Detections are LCTK's own topic -- published here, subscribed only by
+        // LCTK's solvers -- so there is nothing for a session to decide and it
+        // is pinned RELIABLE. The sensor answer above governs only what this
+        // node receives.
         let mut detection_pub_opts = PublisherOptions::new("aruco_detections");
-        detection_pub_opts.qos = if use_best_effort_qos {
-            QoSProfile {
-                history: QoSHistoryPolicy::KeepLast { depth: 1 },
-                ..QoSProfile::sensor_data_default() // BEST_EFFORT
-            }
-        } else {
-            QoSProfile {
-                history: QoSHistoryPolicy::KeepLast { depth: 10 },
-                ..QoSProfile::default() // RELIABLE
-            }
+        detection_pub_opts.qos = QoSProfile {
+            history: QoSHistoryPolicy::KeepLast { depth: 10 },
+            ..QoSProfile::default() // RELIABLE
         };
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
 

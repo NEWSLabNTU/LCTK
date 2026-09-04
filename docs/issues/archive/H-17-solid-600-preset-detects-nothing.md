@@ -316,7 +316,7 @@ requesting incompatible QoS. No messages will be sent to it.
 Last incompatible policy: RELIABILITY_QOS_POLICY
 ```
 
-That is [M-30](../M-30-bag-playback-qos-mismatch-is-silent.md): the recording replays with
+That is [M-30](./M-30-bag-playback-qos-mismatch-is-silent.md): the recording replays with
 the QoS its publishers used, which for this rig's LiDAR is BEST_EFFORT, so `offline`'s
 RELIABLE subscriber is simply incompatible and receives nothing. The camera half keeps
 working, which is what makes the failure read as a broken LiDAR detector. The session

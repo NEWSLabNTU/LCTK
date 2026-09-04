@@ -4,7 +4,7 @@
 - **Area:** lctk_launch (session_data.launch.py), justfile
 - **Status:** 🟢 Fixed (2026-09-02)
 - **Found:** by an operator running `just mode=realtime assisted solid600-handheld-zed` and reporting that the nodes had not started before the recording ended
-- **Related:** [M-30](./M-30-bag-playback-qos-mismatch-is-silent.md), [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
+- **Related:** [M-30](./archive/M-30-bag-playback-qos-mismatch-is-silent.md), [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
 
 ## Problem
 

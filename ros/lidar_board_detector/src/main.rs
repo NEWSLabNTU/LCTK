@@ -806,20 +806,16 @@ impl CalibrationBoardLocatorNode {
             detector_config.estimator_tuning(&target)?,
         )?);
 
-        // Create publisher for detections with QoS matching the mode
-        // - BEST_EFFORT (realtime): Low latency, may drop messages
-        // - RELIABLE (offline): No message drops, suitable for rosbag playback
+        // Detections are LCTK's own topic: this node publishes them and only
+        // LCTK's solvers subscribe. Both ends being ours, there is nothing for
+        // a session to decide, so it is pinned RELIABLE rather than taking the
+        // sensor input's answer. That matters when two lidars in one recording
+        // offer different reliability -- the lidar-to-lidar solver subscribes
+        // to both detectors and can only ask for one thing.
         let mut detection_pub_opts = PublisherOptions::new("calibration_board_detections");
-        detection_pub_opts.qos = if use_best_effort_qos {
-            QoSProfile {
-                history: QoSHistoryPolicy::KeepLast { depth: 1 },
-                ..QoSProfile::sensor_data_default() // BEST_EFFORT
-            }
-        } else {
-            QoSProfile {
-                history: QoSHistoryPolicy::KeepLast { depth: 10 },
-                ..QoSProfile::default() // RELIABLE
-            }
+        detection_pub_opts.qos = QoSProfile {
+            history: QoSHistoryPolicy::KeepLast { depth: 10 },
+            ..QoSProfile::default() // RELIABLE
         };
         let detection_publisher = node.create_publisher(detection_pub_opts)?;
         let detection_publisher_shared = Arc::clone(&detection_publisher);
@@ -906,13 +902,22 @@ impl CalibrationBoardLocatorNode {
             );
         }
 
-        // Configure QoS for sensor input topics
+        // Reliability for the sensor input, resolved per device by the session
+        // (see lctk_launch/transport.py). Asking for RELIABLE against a
+        // BEST_EFFORT publisher receives nothing at all, which is why this is
+        // no longer a graph-wide guess.
+        //
+        // Depth is fixed at 10 in both cases. It used to fall to 1 alongside
+        // BEST_EFFORT, on the reasoning that a deep queue delays a live sensor
+        // -- but this node already discards stale frames with the store-latest
+        // ArcSwap pattern, so a depth of 1 only cost frames during a burst.
         let qos_profile = if use_best_effort_qos {
-            let mut qos = QoSProfile::sensor_data_default();
-            qos.history = rclrs::QoSHistoryPolicy::KeepLast { depth: 1 }; // Prevent buffering delays
-            qos
+            QoSProfile {
+                history: rclrs::QoSHistoryPolicy::KeepLast { depth: 10 },
+                ..QoSProfile::sensor_data_default() // BEST_EFFORT
+            }
         } else {
-            QoSProfile::default() // Reliable for rosbag playback
+            QoSProfile::default() // RELIABLE, depth 10
         };
 
         // Counter for debugging message reception

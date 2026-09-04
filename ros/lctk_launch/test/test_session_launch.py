@@ -77,7 +77,7 @@ def test_pcap_avi_includes_the_playback_launch_with_derived_topics(
     data_launch, tmp_path
 ):
     directory = make_pcap_session(tmp_path)
-    actions = data_launch.generate_data_source(_Context(directory, play_args=""))
+    actions = data_launch.generate_data_source(_Context(directory))
     arguments = {}
     for action in actions:
         if hasattr(action, "launch_arguments"):
@@ -112,13 +112,13 @@ sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
 """,
         encoding="utf-8",
     )
-    actions = data_launch.generate_data_source(_Context(directory, play_args=""))
+    actions = data_launch.generate_data_source(_Context(directory))
     assert not [a for a in actions if hasattr(a, "launch_arguments")]
 
 
 def test_a_missing_session_is_refused(data_launch, tmp_path):
     with pytest.raises(Exception, match="no session"):
-        data_launch.generate_data_source(_Context(tmp_path / "absent", play_args=""))
+        data_launch.generate_data_source(_Context(tmp_path / "absent"))
 
 
 SESSION_LAUNCH = PACKAGE_ROOT / "launch" / "session.launch.py"
@@ -126,12 +126,8 @@ SESSION_LAUNCH = PACKAGE_ROOT / "launch" / "session.launch.py"
 # What DeclareLaunchArgument puts in the context before the OpaqueFunction runs.
 # The names are pinned independently by the declaration test below.
 FORWARDED_DEFAULTS = {
-    # play_args is declared by session.launch.py but is deliberately NOT in its
-    # _FORWARDED table: it goes to the data half, not to calibrate.launch.py.
-    "play_args": "",
     "debug_mode": "false",
     "log_level": "info",
-    "mode": "offline",
     "enable_rviz": "true",
     "solver_mode": "continuous",
     "enable_overlay": "false",
@@ -151,7 +147,6 @@ def test_session_launch_declares_session_and_the_calibrate_arguments():
     assert "session" in names
     for expected in (
         "solver_mode",
-        "mode",
         "enable_rviz",
         "enable_overlay",
         "log_level",
@@ -310,44 +305,16 @@ def _player_arguments(actions) -> list[str]:
     raise AssertionError("no bag_player node in the generated actions")
 
 
-def test_play_args_reach_the_bag_player_one_per_flag(data_launch, tmp_path):
-    """M-30: overriding playback QoS is the reason this exists.
+def test_the_player_is_given_no_qos_override(data_launch, tmp_path):
+    """The player replays each topic with the QoS the recording offers.
 
-    A recording made with sensor-data QoS offers BEST_EFFORT, which cannot satisfy the
-    RELIABLE subscribers `mode:=offline` creates, so the graph silently receives nothing.
-    Forwarding `--qos-profile-overrides-path` keeps offline's sync settings instead of
-    switching the whole graph to realtime just to line the QoS up.
+    `play_args` used to exist so an operator could override that, because the
+    graph-wide `mode` argument could not express what the bag already knows.
+    Subscribers now adapt per topic instead (lctk_launch/transport.py), so
+    nothing overrides the player and `--clock` is the only argument it takes.
     """
     directory = _bag_session(tmp_path / "bagged")
-    actions = data_launch.generate_data_source(
-        _Context(directory, play_args="--qos-profile-overrides-path /tmp/qos.yaml")
-    )
-    arguments = _player_arguments(actions)
-
-    assert "--play-arg=--qos-profile-overrides-path" in arguments
-    assert "--play-arg=/tmp/qos.yaml" in arguments
-    # --clock is still passed, and still first, so an override cannot displace it.
-    assert "--play-arg=--clock" in arguments
-    assert arguments.index("--play-arg=--clock") < arguments.index(
-        "--play-arg=--qos-profile-overrides-path"
-    )
-
-
-def test_play_args_defaults_to_nothing_extra(data_launch, tmp_path):
-    directory = _bag_session(tmp_path / "plain")
-    arguments = _player_arguments(
-        data_launch.generate_data_source(_Context(directory, play_args=""))
-    )
+    arguments = _player_arguments(data_launch.generate_data_source(_Context(directory)))
     assert [a for a in arguments if a.startswith("--play-arg=")] == [
         "--play-arg=--clock"
     ]
-
-
-def test_play_args_keeps_a_quoted_path_with_spaces_together(data_launch, tmp_path):
-    directory = _bag_session(tmp_path / "spaced")
-    actions = data_launch.generate_data_source(
-        _Context(
-            directory, play_args="--qos-profile-overrides-path '/tmp/a b/qos.yaml'"
-        )
-    )
-    assert "--play-arg=/tmp/a b/qos.yaml" in _player_arguments(actions)

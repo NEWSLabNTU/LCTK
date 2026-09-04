@@ -69,11 +69,6 @@ def generate_nodes(context, *args, **kwargs) -> list:
     config_file = LaunchConfiguration("config_file").perform(context)
     debug_mode = LaunchConfiguration("debug_mode").perform(context)
     log_level = LaunchConfiguration("log_level").perform(context)
-    mode = LaunchConfiguration("mode").perform(context)
-    # L-05: fail on an unknown mode instead of silently falling back to offline
-    # (a typo like "realtim" would otherwise ship offline QoS to a live sensor).
-    if mode not in ("offline", "realtime"):
-        raise RuntimeError(f"Invalid mode '{mode}'; expected 'offline' or 'realtime'.")
     solver_mode = LaunchConfiguration("solver_mode").perform(context)
     if solver_mode not in ("continuous", "manual", "assisted"):
         raise RuntimeError(
@@ -83,13 +78,17 @@ def generate_nodes(context, *args, **kwargs) -> list:
     enable_overlay = LaunchConfiguration("enable_overlay").perform(context) == "true"
     enable_judge = LaunchConfiguration("enable_judge").perform(context) == "true"
 
-    # Derive settings from mode. `mode` now controls ONLY this transport
-    # property (live vs. recorded data): whether to use RELIABLE or
-    # BEST_EFFORT QoS.
-    # - offline: RELIABLE QoS
-    # - realtime: BEST_EFFORT QoS
-    is_realtime = mode == "realtime"
-    use_best_effort_qos = is_realtime
+    # Transport reliability is NOT decided here. It is a property of what
+    # publishes each sensor topic -- a recording knows its own answer, and a
+    # live rig's is a fact about the driver -- so it is resolved per device by
+    # `lctk_launch.transport` and arrives on each node's config below. The
+    # `mode` argument that used to decide it graph-wide is gone: it guessed one
+    # answer for every topic, and `twolidar-vlp32-falcon` proved that wrong by
+    # recording a RELIABLE Falcon and a BEST_EFFORT VLP-32 in the same bag.
+    #
+    # Only sensor subscriptions take an answer from the session. LCTK's own
+    # detection and transform topics are ours on both ends and are pinned
+    # RELIABLE inside the nodes.
 
     # Parse configuration
     pipeline = parse_config(config_file)
@@ -120,7 +119,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
     # Log pipeline summary
     nodes.append(
         LogInfo(
-            msg=f"Calibration Pipeline ({mode} mode): "
+            msg="Calibration Pipeline: "
             f"{len(pipeline.lidar_board_detectors)} board detectors, "
             f"{len(pipeline.aruco_locators)} aruco locators, "
             f"{len(pipeline.lidar_camera_solvers)} lidar-camera solvers, "
@@ -150,7 +149,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
         params = {
             "enable_debug": debug_mode == "true",
             "enable_icp_iteration_debug": debug_mode == "true",
-            "use_best_effort_qos": use_best_effort_qos,
+            "use_best_effort_qos": detector.use_best_effort_qos,
             "target_config": detector.target_config,
             "detector_config": detector.detector_config,
         }
@@ -194,7 +193,7 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "aruco_detector_config_file": locator.aruco_detector_config,
             "debug_mode": debug_mode == "true",
             "debug_overlay_enabled": debug_mode == "true",
-            "use_best_effort_qos": use_best_effort_qos,
+            "use_best_effort_qos": locator.use_best_effort_qos,
             "target_config": locator.target_config,
         }
 
@@ -243,7 +242,11 @@ def generate_nodes(context, *args, **kwargs) -> list:
             "camera_target_identity_topic": "camera_target_identity",
             "debug_mode": debug_mode == "true",
             "publishing_rate": 10.0,
-            "use_best_effort_qos": use_best_effort_qos,
+            # The camera's answer. This node's detection subscriptions are
+            # LCTK's own topics and are pinned RELIABLE inside the node; this
+            # governs the camera_info it reads and, in assisted mode, the
+            # preview frame.
+            "use_best_effort_qos": solver.use_best_effort_qos,
             "sync_tolerance_ms": sync_tolerance_ms,
             "sync_queue_size": sync_queue_size,
             "sync_drop_policy": sync_drop_policy,
@@ -309,7 +312,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
                         "sync_queue_size": sync_queue_size,
                         "sync_drop_policy": sync_drop_policy,
                         "publish_tf": True,
-                        "use_best_effort_qos": use_best_effort_qos,
+                        # This solver has no sensor subscription at all -- both
+                        # inputs are detection topics LCTK publishes -- so it
+                        # always asks for the reliability those are pinned to.
+                        "use_best_effort_qos": False,
                         "max_message_age_ms": 0.0,
                     }
                 ],
@@ -376,7 +382,10 @@ def generate_nodes(context, *args, **kwargs) -> list:
                     namespace=solver.namespace,
                     output="screen",
                     arguments=node_args,
-                    parameters=[{"use_best_effort_qos": use_best_effort_qos}],
+                    # A viewer, not a pipeline stage: dropping a frame under
+                    # load costs nothing, and BEST_EFFORT can receive from a
+                    # publisher of either kind, so it needs no session answer.
+                    parameters=[{"use_best_effort_qos": True}],
                     remappings=[
                         ("image", solver.camera_topic),
                         ("pointcloud", lidar.pointcloud_topic),
@@ -435,11 +444,6 @@ def generate_launch_description() -> LaunchDescription:
                 "log_level",
                 default_value="info",
                 description="ROS log level (debug, info, warn, error, fatal)",
-            ),
-            DeclareLaunchArgument(
-                "mode",
-                default_value="offline",
-                description="Processing mode: 'offline' (RELIABLE QoS, perfect sync) or 'realtime' (BEST_EFFORT QoS, no buffering)",
             ),
             DeclareLaunchArgument(
                 "enable_rviz",

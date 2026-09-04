@@ -206,7 +206,14 @@ class EducationalOverlayNode(Node):
         self.declare_parameter("max_depth", 20.0)
 
         # === ROS 2 QUALITY OF SERVICE CONFIGURATION ===
-        # Educational note: QoS affects message delivery reliability
+        # Educational note: QoS affects message delivery reliability.
+        #
+        # This node is a viewer, so it defaults to BEST_EFFORT and the launch
+        # layer never overrides it: a BEST_EFFORT subscriber can receive from a
+        # publisher of either kind, and dropping an overlay frame under load
+        # costs nothing. The nodes that actually feed the calibration take their
+        # reliability from the session instead (lctk_launch/transport.py),
+        # because there a dropped frame is a lost detection.
         self.declare_parameter("use_best_effort_qos", True)
         use_best_effort = (
             self.get_parameter("use_best_effort_qos").get_parameter_value().bool_value

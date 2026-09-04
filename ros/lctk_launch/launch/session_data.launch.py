@@ -7,8 +7,6 @@ values `config_parser` gives the calibration graph, which is the whole point --
 one source, so the two halves cannot disagree.
 """
 
-import shlex
-
 import yaml
 from launch import LaunchDescription
 from launch.actions import (
@@ -73,13 +71,6 @@ def generate_data_source(context, *args, **kwargs) -> list:
     manifest = yaml.safe_load(session.manifest.read_text(encoding="utf-8"))
     source = parse_data(manifest.get("data"), session.directory)
 
-    # Operator-supplied `ros2 bag play` arguments, one --play-arg each. shlex so a
-    # quoted path with spaces survives; the launch layer only ever sees one string.
-    extra_play_args = [
-        f"--play-arg={token}"
-        for token in shlex.split(LaunchConfiguration("play_args").perform(context))
-    ]
-
     devices = manifest.get("devices") or {}
     lidars = list((devices.get("lidars") or {}).items())
     cameras = list((devices.get("cameras") or {}).items())
@@ -125,8 +116,11 @@ def generate_data_source(context, *args, **kwargs) -> list:
                 arguments=[
                     str(source.path),
                     *_wait_for_arguments(source, lidars),
+                    # The player replays each topic with the QoS the
+                    # recording offers. Nothing overrides that any more: the
+                    # subscribers are the side that adapts, per topic, from
+                    # `lctk_launch.transport`.
                     "--play-arg=--clock",
-                    *extra_play_args,
                 ],
                 output="screen",
             ),
@@ -186,14 +180,6 @@ def generate_launch_description() -> LaunchDescription:
                 description=(
                     "Explicit path to a session directory or its session.yaml. "
                     "There is no search path: a session may live anywhere."
-                ),
-            ),
-            DeclareLaunchArgument(
-                "play_args",
-                default_value="",
-                description=(
-                    "Extra arguments for `ros2 bag play`, space separated, forwarded "
-                    "one per --play-arg. Ignored by non-bag data sources."
                 ),
             ),
             OpaqueFunction(function=generate_data_source),

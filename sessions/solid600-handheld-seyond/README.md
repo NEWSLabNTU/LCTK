@@ -35,16 +35,20 @@ ln -sfn /path/to/new_LCTK_board/newtype_1 sessions/solid600-handheld-seyond/bag
 ## Running it
 
 ```bash
-just mode=realtime assisted solid600-handheld-seyond
+just assisted solid600-handheld-seyond
 ```
 
 Then open <http://localhost:8080>. *Export archive* writes `out/detections.json`.
 
-`mode=realtime` is required for the same reason as the Velodyne session: the
-recording replays with the QoS its publishers used, which is BEST_EFFORT, and a
-RELIABLE subscriber receives nothing from it while the camera half keeps working
-— so the failure looks like a broken LiDAR detector. See
-[M-30](../../docs/issues/M-30-bag-playback-qos-mismatch-is-silent.md).
+The reliability each sensor topic is subscribed with is resolved per device from
+the recording itself (`offered_qos_profiles` in the bag's `metadata.yaml`), so
+nothing has to be remembered on the command line. This session used to require
+`mode=realtime` because the graph-wide flag could not say what the bag already
+knew: its LiDAR replays BEST_EFFORT, and a RELIABLE subscriber receives nothing
+from it while the camera half keeps working, which made the failure look like a
+broken detector. See
+[M-30](../../docs/issues/archive/M-30-bag-playback-qos-mismatch-is-silent.md) and
+`lctk_launch/transport.py`.
 
 ## What is not yet tuned
 
@@ -68,7 +72,7 @@ and overstates the result -- it predicted 7 placements where the node produced
 3. `lidar_to_camera_solver` now logs every stillness verdict at debug level:
 
 ```bash
-just mode=realtime solver_mode=assisted log_level=debug run solid600-handheld-seyond
+just solver_mode=assisted log_level=debug run solid600-handheld-seyond
 grep "stillness:" play_log/<run>/node/lidar_to_camera_solver/err
 ```
 

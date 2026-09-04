@@ -105,10 +105,8 @@ just run /abs/path/to/my-session
 # Calibration graph only, against an explicit config file
 just calibrate /path/to/session.yaml
 
-# Justfile variables go BEFORE the recipe name -- `just demo mode=realtime`
+# Justfile variables go BEFORE the recipe name -- `just demo solver_mode=manual`
 # is parsed as a recipe argument and fails.
-just mode=realtime demo              # Use realtime mode (BEST_EFFORT QoS, no buffering)
-just mode=offline demo               # Use offline mode (RELIABLE QoS, default)
 just solver_mode=manual demo         # Use service-driven multi-pose buffering
 just assisted                        # Auto-capture still, novel poses; review at :8080
 just debug_mode=false demo           # Disable debug output
@@ -376,33 +374,48 @@ This ensures always processing the latest data, not stale queued messages.
 
 ## Calibration Workflow
 
-### Processing Modes
+### Transport reliability
 
-The calibration pipeline supports two processing modes controlled by the `mode` parameter. `mode`
-controls **only** transport QoS — live-versus-recorded data is a genuine transport property. The
-synchronizer window/buffer/drop-policy are a physical judgement about the scene (how far the
-calibration target can move between a camera frame and a LiDAR sweep) and are **not** derivable
-from `mode`; they come from the calibration config file's required `sync:` section instead — see
-`sync:` under Configuration Format below.
+There is **no `mode` argument.** The reliability each sensor topic is subscribed with is a
+property of whatever publishes it, not of the graph, so it is resolved per device by
+`lctk_launch/transport.py` in this order:
 
-| Mode | QoS | Use Case |
-|------|-----|----------|
-| `offline` (default) | RELIABLE | Recorded data (rosbags or the pcap/avi sample playback). |
-| `realtime` | BEST_EFFORT | Live sensor data. Low latency. |
+1. What the manifest states — `qos:` on a device, or `qos:` at the top level as a session-wide
+   default. Values: `reliable`, `best_effort`.
+2. What the recording offers, read from the bag's own `metadata.yaml`
+   (`offered_qos_profiles`). Only `kind: bag`.
+3. `best_effort`, which is compatible with a publisher of either kind.
+
+A stated value is checked, not merely trusted: under `kind: bag`, stating `reliable` for a topic
+the recording offers `best_effort` is refused at parse time, because that pairing receives
+**nothing at all** — no error, no rejection, just a silent graph. That is M-30, and it shipped:
+`just mode=offline run twolidar-vlp32-falcon` left the VLP-32 detector without a single cloud
+while the Falcon one warmed up normally, because TWO_LIDAR_1 records a RELIABLE Falcon beside a
+BEST_EFFORT VLP-32. One graph-wide flag could not serve both.
+
+Only **sensor** subscriptions take an answer from the session. LCTK's own detection and transform
+topics are ours on both ends and are pinned RELIABLE inside the nodes — which is what lets two
+detectors with different input reliability feed one lidar-to-lidar solver. `pointcloud_image_overlay`
+is a viewer and stays BEST_EFFORT unconditionally.
+
+Queue depth is **not** a session concern. It used to travel with reliability (the two `mode`
+branches selected whole different rclrs profiles, differing 10 against 1 — undocumented) but the
+nodes already discard stale frames with the store-latest ArcSwap pattern, so a depth of 1 only cost
+frames. It is fixed at 10.
+
+The synchronizer window/buffer/drop-policy were taken out of `mode` earlier, in `81e8c9a`. They are
+a physical judgement about the scene — how far the calibration target can move between a camera
+frame and a LiDAR sweep — and come from the config's required `sync:` section. See `sync:` under
+Configuration Format below.
+
+`play_args` is gone with `mode`. It existed only to override playback QoS from the command line,
+which is no longer a thing anyone needs to do: the player replays each topic with the QoS the
+recording offers, and the subscribers adapt.
 
 Note: `lctk_sample_data` ships pcap + avi in git (datasets 1–5; dataset 3 is the lidar-camera
 default, dataset 4 the second lidar). Recorded two-LiDAR bags live in
 `ros/lctk_sample_data/bags/TWO_LIDAR_*` but are **gitignored** — see that directory's README to
 obtain them. To record more: `ros2 bag record -a` alongside `just sample-data`.
-
-**Setting derived from mode:**
-- **QoS Reliability**: RELIABLE (offline) vs BEST_EFFORT (realtime)
-
-**Usage:**
-```bash
-just mode=offline demo    # For recorded/sample-data playback (default)
-just mode=realtime demo   # For live sensors
-```
 
 ### Performance Profiling Results
 
@@ -412,6 +425,10 @@ against real data — see "Outstanding items no packet owns" in
 `docs/roadmap/phase-8-single-source-target-definition.md`. The numbers below were real when measured
 and are kept rather than deleted, but treat them as a baseline from the prior implementation, not a
 claim about the current one.
+
+These tables compare the two `mode` settings, which no longer exist. They are kept as a record of
+what RELIABLE versus BEST_EFFORT costs on this hardware — the physics is unchanged, only who
+decides is. Read "Offline" as "RELIABLE subscribers" and "Realtime" as "BEST_EFFORT, depth 1".
 
 **Throughput Comparison:**
 | Metric | Offline | Realtime | Notes |
@@ -492,11 +509,19 @@ against plain configs.
 
 **Configuration Format:**
 ```yaml
+# Optional session-wide transport reliability default. Omitted, each device
+# falls through to what its recording offers, else best_effort.
+qos: best_effort
+
 devices:
   lidars:
     top_lidar:
       pointcloud_topic: /sensing/lidar/top/pointcloud_raw
       frame_id: velodyne_top
+      # Optional per-device override. Needed only when one recording holds
+      # topics with different offered QoS, or on a live rig whose driver
+      # publishes RELIABLE and you want every message.
+      qos: reliable
   cameras:
     front_center:
       image_topic: /sensing/camera/front_center/image_raw

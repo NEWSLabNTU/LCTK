@@ -938,21 +938,37 @@ def test_a_config_without_a_data_section_still_parses(tmp_path):
     assert pipeline.lidars["top"].pointcloud_topic == "/points"
 
 
+# rmw reliability, as rosbag2 records it: 1 = RELIABLE, 2 = BEST_EFFORT.
+BAG_RELIABLE = 1
+BAG_BEST_EFFORT = 2
+
+
 def write_bag(tmp_path, topics, name="bag"):
-    """A minimal rosbag2 directory: only metadata.yaml is read for verification."""
+    """A minimal rosbag2 directory: only metadata.yaml is read.
+
+    `topics` is either a list of names -- a recording that states no QoS, which
+    is what older rosbag2 versions produce -- or a mapping of name to the rmw
+    reliability it offers.
+    """
     import yaml
+
+    if not isinstance(topics, dict):
+        topics = dict.fromkeys(topics, None)
+
+    entries = []
+    for topic, reliability in topics.items():
+        metadata = {"name": topic}
+        if reliability is not None:
+            metadata["offered_qos_profiles"] = yaml.safe_dump(
+                [{"history": 1, "depth": 10, "reliability": reliability}]
+            )
+        entries.append({"topic_metadata": metadata})
 
     bag = tmp_path / name
     bag.mkdir(parents=True, exist_ok=True)
     (bag / "metadata.yaml").write_text(
         yaml.safe_dump(
-            {
-                "rosbag2_bagfile_information": {
-                    "topics_with_message_count": [
-                        {"topic_metadata": {"name": topic}} for topic in topics
-                    ]
-                }
-            }
+            {"rosbag2_bagfile_information": {"topics_with_message_count": entries}}
         ),
         encoding="utf-8",
     )
@@ -1062,3 +1078,129 @@ assisted:
         session / "out" / "detections.json"
     )
     assert "$(" not in pipeline.assisted.review_archive_path
+
+
+def test_each_device_takes_the_reliability_its_own_topic_was_recorded_with(tmp_path):
+    """TWO_LIDAR_1 records a RELIABLE Falcon beside a BEST_EFFORT VLP-32.
+
+    Under the old graph-wide `mode` argument one flag had to serve both, and
+    `just mode=offline run twolidar-vlp32-falcon` really did leave the VLP-32
+    detector without a single cloud while the Falcon one warmed up normally.
+    """
+    (tmp_path / "rig").mkdir(parents=True, exist_ok=True)
+    write_bag(
+        tmp_path / "rig",
+        {
+            "/lidar/vlp32/velodyne_points": BAG_BEST_EFFORT,
+            "/lidar/falcon/iv_points": BAG_RELIABLE,
+            "/image": BAG_RELIABLE,
+        },
+    )
+    target = "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
+    detector = "$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5"
+    manifest = tmp_path / "rig" / "session.yaml"
+    manifest.write_text(
+        f"""
+name: two_lidar
+data: {{ kind: bag, path: $(session-dir)/bag }}
+devices:
+  lidars:
+    top:
+      frame_id: velodyne_top
+      pointcloud_topic: /lidar/vlp32/velodyne_points
+    falcon:
+      frame_id: falcon
+      pointcloud_topic: /lidar/falcon/iv_points
+  cameras:
+    front_center: {{ frame_id: cam, image_topic: /image }}
+markers:
+  calibration_board:
+    target_config: {target}
+    detector_config: {detector}
+    pairs:
+      - [top, front_center]
+      - [falcon, front_center]
+sync: {{ tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }}
+""",
+        encoding="utf-8",
+    )
+    pipeline = parse_config(str(manifest))
+
+    assert pipeline.lidars["top"].qos == "best_effort"
+    assert pipeline.lidars["falcon"].qos == "reliable"
+    assert pipeline.cameras["front_center"].qos == "reliable"
+
+    detectors = {
+        d.lidar_name: d.use_best_effort_qos for d in pipeline.lidar_board_detectors
+    }
+    assert detectors["top"] is True
+    assert detectors["falcon"] is False
+
+
+def test_stating_reliable_against_a_best_effort_recording_is_refused(tmp_path):
+    """The one pairing that receives nothing at all, refused before launch."""
+    (tmp_path / "rig").mkdir(parents=True, exist_ok=True)
+    write_bag(
+        tmp_path / "rig",
+        {"/lidar/vlp32/velodyne_points": BAG_BEST_EFFORT, "/image": BAG_RELIABLE},
+    )
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: bag\n  path: $(session-dir)/bag\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /lidar/vlp32/velodyne_points\n"
+        "      qos: reliable\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    with pytest.raises(Exception, match="receives nothing"):
+        parse_config(str(manifest))
+
+
+def test_a_session_default_applies_and_a_device_overrides_it(tmp_path):
+    (tmp_path / "rig").mkdir(parents=True, exist_ok=True)
+    write_bag(
+        tmp_path / "rig",
+        {"/lidar/vlp32/velodyne_points": BAG_RELIABLE, "/image": BAG_RELIABLE},
+    )
+    manifest = write_session(
+        tmp_path,
+        "qos: best_effort\ndata:\n  kind: bag\n  path: $(session-dir)/bag\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /lidar/vlp32/velodyne_points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n      qos: reliable\n",
+    )
+    pipeline = parse_config(str(manifest))
+    # The session default wins over what the recording offers ...
+    assert pipeline.lidars["top"].qos == "best_effort"
+    # ... and the device wins over the session default.
+    assert pipeline.cameras["front_center"].qos == "reliable"
+
+
+def test_a_live_session_defaults_to_best_effort(tmp_path):
+    """Nothing to read a recording from, so take the answer compatible with all."""
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: live\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    pipeline = parse_config(str(manifest))
+    assert pipeline.lidars["top"].qos == "best_effort"
+    assert pipeline.cameras["front_center"].qos == "best_effort"
+
+
+def test_an_unknown_qos_value_is_refused(tmp_path):
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: live\n",
+        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "      pointcloud_topic: /points\n      qos: sensor_data\n"
+        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "      image_topic: /image\n",
+    )
+    with pytest.raises(ValueError, match="expected one of"):
+        parse_config(str(manifest))

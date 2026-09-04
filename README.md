@@ -180,7 +180,6 @@ You can customize the calibration pipeline behavior using configuration variable
 debug_mode=true            # Enable debug topics
 log_level=info             # ROS log level (debug/info/warn/error)
 rviz_enabled=true          # Launch RViz
-mode=offline               # offline (RELIABLE QoS, rosbags) or realtime (BEST_EFFORT, live)
 solver_mode=continuous     # continuous (latest pair), manual (multi-pose buffer), assisted (auto-capture + web review)
 enable_overlay=true        # Point cloud / image overlay for visual validation
 enable_judge=true          # Calibration judge (IoU metrics)
@@ -217,9 +216,6 @@ ros2 bag play your_data.bag
 
 # Run the config-driven pipeline against your session manifest in another terminal
 just calibrate ~/calib/rig-b/session.yaml
-
-# For live sensors, use realtime QoS
-just mode=realtime calibrate /path/to/your_config.yaml
 ```
 
 Camera info is auto-derived from each image topic (image_pipeline convention).

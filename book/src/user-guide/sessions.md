@@ -138,6 +138,41 @@ defaulted to:
 So under `pcap_avi`, naming the lidar device `top` is what produces
 `/sensing/lidar/top/pointcloud_raw`.
 
+### Transport reliability
+
+A subscriber that asks for RELIABLE and meets a BEST_EFFORT publisher receives nothing
+at all — no error on either side, just a graph that launches cleanly and stays silent.
+So the reliability each sensor topic is subscribed with is part of the session, resolved
+per device in this order:
+
+1. **What the manifest states.** `qos:` on a device, or `qos:` at the top level as a
+   session-wide default. Values are `reliable` and `best_effort`.
+2. **What the recording offers**, read from the bag's own `metadata.yaml`. `kind: bag` only.
+3. **`best_effort`**, which can receive from a publisher of either kind.
+
+```yaml
+qos: best_effort            # optional session default
+
+devices:
+  lidars:
+    front_lidar:
+      pointcloud_topic: /lidar/falcon/iv_points
+      frame_id: falcon
+      qos: reliable         # optional per-device override
+```
+
+A stated value is checked rather than trusted. Under `kind: bag`, stating `reliable` for a
+topic the recording offers `best_effort` is refused at parse time, naming the topic.
+
+Per-device rather than per-session because a single recording can hold both: `TWO_LIDAR_1`
+records a RELIABLE Falcon beside a BEST_EFFORT VLP-32. Under the old graph-wide `mode`
+argument one answer had to serve both, and `mode=offline` really did leave the VLP-32
+detector without a single cloud while the Falcon one warmed up normally.
+
+Only sensor subscriptions take an answer from the session. LCTK's own detection and
+transform topics are pinned RELIABLE inside the nodes — which is what lets two detectors
+with different input reliability feed one lidar-to-lidar solver.
+
 ## Running a session
 
 ```bash
@@ -318,11 +353,15 @@ the installed share directory.
 `just new <path> <template>` takes its template as a second **positional** argument, not as
 `FROM=…`; `FROM=x` would be passed through as the literal string.
 
-The run-shaping variables (`mode`, `solver_mode`, `debug_mode`, `log_level`,
+The run-shaping variables (`solver_mode`, `debug_mode`, `log_level`,
 `rviz_enabled`, `enable_overlay`, `enable_judge`) are just-variables, so they go before the
 recipe name:
 
 ```bash
 just solver_mode=manual run seyond-left
-just mode=realtime demo
+just debug_mode=false demo
 ```
+
+Transport reliability is not among them. It is a property of what publishes each
+topic, so it lives in the manifest and is read from a recording when there is one
+— see [Transport reliability](#transport-reliability) below.

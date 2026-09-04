@@ -107,21 +107,31 @@ class LidarToLidarSolver(Node):
         self.state_lock = threading.RLock()
         self._identity_generation = 0
 
-        # QoS profile configuration based on mode:
-        # - BEST_EFFORT (realtime): Low latency, may drop messages
-        # - RELIABLE (offline): No message drops, suitable for rosbag playback
-        reliability = (
-            ReliabilityPolicy.BEST_EFFORT
-            if use_best_effort_qos
-            else ReliabilityPolicy.RELIABLE
-        )
+        # This node has no sensor subscription: both inputs are detection
+        # topics LCTK's own board detectors publish, and those are pinned
+        # RELIABLE. So there is nothing here for a session to decide, and
+        # `use_best_effort_qos` is expected to be false.
+        #
+        # It mattering is exactly why the detectors pin their publishers. Two
+        # lidars in one recording can offer different reliability -- the
+        # TWO_LIDAR_1 bag records a RELIABLE Falcon beside a BEST_EFFORT
+        # VLP-32 -- and this node subscribes to both detectors with one
+        # profile, so it could not follow them if they differed.
+        if use_best_effort_qos:
+            self.get_logger().warn(
+                "use_best_effort_qos is set, but this node subscribes only to "
+                "LCTK detection topics, which are published RELIABLE. "
+                "Subscribing BEST_EFFORT still works; the parameter has no "
+                "sensor to describe here."
+            )
         qos = QoSProfile(
-            reliability=reliability,
+            reliability=(
+                ReliabilityPolicy.BEST_EFFORT
+                if use_best_effort_qos
+                else ReliabilityPolicy.RELIABLE
+            ),
             history=HistoryPolicy.KEEP_LAST,
             depth=sync_queue_size,
-        )
-        self.get_logger().info(
-            f"Using {'BEST_EFFORT' if use_best_effort_qos else 'RELIABLE'} QoS"
         )
 
         # Synchronized detection pairs. `lctk_sync` owns the window (which it refuses to

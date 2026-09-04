@@ -54,7 +54,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🟢 |
 | [M-28](./M-28-generator-geometry-cell-handedness-disagree.md) | Medium | ArUco generator and target geometry bind cells with opposite handedness (2x2 targets) | 🔴 |
 | [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
-| [M-30](./M-30-bag-playback-qos-mismatch-is-silent.md) | Medium | A `kind: bag` session in the default `offline` mode silently receives no LiDAR: recorded BEST_EFFORT QoS cannot feed a RELIABLE subscriber | 🔴 |
+| [M-30](./archive/M-30-bag-playback-qos-mismatch-is-silent.md) | Medium | A `kind: bag` session in the default `offline` mode silently receives no LiDAR: recorded BEST_EFFORT QoS cannot feed a RELIABLE subscriber | 🟢 |
 | [M-31](./M-31-perforated-icp-parked-termination-findings.md) | Medium | Perforated ICP: `StablePose` publishes an unbounded residual and is reachable at a shipped budget; separation gate skipped on a lone success; two dead-code leftovers | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |

@@ -20,7 +20,7 @@ second terminal running `just republish-zed`.
 Two terminals. First the graph:
 
 ```bash
-just mode=realtime solver_mode=manual run vlp32-zed-hollow
+just solver_mode=manual run vlp32-zed-hollow
 ```
 
 Then feed it bags, one at a time:
@@ -38,12 +38,15 @@ just extrinsic-solver-controller
 One detection per bag; eight bags give eight placements. `lctk_quality` wants
 ten, so expect the diversity check to report a shortfall.
 
-**`mode=realtime` is required.** `mode` selects transport QoS, and a bag replays
-with the QoS its publishers used — BEST_EFFORT for this rig's LiDAR. A RELIABLE
-subscriber cannot match it and receives nothing, while the camera half keeps
-working, so the failure looks like a broken LiDAR detector. `rosbag2_player` says
-so exactly once at startup. See
-[M-30](../../docs/issues/M-30-bag-playback-qos-mismatch-is-silent.md).
+The reliability each sensor topic is subscribed with is resolved per device from
+the recording itself (`offered_qos_profiles` in the bag's `metadata.yaml`), so
+nothing has to be remembered on the command line. This session used to require
+`mode=realtime` because the graph-wide flag could not say what the bag already
+knew: its LiDAR replays BEST_EFFORT, and a RELIABLE subscriber receives nothing
+from it while the camera half keeps working, which made the failure look like a
+broken detector. See
+[M-30](../../docs/issues/archive/M-30-bag-playback-qos-mismatch-is-silent.md) and
+`lctk_launch/transport.py`.
 
 ## Not for assisted mode
 

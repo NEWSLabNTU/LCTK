@@ -29,6 +29,12 @@ from lctk_launch.session import (
     resolve_config_path,
     verify_bag_topics,
 )
+from lctk_launch.transport import (
+    BEST_EFFORT,
+    bag_offered_reliability,
+    parse_reliability,
+    resolve_reliability,
+)
 
 # Detector tuning used when a marker does not name its own. The node itself has no hidden
 # defaults; this is the launch layer supplying the shipped file so pre-existing configs, which
@@ -75,6 +81,10 @@ class LidarDevice:
     frame_id: str
     detector_config_override: str | None = None
     bbox_config_override: str | None = None  # Per-lidar bbox_config, overrides marker's
+    # Reliability this device's topic is subscribed with. Holds the manifest's
+    # stated value (or None) until `_resolve_transport` replaces it with the
+    # resolved one; see lctk_launch/transport.py for the three rules.
+    qos: str | None = None
 
 
 @dataclass
@@ -84,6 +94,7 @@ class CameraDevice:
     name: str
     image_topic: str
     frame_id: str
+    qos: str | None = None
 
 
 @dataclass
@@ -165,6 +176,10 @@ class LidarBoardDetectorNode:
     detector_config: str
     bbox_config: str | None
     output_topic: str  # Detection output topic
+    # Reliability for this node's ONE sensor subscription (the point cloud).
+    # Its detection publisher is not covered: that topic is LCTK's on both
+    # ends, so the nodes pin it rather than take it from a session.
+    use_best_effort_qos: bool = True
 
 
 @dataclass
@@ -180,6 +195,9 @@ class ArucoLocatorNode:
     target_identity: TargetIdentity
     aruco_detector_config: str
     output_topic: str  # Detection output topic
+    # Reliability for this node's sensor subscriptions -- the image and the
+    # camera_info derived from it, which share one camera and so one answer.
+    use_best_effort_qos: bool = True
 
 
 @dataclass
@@ -199,6 +217,10 @@ class LidarCameraSolverNode:
     target_config: str
     target_identity: TargetIdentity
     output_topic: str
+    # Reliability for the camera_info this node reads, and for the review
+    # preview frame in assisted mode. Its detection subscriptions are LCTK's
+    # own topics and are pinned in the node.
+    use_best_effort_qos: bool = True
 
 
 @dataclass
@@ -262,6 +284,9 @@ class CalibrationConfigParser:
         self._reference_frame: str | None = None
         self._sync: SyncSettings | None = None
         self._assisted = AssistedSettings()
+        # Session-wide reliability default. `None` means nothing was stated, so
+        # each device falls through to what its recording offers.
+        self._default_qos: str | None = None
 
     def parse(self) -> PipelineConfig:
         """Parse configuration file and derive pipeline configuration."""
@@ -276,8 +301,15 @@ class CalibrationConfigParser:
         if raw_data is not None:
             self._data = parse_data(raw_data, self._session_dir)
 
+        # A session-wide default, overridden per device. Read before the
+        # devices so `_stated_qos` can fall back to it.
+        raw_qos = raw_config.get("qos")
+        if raw_qos is not None:
+            self._default_qos = parse_reliability(raw_qos, "the session")
+
         self._parse_devices(raw_config.get("devices", {}))
         self._verify_data_topics()
+        self._resolve_transport()
 
         markers_config = raw_config.get("markers", {})
         self._parse_markers(markers_config)
@@ -527,6 +559,32 @@ class CalibrationConfigParser:
             raise ValueError(f"device '{name}' requires {key}")
         return stated
 
+    def _stated_qos(self, config: dict, where: str) -> str | None:
+        """The reliability this device states, or the session's default."""
+        raw = config.get("qos")
+        if raw is None:
+            return self._default_qos
+        return parse_reliability(raw, where)
+
+    def _resolve_transport(self) -> None:
+        """Decide the reliability each sensor subscription asks for.
+
+        Runs after the devices exist, because the answer is per topic and a
+        device's topic may have been derived rather than stated. Under
+        `kind: bag` the recording is the authority and a contradicting claim is
+        refused here -- the alternative is M-30, where the graph launches
+        cleanly and the LiDAR half never receives a message.
+        """
+        offered: dict[str, str] | None = None
+        if self._data is not None and self._data.kind == "bag":
+            assert self._data.path is not None  # parse_data guarantees it
+            offered = bag_offered_reliability(self._data.path)
+
+        for lidar in self.lidars.values():
+            lidar.qos = resolve_reliability(lidar.pointcloud_topic, lidar.qos, offered)
+        for camera in self.cameras.values():
+            camera.qos = resolve_reliability(camera.image_topic, camera.qos, offered)
+
     def _verify_data_topics(self) -> None:
         """Refuse a manifest naming a topic its bag does not record.
 
@@ -578,6 +636,7 @@ class CalibrationConfigParser:
                 frame_id=config["frame_id"],
                 detector_config_override=detector_config_override,
                 bbox_config_override=bbox_config_override,
+                qos=self._stated_qos(config, f"lidar '{name}'"),
             )
 
         # Parse cameras
@@ -588,6 +647,7 @@ class CalibrationConfigParser:
                     "camera", name, config.get("image_topic")
                 ),
                 frame_id=config["frame_id"],
+                qos=self._stated_qos(config, f"camera '{name}'"),
             )
 
     def _parse_markers(self, markers_config: dict) -> None:
@@ -770,6 +830,7 @@ class CalibrationConfigParser:
                     detector_config=detector_config,
                     bbox_config=bbox_config,
                     output_topic=output_topic,
+                    use_best_effort_qos=lidar.qos == BEST_EFFORT,
                 )
             )
 
@@ -850,6 +911,7 @@ class CalibrationConfigParser:
                     target_identity=next(iter(target_identities)),
                     aruco_detector_config=aruco_detector_config,
                     output_topic=output_topic,
+                    use_best_effort_qos=camera.qos == BEST_EFFORT,
                 )
             )
 
@@ -910,6 +972,7 @@ class CalibrationConfigParser:
                 target_config=marker.target_config,
                 target_identity=marker.target_identity,
                 output_topic=output_topic,
+                use_best_effort_qos=camera.qos == BEST_EFFORT,
             )
         )
 

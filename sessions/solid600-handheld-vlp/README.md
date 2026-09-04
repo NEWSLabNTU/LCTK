@@ -28,24 +28,20 @@ recording's `metadata.yaml` at parse time (M-26).
 ## Running it
 
 ```bash
-just mode=realtime assisted solid600-handheld-vlp
+just assisted solid600-handheld-vlp
 ```
 
 Then open <http://localhost:8080>. *Export archive* writes `out/detections.json`.
 
-**`mode=realtime` is required, and this is not a typo.** `mode` selects transport
-QoS: `offline` is RELIABLE, `realtime` is BEST_EFFORT. The recording replays with
-the QoS its publishers used, which for this rig's LiDAR driver is BEST_EFFORT, so
-a RELIABLE subscriber is simply incompatible and receives nothing:
-
-```
-[rosbag2_player] New subscription discovered on topic '/velodyne_points',
-requesting incompatible QoS. No messages will be sent to it.
-```
-
-The camera half keeps working, so the failure looks like a broken LiDAR detector
-rather than a QoS mismatch. See
-[M-30](../../docs/issues/M-30-bag-playback-qos-mismatch-is-silent.md).
+The reliability each sensor topic is subscribed with is resolved per device from
+the recording itself (`offered_qos_profiles` in the bag's `metadata.yaml`), so
+nothing has to be remembered on the command line. This session used to require
+`mode=realtime` because the graph-wide flag could not say what the bag already
+knew: its LiDAR replays BEST_EFFORT, and a RELIABLE subscriber receives nothing
+from it while the camera half keeps working, which made the failure look like a
+broken detector. See
+[M-30](../../docs/issues/archive/M-30-bag-playback-qos-mismatch-is-silent.md) and
+`lctk_launch/transport.py`.
 
 ## The ZED records compressed images only
 
