@@ -13,7 +13,7 @@ data*.
 
 The `data.republish:` bridge is still declared and still launched, because the
 ZED records `CompressedImage` and nothing in this tree subscribes to one. No
-second terminal running `just republish-zed`.
+second terminal running `just republish`.
 
 ## Running it
 

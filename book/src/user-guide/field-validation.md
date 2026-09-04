@@ -134,7 +134,7 @@ Useful overrides: `debug_mode=true`
 is what raises log verbosity — `debug_mode` does not), `rviz_enabled=false`.
 
 **Terminal 2 — the data.** Only needed if your session declares `kind: live`, or if you chose
-the calibration-only form above. `just two-lidar` still plays nothing; `session.launch.py`
+the calibration-only form above. `just run twolidar-vlp32-falcon` plays the bag too; `session.launch.py`
 plays whatever the manifest's `data:` section declares, and nothing under `live`. To play a
 bag yourself:
 
@@ -185,7 +185,7 @@ refusal message appears.
 | `config/rviz/calibration.rviz` (default) | `seyond` | `seyond_left.yaml` / `seyond_right.yaml` |
 | `config/rviz/two_lidar_calibration.rviz` | `velodyne` | `two_lidar.yaml` |
 
-`just lidar-camera` always uses the first one regardless of the config you pass, and there is no
+`just run` always uses the first one regardless of the config you pass, and there is no
 justfile variable to change it. For any other rig, run with `rviz_enabled=false` and start RViz
 yourself, or use the launch file directly with `rviz_config:=<path>`.
 
@@ -391,7 +391,7 @@ universal thresholds have been invented ahead of your first datasets.
   connects a solid Target Definition to a hollow-board recording, and **the identity gate cannot
   catch this** — both observers are told by config to expect solid-600, so they agree. The mismatch
   is physical. Confirm your actual data source before trusting any solid run. Tracked as M-27.
-- **`just two-lidar` plays no data** and is hardcoded to `two_lidar.yaml`, whose topics match no
+- **`just two-lidar` is gone.** It was hardcoded to `two_lidar.yaml`, whose topics matched no
   in-repo source (M-26). Supply and remap your own.
 - **Restarting observers after a target change** permanently blocks a running solver. Restart
   everything.

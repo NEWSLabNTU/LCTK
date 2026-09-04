@@ -155,7 +155,7 @@ Test the calibration pipeline with included sample data:
 just sample-data
 
 # Terminal 2: calibration pipeline
-just lidar-camera
+just run seyond-left
 
 # Or run playback + pipeline together in one command
 just demo
@@ -229,7 +229,7 @@ For sample data topics:
 
 ```bash
 # Launch two-LiDAR calibration (config-driven, aligns two LiDAR sensors)
-just two-lidar
+just run twolidar-vlp32-falcon
 
 # Stop with Ctrl+C in the launching terminal
 ```
@@ -457,8 +457,8 @@ just test                  # Run tests
 # Launch (foreground; Ctrl+C to stop)
 just sample-data           # Sample data playback
 just demo                  # Sample data + calibration pipeline
-just lidar-camera          # LiDAR-camera calibration
-just two-lidar             # Two-LiDAR calibration
+just run <session>         # Any session, end to end
+just sessions              # What is shipped
 just calibrate <config>    # Config-driven calibration for your own sensors
 
 # Tools

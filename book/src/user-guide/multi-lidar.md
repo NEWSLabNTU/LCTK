@@ -61,7 +61,7 @@ ros2 launch lctk_launch session.launch.py \
     session:=$(ros2 pkg prefix lctk_launch --share)/sessions/twolidar-vlp32-falcon
 ```
 
-`just two-lidar` instead starts the **calibration pipeline only** (`calibrate.launch.py`), so
+`just run twolidar-vlp32-falcon` instead starts the **calibration pipeline only** (`calibrate.launch.py`), so
 with it you play the bag yourself in another terminal:
 
 ```bash
@@ -84,7 +84,7 @@ and let the check confirm it.
 
 ```bash
 cd ~/repos/LCTK
-just two-lidar
+just run twolidar-vlp32-falcon
 ```
 
 This generates, from `two_lidar.yaml`:
@@ -134,7 +134,7 @@ before that). `same_face_mode` (`true`: both LiDARs see the **same side** of the
 apply a 180-degree correction for **opposite** sides) is a `lidar_to_lidar_solver` ROS parameter,
 defaulting to `true`. Config-driven launch (`calibrate.launch.py`) does not currently expose it
 through the calibration config's YAML schema, so to run with `same_face_mode: false` invoke the
-node directly with `--ros-args -p same_face_mode:=false` instead of `just two-lidar`, or add the
+node directly with `--ros-args -p same_face_mode:=false` instead of `just run twolidar-vlp32-falcon`, or add the
 parameter to the config-driven launch node args yourself.
 
 There is no minimum-detections-before-solving gate in the current `lidar_to_lidar_solver` — unlike

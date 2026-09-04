@@ -658,7 +658,7 @@ To reproduce:
 # terminal 1
 ros2 launch lctk_sample_data two_lidar.launch.xml
 # terminal 2
-just two-lidar
+just run twolidar-vlp32-falcon
 ```
 
 ### LiDAR-to-Camera Solver: Continuous Mode (Default)

@@ -20,6 +20,7 @@ default:
 # The conflux packages LCTK depends on (conflux_cpp + conflux_py) are built
 # first by `build-conflux`; the rest of ros/conflux (conflux, conflux-ros2)
 # is excluded because it uses a git rclrs that conflicts with our crates.io rclrs.
+# Build all ROS packages (colcon + cargo-ros2)
 build: _check-python-env
     #!/usr/bin/env bash
     set -eo pipefail
@@ -94,6 +95,7 @@ build: _check-python-env
 _check-python-env:
     @bash setup/scripts/check-python-env.sh
 
+# Set up the development environment
 setup *args:
     ./setup.sh {{ args }}
 
@@ -117,6 +119,7 @@ lint:
 # Part of the release gate: CLAUDE.md requires that when an issue closes and
 # moves into docs/issues/archive/, every link crossing the move is repaired in
 # both directions -- which only holds if something checks it.
+# Verify every relative link under docs/ resolves
 check-docs:
     python3 setup/scripts/check-doc-links.py
 
@@ -129,6 +132,7 @@ lint-py:
 # Must run in the sourced build env: a bare `cargo audit` re-resolves the wildcard ROS
 # message crates against crates.io and hits the yanked sensor_msgs. Tracked exceptions
 # live in .cargo/audit.toml with justification.
+# Check dependencies for RUSTSEC advisories
 audit:
     #!/usr/bin/env bash
     set -eo pipefail
@@ -203,90 +207,12 @@ test: _check-rust-tests-collectable
     # reached. Must be the system python3 (see _check-python-env).
     python3 -m pytest setup/test/ ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
-# Identical to `just run` -- kept as the name muscle memory reaches for. The
-# RViz layout is no longer named here: a session ships its own `rviz.rviz` and
-# session.launch.py picks it up, so the layout lives with the rig it was framed for.
-# Run a lidar-camera session end to end
-lidar-camera SESSION='seyond-left':
-    #!/usr/bin/env bash
-    set -eo pipefail
-    source install/setup.bash
-    # Resolve first, into a variable: under `set -e` a failing command
-    # substitution aborts an assignment but NOT an argument, so inlining it
-    # would swallow the "no session" message and launch against an empty path.
-    session_path=$(just _session-path {{ SESSION }})
-    play_launch launch \
-        --web-addr 0.0.0.0:8000 \
-        lctk_launch session.launch.py \
-        session:="$session_path" \
-        debug_mode:={{ debug_mode }} \
-        log_level:={{ log_level }} \
-        enable_rviz:={{ rviz_enabled }} \
-        solver_mode:={{ solver_mode }} \
-        enable_overlay:={{ enable_overlay }} \
-        enable_judge:={{ enable_judge }}
-
-# Development only, remove later. A `just run` with the solid-board bench
-# settings baked in; the RViz layout comes from the session's own rviz.rviz.
-# Run a solid-board session with the bench settings
-solid SESSION='solid600-handheld-zed':
-    #!/usr/bin/env bash
-    set -eo pipefail
-    source install/setup.bash
-    # Resolve first, into a variable: under `set -e` a failing command
-    # substitution aborts an assignment but NOT an argument, so inlining it
-    # would swallow the "no session" message and launch against an empty path.
-    session_path=$(just _session-path {{ SESSION }})
-    play_launch launch \
-        --web-addr 0.0.0.0:8000 \
-        lctk_launch session.launch.py \
-        session:="$session_path" \
-        debug_mode:=true \
-        log_level:=info \
-        enable_rviz:=true \
-        solver_mode:=manual \
-        enable_overlay:=true \
-        enable_judge:=false
-
-# `solver_mode` stays a switch: `just solver_mode=continuous lidar-camera` and
-# `just solver_mode=manual lidar-camera` still run the original paths unchanged.
-# Equivalent to `just solver_mode=assisted run <session>`.
-# Launch assisted calibration (auto-capture + review page on :8080)
-assisted SESSION='seyond-left':
-    #!/usr/bin/env bash
-    set -eo pipefail
-    source install/setup.bash
-    # Resolve first, into a variable: under `set -e` a failing command
-    # substitution aborts an assignment but NOT an argument, so inlining it
-    # would swallow the "no session" message and launch against an empty path.
-    session_path=$(just _session-path {{ SESSION }})
-    play_launch launch \
-        --web-addr 0.0.0.0:8000 \
-        lctk_launch session.launch.py \
-        session:="$session_path" \
-        debug_mode:={{ debug_mode }} \
-        log_level:={{ log_level }} \
-        enable_rviz:={{ rviz_enabled }} \
-        solver_mode:=assisted \
-        enable_overlay:={{ enable_overlay }} \
-        enable_judge:={{ enable_judge }}
-
-# Launch two-LiDAR calibration (config-driven)
-two-lidar:
-    #!/usr/bin/env bash
-    set -eo pipefail
-    source install/setup.bash
-    SHARE=$(ros2 pkg prefix lctk_launch --share)
-    session_path=$(just _session-path twolidar-vlp32-falcon)
-    play_launch launch \
-        --web-addr 0.0.0.0:8000 \
-        lctk_launch calibrate.launch.py \
-        config_file:="$session_path/session.yaml" \
-        rviz_config:=$SHARE/config/rviz/two_lidar_calibration.rviz \
-        debug_mode:={{ debug_mode }} \
-        log_level:={{ log_level }} \
-        enable_rviz:={{ rviz_enabled }} \
-        solver_mode:={{ solver_mode }}
+# `solver_mode` stays a switch, so `just solver_mode=manual run <session>` and
+# `just solver_mode=continuous run <session>` reach the other two paths. This
+# recipe only spares you typing the one people reach for most.
+# Launch assisted calibration on a session (auto-capture + review page on :8080)
+assisted SESSION:
+    @just solver_mode=assisted run {{ SESSION }}
 
 # Launch a session's data playback only: just sample-data [<path-or-name>]
 #
@@ -294,6 +220,7 @@ two-lidar:
 # directly. The recordings now live inside their sessions, so the manifest is
 # where the pcap, the avi, the topics and the frame ids come from -- driving the
 # playback launch file directly would mean restating them here.
+# Play a session's data only: just sample-data [<path-or-name>]
 sample-data SESSION='sample3-hollow-velodyne':
     #!/usr/bin/env bash
     set -eo pipefail
@@ -386,16 +313,20 @@ _session-path SESSION:
         fi
     fi
 
-# Launch RViz for calibration visualization
+# `just run` already opens RViz with the session's layout. This is for looking
+# at a graph someone else started.
+# Open RViz alone, with the default calibration layout
 rviz:
     #!/usr/bin/env bash
     set -eo pipefail
     source install/setup.bash
-    ros2 run rviz2 rviz2
+    SHARE=$(ros2 pkg prefix lctk_launch --share)
+    ros2 run rviz2 rviz2 -d "$SHARE/config/rviz/calibration.rviz"
 
 # Launch config-driven calibration pipeline
 # Usage: just calibrate /path/to/config.yaml
 # Example: just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/sessions/sample3-hollow-velodyne/session.yaml
+# Run the calibration graph against a config file: just calibrate <path>
 calibrate config_file:
     #!/usr/bin/env bash
     set -eo pipefail
@@ -418,14 +349,16 @@ extrinsic-solver-controller:
     source install/setup.bash
     ros2 run interactive_solver_controller interactive_solver_controller
 
+# Bridge a compressed camera stream to raw, by hand.
+#
+# A session normally declares this itself, under `data.republish`, so the bridge
+# is part of the graph it launches -- running it in a second terminal is exactly
+# the thing an operator forgets, and forgetting it gives every node healthy, no
+# camera data and no error. Keep this for a rig whose session has not declared
+# it yet.
+# Bridge /camera/<which>/image_raw/compressed to raw: just republish left
 republish which:
     ros2 run image_transport republish compressed raw \
       --ros-args \
       -r in/compressed:=/camera/{{ which }}/image_raw/compressed \
       -r out:=/camera/{{ which }}/image_raw
-
-republish-zed:
-    ros2 run image_transport republish compressed raw \
-    --ros-args \
-    -r in/compressed:=/sensing/camera/zed/rgb/color/rect/image/compressed \
-    -r out:=/sensing/camera/zed/rgb/color/rect/image

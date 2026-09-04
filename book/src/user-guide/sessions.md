@@ -345,8 +345,9 @@ the installed share directory.
 | `just run <name-or-path>` | `ros2 launch lctk_launch session.launch.py session:=…` |
 | `just demo` | `just run sample3-hollow-velodyne` |
 | `just sample-data [<name>]` | `ros2 launch lctk_launch session_data.launch.py session:=…` — playback only |
-| `just lidar-camera [<name>]` | `just run`, defaulting to `seyond-left` |
-| `just solid [<name>]` | `just run` with the solid-board bench settings |
+| `just lidar-camera [<name>]` | `just run <name>` |
+| `just solid [<name>]` | `just run <name>` |
+| `just two-lidar` | `just run twolidar-vlp32-falcon` |
 | `just assisted [<name>]` | `just run` with `solver_mode:=assisted` |
 | `just calibrate <config-path>` | `ros2 launch lctk_launch calibrate.launch.py config_file:=…` |
 
