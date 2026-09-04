@@ -77,7 +77,7 @@ def test_pcap_avi_includes_the_playback_launch_with_derived_topics(
     data_launch, tmp_path
 ):
     directory = make_pcap_session(tmp_path)
-    actions = data_launch.generate_data_source(_Context(directory))
+    actions = data_launch.generate_data_source(_Context(directory, play_args=""))
     arguments = {}
     for action in actions:
         if hasattr(action, "launch_arguments"):
@@ -112,13 +112,13 @@ sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
 """,
         encoding="utf-8",
     )
-    actions = data_launch.generate_data_source(_Context(directory))
+    actions = data_launch.generate_data_source(_Context(directory, play_args=""))
     assert not [a for a in actions if hasattr(a, "launch_arguments")]
 
 
 def test_a_missing_session_is_refused(data_launch, tmp_path):
     with pytest.raises(Exception, match="no session"):
-        data_launch.generate_data_source(_Context(tmp_path / "absent"))
+        data_launch.generate_data_source(_Context(tmp_path / "absent", play_args=""))
 
 
 SESSION_LAUNCH = PACKAGE_ROOT / "launch" / "session.launch.py"
@@ -126,6 +126,9 @@ SESSION_LAUNCH = PACKAGE_ROOT / "launch" / "session.launch.py"
 # What DeclareLaunchArgument puts in the context before the OpaqueFunction runs.
 # The names are pinned independently by the declaration test below.
 FORWARDED_DEFAULTS = {
+    # play_args is declared by session.launch.py but is deliberately NOT in its
+    # _FORWARDED table: it goes to the data half, not to calibrate.launch.py.
+    "play_args": "",
     "debug_mode": "false",
     "log_level": "info",
     "mode": "offline",
@@ -250,3 +253,95 @@ def test_an_explicit_rviz_config_beats_the_session_layout(tmp_path):
     context = _Context(directory, **{**FORWARDED_DEFAULTS, "rviz_config": str(chosen)})
     arguments = _calibrate_arguments(module.generate_session(context))
     assert arguments["rviz_config"] == str(chosen)
+
+
+def _bag_session(directory: Path) -> Path:
+    """A minimal `kind: bag` session whose bag directory looks real enough to parse."""
+    directory.mkdir(parents=True, exist_ok=True)
+    bag = directory / "bag"
+    bag.mkdir(exist_ok=True)
+    (bag / "metadata.yaml").write_text(
+        """
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  relative_file_paths: [bag_0.db3]
+  duration: { nanoseconds: 1000000000 }
+  starting_time: { nanoseconds_since_epoch: 0 }
+  message_count: 1
+  topics_with_message_count:
+    - topic_metadata:
+        name: /points
+        type: sensor_msgs/msg/PointCloud2
+        serialization_format: cdr
+      message_count: 1
+""",
+        encoding="utf-8",
+    )
+    (bag / "bag_0.db3").write_bytes(b"")
+    (directory / "session.yaml").write_text(
+        """
+name: bagged
+data: { kind: bag, path: $(session-dir)/bag }
+devices:
+  lidars:
+    top: { frame_id: velodyne_top, pointcloud_topic: /points }
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs: []
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+""",
+        encoding="utf-8",
+    )
+    return directory
+
+
+def _player_arguments(actions) -> list[str]:
+    """The bag player's argv, read before the action is executed.
+
+    `node_name` raises until launch has run the action, so the declared name is read
+    from the attribute the constructor stored.
+    """
+    for action in actions:
+        if getattr(action, "_Node__node_name", None) == "bag_player":
+            return [str(a) for a in action._Node__arguments]
+    raise AssertionError("no bag_player node in the generated actions")
+
+
+def test_play_args_reach_the_bag_player_one_per_flag(data_launch, tmp_path):
+    """M-30: overriding playback QoS is the reason this exists.
+
+    A recording made with sensor-data QoS offers BEST_EFFORT, which cannot satisfy the
+    RELIABLE subscribers `mode:=offline` creates, so the graph silently receives nothing.
+    Forwarding `--qos-profile-overrides-path` keeps offline's sync settings instead of
+    switching the whole graph to realtime just to line the QoS up.
+    """
+    directory = _bag_session(tmp_path / "bagged")
+    actions = data_launch.generate_data_source(
+        _Context(directory, play_args="--qos-profile-overrides-path /tmp/qos.yaml")
+    )
+    arguments = _player_arguments(actions)
+
+    assert "--play-arg=--qos-profile-overrides-path" in arguments
+    assert "--play-arg=/tmp/qos.yaml" in arguments
+    # --clock is still passed, and still first, so an override cannot displace it.
+    assert "--play-arg=--clock" in arguments
+    assert arguments.index("--play-arg=--clock") < arguments.index(
+        "--play-arg=--qos-profile-overrides-path"
+    )
+
+
+def test_play_args_defaults_to_nothing_extra(data_launch, tmp_path):
+    directory = _bag_session(tmp_path / "plain")
+    arguments = _player_arguments(data_launch.generate_data_source(_Context(directory, play_args="")))
+    assert [a for a in arguments if a.startswith("--play-arg=")] == ["--play-arg=--clock"]
+
+
+def test_play_args_keeps_a_quoted_path_with_spaces_together(data_launch, tmp_path):
+    directory = _bag_session(tmp_path / "spaced")
+    actions = data_launch.generate_data_source(
+        _Context(directory, play_args="--qos-profile-overrides-path '/tmp/a b/qos.yaml'")
+    )
+    assert "--play-arg=/tmp/a b/qos.yaml" in _player_arguments(actions)

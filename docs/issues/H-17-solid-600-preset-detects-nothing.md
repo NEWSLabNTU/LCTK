@@ -304,7 +304,47 @@ applies `finite_only` + `voxel_downsample(bbf_voxel)` internally, matching the h
 the background source, and the possibility of a nested `bbox_free.board` block shadowing
 the top-level fields (the preset is flat).
 
-That discrepancy is the next thing to chase, and the harness is the tool for it. Making
-`session.launch.py` expose `bag_play.py`'s existing `--play-arg` would allow reliable
-playback QoS and hence a frame-for-frame comparison against the harness -- currently
-impossible, and the single most useful next step.
+That discrepancy is the next thing to chase, and the harness is the tool for it.
+
+### `play_args` added, and what it ruled out
+
+`session.launch.py` now takes `play_args`, forwarded one token per `--play-arg` to
+`bag_play.py`, so playback QoS can be overridden without switching the whole graph to
+realtime:
+
+```bash
+just run <session>   # or:
+ros2 launch lctk_launch session.launch.py session:=... mode:=offline \
+  play_args:="--qos-profile-overrides-path /path/to/qos.yaml"
+```
+
+That was added to make the ROS run comparable with the harness, and it did its job --
+by ruling its own hypothesis out. Running the session `mode:=offline` with reliable
+playback QoS still yields **one** non-empty detection, and still processes only 116 of
+the bag's 578 LiDAR frames.
+
+The 116 is now understood and is *not* a QoS problem: the detector cannot keep up with
+10 Hz playback, so the node's "store latest, skip stale" subscription (CLAUDE.md's
+ArcSwap pattern) drops roughly four frames in five. That also means warmup consumes the
+first 20 frames it *processes*, spanning ~10 s of bag rather than the opening second --
+so the harness was re-run with a background built exactly that way (`nodebg`, stride 5).
+It gives 7 of 12 candidates, no worse than the others.
+
+### The discrepancy is now well-bounded
+
+Harness: 58-75% of frames yield a candidate, across four different backgrounds
+(board-free bag, session self-warmup, stride-28 spread, stride-5 node-like).
+Node: ~0.9%, one detection in 116 processed frames.
+
+Excluded by measurement or inspection: playback QoS and frame dropping; the node's
+tuning (only `stance_floor` is overridden); the downsample path (`detect_for_target`
+applies `finite_only` + `voxel_downsample(bbf_voxel)` internally, and the background
+model voxelises at the same `bbf_voxel`); the background source; a nested
+`bbox_free.board` block shadowing top-level fields (the preset is flat); and cropping
+(only the bbox path filters, bbox-free passes the cloud through).
+
+What has *not* been compared is the two paths on the same frame. That is now possible:
+run the session with `play_args` and `debug_mode:=true`, capture
+`debug/foreground_points` for a frame, and feed the same frame through the harness. If
+the foreground sets differ, the divergence is upstream of clustering; if they match, it
+is in `detect_for_target`'s own call into the generator.

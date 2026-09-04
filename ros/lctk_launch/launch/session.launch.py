@@ -86,7 +86,10 @@ def generate_session(context, *args, **kwargs) -> list:
     return [
         IncludeLaunchDescription(
             AnyLaunchDescriptionSource(_share("launch", "session_data.launch.py")),
-            launch_arguments={"session": str(session.directory)}.items(),
+            launch_arguments={
+                "session": str(session.directory),
+                "play_args": LaunchConfiguration("play_args").perform(context),
+            }.items(),
         ),
         IncludeLaunchDescription(
             AnyLaunchDescriptionSource(_share("launch", "calibrate.launch.py")),
@@ -112,6 +115,22 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(name, default_value=default, description=description)
         for name, default, description in _FORWARDED
     ]
+    arguments.append(
+        DeclareLaunchArgument(
+            "play_args",
+            default_value="",
+            description=(
+                "Extra arguments for `ros2 bag play`, space separated, forwarded one "
+                "per --play-arg. Only meaningful for a 'kind: bag' session. The usual "
+                "reason is playback QoS: a recording made with sensor-data QoS offers "
+                "BEST_EFFORT, which cannot satisfy the RELIABLE subscribers that "
+                "mode:=offline creates, so the graph receives nothing and says so only "
+                "once (M-30). Overriding the player's QoS keeps offline's sync settings "
+                "instead of switching the whole graph to realtime just to line QoS up:\n"
+                "  play_args:='--qos-profile-overrides-path /path/to/overrides.yaml'"
+            ),
+        )
+    )
     arguments.append(
         DeclareLaunchArgument(
             "rviz_config",

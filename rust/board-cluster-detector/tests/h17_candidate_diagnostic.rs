@@ -41,7 +41,7 @@ fn where_do_solid_board_candidates_die() {
 
     // Build the background exactly as the node does during warmup: each frame is its
     // own source, and a voxel becomes background once min_sources frames have seen it.
-    for source in ["bgframe", "selfbg", "spreadbg"] {
+    for source in ["bgframe", "selfbg", "spreadbg", "nodebg"] {
         run_with_background(dir, &params, &tuning, source);
     }
 }
