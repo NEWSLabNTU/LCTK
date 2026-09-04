@@ -28,7 +28,7 @@ recording's `metadata.yaml` at parse time (M-26).
 ## Running it
 
 ```bash
-just assisted solid600-handheld-vlp
+just solver_mode=assisted run solid600-handheld-vlp
 ```
 
 Then open <http://localhost:8080>. *Export archive* writes `out/detections.json`.

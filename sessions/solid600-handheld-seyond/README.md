@@ -35,7 +35,7 @@ ln -sfn /path/to/new_LCTK_board/newtype_1 sessions/solid600-handheld-seyond/bag
 ## Running it
 
 ```bash
-just assisted solid600-handheld-seyond
+just solver_mode=assisted run solid600-handheld-seyond
 ```
 
 Then open <http://localhost:8080>. *Export archive* writes `out/detections.json`.

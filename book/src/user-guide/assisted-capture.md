@@ -46,8 +46,7 @@ ros2 launch lctk_launch calibrate.launch.py \
 The `just` shorthand resolves a bare session name and fills in `solver_mode:=assisted`:
 
 ```bash
-just assisted                          # defaults to the seyond-left session
-just assisted solid600-handheld-vlp
+just solver_mode=assisted run solid600-handheld-vlp
 just solver_mode=assisted run <session>   # the same thing, spelled generally
 ```
 

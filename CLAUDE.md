@@ -86,8 +86,9 @@ just
 just build      # Build all packages
 just clean      # Clean build artifacts
 just test       # Run tests (cargo nextest + pytest suites)
-just lint       # Full lint (rustfmt + clippy + ruff; clippy takes minutes)
-just lint-py    # Fast ruff-only lint
+just lint       # Everything (runs the two below; clippy takes minutes)
+just lint-rust  # Rust only: nightly rustfmt + clippy
+just lint-py    # Python only: ruff. Seconds -- what to run while iterating
 just audit      # cargo-audit for RUSTSEC advisories (runs in the sourced build env)
 
 just sessions       # List the shipped sessions
@@ -108,7 +109,7 @@ just calibrate /path/to/session.yaml
 # Justfile variables go BEFORE the recipe name -- `just demo solver_mode=manual`
 # is parsed as a recipe argument and fails.
 just solver_mode=manual demo         # Use service-driven multi-pose buffering
-just assisted                        # Auto-capture still, novel poses; review at :8080
+just solver_mode=assisted run <session>   # Auto-capture; review at :8080
 just debug_mode=false demo           # Disable debug output
 
 # Documentation (run from book/ directory)
@@ -686,7 +687,7 @@ Use it for quick calibration verification or real-time transform updates.
 
 `lidar_to_camera_solver` with `solver_mode=assisted` auto-captures a detection pair whenever the
 board is held still in a placement it has not seen before, and serves a review page on
-`http://localhost:8080`. Run `just assisted`, then open the page.
+`http://localhost:8080`. Run `just solver_mode=assisted run <session>`, then open the page.
 
 Two gates decide a capture, and both are load-bearing:
 

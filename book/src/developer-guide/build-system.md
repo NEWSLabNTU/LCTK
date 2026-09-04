@@ -24,7 +24,9 @@ just build      # Build all packages
 just clean      # Remove build artifacts
 just test       # Run all tests
 just format     # Format code with rustfmt
-just lint       # Run clippy and format checks
+just lint       # Every lint (Rust + Python)
+just lint-rust  # Rust only: nightly rustfmt + clippy
+just lint-py    # Python only: ruff, in seconds
 ```
 
 ### Using colcon Directly

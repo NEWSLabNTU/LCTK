@@ -13,7 +13,7 @@ data:
   # The ZED records CompressedImage and nothing here subscribes to one, so the
   # bridge belongs in the graph even though this session plays no data itself:
   # the operator replays bags into it by hand and would otherwise need a second
-  # terminal running `just republish`.
+  # terminal running `image_transport republish` by hand.
   republish:
     - from: /sensing/camera/zed/rgb/color/rect/image/compressed
       to: /sensing/camera/zed/rgb/color/rect/image

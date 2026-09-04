@@ -348,7 +348,7 @@ the installed share directory.
 | `just lidar-camera [<name>]` | `just run <name>` |
 | `just solid [<name>]` | `just run <name>` |
 | `just two-lidar` | `just run twolidar-vlp32-falcon` |
-| `just assisted [<name>]` | `just run` with `solver_mode:=assisted` |
+| `just assisted [<name>]` | `just solver_mode=assisted run <name>` |
 | `just calibrate <config-path>` | `ros2 launch lctk_launch calibrate.launch.py config_file:=…` |
 
 `just new <path> <template>` takes its template as a second **positional** argument, not as

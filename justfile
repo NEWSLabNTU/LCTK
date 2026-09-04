@@ -12,6 +12,20 @@ solver_mode := "continuous"
 enable_overlay := "true"
 enable_judge := "true"
 
+# The settings every launching recipe forwards, composed once so `run` and
+# `calibrate` cannot drift in what they pass.
+#
+# A variable, deliberately, not a shared recipe: a recipe would have to be
+# invoked as a nested `just`, which starts a fresh process with the DEFAULT
+# variable values, so `just debug_mode=false run <session>` would silently
+# forward `debug_mode:=true`. Variables are substituted in this invocation.
+_forwarded := "debug_mode:=" + debug_mode + \
+    " log_level:=" + log_level + \
+    " enable_rviz:=" + rviz_enabled + \
+    " solver_mode:=" + solver_mode + \
+    " enable_overlay:=" + enable_overlay + \
+    " enable_judge:=" + enable_judge
+
 # Show available commands
 default:
     @just --list
@@ -108,10 +122,22 @@ format:
     cargo +nightly fmt
     ruff format ros/
 
-# Run formatting and linting checks (Rust + Python)
-lint:
+# Everything. Minutes, because clippy is minutes -- reach for lint-py or
+# lint-rust while iterating and run this before pushing.
+# Run every lint (Rust + Python)
+lint: lint-rust lint-py
+
+# Rust only. This is the slow half: clippy over all targets takes minutes.
+# rustfmt is pinned to nightly, so stable `cargo fmt` produces a diff this
+# rejects -- see the nightly note in CLAUDE.md.
+# Lint Rust (nightly rustfmt + clippy)
+lint-rust:
     cargo +nightly fmt --check
     cargo clippy --all-targets --
+
+# Fast: seconds, not minutes. What to run while iterating on Python.
+# Lint Python (ruff check + format)
+lint-py:
     ruff check ros/
     ruff format --check ros/
 
@@ -122,11 +148,6 @@ lint:
 # Verify every relative link under docs/ resolves
 check-docs:
     python3 setup/scripts/check-doc-links.py
-
-# Fast Python-only lint (skips the multi-minute clippy step)
-lint-py:
-    ruff check ros/
-    ruff format --check ros/
 
 # Audit Rust dependencies for RUSTSEC advisories (Phase 4).
 # Must run in the sourced build env: a bare `cargo audit` re-resolves the wildcard ROS
@@ -207,13 +228,6 @@ test: _check-rust-tests-collectable
     # reached. Must be the system python3 (see _check-python-env).
     python3 -m pytest setup/test/ ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
 
-# `solver_mode` stays a switch, so `just solver_mode=manual run <session>` and
-# `just solver_mode=continuous run <session>` reach the other two paths. This
-# recipe only spares you typing the one people reach for most.
-# Launch assisted calibration on a session (auto-capture + review page on :8080)
-assisted SESSION:
-    @just solver_mode=assisted run {{ SESSION }}
-
 # Launch a session's data playback only: just sample-data [<path-or-name>]
 #
 # Goes through session_data.launch.py rather than lctk_sample_data's launch file
@@ -273,24 +287,19 @@ new TARGET FROM='sample3-hollow-velodyne':
 run SESSION:
     #!/usr/bin/env bash
     set -eo pipefail
-    source install/setup.bash
+    # Resolve first, into a variable: under `set -e` a failing command substitution
+    # aborts an assignment but NOT an argument, so inlining it would swallow the
+    # "no session" message and launch against an empty path.
     session_path=$(just _session-path {{ SESSION }})
+    source install/setup.bash
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch session.launch.py \
         session:="$session_path" \
-        debug_mode:={{ debug_mode }} \
-        log_level:={{ log_level }} \
-        enable_rviz:={{ rviz_enabled }} \
-        solver_mode:={{ solver_mode }} \
-        enable_overlay:={{ enable_overlay }} \
-        enable_judge:={{ enable_judge }}
+        {{ _forwarded }}
 
 # Run the shipped sample-data session end to end
-demo:
-    #!/usr/bin/env bash
-    set -eo pipefail
-    just run sample3-hollow-velodyne
+demo: (run "sample3-hollow-velodyne")
 
 # Resolve a session name to a path. Name lookup lives HERE, in the alias layer --
 # the ros2 interface takes an explicit path and makes no assumption about where
@@ -323,10 +332,12 @@ rviz:
     SHARE=$(ros2 pkg prefix lctk_launch --share)
     ros2 run rviz2 rviz2 -d "$SHARE/config/rviz/calibration.rviz"
 
-# Launch config-driven calibration pipeline
-# Usage: just calibrate /path/to/config.yaml
-# Example: just calibrate $(ros2 pkg prefix lctk_launch)/share/lctk_launch/sessions/sample3-hollow-velodyne/session.yaml
-# Run the calibration graph against a config file: just calibrate <path>
+# The calibration graph WITHOUT a data source -- for a rig whose sensors are
+# already publishing, or a recording you are playing yourself. `just run` starts
+# both halves and takes a session name; this takes an explicit path to a config
+# and starts nothing else. It is also the only way to run a plain calibration
+# config, which has no `data:` section for `run` to act on.
+# Run the calibration graph alone, against a config file: just calibrate <path>
 calibrate config_file:
     #!/usr/bin/env bash
     set -eo pipefail
@@ -334,13 +345,8 @@ calibrate config_file:
     play_launch launch \
         --web-addr 0.0.0.0:8000 \
         lctk_launch calibrate.launch.py \
-        config_file:={{ config_file }} \
-        debug_mode:={{ debug_mode }} \
-        log_level:={{ log_level }} \
-        enable_rviz:={{ rviz_enabled }} \
-        solver_mode:={{ solver_mode }} \
-        enable_overlay:={{ enable_overlay }} \
-        enable_judge:={{ enable_judge }}
+        config_file:="{{ config_file }}" \
+        {{ _forwarded }}
 
 # Launch interactive manual solver controller
 extrinsic-solver-controller:
@@ -348,17 +354,3 @@ extrinsic-solver-controller:
     set -eo pipefail
     source install/setup.bash
     ros2 run interactive_solver_controller interactive_solver_controller
-
-# Bridge a compressed camera stream to raw, by hand.
-#
-# A session normally declares this itself, under `data.republish`, so the bridge
-# is part of the graph it launches -- running it in a second terminal is exactly
-# the thing an operator forgets, and forgetting it gives every node healthy, no
-# camera data and no error. Keep this for a rig whose session has not declared
-# it yet.
-# Bridge /camera/<which>/image_raw/compressed to raw: just republish left
-republish which:
-    ros2 run image_transport republish compressed raw \
-      --ros-args \
-      -r in/compressed:=/camera/{{ which }}/image_raw/compressed \
-      -r out:=/camera/{{ which }}/image_raw

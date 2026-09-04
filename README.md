@@ -451,7 +451,7 @@ just --list
 # Build / check
 just build                 # Build all ROS packages (+ conflux)
 just clean                 # Clean build artifacts
-just lint                  # Run linters
+just lint                  # Run every linter (lint-rust + lint-py)
 just test                  # Run tests
 
 # Launch (foreground; Ctrl+C to stop)
