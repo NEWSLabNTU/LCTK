@@ -77,7 +77,11 @@ from lidar_to_camera_solver.detection_format import (
     select_loaded_adjustment,
 )
 from lidar_to_camera_solver.evidence_store import EvidenceStore
-from lidar_to_camera_solver.review_server import ReviewServer
+from lidar_to_camera_solver.review_server import (
+    ReviewServer,
+    is_loopback_host,
+    validate_stability_params,
+)
 from lidar_to_camera_solver.stability import StillnessTracker
 
 SOLVER_MODES = ("continuous", "manual", "assisted")
@@ -387,6 +391,11 @@ class LidarToCameraSolver(Node):
         # Monotonic token for the review scene. It covers buffer mutations and
         # camera-pose/session resets, not just the buffer's index revision.
         self._scene_revision = 0
+        self._stability_params: dict[str, float] = {}
+        self._review_params_writable = False
+        self._review_params_detail = (
+            "stability tuning is available only in assisted mode"
+        )
 
         # Observer identities are relative and latched by both detectors.  Their
         # QoS is independent of detection QoS so a late-starting solver receives
@@ -545,6 +554,7 @@ class LidarToCameraSolver(Node):
             max_rotation_deg=self._double_parameter("stability_max_rotation_deg"),
             cooldown_s=self._double_parameter("stability_cooldown_s"),
         )
+        self._stability_params = self._stillness.params
         self._novelty_position_tol_m = self._double_parameter("novelty_position_tol_m")
         self._novelty_orientation_tol_deg = self._double_parameter(
             "novelty_orientation_tol_deg"
@@ -579,11 +589,17 @@ class LidarToCameraSolver(Node):
             )
 
         host = self._string_parameter("review_bind_host")
+        self._review_params_writable = is_loopback_host(host)
+        self._review_params_detail = (
+            ""
+            if self._review_params_writable
+            else "parameter writes are disabled: the review server is not bound to a loopback address"
+        )
         self._review_server = ReviewServer(
             self, host=host, port=self._integer_parameter("review_port")
         )
         self._review_server.start()
-        if host not in ("127.0.0.1", "localhost"):
+        if not self._review_params_writable:
             self.get_logger().warn(
                 f"review server bound to {host}:{self._review_server.port} -- "
                 "the queue, the camera previews and the solved extrinsic are "
@@ -1572,6 +1588,16 @@ class LidarToCameraSolver(Node):
             snapshot = self._snapshot()
             stillness = self._last_stillness
             scene_revision = getattr(self, "_scene_revision", 0)
+            tracker = getattr(self, "_stillness", None)
+            stability_params = dict(
+                getattr(
+                    tracker,
+                    "params",
+                    getattr(self, "_stability_params", {}),
+                )
+            )
+            params_writable = bool(getattr(self, "_review_params_writable", False))
+            params_detail = getattr(self, "_review_params_detail", "")
             evidence = (
                 {
                     pair_id: self._evidence_store.get(pair_id)
@@ -1596,6 +1622,9 @@ class LidarToCameraSolver(Node):
         return {
             "mode": self.solver_mode,
             "scene_revision": scene_revision,
+            "stability_params": stability_params,
+            "params_writable": params_writable,
+            "params_detail": params_detail,
             "sync": self.pair_source.status_line(),
             "identity_error": identity_error,
             "stillness": {
@@ -1788,6 +1817,37 @@ class LidarToCameraSolver(Node):
                 return None
             evidence = self._evidence_store.get(pair_id)
             return evidence.cloud_xyz if evidence is not None else None
+
+    def set_stability_params(self, values: dict) -> tuple[bool, str]:
+        """Update the assisted stillness gate for future captures only."""
+
+        validation_error = validate_stability_params(values)
+        if validation_error is not None:
+            return False, validation_error
+        with self.state_lock:
+            if self.solver_mode != "assisted" or self._stillness is None:
+                return False, "stability tuning is available only in assisted mode"
+            if not getattr(self, "_review_params_writable", False):
+                return False, getattr(
+                    self,
+                    "_review_params_detail",
+                    "parameter writes are disabled for this bind address",
+                )
+            try:
+                changed = self._stillness.update_params(
+                    window_s=values.get("stability_window_s"),
+                    max_translation_m=values.get("stability_max_translation_m"),
+                    max_rotation_deg=values.get("stability_max_rotation_deg"),
+                )
+            except (TypeError, ValueError, OverflowError) as error:
+                return False, str(error)
+            self._stability_params = self._stillness.params
+            if not changed:
+                return True, "stability parameters unchanged"
+            effective = ", ".join(
+                f"{name}={value:g}" for name, value in self._stability_params.items()
+            )
+        return True, f"updated stability parameters for future captures ({effective})"
 
     def drop(self, pair_id: int) -> tuple[bool, str]:
         with self.state_lock:

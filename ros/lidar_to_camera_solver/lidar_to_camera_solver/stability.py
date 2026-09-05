@@ -96,6 +96,14 @@ class StillnessTracker:
             raise ValueError(
                 f"min_samples must be at least 2 to have a span; got {min_samples}"
             )
+        for name, value in (
+            ("max_translation_m", max_translation_m),
+            ("max_rotation_deg", max_rotation_deg),
+        ):
+            if not math.isfinite(float(value)) or float(value) <= 0.0:
+                raise ValueError(
+                    f"{name} must be finite and strictly positive; got {value}"
+                )
         self._window_s = window_s
         self._min_samples = min_samples
         self._max_translation_m = max_translation_m
@@ -113,6 +121,59 @@ class StillnessTracker:
         self._positions.clear()
         self._quaternions.clear()
         self._armed = True
+
+    @property
+    def params(self) -> dict[str, float]:
+        """Current gate values, detached for status and review responses."""
+
+        return {
+            "stability_window_s": self._window_s,
+            "stability_max_translation_m": self._max_translation_m,
+            "stability_max_rotation_deg": self._max_rotation_deg,
+        }
+
+    def update_params(
+        self,
+        *,
+        window_s: float | None = None,
+        max_translation_m: float | None = None,
+        max_rotation_deg: float | None = None,
+    ) -> bool:
+        """Apply gate values and discard the partial old window when changed."""
+
+        values = {
+            "window_s": self._window_s if window_s is None else float(window_s),
+            "max_translation_m": (
+                self._max_translation_m
+                if max_translation_m is None
+                else float(max_translation_m)
+            ),
+            "max_rotation_deg": (
+                self._max_rotation_deg
+                if max_rotation_deg is None
+                else float(max_rotation_deg)
+            ),
+        }
+        for name, value in values.items():
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and strictly positive")
+        changed = any(
+            values[name] != current
+            for name, current in (
+                ("window_s", self._window_s),
+                ("max_translation_m", self._max_translation_m),
+                ("max_rotation_deg", self._max_rotation_deg),
+            )
+        )
+        if not changed:
+            return False
+        self._window_s = values["window_s"]
+        self._max_translation_m = values["max_translation_m"]
+        self._max_rotation_deg = values["max_rotation_deg"]
+        # Keep the last-capture cooldown anchor, but do not let samples collected
+        # under the old gate qualify under the new one.
+        self.reset()
+        return True
 
     def _evict(self, horizon: float) -> None:
         """Drop everything older than the window, keeping one bracketing sample.

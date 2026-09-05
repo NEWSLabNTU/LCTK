@@ -317,6 +317,9 @@ def assisted_harness(
     )
     solver._last_stillness = None
     solver._last_epoch_resets = 0
+    solver._review_params_writable = True
+    solver._review_params_detail = ""
+    solver._stability_params = solver._stillness.params
     solver.publishing_enabled = False
     solver._novelty_position_tol_m = 0.05
     solver._novelty_orientation_tol_deg = 5.0
@@ -511,6 +514,26 @@ def test_state_is_json_shaped_before_anything_has_been_captured():
         "archive_path": "/tmp/detections.json",
         "autoware_ready": False,
     }
+
+
+def test_stability_params_update_future_captures_and_preserves_pairs():
+    solver = facade_harness()
+    hold(solver, 6)
+    before = solver.detection_buffer.count
+
+    ok, detail = solver.set_stability_params(
+        {"stability_window_s": 0.5, "stability_max_rotation_deg": 1.0}
+    )
+
+    assert ok is True
+    assert "future captures" in detail
+    assert solver.detection_buffer.count == before
+    assert solver.state()["stability_params"] == {
+        "stability_window_s": 0.5,
+        "stability_max_translation_m": 0.005,
+        "stability_max_rotation_deg": 1.0,
+    }
+    assert len(solver._stillness._stamps) == 0
 
 
 def test_state_lists_one_entry_per_buffered_pair():

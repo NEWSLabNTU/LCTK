@@ -8,7 +8,22 @@ import json
 from pathlib import Path
 
 import pytest
-from lidar_to_camera_solver.review_server import create_app
+from lidar_to_camera_solver.review_server import create_app, is_loopback_host
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", True),
+        ("::1", True),
+        ("0.0.0.0", False),
+        ("::", False),
+        ("192.168.1.10", False),
+        ("localhost", False),
+    ],
+)
+def test_parameter_write_gate_accepts_only_numeric_loopback_addresses(host, expected):
+    assert is_loopback_host(host) is expected
 
 
 class FakeFacade:
@@ -16,6 +31,7 @@ class FakeFacade:
         self.dropped = []
         self.exported = []
         self.autoware_calls = []
+        self.param_calls = []
         self._state = {
             "mode": "assisted",
             "sync": "sync: groups=12",
@@ -24,6 +40,11 @@ class FakeFacade:
             "solve": {"status": "solved", "rms_px": 0.5},
             "pairs": [{"id": 1, "rms_px": 0.5, "has_preview": True}],
             "export": {"archive_path": "/tmp/detections.json", "autoware_ready": True},
+            "stability_params": {
+                "stability_window_s": 1.0,
+                "stability_max_translation_m": 0.005,
+                "stability_max_rotation_deg": 0.5,
+            },
         }
         self._previews = {1: b"\xff\xd8fakejpeg\xff\xd9"}
         self._clouds = {1: b"\x00\x00\x80?\x00\x00\x00@\x00\x00@@"}
@@ -45,6 +66,11 @@ class FakeFacade:
 
     def scene(self):
         return self._scene
+
+    def set_stability_params(self, values):
+        self.param_calls.append(values)
+        self._state["stability_params"].update(values)
+        return True, "updated"
 
     def drop(self, pair_id):
         if pair_id not in self._previews:
@@ -120,6 +146,61 @@ def test_scene_is_returned_verbatim(client):
     response = client.get("/api/scene")
     assert response.status_code == 200
     assert json.loads(response.data) == client.facade.scene()
+
+
+def test_params_updates_whitelisted_values_and_returns_effective_set(client):
+    response = client.post(
+        "/api/params",
+        data=json.dumps({"stability_window_s": 2.5}),
+        content_type="application/json",
+    )
+    payload = json.loads(response.data)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["params"] == client.facade.state()["stability_params"]
+    assert client.facade.param_calls == [{"stability_window_s": 2.5}]
+
+
+def test_params_reject_unknown_key_atomically(client):
+    response = client.post(
+        "/api/params",
+        data=json.dumps({"stability_window_s": 2.5, "publishing_rate": 1.0}),
+        content_type="application/json",
+    )
+    payload = json.loads(response.data)
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert "publishing_rate" in payload["detail"]
+    assert client.facade.param_calls == []
+
+
+@pytest.mark.parametrize(
+    "value", [0, -1, True, "1.0", None, float("nan"), float("inf"), 10**400]
+)
+def test_params_reject_non_positive_or_non_numeric_values(client, value):
+    response = client.post(
+        "/api/params",
+        data=json.dumps({"stability_window_s": value}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert json.loads(response.data)["ok"] is False
+    assert client.facade.param_calls == []
+
+
+def test_params_are_refused_when_server_is_not_loopback():
+    facade = FakeFacade()
+    app = create_app(facade, params_writable=False)
+    app.config["TESTING"] = True
+    with app.test_client() as test_client:
+        response = test_client.post(
+            "/api/params",
+            data=json.dumps({"stability_window_s": 2.5}),
+            content_type="application/json",
+        )
+    assert response.status_code == 403
+    assert "loopback" in json.loads(response.data)["detail"]
+    assert facade.param_calls == []
 
 
 def test_preview_returns_jpeg(client):

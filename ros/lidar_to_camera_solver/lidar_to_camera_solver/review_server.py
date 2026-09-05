@@ -12,12 +12,45 @@ change between the two invalidates the confirmation.
 
 from __future__ import annotations
 
+import ipaddress
+import math
 import threading
 from pathlib import Path
 from typing import Any, Protocol
 
 from flask import Flask, Response, jsonify, request
 from werkzeug.serving import make_server
+
+STABILITY_PARAMETER_NAMES = frozenset(
+    {
+        "stability_window_s",
+        "stability_max_translation_m",
+        "stability_max_rotation_deg",
+    }
+)
+
+
+def validate_stability_params(values: object) -> str | None:
+    """Return an operator-facing validation error, or ``None`` when valid."""
+
+    if not isinstance(values, dict) or not values:
+        return "request must be a non-empty JSON object"
+    unknown = sorted(
+        (name for name in values if name not in STABILITY_PARAMETER_NAMES),
+        key=str,
+    )
+    if unknown:
+        return f"parameter '{unknown[0]}' is not settable"
+    for name, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"parameter '{name}' must be a finite number"
+        try:
+            numeric = float(value)
+        except (OverflowError, ValueError, TypeError):
+            return f"parameter '{name}' must be finite and strictly positive"
+        if not math.isfinite(numeric) or numeric <= 0.0:
+            return f"parameter '{name}' must be finite and strictly positive"
+    return None
 
 
 class NodeFacade(Protocol):
@@ -31,6 +64,8 @@ class NodeFacade(Protocol):
 
     def scene(self) -> dict[str, Any]: ...
 
+    def set_stability_params(self, values: dict[str, Any]) -> tuple[bool, str]: ...
+
     def preview(self, pair_id: int) -> bytes | None: ...
 
     def cloud(self, pair_id: int) -> bytes | None: ...
@@ -42,7 +77,16 @@ class NodeFacade(Protocol):
     def export_autoware(self, dry_run: bool) -> tuple[bool, str, dict | None]: ...
 
 
-def create_app(facade: NodeFacade) -> Flask:
+def is_loopback_host(host: str) -> bool:
+    """Return whether ``host`` is a numeric loopback address."""
+
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def create_app(facade: NodeFacade, *, params_writable: bool = True) -> Flask:
     static_folder = Path(__file__).resolve().parent / "web"
     app = Flask(
         __name__,
@@ -64,6 +108,44 @@ def create_app(facade: NodeFacade) -> Flask:
     @app.get("/api/scene")
     def scene() -> Response:
         return jsonify(facade.scene())
+
+    @app.post("/api/params")
+    def set_params() -> Response:
+        if not params_writable:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "detail": (
+                            "parameter writes are disabled: the review server is "
+                            "not bound to a loopback address"
+                        ),
+                    }
+                ),
+                403,
+            )
+        payload = request.get_json(silent=True)
+        validation_error = validate_stability_params(payload)
+        if validation_error is not None:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "detail": validation_error,
+                    }
+                ),
+                400,
+            )
+        ok, detail = facade.set_stability_params(payload)
+        if not ok:
+            return jsonify({"ok": False, "detail": detail}), 400
+        effective = {}
+        try:
+            state = facade.state()
+            effective = state.get("stability_params", {})
+        except (AttributeError, TypeError):
+            effective = {}
+        return jsonify({"ok": True, "detail": detail, "params": effective})
 
     @app.get("/api/pair/<int:pair_id>/preview.jpg")
     def preview(pair_id: int) -> Response:
@@ -124,7 +206,12 @@ class ReviewServer:
     """The Flask app on a daemon thread, startable and stoppable by the node."""
 
     def __init__(self, facade: NodeFacade, *, host: str, port: int):
-        self._server = make_server(host, port, create_app(facade), threaded=True)
+        self._server = make_server(
+            host,
+            port,
+            create_app(facade, params_writable=is_loopback_host(host)),
+            threaded=True,
+        )
         self._thread = threading.Thread(
             target=self._server.serve_forever, name="lctk-review", daemon=True
         )

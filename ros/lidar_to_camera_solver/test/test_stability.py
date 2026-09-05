@@ -249,6 +249,32 @@ def test_min_samples_must_allow_a_span():
         make_tracker(min_samples=1)
 
 
+def test_update_params_discards_a_partial_old_window():
+    tracker = make_tracker()
+    push_stream(tracker, 8, step=0.1)
+    assert tracker.update_params(window_s=0.5)
+    assert tracker.params["stability_window_s"] == 0.5
+    state = tracker.push((0.0, 0.0, 0.0), IDENTITY, 0.8)
+    assert state.frames == 1
+    assert not state.is_still
+    assert "filling" in state.reason
+
+
+def test_update_params_is_a_noop_for_the_same_values():
+    tracker = make_tracker()
+    push_stream(tracker, 8, step=0.1)
+    assert not tracker.update_params(
+        window_s=1.0,
+        max_translation_m=0.005,
+        max_rotation_deg=0.5,
+    )
+    assert tracker.params == {
+        "stability_window_s": 1.0,
+        "stability_max_translation_m": 0.005,
+        "stability_max_rotation_deg": 0.5,
+    }
+
+
 # --- housekeeping -------------------------------------------------------------
 
 
