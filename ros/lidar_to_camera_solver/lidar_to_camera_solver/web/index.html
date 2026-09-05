@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LCTK assisted capture</title>
+<style>
+ :root { color-scheme: light dark; }
+ body { font: 14px/1.45 system-ui, sans-serif; margin: 0; padding: 1rem; }
+ h1 { font-size: 1.1rem; margin: 0 0 .75rem; }
+ .banner { padding: .6rem .8rem; border-radius: .4rem; margin-bottom: .8rem;
+           background: #7773; }
+ .banner.still { background: #2b8a3e33; }
+ .shortfall { margin: .15rem 0; opacity: .85; }
+ .pair { display: flex; gap: .8rem; align-items: center;
+         border-top: 1px solid #8884; padding: .5rem 0; }
+ .pair img { width: 220px; border-radius: .25rem; background: #8882; }
+ .worst { outline: 2px solid #e0348044; }
+ button { font: inherit; padding: .35rem .7rem; border-radius: .3rem; }
+ .sync { opacity: .7; font-size: .85em; }
+ pre { background: #8882; padding: .5rem; border-radius: .3rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>LCTK assisted capture <span class="sync" id="sync"></span></h1>
+<div class="banner" id="banner">connecting…</div>
+<div id="diversity"></div>
+<div id="solve"></div>
+<div id="pairs"></div>
+<p>
+  <button onclick="exportArchive()">Export archive</button>
+  <button onclick="autowarePreview()">Export to Autoware…</button>
+</p>
+<div id="autoware"></div>
+<script>
+let archivePath = "";
+async function refresh() {
+  const state = await (await fetch("/api/state")).json();
+  archivePath = state.export.archive_path || "";
+  document.getElementById("sync").textContent = state.sync || "";
+  const banner = document.getElementById("banner");
+  banner.textContent = state.stillness.reason || "";
+  banner.className = "banner" + (state.stillness.is_still ? " still" : "");
+  document.getElementById("diversity").innerHTML =
+    (state.diversity.shortfalls || [])
+      .map(s => '<div class="shortfall">· ' + s + "</div>").join("")
+    || '<div class="shortfall">diversity targets met</div>';
+  const solve = state.solve || {};
+  document.getElementById("solve").textContent =
+    "solve: " + (solve.status || "?") +
+    (solve.rms_px != null ? "  RMS " + solve.rms_px.toFixed(2) + " px" : "") +
+    (solve.detail ? "  " + solve.detail : "");
+  const pairs = (state.pairs || []).slice().sort(
+    (a, b) => (b.rms_px || 0) - (a.rms_px || 0));
+  document.getElementById("pairs").innerHTML = pairs.map((p, i) =>
+    '<div class="pair' + (i === 0 && pairs.length > 1 ? ' worst' : '') + '">' +
+    (p.has_preview
+      ? '<img src="/api/pair/' + p.id + '/preview.jpg?v=' + p.id + '">'
+      : '<img alt="no matching camera frame">') +
+    '<div>#' + p.id +
+    (p.rms_px != null ? '<br>' + p.rms_px.toFixed(2) + ' px' : '') +
+    (p.missing && p.missing.length ? '<br>Missing: ' + p.missing.join(', ') : '') + '</div>' +
+    '<button onclick="dropPair(' + p.id + ')">drop</button></div>').join("");
+}
+async function post(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body || {}),
+  });
+  return response.json();
+}
+async function dropPair(id) { await post("/api/pair/" + id + "/drop"); refresh(); }
+async function exportArchive() {
+  const result = await post("/api/export/archive", {path: archivePath});
+  alert(result.detail);
+}
+async function autowarePreview() {
+  const result = await post("/api/export/autoware/preview");
+  const box = document.getElementById("autoware");
+  if (!result.ok) { box.textContent = result.detail; return; }
+  box.innerHTML = "<pre>" + JSON.stringify(result.entry, null, 2) + "</pre>" +
+    '<button onclick="autowareWrite()">Confirm write</button>';
+}
+async function autowareWrite() {
+  const result = await post("/api/export/autoware/write");
+  document.getElementById("autoware").textContent = result.detail;
+}
+setInterval(refresh, 500);
+refresh();
+</script>
+</body>
+</html>

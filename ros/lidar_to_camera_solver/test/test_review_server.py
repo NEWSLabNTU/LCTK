@@ -5,6 +5,7 @@ node, and no camera. If a test here needs rclpy, the seam has leaked.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from lidar_to_camera_solver.review_server import create_app
@@ -69,6 +70,21 @@ def test_index_serves_a_self_contained_page(client):
     assert "http://" not in body.replace("http://www.w3.org", ""), (
         "the page must not reference any external host; the rig has no internet"
     )
+
+
+def test_index_is_the_packaged_static_asset(client):
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "lidar_to_camera_solver"
+        / "web"
+        / "index.html"
+    )
+    index = client.get("/")
+    static = client.get("/static/index.html")
+
+    assert index.data == source.read_bytes()
+    assert static.data == index.data
+    assert static.mimetype == "text/html"
 
 
 def test_state_is_returned_verbatim(client):

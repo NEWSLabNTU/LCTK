@@ -16,6 +16,7 @@ setup(
         # (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),  # No local config files
         (os.path.join("lib", package_name), ["scripts/lidar_to_camera_solver"]),
     ],
+    package_data={package_name: ["web/*", "web/vendor/*"]},
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="NEWSLAB NTU",
