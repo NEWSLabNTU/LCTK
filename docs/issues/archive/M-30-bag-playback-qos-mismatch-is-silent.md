@@ -5,7 +5,7 @@
 - **Status:** 🟢 Fixed 2026-09-04 — the session owns transport reliability, resolved per
   device from the recording, and the one silent pairing is refused at parse time
 - **Found:** 2026-09-02, first run of `solid600-handheld-zed` against its recording
-- **Related:** [M-26 (archived)](./M-26-two-lidar-example-topics-unreachable.md), [M-29](../M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
+- **Related:** [M-26 (archived)](./M-26-two-lidar-example-topics-unreachable.md), [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
 
 ## Problem
 

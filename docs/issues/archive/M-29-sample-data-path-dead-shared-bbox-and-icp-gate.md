@@ -4,7 +4,7 @@
 - **Area:** lctk_launch / config/board, calibration-target-detector
 - **Status:** 🟢 Fixed (2026-08-31)
 - **Verified:** By running `just sample-data` + `calibrate.launch.py` on dataset 3 and reading the detector's own log
-- **Related:** [C-04 (archived)](./archive/C-04-board-detector-gate-unreachable.md), [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md)
+- **Related:** [C-04 (archived)](./C-04-board-detector-gate-unreachable.md), [M-27](./M-27-solid-600-handheld-topics-alias-sample-data.md)
 
 ## Problem
 
@@ -40,7 +40,7 @@ target rejected: reason=perforated_icp_failure rim_correspondences=250
 own profiling section records `0.026–0.029` as the **VLP-32C noise floor, not a bad fit** — a
 sensor spec'd at ±3 cm range accuracy cannot do better. The gate could never pass.
 
-This is [C-04](./archive/C-04-board-detector-gate-unreachable.md) recurring on a different
+This is [C-04](./C-04-board-detector-gate-unreachable.md) recurring on a different
 threshold. C-04 was `icp_good_fit_threshold` at `0.012`; this is `icp_rejection_threshold` at
 `0.008`, and the same sentence in `CLAUDE.md` predicted it: *"`icp_good_fit_threshold` must sit
 above this; it was once set to 0.012 and the detector then silently accepted nothing."* The
@@ -68,7 +68,7 @@ nothing automates.
   > **Superseded (2026-09-03).** `icp_rejection_threshold` no longer exists: the perforated ICP
   > termination cleanup collapsed it onto `icp_good_fit_threshold`, and a config still carrying
   > the old key is now refused at load with an actionable error. Set `icp_good_fit_threshold`
-  > instead — see [M-21](archive/M-21-icp-stable-pose-exit-unreachable.md). The finding and
+  > instead — see [M-21](M-21-icp-stable-pose-exit-unreachable.md). The finding and
   > evidence above stand as recorded; only the key name changed.
 
 Verified after the fix on dataset 3: **zero rejections**, assisted mode auto-captures a pair
@@ -87,7 +87,7 @@ were never inside.
 
 The crop box also stopped being shareable by construction: it lives in the session that owns
 the recording, which is what the sessions work
-([design](../superpowers/specs/2026-08-31-calibration-sessions-design.md)) was for.
+([design](../../superpowers/specs/2026-08-31-calibration-sessions-design.md)) was for.
 
 **The end-to-end gap is now closed.** `ros/lctk_launch/smoke/test_session_smoke.py`, run by
 `just smoke`, plays every shipped `pcap_avi` session and asserts a non-empty detection array

@@ -218,7 +218,7 @@ standing instruction not to re-baseline from implementation output previously ha
 obeyed. The ported generator reproduces the committed golden to 5.8e-16 m from stdlib and json5
 alone.
 
-**Migrating the ICP suite exposed [H-15](../issues/H-15-perforated-icp-applies-correction-backwards.md),
+**Migrating the ICP suite exposed [H-15](../issues/archive/H-15-perforated-icp-applies-correction-backwards.md),
 a shipped defect: the perforated ICP applied its Kabsch correction backwards, so every iteration
 moved the board pose away from the observed points.** It dated from W3-C and came from a naming trap
 -- the old crate's correspondence tuples were `(sensor, model)` but its unzipped variables were

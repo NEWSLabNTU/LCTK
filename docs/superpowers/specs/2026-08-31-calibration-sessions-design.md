@@ -33,7 +33,7 @@ different clothes:
 - **[M-27](../../issues/archive/M-27-solid-600-handheld-topics-alias-sample-data.md)** —
   `solid_600_handheld.yaml`'s placeholder topics collide with the sample-data playback,
   so it silently calibrates against the wrong recording.
-- **[M-29](../../issues/M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)** —
+- **[M-29](../../issues/archive/M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)** —
   `config/board/bbox.json5` was retuned for a Seyond rosbag, which killed the shipped
   demo. One crop box, two recordings, different rig geometry.
 

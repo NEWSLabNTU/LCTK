@@ -25,10 +25,10 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-11](./archive/H-11-camera-solvers-stale-board-frame.md) | High | Camera solvers used the old edge-aligned board frame → extrinsic wrong by 45°, half of it silently | 🟢 |
 | [H-12](./H-12-continuous-solver-forgets-prior-placements.md) | High | Continuous LiDAR-camera calibration forgets prior board placements | 🔴 |
 | [H-13](./H-13-l2l-latest-board-pair-overwrites-extrinsic.md) | High | LiDAR-to-LiDAR calibration overwrites the extrinsic from one board-pose pair | 🔴 |
-| [H-15](./H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
-| [H-16](./H-16-play-launch-does-not-replay-execute-process.md) | High | `play_launch` replays `Node` actions only, so a `kind: bag` session's `ExecuteProcess` player ran during the recording pass and the recording played into an empty graph | 🟢 |
+| [H-15](./archive/H-15-perforated-icp-applies-correction-backwards.md) | High | Perforated ICP applied its Kabsch correction backwards → every iteration moved away from the fit | 🟢 |
+| [H-16](./archive/H-16-play-launch-does-not-replay-execute-process.md) | High | `play_launch` replays `Node` actions only, so a `kind: bag` session's `ExecuteProcess` player ran during the recording pass and the recording played into an empty graph | 🟢 |
 | [H-17](./archive/H-17-solid-600-preset-detects-nothing.md) | High | The `solid_600` detector preset rejects every frame of real data | 🟢 |
-| [M-01](./archive/M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟡 |
+| [M-01](./archive/M-01-transform-direction-inverted.md) | Medium | Transform frame labels inverted vs ROS TF semantics | 🟢 |
 | [M-02](./archive/M-02-radians-degrees-mix.md) | Medium | Advanced solver adjust/pose API mixes radians and degrees | ⚪ |
 | [M-03](./archive/M-03-hardcoded-plane-normal-x.md) | Medium | Hardcoded plane-normal flip to +X assumes sensor-forward-X | 🟢 |
 | [M-04](./archive/M-04-l2l-wallclock-staleness.md) | Medium | L2L staleness check uses wall-clock vs sensor stamp | 🟢 |
@@ -53,7 +53,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-26](./archive/M-26-two-lidar-example-topics-unreachable.md) | Medium | `two_lidar.yaml` names topics no in-repo data source ever publishes | 🟢 |
 | [M-27](./archive/M-27-solid-600-handheld-topics-alias-sample-data.md) | Medium | `solid_600_handheld.yaml`'s placeholder topics alias the hollow-board sample-data playback | 🟢 |
 | [M-28](./M-28-generator-geometry-cell-handedness-disagree.md) | Medium | ArUco generator and target geometry bind cells with opposite handedness (2x2 targets) | 🔴 |
-| [M-29](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
+| [M-29](./archive/M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
 | [M-30](./archive/M-30-bag-playback-qos-mismatch-is-silent.md) | Medium | A `kind: bag` session in the default `offline` mode silently receives no LiDAR: recorded BEST_EFFORT QoS cannot feed a RELIABLE subscriber | 🟢 |
 | [M-31](./M-31-perforated-icp-parked-termination-findings.md) | Medium | Perforated ICP: `StablePose` publishes an unbounded residual and is reachable at a shipped budget; separation gate skipped on a lone success; two dead-code leftovers | 🔴 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |

@@ -178,4 +178,4 @@ worth making explicitly.
   the finding this branch set out to close; its resolution section carries the 2026-09-03
   re-measurement.
 - [C-04 · ICP accept gate set below the sensor noise floor](./archive/C-04-board-detector-gate-unreachable.md)
-- [M-29 · sample-data path dead: shared bbox and ICP gate](./M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
+- [M-29 · sample-data path dead: shared bbox and ICP gate](./archive/M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md)
