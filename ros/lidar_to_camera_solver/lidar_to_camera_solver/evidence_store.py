@@ -207,9 +207,7 @@ class EvidenceStore:
                 # zero-distortion model rather than carrying a stale model.
                 coefficients = np.zeros(5, dtype=np.float64)
             elif coefficients.size not in (4, 5, 8, 12, 14):
-                raise ValueError(
-                    "distortion must contain 4, 5, 8, 12, or 14 values"
-                )
+                raise ValueError("distortion must contain 4, 5, 8, 12, or 14 values")
             if not np.all(np.isfinite(coefficients)):
                 raise ValueError("distortion must be finite")
             parsed = _Intrinsics(
@@ -222,7 +220,11 @@ class EvidenceStore:
         with self._lock:
             previous = self._intrinsics
             self._intrinsics = parsed
-            if parsed is None or previous is None or not _same_intrinsics(previous, parsed):
+            if (
+                parsed is None
+                or previous is None
+                or not _same_intrinsics(previous, parsed)
+            ):
                 # Raw frames are only compatible with the model that was active
                 # when they were captured.  Do not let a nearest old frame be
                 # rectified using a newly published camera model.
@@ -247,14 +249,10 @@ class EvidenceStore:
 
         with self._lock:
             frame = (
-                self._frames.match(camera_stamp)
-                if camera_stamp is not None
-                else None
+                self._frames.match(camera_stamp) if camera_stamp is not None else None
             )
             cloud = (
-                self._clouds.match(cloud_stamp_s)
-                if cloud_stamp_s is not None
-                else None
+                self._clouds.match(cloud_stamp_s) if cloud_stamp_s is not None else None
             )
             intrinsics = self._intrinsics
             preview, preview_missing, owned_corners, retryable = (
@@ -325,9 +323,12 @@ class EvidenceStore:
                 source_corners = ()
             else:
                 corners_array = np.asarray(corners)
-                source_corners = (corners,) if corners_array.ndim == 2 else tuple(corners)
+                source_corners = (
+                    (corners,) if corners_array.ndim == 2 else tuple(corners)
+                )
             owned_corners = tuple(
-                np.array(corner, dtype=np.float64, copy=True) for corner in source_corners
+                np.array(corner, dtype=np.float64, copy=True)
+                for corner in source_corners
             )
             if any(
                 corner.shape != (4, 2) or not np.all(np.isfinite(corner))

@@ -120,6 +120,16 @@ def test_solver_mode_reaches_the_solver():
     assert parameters_of(solver)["solver_mode"] == "assisted"
 
 
+def test_lidar_camera_solver_receives_plane_inliers_from_its_board_detector():
+    plan = plan_for("sample3-hollow-velodyne", solver_mode="assisted")
+    solver = nodes_named(plan, "lidar_to_camera_solver")[0]
+    remappings = dict(solver.remappings)
+
+    assert remappings["plane_inliers"] == (
+        "/calibration/top_calibration_board/debug/plane_inliers"
+    )
+
+
 def test_an_unknown_solver_mode_is_refused_before_any_node_is_built():
     """A typo must not silently ship a different solver policy.
 

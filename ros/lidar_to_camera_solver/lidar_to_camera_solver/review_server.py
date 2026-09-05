@@ -125,6 +125,8 @@ class NodeFacade(Protocol):
 
     def preview(self, pair_id: int) -> bytes | None: ...
 
+    def cloud(self, pair_id: int) -> bytes | None: ...
+
     def drop(self, pair_id: int) -> tuple[bool, str]: ...
 
     def export_archive(self, path: str) -> tuple[bool, str]: ...
@@ -152,6 +154,13 @@ def create_app(facade: NodeFacade) -> Flask:
         if data is None:
             return Response("no preview for that pair", status=404)
         return Response(data, mimetype="image/jpeg")
+
+    @app.get("/api/pair/<int:pair_id>/cloud.bin")
+    def cloud(pair_id: int) -> Response:
+        data = facade.cloud(pair_id)
+        if data is None:
+            return Response("no plane inliers for that pair", status=404)
+        return Response(data, mimetype="application/octet-stream")
 
     @app.post("/api/pair/<int:pair_id>/drop")
     def drop(pair_id: int) -> Response:

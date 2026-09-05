@@ -328,6 +328,18 @@ fn target_identity_publisher_options() -> PublisherOptions<'static> {
     options
 }
 
+/// `plane_inliers` is an LCTK-owned evidence topic, not a sensor debug stream.
+/// Keep it available even when the other debug publishers are disabled, and use
+/// the reliable internal-node QoS contract for its subscribers.
+fn plane_inliers_publisher_options() -> PublisherOptions<'static> {
+    let mut options = PublisherOptions::new("debug/plane_inliers");
+    options.qos = QoSProfile {
+        history: QoSHistoryPolicy::KeepLast { depth: 10 },
+        ..QoSProfile::default()
+    };
+    options
+}
+
 fn identity_message(identity: &TargetIdentity) -> CalibrationTargetIdentity {
     CalibrationTargetIdentity {
         schema_version: identity.schema_version,
@@ -354,7 +366,6 @@ struct BoardDebugPublishers {
     /// failed frame — the cluster that came closest to passing. Silent in bbox
     /// mode and on a successful detection.
     rejected_cluster: Arc<Publisher<PointCloud2>>,
-    plane_inliers: Arc<Publisher<PointCloud2>>,
     downsampled_points: Arc<Publisher<PointCloud2>>,
     plane_marker: Arc<Publisher<MarkerArray>>,
     bbox_marker: Arc<Publisher<MarkerArray>>,
@@ -373,6 +384,7 @@ struct CallbackContext<'a> {
     estimator: &'a Arc<TargetPoseEstimator>,
     detector_config: &'a DetectorConfig,
     publisher: &'a Publisher<Detection3DArray>,
+    plane_inliers: &'a Publisher<PointCloud2>,
     bbox_params: &'a Option<BBoxParameters>,
     board_debug_publishers: &'a Option<BoardDebugPublishers>,
     bbox_free_cfg: &'a Option<Arc<bbox_free::BboxFreeRaw>>,
@@ -616,6 +628,9 @@ pub struct CalibrationBoardLocatorNode {
     _node: Node,
     _detection_publisher: Publisher<Detection3DArray>,
     _pointcloud_subscription: Subscription<PointCloud2>,
+    // Plane inliers are review evidence and stay available even when the
+    // other debug publishers are disabled.
+    _plane_inliers_publisher: Publisher<PointCloud2>,
     // Board debug publishers - grouped into a single struct
     _board_debug_publishers: Option<BoardDebugPublishers>,
     // BBox parameters (dynamically reconfigurable via ROS parameters)
@@ -834,6 +849,7 @@ impl CalibrationBoardLocatorNode {
         );
 
         // Create board debug publishers if debug mode is enabled
+        let plane_inliers_publisher = node.create_publisher(plane_inliers_publisher_options())?;
         let board_debug_publishers = if enable_debug {
             log_info!(
                 LOGGER_NAME,
@@ -859,9 +875,6 @@ impl CalibrationBoardLocatorNode {
             let mut rejected_cluster_opts = PublisherOptions::new("debug/rejected_cluster");
             rejected_cluster_opts.qos = debug_qos;
 
-            let mut plane_inliers_opts = PublisherOptions::new("debug/plane_inliers");
-            plane_inliers_opts.qos = debug_qos;
-
             let mut downsampled_points_opts = PublisherOptions::new("debug/downsampled_points");
             downsampled_points_opts.qos = debug_qos;
 
@@ -883,7 +896,6 @@ impl CalibrationBoardLocatorNode {
                 foreground_points: Arc::new(node.create_publisher(foreground_points_opts)?),
                 background_voxels: Arc::new(node.create_publisher(background_voxels_opts)?),
                 rejected_cluster: Arc::new(node.create_publisher(rejected_cluster_opts)?),
-                plane_inliers: Arc::new(node.create_publisher(plane_inliers_opts)?),
                 downsampled_points: Arc::new(node.create_publisher(downsampled_points_opts)?),
                 plane_marker: Arc::new(node.create_publisher(plane_marker_opts)?),
                 bbox_marker: Arc::new(node.create_publisher(bbox_marker_opts)?),
@@ -894,6 +906,7 @@ impl CalibrationBoardLocatorNode {
             None
         };
         let board_debug_shared = board_debug_publishers.clone();
+        let plane_inliers_for_thread = plane_inliers_publisher.clone();
 
         if enable_icp_iteration_debug {
             log_warn!(
@@ -966,6 +979,7 @@ impl CalibrationBoardLocatorNode {
                 estimator: &estimator_for_thread,
                 detector_config: &detector_config_for_thread,
                 publisher: &detection_publisher_shared,
+                plane_inliers: &plane_inliers_for_thread,
                 bbox_params: &bbox_params_for_callback,
                 board_debug_publishers: &board_debug_shared,
                 bbox_free_cfg: &bbox_free_for_thread,
@@ -1036,6 +1050,7 @@ impl CalibrationBoardLocatorNode {
             _node: node,
             _detection_publisher: detection_publisher,
             _pointcloud_subscription: pointcloud_subscription,
+            _plane_inliers_publisher: plane_inliers_publisher,
             _board_debug_publishers: board_debug_publishers,
             _bbox_params: bbox_params,
             _processing_thread: processing_thread,
@@ -1112,6 +1127,7 @@ impl CalibrationBoardLocatorNode {
             estimator,
             detector_config,
             publisher,
+            plane_inliers,
             bbox_params,
             board_debug_publishers,
             bbox_free_cfg,
@@ -1150,6 +1166,7 @@ impl CalibrationBoardLocatorNode {
             detector_config,
             bbox_params,
             board_debug_publishers,
+            plane_inliers,
             bbox_free_cfg,
             background_state,
         );
@@ -1182,6 +1199,7 @@ impl CalibrationBoardLocatorNode {
         detector_config: &DetectorConfig,
         bbox_params: &Option<BBoxParameters>,
         board_debug_publishers: &Option<BoardDebugPublishers>,
+        plane_inliers: &Publisher<PointCloud2>,
         bbox_free_cfg: &Option<Arc<bbox_free::BboxFreeRaw>>,
         background_state: &Arc<std::sync::Mutex<Option<bbox_free::BackgroundState>>>,
     ) -> Result<Detection3DArray> {
@@ -1216,6 +1234,7 @@ impl CalibrationBoardLocatorNode {
                     detector_config,
                     &msg.header,
                     board_debug_publishers,
+                    Some(plane_inliers),
                 )?
             }
             Some(bf) => Self::select_board_cluster(
@@ -1226,6 +1245,7 @@ impl CalibrationBoardLocatorNode {
                 detector_config.sensor_up_axis.as_vector(),
                 &msg.header,
                 board_debug_publishers,
+                Some(plane_inliers),
             )?,
         };
         let Some(selected) = selected else {
@@ -1342,6 +1362,7 @@ impl CalibrationBoardLocatorNode {
         sensor_up: na::Vector3<f64>,
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
+        plane_inliers: Option<&Publisher<PointCloud2>>,
     ) -> Result<Option<SelectedEvidence>> {
         let method = bf.method;
         let target_side = TargetSide::metres(target.plate().side_um as f64 / 1_000_000.0)?;
@@ -1445,13 +1466,8 @@ impl CalibrationBoardLocatorNode {
         }
         let observation =
             TargetSquarePlaneObservation::from_square_plane(&square_plane, sensor_up)?;
-        if let Some(debug_pubs) = board_debug_publishers {
-            Self::publish_debug_cloud(
-                &debug_pubs.plane_inliers,
-                &square_plane.points,
-                header,
-                "plane inliers",
-            );
+        if let Some(plane_inliers) = plane_inliers {
+            Self::publish_debug_cloud(plane_inliers, &square_plane.points, header, "plane inliers");
         }
         Ok(Some(SelectedEvidence {
             points: square_plane.points.clone(),
@@ -1555,6 +1571,7 @@ impl CalibrationBoardLocatorNode {
         detector_config: &DetectorConfig,
         header: &Header,
         board_debug_publishers: &Option<BoardDebugPublishers>,
+        plane_inliers: Option<&Publisher<PointCloud2>>,
     ) -> Result<Option<SelectedEvidence>> {
         if active_points.len() < 3 {
             log_info!(
@@ -1578,13 +1595,10 @@ impl CalibrationBoardLocatorNode {
                 return Ok(None);
             }
         };
+        if let Some(plane_inliers) = plane_inliers {
+            Self::publish_debug_cloud(plane_inliers, &plane_points, header, "plane inliers");
+        }
         if let Some(debug_pubs) = board_debug_publishers {
-            Self::publish_debug_cloud(
-                &debug_pubs.plane_inliers,
-                &plane_points,
-                header,
-                "plane inliers",
-            );
             if let Ok(markers) = Self::create_plane_marker(&plane, &plane_points, header) {
                 let _ = debug_pubs.plane_marker.publish(markers);
             }
@@ -2725,6 +2739,15 @@ mod covariance_tests {
     }
 
     #[test]
+    fn plane_inliers_publisher_is_always_reliable_and_relative() {
+        let options = plane_inliers_publisher_options();
+        assert_eq!(options.topic, "debug/plane_inliers");
+        assert_eq!(options.qos.history, QoSHistoryPolicy::KeepLast { depth: 10 });
+        assert_eq!(options.qos.reliability, QoSReliabilityPolicy::Reliable);
+        assert_eq!(options.qos.durability, QoSDurabilityPolicy::Volatile);
+    }
+
+    #[test]
     fn bbox_and_bbox_free_adapters_have_identical_observation_semantics() {
         let plane = PlaneModel {
             center: na::Point3::new(0.0, 0.0, 2.0),
@@ -2914,6 +2937,7 @@ mod covariance_tests {
             &detector_config,
             &Header::default(),
             &None,
+            None,
         )
         .unwrap()
         .expect("representative hollow cloud should produce bbox evidence");
@@ -2970,6 +2994,7 @@ mod covariance_tests {
             &detector_config,
             &Header::default(),
             &None,
+            None,
         )
         .unwrap()
         .is_none());

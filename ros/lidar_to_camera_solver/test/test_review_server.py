@@ -25,12 +25,16 @@ class FakeFacade:
             "export": {"archive_path": "/tmp/detections.json", "autoware_ready": True},
         }
         self._previews = {1: b"\xff\xd8fakejpeg\xff\xd9"}
+        self._clouds = {1: b"\x00\x00\x80?\x00\x00\x00@\x00\x00@@"}
 
     def state(self):
         return self._state
 
     def preview(self, pair_id):
         return self._previews.get(pair_id)
+
+    def cloud(self, pair_id):
+        return self._clouds.get(pair_id)
 
     def drop(self, pair_id):
         if pair_id not in self._previews:
@@ -82,6 +86,17 @@ def test_preview_returns_jpeg(client):
 
 def test_missing_preview_is_404_not_500(client):
     assert client.get("/api/pair/99/preview.jpg").status_code == 404
+
+
+def test_cloud_returns_packed_binary(client):
+    response = client.get("/api/pair/1/cloud.bin")
+    assert response.status_code == 200
+    assert response.mimetype == "application/octet-stream"
+    assert response.data == client.facade._clouds[1]
+
+
+def test_missing_cloud_is_404_not_a_neighbouring_sweep(client):
+    assert client.get("/api/pair/99/cloud.bin").status_code == 404
 
 
 def test_drop_calls_the_facade(client):

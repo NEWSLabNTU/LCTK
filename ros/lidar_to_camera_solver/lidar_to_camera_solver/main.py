@@ -37,7 +37,7 @@ from lctk_sync import DetectionPairSource, PairSourceConfig
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from std_msgs.msg import ColorRGBA, Header
 from vision_msgs.msg import Detection2DArray, Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
@@ -84,6 +84,62 @@ def message_stamp_seconds(message) -> float:
         return float(stamp.sec) + float(stamp.nanosec) * 1e-9
     except (AttributeError, TypeError, ValueError, OverflowError):
         return float("nan")
+
+
+def _pointcloud_xyz(message) -> np.ndarray | None:
+    """Decode a ``PointCloud2`` into finite ``(N, 3)`` XYZ samples.
+
+    The board detector publishes packed little-endian float32 fields, but the
+    decoder also respects field order, row padding, and the message's byte
+    order.  Returning ``None`` for malformed data lets :class:`EvidenceStore`
+    clear its cloud timeline rather than accidentally retaining a neighbouring
+    sweep as evidence.
+    """
+
+    try:
+        height = int(message.height)
+        width = int(message.width)
+        point_step = int(message.point_step)
+        row_step = int(message.row_step)
+        if height < 0 or width < 0 or point_step < 1 or row_step < 0:
+            return None
+        if width == 0 or height == 0:
+            return np.empty((0, 3), dtype=np.float32)
+
+        fields = {str(field.name): field for field in message.fields}
+        offsets: list[int] = []
+        for name in ("x", "y", "z"):
+            field = fields.get(name)
+            if field is None or int(field.datatype) != 7:
+                return None
+            offset = int(field.offset)
+            if offset < 0 or offset + 4 > point_step:
+                return None
+            offsets.append(offset)
+        if row_step < width * point_step:
+            return None
+
+        raw = memoryview(message.data)
+        required = (height - 1) * row_step + width * point_step
+        if len(raw) < required:
+            return None
+        dtype = np.dtype(">f4" if bool(message.is_bigendian) else "<f4")
+        points = np.empty((height, width, 3), dtype=np.float32)
+        for index, offset in enumerate(offsets):
+            values = np.ndarray(
+                (height, width),
+                dtype=dtype,
+                buffer=raw,
+                offset=offset,
+                strides=(row_step, point_step),
+            )
+            points[:, :, index] = values
+        points = points.reshape(-1, 3)
+        if not np.all(np.isfinite(points)):
+            return None
+        return points
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
 
 
 def target_identity_qos_profile() -> QoSProfile:
@@ -398,8 +454,9 @@ class LidarToCameraSolver(Node):
             CameraInfo, camera_info_topic, self.camera_info_callback, sensor_qos
         )
         self.image_subscription = None
+        self.plane_inliers_subscription = None
         if self.solver_mode == "assisted":
-            self._start_assisted(camera_topic, sensor_qos)
+            self._start_assisted(camera_topic, sensor_qos, internal_qos)
         # Assisted is a multi-pose buffer too, so it gets the manual services: the
         # interactive controller still attaches, and dump/load stays reachable.
         if self.solver_mode in ("manual", "assisted"):
@@ -452,6 +509,7 @@ class LidarToCameraSolver(Node):
             ("review_jpeg_quality", 80),
             ("review_max_previews", 64),
             ("review_evidence_seconds", 1.0),
+            ("plane_inliers_topic", "plane_inliers"),
             ("review_archive_path", ""),
             ("export_autoware_target", ""),
             ("export_camera_frame", ""),
@@ -460,7 +518,12 @@ class LidarToCameraSolver(Node):
         for name, default in parameters:
             self.declare_parameter(name, default)
 
-    def _start_assisted(self, camera_topic: str, sensor_qos: QoSProfile) -> None:
+    def _start_assisted(
+        self,
+        camera_topic: str,
+        sensor_qos: QoSProfile,
+        internal_qos: QoSProfile,
+    ) -> None:
         """Build the stillness gate, the preview store and the review server.
 
         Called only for ``solver_mode=assisted``.  Nothing here is reachable from
@@ -491,6 +554,19 @@ class LidarToCameraSolver(Node):
         else:
             self.get_logger().warn(
                 "camera_topic is unset; the review page will show no previews"
+            )
+
+        plane_inliers_topic = self._string_parameter("plane_inliers_topic")
+        if plane_inliers_topic:
+            self.plane_inliers_subscription = self.create_subscription(
+                PointCloud2,
+                plane_inliers_topic,
+                self._plane_inliers_callback,
+                internal_qos,
+            )
+        else:
+            self.get_logger().warn(
+                "plane_inliers_topic is unset; the review page will show no clouds"
             )
 
         host = self._string_parameter("review_bind_host")
@@ -526,6 +602,15 @@ class LidarToCameraSolver(Node):
             encoding=message.encoding,
             step=message.step,
             data=message.data,
+        )
+
+    def _plane_inliers_callback(self, message: PointCloud2) -> None:
+        """Retain detector-selected plane points keyed by the source stamp."""
+
+        if self._evidence_store is None:
+            return
+        self._evidence_store.observe_cloud(
+            message_stamp_seconds(message), _pointcloud_xyz(message)
         )
 
     def _create_services(self) -> None:
@@ -1545,6 +1630,18 @@ class LidarToCameraSolver(Node):
                 return None
             evidence = self._evidence_store.get(pair_id)
             return evidence.preview_jpeg if evidence is not None else None
+
+    def cloud(self, pair_id: int) -> bytes | None:
+        with self.state_lock:
+            snapshot = self._snapshot()
+            if (
+                self._evidence_store is None
+                or snapshot is None
+                or pair_id not in snapshot.capture_ids
+            ):
+                return None
+            evidence = self._evidence_store.get(pair_id)
+            return evidence.cloud_xyz if evidence is not None else None
 
     def drop(self, pair_id: int) -> tuple[bool, str]:
         with self.state_lock:

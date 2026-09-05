@@ -13,6 +13,7 @@ residual-based number rates as excellent.
 
 from __future__ import annotations
 
+import struct
 import threading
 from types import SimpleNamespace
 
@@ -28,6 +29,7 @@ from lidar_to_camera_solver.evidence_store import CaptureEvidence, EvidenceStore
 from lidar_to_camera_solver.main import (
     SOLVER_MODES,
     LidarToCameraSolver,
+    _pointcloud_xyz,
     aruco_corner_quads,
     board_pose_from_detections,
     parse_solver_mode,
@@ -119,6 +121,49 @@ def test_aruco_corner_quads_skips_a_detection_without_four_corners():
     message = aruco_message()
     message.detections[0].results = message.detections[0].results[:3]
     assert aruco_corner_quads(message) == []
+
+
+def test_plane_inliers_decoder_reads_padded_little_endian_float32_points():
+    data = bytearray(32)
+    struct.pack_into("<fff", data, 0, 1.0, 2.0, 3.0)
+    struct.pack_into("<fff", data, 16, -4.0, 5.0, 6.0)
+    fields = [
+        SimpleNamespace(name="x", offset=0, datatype=7),
+        SimpleNamespace(name="y", offset=4, datatype=7),
+        SimpleNamespace(name="z", offset=8, datatype=7),
+    ]
+    message = SimpleNamespace(
+        height=1,
+        width=2,
+        point_step=16,
+        row_step=32,
+        is_bigendian=False,
+        data=bytes(data),
+        fields=fields,
+    )
+
+    points = _pointcloud_xyz(message)
+
+    assert points is not None
+    assert np.array_equal(points, [[1.0, 2.0, 3.0], [-4.0, 5.0, 6.0]])
+
+
+def test_plane_inliers_decoder_rejects_truncated_data():
+    message = SimpleNamespace(
+        height=1,
+        width=1,
+        point_step=12,
+        row_step=12,
+        is_bigendian=False,
+        data=b"short",
+        fields=[
+            SimpleNamespace(name="x", offset=0, datatype=7),
+            SimpleNamespace(name="y", offset=4, datatype=7),
+            SimpleNamespace(name="z", offset=8, datatype=7),
+        ],
+    )
+
+    assert _pointcloud_xyz(message) is None
 
 
 # --- capture-callback harness -------------------------------------------------

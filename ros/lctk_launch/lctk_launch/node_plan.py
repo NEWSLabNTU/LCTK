@@ -101,6 +101,14 @@ def _identity_topic_for_detection(detection_topic: str) -> str:
     return f"{prefix}/target_identity"
 
 
+def _plane_inliers_topic_for_detection(detection_topic: str) -> str:
+    """Return the board detector's plane-evidence sibling topic."""
+    prefix, separator, _leaf = detection_topic.rpartition("/")
+    if not separator:
+        return "debug/plane_inliers"
+    return f"{prefix}/debug/plane_inliers"
+
+
 def build_node_plan(pipeline: PipelineConfig, settings: RunSettings) -> list[PlanEntry]:
     """Every node this configuration runs, in the order it should appear."""
     log_arguments = ("--ros-args", "--log-level", settings.log_level)
@@ -277,6 +285,12 @@ def _lidar_camera_solvers(pipeline, settings, sync, log_arguments) -> list[PlanE
                     (
                         "camera_target_identity",
                         _identity_topic_for_detection(solver.aruco_detections_topic),
+                    ),
+                    (
+                        "plane_inliers",
+                        _plane_inliers_topic_for_detection(
+                            solver.board_detections_topic
+                        ),
                     ),
                     ("extrinsic_transform", solver.output_topic),
                 ),
