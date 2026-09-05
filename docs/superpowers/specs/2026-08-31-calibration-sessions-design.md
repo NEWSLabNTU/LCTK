@@ -4,6 +4,11 @@
 - **Status:** Implemented 2026-09-01; verified end to end on dataset 3 (detections non-empty, zero detector rejections, extrinsic at ~17 Hz), from a relocated session outside the repo, and with plain `ros2 launch` from `/tmp`
 - **Area:** `lctk_launch`, `lctk_sample_data`, justfile, `sessions/`
 - **Breaking:** yes — `config/examples/*.yaml` is replaced by `sessions/`
+- **Since implemented:** `solid600-handheld-zed`, named throughout the body below, has been
+  renamed and split into `solid600-handheld-vlp` (Velodyne + ZED) and
+  `solid600-handheld-seyond` (Seyond + ZED), and both are now `kind: bag` rather than
+  `kind: live`. The body is left as the record of the design as approved; `sessions/` is the
+  authority on what ships.
 
 ## The problem
 
