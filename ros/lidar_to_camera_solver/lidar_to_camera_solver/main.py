@@ -27,6 +27,12 @@ from lctk_interfaces.srv import (
     ResetTransform,
 )
 from lctk_quality import compute_diversity
+from lctk_quality.diversity import (
+    MIN_DEPTH_RANGE_M,
+    MIN_LATERAL_SPAN_M,
+    MIN_NORMAL_SPAN_DEG,
+    MIN_PLACEMENTS,
+)
 from lctk_quality.placements import (
     DEFAULT_ORIENTATION_TOL_DEG,
     DEFAULT_POSITION_TOL_M,
@@ -1609,9 +1615,24 @@ class LidarToCameraSolver(Node):
                     "lateral_span_m": diversity.lateral_span_m,
                     "is_degenerate": diversity.is_degenerate,
                     "shortfalls": diversity.shortfalls(),
+                    "targets": {
+                        "n_placements": MIN_PLACEMENTS,
+                        "normal_span_deg": MIN_NORMAL_SPAN_DEG,
+                        "depth_range_m": MIN_DEPTH_RANGE_M,
+                        "lateral_span_m": MIN_LATERAL_SPAN_M,
+                    },
                 }
                 if diversity is not None
-                else {"n_placements": 0, "shortfalls": ["no placements yet"]}
+                else {
+                    "n_placements": 0,
+                    "shortfalls": ["no placements yet"],
+                    "targets": {
+                        "n_placements": MIN_PLACEMENTS,
+                        "normal_span_deg": MIN_NORMAL_SPAN_DEG,
+                        "depth_range_m": MIN_DEPTH_RANGE_M,
+                        "lateral_span_m": MIN_LATERAL_SPAN_M,
+                    },
+                }
             ),
             "solve": {
                 "status": (

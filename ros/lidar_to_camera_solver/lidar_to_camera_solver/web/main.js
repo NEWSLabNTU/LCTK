@@ -1,43 +1,112 @@
+import { Chrome } from "./chrome.js";
 import { ReviewApi } from "./review_api.js";
 import { SceneModel } from "./scene_model.js";
 
-const canvas = document.getElementById("scene");
+const canvas = document.getElementById("scene") || document.getElementById("view");
 if (canvas) {
   const api = new ReviewApi();
-  const status = document.getElementById("scene-status");
   const app = {
     api,
     state: null,
     scene: { scene_revision: -1, captures: [], camera: null },
     clouds: new Map(),
     selectedId: null,
+    selectedCaptureId: null,
+    preview: { id: null, url: null, status: "idle" },
+    notice: "",
     layers: { points: true, frustum: true, rms: true },
   };
-  const model = new SceneModel(canvas, {
-    onPick: (id) => {
-      app.selectedId = id;
-      if (status) status.textContent = `selected pair #${id}`;
-      window.dispatchEvent(new CustomEvent("lctk-scene-selection", { detail: id }));
-    },
-  });
+  let previewSerial = 0;
   let sceneRevision = -1;
-  let requestSerial = 0;
+  let sceneRequestSerial = 0;
   let polling = false;
 
-  async function syncScene(state) {
-    if (state.scene_revision === sceneRevision && app.scene) return;
-    const serial = ++requestSerial;
-    const scene = await api.scene();
-    if (serial !== requestSerial || !scene || scene.ok === false) return;
-    const captures = scene.captures || [];
-    const cloudEntries = await Promise.all(
-      captures.map(async (capture) => [Number(capture.id), await api.cloud(capture.id)]),
+  const model = new SceneModel(canvas, {
+    onPick: (id) => select(id),
+  });
+
+  function render() {
+    chrome.render(app);
+    model.sync(app);
+  }
+
+  async function loadPreview(id) {
+    const serial = ++previewSerial;
+    if (app.preview.url) URL.revokeObjectURL(app.preview.url);
+    app.preview = { id, url: null, status: "loading" };
+    render();
+    const blob = await api.preview(id);
+    if (serial !== previewSerial || app.selectedId !== id) return;
+    if (blob) {
+      app.preview = { id, url: URL.createObjectURL(blob), status: "ready" };
+    } else {
+      app.preview = { id, url: null, status: "missing" };
+    }
+    render();
+  }
+
+  function select(id) {
+    const numericId = Number(id);
+    const exists = (app.state?.pairs || []).some(
+      (pair) => Number(pair.id) === numericId,
     );
-    if (serial !== requestSerial) return;
+    if (!exists) return clearSelection();
+    app.selectedId = numericId;
+    app.selectedCaptureId = numericId;
+    model.focus(numericId);
+    loadPreview(numericId);
+    render();
+  }
+
+  function clearSelection() {
+    previewSerial += 1;
+    if (app.preview.url) URL.revokeObjectURL(app.preview.url);
+    app.selectedId = null;
+    app.selectedCaptureId = null;
+    app.preview = { id: null, url: null, status: "idle" };
+    render();
+    model.frameAll();
+  }
+
+  async function syncScene(state) {
+    if (Number(state.scene_revision) === sceneRevision && app.scene) return;
+    const serial = ++sceneRequestSerial;
+    const scene = await api.scene();
+    if (serial !== sceneRequestSerial || !scene || scene.ok === false) return;
+    const cloudEntries = await Promise.all(
+      (scene.captures || []).map(async (capture) => [
+        Number(capture.id),
+        await api.cloud(capture.id),
+      ]),
+    );
+    if (serial !== sceneRequestSerial) return;
     app.scene = scene;
     for (const [id, cloud] of cloudEntries) app.clouds.set(id, cloud);
     sceneRevision = Number(scene.scene_revision);
   }
+
+  const chrome = new Chrome({
+    onSelect: select,
+    onClose: clearSelection,
+    onFrameAll: () => model.frameAll(),
+    onLayer: (name, enabled) => {
+      if (name in app.layers) app.layers[name] = Boolean(enabled);
+      render();
+    },
+    onDrop: async (id) => {
+      const result = await api.drop(id);
+      if (result.ok && app.selectedId === Number(id)) clearSelection();
+      return result;
+    },
+    onExportArchive: (path) => api.exportArchive(path),
+    onAutowarePreview: async () => {
+      const result = await api.autowarePreview();
+      app.autowarePreview = result.ok ? result.entry : null;
+      return result;
+    },
+    onAutowareWrite: () => api.autowareWrite(),
+    onSetParams: (values) => api.setParams(values),
+  });
 
   async function poll() {
     if (polling) return;
@@ -45,13 +114,15 @@ if (canvas) {
     try {
       const state = await api.state();
       if (!state || state.ok === false) {
-        if (status) status.textContent = `scene unavailable: ${state?.detail || "request failed"}`;
+        app.notice = `server unavailable: ${state?.detail || "request failed"}`;
+        render();
         return;
       }
       app.state = state;
+      const ids = new Set((state.pairs || []).map((pair) => Number(pair.id)));
+      if (app.selectedId != null && !ids.has(app.selectedId)) clearSelection();
       await syncScene(state);
-      model.sync(app);
-      if (status && model.error) status.textContent = `3D viewport unavailable: ${model.error}`;
+      render();
     } finally {
       polling = false;
     }
@@ -62,15 +133,10 @@ if (canvas) {
     model,
     setLayer(name, enabled) {
       if (name in app.layers) app.layers[name] = Boolean(enabled);
-      model.sync(app);
+      render();
     },
-    select(id) {
-      app.selectedId = Number(id);
-      model.focus(app.selectedId);
-    },
-    frameAll() {
-      model.frameAll();
-    },
+    select,
+    frameAll: () => model.frameAll(),
   };
   setInterval(poll, 500);
   poll();

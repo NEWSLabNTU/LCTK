@@ -312,12 +312,12 @@ export class SceneModel {
 
   focus(id) {
     if (!this.available) return;
-    const group = this.captureGroups.get(Number(id));
+    this.selectedId = Number(id);
+    const group = this.captureGroups.get(this.selectedId);
     if (!group) return;
     const box = new THREE.Box3().setFromObject(group);
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.8, 0.8);
-    this.selectedId = Number(id);
     this.target.copy(center);
     this.camera.position.copy(center).add(new THREE.Vector3(radius, radius * 0.6, radius));
     this.camera.lookAt(this.target);

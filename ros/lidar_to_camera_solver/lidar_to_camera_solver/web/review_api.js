@@ -29,6 +29,18 @@ export class ReviewApi {
     return this._json("/api/scene");
   }
 
+  async preview(id) {
+    try {
+      const response = await fetch(
+        this.baseUrl + `/api/pair/${encodeURIComponent(Number(id))}/preview.jpg`,
+      );
+      if (!response.ok) return null;
+      return await response.blob();
+    } catch (_error) {
+      return null;
+    }
+  }
+
   async cloud(id) {
     const key = Number(id);
     if (this.clouds.has(key)) return this.clouds.get(key);

@@ -79,6 +79,20 @@ def test_index_serves_a_self_contained_page(client):
     assert "http://" not in body.replace("http://www.w3.org", ""), (
         "the page must not reference any external host; the rig has no internet"
     )
+    assert "scene.js" not in body, "the throwaway canvas mock must not ship"
+    assert 'type="module"' in body
+    assert "/static/main.js" in body
+    assert "/static/vendor/three.module.js" not in body, (
+        "three.js is imported by the local scene module, not from a CDN"
+    )
+
+
+def test_index_serves_the_local_frontend_modules(client):
+    assert client.get("/static/main.js").status_code == 200
+    assert client.get("/static/chrome.js").status_code == 200
+    assert client.get("/static/scene_model.js").status_code == 200
+    assert client.get("/static/review_api.js").status_code == 200
+    assert client.get("/static/vendor/three.module.js").status_code == 200
 
 
 def test_index_is_the_packaged_static_asset(client):
