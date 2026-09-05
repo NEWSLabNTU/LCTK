@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype D — merged</title>
+<style>
+  :root {
+    /* B's theme, unchanged */
+    --bg: #171a1f; --panel: #1f242b; --panel2: #262c34; --line: #333b45;
+    --text: #e2e7ee; --dim: #96a1af; --accent: #f0a53a;
+    --good: #4bcf7d; --warn: #f0a53a; --bad: #ef5f80;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13.5px/1.45 ui-sans-serif, system-ui, sans-serif;
+    display: grid; grid-template-rows: 44px 1fr 58px; overflow: hidden;
+  }
+
+  /* ---------- header: B's brand, A's menu button ---------- */
+  header {
+    display: flex; align-items: center; padding: 0 .5rem 0 .75rem;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 650; font-size: 15px; }
+  .brand em {
+    font-style: normal; color: var(--accent); font-weight: 500;
+    margin-left: .5rem; font-size: 12px;
+    border: 1px solid var(--accent); border-radius: 3px; padding: .05rem .35rem;
+  }
+  .grow { flex: 1; }
+  .iconbtn {
+    background: none; border: 1px solid transparent; color: var(--text);
+    font: 15px/1 ui-sans-serif, sans-serif; padding: .4rem .55rem;
+    border-radius: 4px; cursor: pointer;
+  }
+  .iconbtn:hover { background: #ffffff10; border-color: var(--line); }
+
+  .menu {
+    position: absolute; right: .5rem; top: 40px; z-index: 30; width: 300px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 16px 44px #000b; padding: .5rem; display: none;
+  }
+  .menu.open { display: block; }
+  .menu h4 { margin: .55rem .5rem .3rem; font-size: 11px; color: var(--dim);
+             text-transform: uppercase; letter-spacing: .09em; }
+  .menu .item {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    color: var(--text); font: inherit; padding: .45rem .5rem; border-radius: 5px;
+    cursor: pointer;
+  }
+  .menu .item:hover { background: #ffffff12; }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: .4rem 0; }
+  .toggle { display: flex; gap: .5rem; padding: .3rem .5rem; align-items: center; }
+  .toggle input { accent-color: var(--accent); }
+  .param { display: grid; grid-template-columns: 1fr 80px; gap: .5rem;
+           align-items: center; padding: .25rem .5rem; font-size: 12.5px; }
+  .param input {
+    background: #14181d; border: 1px solid var(--line); color: var(--text);
+    font: 12px ui-monospace, monospace; padding: .25rem .4rem; border-radius: 4px;
+    width: 100%; text-align: right;
+  }
+  .apply {
+    margin: .5rem .5rem .2rem; width: calc(100% - 1rem); padding: .4rem;
+    background: var(--accent); border: 0; color: #1a1204; border-radius: 5px;
+    font: 600 13px ui-sans-serif, sans-serif; cursor: pointer;
+  }
+  .caution { margin: .3rem .55rem .3rem; font-size: 11.5px; color: var(--dim); }
+
+  /* ---------- body ---------- */
+  .body { display: flex; min-height: 0; position: relative; }
+  aside {
+    width: 268px; flex: none; background: var(--panel);
+    border-right: 1px solid var(--line); display: flex; flex-direction: column;
+    transition: margin-left .16s ease;
+  }
+  .body.collapsed aside { margin-left: -268px; }
+
+  /* The toggle rides the sidebar's own right edge, and stays reachable when the
+   * sidebar is gone by sliding to the viewport edge with it. */
+  .handle {
+    position: absolute; top: 50%; left: 268px; transform: translateY(-50%);
+    z-index: 12; width: 15px; height: 54px; padding: 0;
+    background: var(--panel); color: var(--dim); cursor: pointer;
+    border: 1px solid var(--line); border-left: 0;
+    border-radius: 0 6px 6px 0;
+    font: 10px/1 ui-sans-serif, sans-serif;
+    transition: left .16s ease, color .12s, background .12s;
+  }
+  .handle:hover { color: var(--accent); background: var(--panel2); }
+  .body.collapsed .handle { left: 0; }
+
+  .aside-head {
+    padding: .55rem .7rem; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .aside-head strong { font-size: 13px; }
+  .aside-head span { font-size: 11.5px; color: var(--dim); }
+  .list { overflow-y: auto; flex: 1; padding: .3rem; }
+  .row {
+    padding: .5rem .55rem; border-radius: 6px; cursor: pointer;
+    border: 1px solid transparent; margin-bottom: .2rem;
+  }
+  .row:hover { background: #ffffff09; }
+  .row.sel { background: #f0a53a1a; border-color: #f0a53a66; }
+  .row .top { display: flex; align-items: center; gap: .5rem; }
+  .row .id { font: 600 12.5px ui-monospace, monospace; color: var(--dim); }
+  .row .meta { font-size: 11.5px; color: var(--dim); margin-top: .12rem; }
+
+  /* C's pill, in B's palette */
+  .pill {
+    margin-left: auto; font: 600 11.5px ui-monospace, monospace;
+    padding: .12rem .5rem; border-radius: 20px;
+  }
+  .g .pill { background: #4bcf7d1f; color: var(--good); }
+  .m .pill { background: #f0a53a1f; color: var(--warn); }
+  .b .pill { background: #ef5f801f; color: var(--bad); }
+
+  main { flex: 1; display: flex; min-width: 0; }
+  .viewpane { flex: 1; min-width: 0; position: relative; }
+  canvas#view { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas#view:active { cursor: grabbing; }
+  .viewtools { position: absolute; top: .55rem; left: 1.4rem; display: flex; gap: .3rem; }
+  .viewtools button {
+    background: #1f242bcc; border: 1px solid var(--line); color: var(--dim);
+    font: 11.5px ui-sans-serif, sans-serif; padding: .28rem .55rem;
+    border-radius: 5px; cursor: pointer; backdrop-filter: blur(6px);
+  }
+  .viewtools button:hover { color: var(--text); border-color: var(--accent); }
+
+  /* C's legend, in B's palette */
+  .legend {
+    position: absolute; right: .55rem; top: .55rem; background: #1f242bcc;
+    border: 1px solid var(--line); border-radius: 5px; padding: .45rem .6rem;
+    font: 11.5px ui-monospace, monospace; color: var(--dim);
+    backdrop-filter: blur(6px); pointer-events: none;
+  }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+              margin-right: .4rem; vertical-align: -1px; }
+  .legend .sub { margin-top: .3rem; opacity: .8; }
+
+  .divider { width: 4px; background: var(--line); cursor: col-resize; display: none; }
+  .detail {
+    width: 380px; flex: none; background: var(--panel); display: none;
+    flex-direction: column; border-left: 1px solid var(--line);
+  }
+  .detail.open, .divider.open { display: flex; }
+  .detail-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .55rem .7rem; border-bottom: 1px solid var(--line);
+  }
+  .detail-head strong { font: 600 13px ui-monospace, monospace; }
+  .detail-head button { background: none; border: 0; color: var(--dim);
+                        font-size: 17px; cursor: pointer; line-height: 1; }
+  .detail .inner { padding: .7rem; overflow-y: auto; }
+  .detail canvas { width: 100%; border-radius: 6px; display: block; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: .3rem .9rem;
+        margin-top: .7rem; font-size: 12.5px; }
+  .kv span { color: var(--dim); }
+  .kv b { font: 500 12.5px ui-monospace, monospace; }
+  .dropbtn {
+    margin-top: .9rem; width: 100%; padding: .45rem; background: none;
+    border: 1px solid #ef5f8066; color: var(--bad); border-radius: 5px;
+    font: inherit; cursor: pointer;
+  }
+  .dropbtn:hover { background: #ef5f8018; }
+
+  /* ---------- footer: C's gauge rail, B's cell chrome ---------- */
+  footer {
+    background: var(--panel); border-top: 1px solid var(--line);
+    display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden;
+  }
+  .cell {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 .85rem; border-right: 1px solid var(--line); white-space: nowrap;
+  }
+  .cell:last-child { border-right: 0; }
+  .cell.pad { flex: 1; border-right: 0; }
+  .label {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  .value { font: 500 12.5px ui-monospace, monospace; margin-top: .1rem; }
+  .value.ok { color: var(--good); } .value.bad { color: var(--bad); }
+  .gauge .label { display: flex; justify-content: space-between; gap: 1.1rem; }
+  .gauge .label b { color: var(--text); font: 500 11px ui-monospace, monospace;
+                    letter-spacing: 0; text-transform: none; }
+  .track { height: 4px; border-radius: 3px; background: #ffffff14; margin-top: .32rem; }
+  .track i { display: block; height: 100%; border-radius: 3px; background: var(--good); }
+  .track.short i { background: var(--bad); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good);
+         display: inline-block; margin-right: .35rem; vertical-align: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">LCTK <em>assisted</em></div>
+  <div class="grow"></div>
+  <button class="iconbtn" id="menubtn">&#9776;</button>
+</header>
+
+<div class="menu" id="menu">
+  <h4>Export</h4>
+  <button class="item">Export archive&hellip;</button>
+  <button class="item">Export to Autoware&hellip;</button>
+  <hr>
+  <h4>View</h4>
+  <label class="toggle"><input type="checkbox" id="tPoints" checked> Plane inliers</label>
+  <label class="toggle"><input type="checkbox" id="tFrustum" checked> Camera frustum</label>
+  <label class="toggle"><input type="checkbox" id="tRms" checked> Colour by RMS</label>
+  <hr>
+  <h4>Advanced</h4>
+  <div class="param"><span>stability_window_s</span><input value="1.00"></div>
+  <div class="param"><span>max_translation_m</span><input value="0.050"></div>
+  <div class="param"><span>max_rotation_deg</span><input value="8.0"></div>
+  <button class="apply">Apply to node</button>
+  <div class="caution">Applies to future captures. Already-buffered pairs keep the gate they were taken under.</div>
+</div>
+
+<div class="body" id="bodyEl">
+  <aside id="aside">
+    <div class="aside-head">
+      <strong>Detections</strong>
+      <span>4 pairs &middot; 4 placements</span>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <button class="handle" id="handle" title="Hide sidebar">&#9664;</button>
+
+  <main>
+    <div class="viewpane">
+      <canvas id="view"></canvas>
+      <div class="viewtools">
+        <button id="frameAll">Frame all</button>
+      </div>
+      <div class="legend">
+        <div><i style="background:#4bcf7d"></i>low RMS</div>
+        <div><i style="background:#ef5f80"></i>high RMS</div>
+        <div class="sub">4 pairs &middot; 880 inliers</div>
+        <div class="sub">LMB pan &middot; RMB orbit &middot; wheel zoom</div>
+      </div>
+    </div>
+    <div class="divider" id="divider"></div>
+    <div class="detail" id="detail">
+      <div class="detail-head">
+        <strong id="dTitle">pair #0</strong>
+        <button id="dClose">&times;</button>
+      </div>
+      <div class="inner">
+        <canvas id="preview" width="700" height="400"></canvas>
+        <div class="kv">
+          <span>reprojection</span><b id="kRms">18.0 px</b>
+          <span>range</span><b id="kRange">4.11 m</b>
+          <span>plane inliers</span><b>220</b>
+          <span>markers seen</span><b>4 / 4</b>
+          <span>captured at</span><b>t + 12.4 s</b>
+        </div>
+        <button class="dropbtn">Drop this pair</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<footer>
+  <div class="cell gauge">
+    <div class="label"><span>Placements</span><b>4 / 6</b></div>
+    <div class="track short"><i style="width:66%"></i></div>
+  </div>
+  <div class="cell gauge">
+    <div class="label"><span>Normal span</span><b>11&deg; / 25&deg;</b></div>
+    <div class="track short"><i style="width:44%"></i></div>
+  </div>
+  <div class="cell gauge">
+    <div class="label"><span>Depth range</span><b>2.6 / 2.0 m</b></div>
+    <div class="track"><i style="width:100%"></i></div>
+  </div>
+  <div class="cell gauge">
+    <div class="label"><span>Lateral span</span><b>2.0 / 1.5 m</b></div>
+    <div class="track"><i style="width:100%"></i></div>
+  </div>
+  <div class="cell">
+    <div class="label">Stillness</div>
+    <div class="value ok"><span class="dot"></span>still &mdash; held 1.4 s</div>
+  </div>
+  <div class="cell">
+    <div class="label">Solve</div>
+    <div class="value">OK &mdash; RMS 28.4 px</div>
+  </div>
+  <div class="cell">
+    <div class="label">Sync</div>
+    <div class="value">groups 580 &middot; skew 12.4 ms</div>
+  </div>
+  <div class="cell pad"></div>
+</footer>
+
+<script src="scene.js"></script>
+<script>
+  const view = new Viewport(document.getElementById('view'), { onPick: select });
+
+  const cls = r => r > 45 ? 'b' : r > 25 ? 'm' : 'g';
+  document.getElementById('list').innerHTML = PAIRS.map(p => `
+    <div class="row ${cls(p.rms)}" data-id="${p.id}">
+      <div class="top">
+        <span class="id">#${p.id}</span>
+        <span class="pill">${p.rms.toFixed(1)} px</span>
+      </div>
+      <div class="meta">range ${Math.hypot(...p.t).toFixed(2)} m &middot; 220 inliers</div>
+    </div>`).join('');
+
+  document.getElementById('list').addEventListener('click', e => {
+    const row = e.target.closest('.row'); if (row) select(Number(row.dataset.id));
+  });
+
+  function select(id) {
+    view.focus(id);
+    document.querySelectorAll('.row').forEach(r =>
+      r.classList.toggle('sel', Number(r.dataset.id) === id));
+    const p = PAIRS.find(x => x.id === id);
+    dTitle.textContent = 'pair #' + id;
+    kRms.textContent = p.rms.toFixed(1) + ' px';
+    kRange.textContent = Math.hypot(...p.t).toFixed(2) + ' m';
+    detail.classList.add('open'); divider.classList.add('open');
+    setTimeout(() => { view._resize(); view.draw(); drawArucoPreview(preview, id); }, 10);
+  }
+
+  dClose.onclick = () => {
+    detail.classList.remove('open'); divider.classList.remove('open');
+    document.querySelectorAll('.row').forEach(r => r.classList.remove('sel'));
+    setTimeout(() => { view._resize(); view.frameAll(); }, 10);
+  };
+  frameAll.onclick = () => view.frameAll();
+
+  handle.onclick = () => {
+    const hidden = bodyEl.classList.toggle('collapsed');
+    handle.innerHTML = hidden ? '&#9654;' : '&#9664;';
+    handle.title = hidden ? 'Show sidebar' : 'Hide sidebar';
+    setTimeout(() => { view._resize(); view.draw(); }, 180);
+  };
+
+  menubtn.onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); };
+  document.addEventListener('click', e => {
+    if (!menu.contains(e.target)) menu.classList.remove('open');
+  });
+  const redraw = () => {
+    view.showPoints = tPoints.checked; view.showFrustum = tFrustum.checked;
+    view.colorByRms = tRms.checked; view.draw();
+  };
+  ['tPoints', 'tFrustum', 'tRms'].forEach(id =>
+    document.getElementById(id).addEventListener('change', redraw));
+
+  view.draw();
+</script>
+</body>
+</html>
