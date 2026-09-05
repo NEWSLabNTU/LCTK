@@ -378,6 +378,9 @@ class LidarToCameraSolver(Node):
         # Continuous solves capture this token before doing work and must match it
         # again before rebasing or publishing their result.
         self._identity_generation = 0
+        # Monotonic token for the review scene. It covers buffer mutations and
+        # camera-pose/session resets, not just the buffer's index revision.
+        self._scene_revision = 0
 
         # Observer identities are relative and latched by both detectors.  Their
         # QoS is independent of detection QoS so a late-starting solver receives
@@ -667,7 +670,13 @@ class LidarToCameraSolver(Node):
             if self._camera_matrix is not None and np.array_equal(
                 camera_matrix, self._camera_matrix
             ):
+                metadata_changed = self.camera_info is None or any(
+                    getattr(self.camera_info, name, None) != getattr(msg, name, None)
+                    for name in ("width", "height")
+                )
                 self.camera_info = msg
+                if metadata_changed:
+                    self._mark_scene_mutation_locked()
                 return
             changed = self._camera_matrix is not None
             self.camera_info = msg
@@ -675,6 +684,7 @@ class LidarToCameraSolver(Node):
             self.detection_buffer = replacement
             self._prune_review_evidence_locked()
             self._clear_adjustment_locked()
+            self._mark_scene_mutation_locked()
             if changed:
                 self._identity_generation += 1
                 self.pair_source.discard_cached_pair()
@@ -732,6 +742,8 @@ class LidarToCameraSolver(Node):
             update = buffer.restore(
                 (DetectionPair(aruco=aruco, board=board),), append=False
             )
+            if update.accepted and update.changed:
+                self._mark_scene_mutation_locked()
         if not update.accepted:
             self.get_logger().error(
                 f"Continuous solve rejected detection pair: {self._rejection_text(update)}",
@@ -870,12 +882,15 @@ class LidarToCameraSolver(Node):
                     throttle_duration_sec=5.0,
                 )
                 return
+            if update.changed:
+                self._mark_scene_mutation_locked()
             pair_index = update.snapshot.frame_count - 1
             if update.added_new_placement is False:
                 # Still, but not a new placement.  Undo rather than pad the buffer
                 # with a view that adds no geometry and inflates every metric that
                 # counts frames.
                 buffer.remove(pair_index)
+                self._mark_scene_mutation_locked()
                 self.get_logger().info(
                     "Held still, but this is not a new board placement; "
                     "move or tilt the board",
@@ -1062,6 +1077,11 @@ class LidarToCameraSolver(Node):
         self.last_transform = None
         self.publishing_enabled = False
 
+    def _mark_scene_mutation_locked(self) -> None:
+        """Advance the review scene token while ``state_lock`` is held."""
+
+        self._scene_revision = getattr(self, "_scene_revision", 0) + 1
+
     def _prune_review_evidence_locked(self) -> None:
         """Forget removed captures without changing index-based manual services."""
         if self._evidence_store is None:
@@ -1115,6 +1135,8 @@ class LidarToCameraSolver(Node):
                 response.buffer_size = buffer.snapshot().frame_count
                 return response
             update = buffer.capture(DetectionPair(aruco=aruco, board=board))
+            if update.accepted and update.changed:
+                self._mark_scene_mutation_locked()
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
             response.success = False
@@ -1145,13 +1167,17 @@ class LidarToCameraSolver(Node):
         old_size = snapshot.frame_count if snapshot is not None else 0
         with self.state_lock:
             self._identity_generation += 1
+            scene_changed = old_size > 0 or self.current_rvec is not None
             if self.detection_buffer is not None:
-                self.detection_buffer.clear()
+                update = self.detection_buffer.clear()
+                scene_changed = scene_changed or update.changed
                 self._clear_adjustment_locked()
             else:
                 self._clear_adjustment_locked()
             self.pair_source.discard_cached_pair()
             self._prune_review_evidence_locked()
+            if scene_changed:
+                self._mark_scene_mutation_locked()
         response.success = True
         response.message = f"Cleared {old_size} detection pairs from buffer"
         return response
@@ -1194,6 +1220,8 @@ class LidarToCameraSolver(Node):
                 response.buffer_size = 0
                 return response
             update = buffer.remove(request.index)
+            if update.accepted and update.changed:
+                self._mark_scene_mutation_locked()
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
             response.success = False
@@ -1372,6 +1400,8 @@ class LidarToCameraSolver(Node):
                 response.buffer_size = buffer.snapshot().frame_count
                 return response
             update = buffer.restore(archive.pairs, append=request.append)
+            if update.accepted and update.changed:
+                self._mark_scene_mutation_locked()
         response.num_detections = len(archive.pairs)
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
@@ -1443,6 +1473,7 @@ class LidarToCameraSolver(Node):
                 self.current_rvec, self.current_tvec
             )
             euler = rotation_vector_to_euler(self.current_rvec, degrees=True)
+            self._mark_scene_mutation_locked()
             response.success = True
             response.message = (
                 "Transform adjusted: "
@@ -1480,6 +1511,7 @@ class LidarToCameraSolver(Node):
                 self.current_rvec, self.current_tvec
             )
             self.publishing_enabled = True
+            self._mark_scene_mutation_locked()
         response.success = True
         response.message = "Reset transform to current solved estimate"
         return response
@@ -1533,6 +1565,7 @@ class LidarToCameraSolver(Node):
         with self.state_lock:
             snapshot = self._snapshot()
             stillness = self._last_stillness
+            scene_revision = getattr(self, "_scene_revision", 0)
             evidence = (
                 {
                     pair_id: self._evidence_store.get(pair_id)
@@ -1556,6 +1589,7 @@ class LidarToCameraSolver(Node):
             identity_error = self.identity_gate.error
         return {
             "mode": self.solver_mode,
+            "scene_revision": scene_revision,
             "sync": self.pair_source.status_line(),
             "identity_error": identity_error,
             "stillness": {
@@ -1619,6 +1653,97 @@ class LidarToCameraSolver(Node):
             },
         }
 
+    def scene(self) -> dict:
+        """Return one coherent world-space scene snapshot for the review page."""
+
+        with self.state_lock:
+            snapshot = self._snapshot()
+            scene_revision = getattr(self, "_scene_revision", 0)
+            camera_info = getattr(self, "camera_info", None)
+            current_matrix = getattr(self, "_camera_matrix", None)
+            camera_matrix = None if current_matrix is None else current_matrix.copy()
+            current_rvec = getattr(self, "current_rvec", None)
+            current_tvec = getattr(self, "current_tvec", None)
+            rvec = None if current_rvec is None else current_rvec.copy()
+            tvec = None if current_tvec is None else current_tvec.copy()
+            target = getattr(self, "target", None)
+            world_frame_id = getattr(self, "parent_frame", "")
+
+        captures = []
+        if snapshot is not None and target is not None:
+            side = float(target.plate.side_um) * 1e-6
+            half = side / 2.0
+            local_outline = np.asarray(
+                [
+                    (-half, -half, 0.0),
+                    (half, -half, 0.0),
+                    (half, half, 0.0),
+                    (-half, half, 0.0),
+                    (-half, -half, 0.0),
+                ],
+                dtype=np.float64,
+            )
+            for capture in snapshot.scene_captures:
+                board_position = np.asarray(capture.board_position, dtype=np.float64)
+                board_rotation = Rotation.from_quat(
+                    capture.board_orientation
+                ).as_matrix()
+                outline = (board_rotation @ local_outline.T).T + board_position
+                captures.append(
+                    {
+                        "id": int(capture.capture_id),
+                        "marker_quads_world": [
+                            np.asarray(corners, dtype=np.float64).tolist()
+                            for corners in capture.marker_corners_world
+                        ],
+                        "board_outline_world": outline.tolist(),
+                        "position": list(capture.board_position),
+                        "orientation": list(capture.board_orientation),
+                    }
+                )
+
+        camera = None
+        if (
+            camera_info is not None
+            and camera_matrix is not None
+            and rvec is not None
+            and tvec is not None
+        ):
+            try:
+                solve_rotation, _ = cv2.Rodrigues(rvec)
+                optical_rotation_world = solve_rotation.T
+                optical_position_world = -optical_rotation_world @ tvec.reshape(3)
+                optical_orientation_world = rotation_matrix_to_quaternion(
+                    optical_rotation_world
+                )
+                camera = {
+                    "optical_pose_world": {
+                        "position": [float(value) for value in optical_position_world],
+                        "orientation": [
+                            float(value) for value in optical_orientation_world
+                        ],
+                    },
+                    "intrinsics": {
+                        "fx": float(camera_matrix[0, 0]),
+                        "fy": float(camera_matrix[1, 1]),
+                        "cx": float(camera_matrix[0, 2]),
+                        "cy": float(camera_matrix[1, 2]),
+                    },
+                    "image_size": {
+                        "width": int(camera_info.width),
+                        "height": int(camera_info.height),
+                    },
+                }
+            except (cv2.error, ValueError, np.linalg.LinAlgError):
+                camera = None
+
+        return {
+            "scene_revision": int(scene_revision),
+            "world_frame_id": world_frame_id,
+            "captures": captures,
+            "camera": camera,
+        }
+
     def preview(self, pair_id: int) -> bytes | None:
         with self.state_lock:
             snapshot = self._snapshot()
@@ -1653,6 +1778,8 @@ class LidarToCameraSolver(Node):
             if pair_id not in ids:
                 return False, f"No captured pair {pair_id}"
             update = buffer.remove(ids.index(pair_id))
+            if update.accepted and update.changed:
+                self._mark_scene_mutation_locked()
             self._prune_review_evidence_locked()
         if not update.accepted:
             return False, self._rejection_text(update)
@@ -1722,10 +1849,15 @@ class LidarToCameraSolver(Node):
                 # publishing under a different target binding.
                 self._identity_generation += 1
                 buffer = self.detection_buffer
+                scene_changed = self.current_rvec is not None
                 if buffer is not None:
-                    buffer.clear()
+                    update = buffer.clear()
+                    scene_changed = scene_changed or update.changed
                 self.pair_source.discard_cached_pair()
                 self._clear_adjustment_locked()
+
+                if scene_changed:
+                    self._mark_scene_mutation_locked()
 
                 self._prune_review_evidence_locked()
 

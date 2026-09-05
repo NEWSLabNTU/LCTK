@@ -29,6 +29,8 @@ class NodeFacade(Protocol):
 
     def state(self) -> dict[str, Any]: ...
 
+    def scene(self) -> dict[str, Any]: ...
+
     def preview(self, pair_id: int) -> bytes | None: ...
 
     def cloud(self, pair_id: int) -> bytes | None: ...
@@ -58,6 +60,10 @@ def create_app(facade: NodeFacade) -> Flask:
     @app.get("/api/state")
     def state() -> Response:
         return jsonify(facade.state())
+
+    @app.get("/api/scene")
+    def scene() -> Response:
+        return jsonify(facade.scene())
 
     @app.get("/api/pair/<int:pair_id>/preview.jpg")
     def preview(pair_id: int) -> Response:

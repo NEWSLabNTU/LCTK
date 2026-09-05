@@ -27,6 +27,12 @@ class FakeFacade:
         }
         self._previews = {1: b"\xff\xd8fakejpeg\xff\xd9"}
         self._clouds = {1: b"\x00\x00\x80?\x00\x00\x00@\x00\x00@@"}
+        self._scene = {
+            "scene_revision": 4,
+            "world_frame_id": "velodyne",
+            "captures": [],
+            "camera": None,
+        }
 
     def state(self):
         return self._state
@@ -36,6 +42,9 @@ class FakeFacade:
 
     def cloud(self, pair_id):
         return self._clouds.get(pair_id)
+
+    def scene(self):
+        return self._scene
 
     def drop(self, pair_id):
         if pair_id not in self._previews:
@@ -91,6 +100,12 @@ def test_state_is_returned_verbatim(client):
     response = client.get("/api/state")
     assert response.status_code == 200
     assert json.loads(response.data) == client.facade.state()
+
+
+def test_scene_is_returned_verbatim(client):
+    response = client.get("/api/scene")
+    assert response.status_code == 200
+    assert json.loads(response.data) == client.facade.scene()
 
 
 def test_preview_returns_jpeg(client):

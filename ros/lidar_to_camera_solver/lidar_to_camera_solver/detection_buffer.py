@@ -108,6 +108,7 @@ class BufferSnapshot:
     correspondence_count: int
     outcome: SolveOutcome
     capture_ids: tuple[int, ...] = ()
+    scene_captures: tuple[SceneCapture, ...] = ()
 
     @property
     def frame_count(self) -> int:
@@ -120,6 +121,16 @@ class BufferSnapshot:
     @property
     def estimate(self) -> SolvedEstimate | None:
         return self.outcome.estimate if isinstance(self.outcome, Solved) else None
+
+
+@dataclass(frozen=True)
+class SceneCapture:
+    """Immutable world-space geometry derived during capture admission."""
+
+    capture_id: int
+    marker_corners_world: tuple[np.ndarray, ...]
+    board_position: tuple[float, float, float]
+    board_orientation: tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -146,6 +157,7 @@ class _PreparedCapture:
     board: _BoardDetection
     weight: float
     capture_id: int = field(default_factory=lambda: next(_CAPTURE_IDS))
+    marker_corners_world: tuple[np.ndarray, ...] = ()
 
 
 class _AdmissionError(ValueError):
@@ -405,6 +417,18 @@ class DetectionBuffer:
             correspondence_count=self._correspondence_count,
             outcome=outcome,
             capture_ids=tuple(capture.capture_id for capture in self._captures),
+            scene_captures=tuple(
+                SceneCapture(
+                    capture_id=capture.capture_id,
+                    marker_corners_world=tuple(
+                        _readonly_array(corners)
+                        for corners in capture.marker_corners_world
+                    ),
+                    board_position=capture.board.position,
+                    board_orientation=capture.board.orientation,
+                )
+                for capture in self._captures
+            ),
         )
 
     def _prepare_pair(self, pair: DetectionPair) -> _PreparedCapture:
@@ -413,6 +437,7 @@ class DetectionBuffer:
 
         object_points: list[np.ndarray] = []
         image_points: list[np.ndarray] = []
+        marker_corners_world: list[np.ndarray] = []
         saw_real_corners = False
         saw_configured_marker = False
 
@@ -440,6 +465,7 @@ class DetectionBuffer:
             world_corners = (rotation @ local_corners.T).T + position
             object_points.extend(world_corners)
             image_points.extend(pixels)
+            marker_corners_world.append(_readonly_array(world_corners))
 
         if not saw_real_corners:
             raise _AdmissionError(RejectionCode.NO_REAL_ARUCO_CORNERS)
@@ -459,6 +485,7 @@ class DetectionBuffer:
             image_points=images,
             board=board,
             weight=self._pose_weight(board, objects),
+            marker_corners_world=tuple(marker_corners_world),
         )
 
     @staticmethod

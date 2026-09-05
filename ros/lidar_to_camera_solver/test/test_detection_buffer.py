@@ -80,6 +80,33 @@ def test_capture_ids_survive_removal_and_are_never_reused_after_reset():
     assert set(replacement.capture_ids).isdisjoint((*ids, *restored.capture_ids))
 
 
+def test_snapshot_exposes_grouped_world_marker_quads_from_correspondences():
+    position = (0.7, -0.4, 4.2)
+    rotation = (0.4, -0.25, 0.0)
+    snapshot = (
+        make_buffer(minimum=100)
+        .capture(make_pair(position=position, rotation=rotation))
+        .snapshot
+    )
+
+    assert len(snapshot.scene_captures) == 1
+    geometry = snapshot.scene_captures[0]
+    assert geometry.capture_id == snapshot.capture_ids[0]
+    assert geometry.board_position == pytest.approx(position)
+    assert geometry.board_orientation == pytest.approx(
+        Rotation.from_euler("xyz", rotation).as_quat()
+    )
+    board_rotation = Rotation.from_euler("xyz", rotation).as_matrix()
+    expected = [
+        (board_rotation @ np.asarray(corners).T).T + np.asarray(position)
+        for corners in MARKERS.values()
+    ]
+    assert len(geometry.marker_corners_world) == len(expected)
+    for actual, wanted in zip(geometry.marker_corners_world, expected):
+        assert np.allclose(actual, wanted, atol=1e-12, rtol=0.0)
+        assert not actual.flags.writeable
+
+
 def make_pair(
     position=(0.0, 0.0, 3.0),
     rotation=(0.0, 0.0, 0.0),
