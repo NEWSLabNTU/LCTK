@@ -82,7 +82,7 @@ def is_loopback_host(host: str) -> bool:
 
     try:
         return ipaddress.ip_address(host).is_loopback
-    except ValueError:
+    except (TypeError, ValueError):
         return False
 
 

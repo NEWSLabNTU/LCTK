@@ -531,8 +531,17 @@ export class Chrome {
       if (value != null) input.value = value.toFixed(3);
     });
     const apply = this._query(".apply");
+    const caution = this._query("#paramCaution");
+    const writable = app.state?.params_writable;
+    if (caution) {
+      setText(
+        caution,
+        writable === false && app.state?.params_detail
+          ? app.state.params_detail
+          : "Applies to future captures. Already-buffered pairs keep the gate they were taken under.",
+      );
+    }
     if (apply) {
-      const writable = app.state?.params_writable;
       apply.disabled = writable === false || this._actionBusy;
       apply.title = writable === false
         ? (app.state?.params_detail || "Parameter writes are disabled")
