@@ -197,6 +197,7 @@ class AssistedSettings:
     review_port: int = 8080
     review_jpeg_quality: int = 80
     review_max_previews: int = 64
+    review_evidence_seconds: float = 1.0
     review_archive_path: str = ""
     export_autoware_target: str = ""
     export_camera_frame: str = ""

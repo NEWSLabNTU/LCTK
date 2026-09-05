@@ -24,6 +24,7 @@ from lidar_to_camera_solver.detection_buffer import (
     BufferUpdate,
     Empty,
 )
+from lidar_to_camera_solver.evidence_store import CaptureEvidence, EvidenceStore
 from lidar_to_camera_solver.main import (
     SOLVER_MODES,
     LidarToCameraSolver,
@@ -143,13 +144,14 @@ class _Logger:
         self.messages.append(message)
 
 
-def _snapshot(frame_count: int, placements=()) -> BufferSnapshot:
+def _snapshot(frame_count: int, placements=(), capture_ids=None) -> BufferSnapshot:
     return BufferSnapshot(
         revision=frame_count,
         pairs=tuple(object() for _ in range(frame_count)),
         placements=tuple(placements),
         correspondence_count=4 * frame_count,
         outcome=Empty(),
+        capture_ids=tuple(range(frame_count) if capture_ids is None else capture_ids),
     )
 
 
@@ -163,6 +165,8 @@ class _Buffer:
         self.placements = tuple(placements)
         self._novelty = list(novelty)
         self._accepted = accepted
+        self.ids = []
+        self.next_id = 0
 
     def capture(self, pair):
         self.captures.append(pair)
@@ -173,35 +177,45 @@ class _Buffer:
                 snapshot=_snapshot(self.count, self.placements),
             )
         self.count += 1
+        self.ids.append(self.next_id)
+        self.next_id += 1
         return BufferUpdate(
             accepted=True,
             changed=True,
-            snapshot=_snapshot(self.count, self.placements),
+            snapshot=_snapshot(self.count, self.placements, self.ids),
             added_new_placement=self._novelty.pop(0),
         )
 
     def remove(self, index):
         self.removed.append(index)
         self.count -= 1
+        self.ids.pop(index)
         return BufferUpdate(
-            accepted=True, changed=True, snapshot=_snapshot(self.count, self.placements)
+            accepted=True,
+            changed=True,
+            snapshot=_snapshot(self.count, self.placements, self.ids),
         )
 
     def snapshot(self):
-        return _snapshot(self.count, self.placements)
+        return _snapshot(self.count, self.placements, self.ids)
 
 
-class _PreviewStore:
+class _EvidenceStore:
     def __init__(self):
         self.captured = []
         self.dropped = []
 
-    def capture(self, pair_id, corners, reprojected):
-        self.captured.append((pair_id, corners, reprojected))
+    def capture(self, pair_id, stamp, corners, *, cloud_stamp=None):
+        self.captured.append((pair_id, stamp, corners, cloud_stamp))
         return True
 
     def get(self, pair_id):
-        return b"\xff\xd8" if pair_id in [p for p, _, _ in self.captured] else None
+        if (
+            pair_id in [p for p, _, _, _ in self.captured]
+            and pair_id not in self.dropped
+        ):
+            return CaptureEvidence(b"\xff\xd8", None, ("plane inliers",))
+        return None
 
     def drop(self, pair_id):
         self.dropped.append(pair_id)
@@ -215,9 +229,13 @@ class _Gate:
 class _PairSource:
     def __init__(self):
         self.epoch_resets = 0
+        self.cached = True
 
     def status_line(self):
         return "sync: groups=12"
+
+    def is_cached_pair(self, messages):
+        return self.cached
 
 
 class _Clock:
@@ -240,7 +258,8 @@ def assisted_harness(
         novelty=novelty, accepted=accepted, placements=placements
     )
     solver.pair_source = _PairSource()
-    solver._preview_store = _PreviewStore()
+    solver._evidence_store = _EvidenceStore()
+    solver._review_capture_ids = set()
     solver._stillness = StillnessTracker(
         # `hold()` below steps the clock 0.1 s per pair, so a 0.25 s window is
         # satisfied by the fourth pair of a hold: three inside the window plus
@@ -253,6 +272,7 @@ def assisted_harness(
     )
     solver._last_stillness = None
     solver._last_epoch_resets = 0
+    solver.publishing_enabled = False
     solver._novelty_position_tol_m = 0.05
     solver._novelty_orientation_tol_deg = 5.0
     solver.applied = []
@@ -309,16 +329,15 @@ def test_a_repeated_placement_is_undone_rather_than_padding_the_buffer():
         "the second capture was not a new placement, so it must be undone"
     )
     assert len(solver.applied) == 1, "an undone capture must not be applied"
-    assert [pair_id for pair_id, _, _ in solver._preview_store.captured] == [0]
+    assert [pair_id for pair_id, _, _, _ in solver._evidence_store.captured] == [0]
 
 
 def test_a_captured_pair_gets_a_preview_against_its_own_index():
     solver = assisted_harness()
     hold(solver, 6)
-    assert len(solver._preview_store.captured) == 1
-    pair_id, corners, reprojected = solver._preview_store.captured[0]
+    assert len(solver._evidence_store.captured) == 1
+    pair_id, _, corners, _ = solver._evidence_store.captured[0]
     assert pair_id == 0
-    assert reprojected is None
     assert len(corners) == 1
     assert np.asarray(corners[0]).shape == (4, 2)
 
@@ -343,7 +362,7 @@ def test_a_rejected_capture_is_reported_and_not_applied():
     hold(solver, 10)
     assert len(solver.detection_buffer.captures) == 1
     assert solver.applied == []
-    assert solver._preview_store.captured == []
+    assert solver._evidence_store.captured == []
 
 
 def test_an_unreadable_board_pose_is_ignored():
@@ -372,6 +391,41 @@ def test_an_epoch_reset_rearms_the_tracker():
     assert len(solver.detection_buffer.captures) == 2, (
         "after a reset the same placement is a fresh hold, not a latched one"
     )
+
+
+def test_a_delayed_pair_discarded_by_reset_never_reaches_stillness_or_buffer():
+    solver = assisted_harness()
+    solver.pair_source.cached = False
+    solver._clock.seconds += 0.5
+    solver._assisted_pair_callback((aruco_message(), board_message()))
+
+    assert solver.detection_buffer.captures == []
+    assert solver._last_stillness is None
+
+
+def test_an_assisted_update_is_rejected_if_buffer_changes_before_apply():
+    solver = assisted_harness()
+    solver._apply_update = LidarToCameraSolver._apply_update.__get__(solver)
+
+    original_snapshot = solver._snapshot
+    snapshot_calls = 0
+
+    def snapshot_with_concurrent_remove():
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        result = original_snapshot()
+        # Return pre-mutation view to emulate another callback winning after
+        # this callback checked pair ownership but before it applies its solve.
+        if snapshot_calls == 2:
+            solver.detection_buffer.remove(0)
+        return result
+
+    solver._snapshot = snapshot_with_concurrent_remove
+    hold(solver, 6)
+
+    assert solver.detection_buffer.count == 0
+    assert solver.detection_buffer.removed == [0]
+    assert solver.publishing_enabled is False
 
 
 # --- NodeFacade ---------------------------------------------------------------
@@ -448,7 +502,44 @@ def test_drop_removes_the_pair_and_its_preview():
     assert ok is True
     assert "0" in detail
     assert solver.detection_buffer.removed == [0]
-    assert solver._preview_store.dropped == [0]
+    assert solver._evidence_store.dropped == [0]
+
+
+def test_review_ids_and_evidence_do_not_shift_when_an_earlier_capture_is_dropped():
+    solver = facade_harness()
+    hold(solver, 6, position=(1.0, 2.0, 3.0))
+    hold(solver, 6, position=(2.0, 0.0, 4.0))
+    preview = solver.preview(1)
+    assert preview is not None
+    assert solver.drop(0)[0]
+    assert [pair["id"] for pair in solver.state()["pairs"]] == [1]
+    assert solver.preview(1) == preview
+    assert solver.preview(0) is None
+    assert not solver.drop(0)[0]
+
+
+def test_assisted_capture_uses_camera_source_stamp_instead_of_latest_or_node_clock():
+    import cv2
+
+    solver = facade_harness()
+    solver._evidence_store = EvidenceStore(max_previews=4, jpeg_quality=100)
+    solver._evidence_store.observe_intrinsics(np.eye(3), np.zeros(5))
+    red = np.full((80, 100, 3), (0, 0, 255), dtype=np.uint8)
+    blue = np.full((80, 100, 3), (255, 0, 0), dtype=np.uint8)
+    for stamp, frame in ((10, red), (10.1, blue)):
+        solver._evidence_store.observe_frame(
+            stamp, 80, 100, "bgr8", 300, frame.tobytes()
+        )
+    aruco = aruco_message()
+    aruco.header = SimpleNamespace(stamp=SimpleNamespace(sec=10, nanosec=0))
+    board = board_message()
+    board.header = SimpleNamespace(stamp=SimpleNamespace(sec=10, nanosec=50_000_000))
+    for _ in range(6):
+        solver._clock.seconds += 0.1
+        solver._assisted_pair_callback((aruco, board))
+    image = cv2.imdecode(np.frombuffer(solver.preview(0), np.uint8), cv2.IMREAD_COLOR)
+    assert image[-5, -5, 2] > 240
+    assert image[-5, -5, 0] < 10
 
 
 def test_drop_without_a_buffer_reports_the_reason_instead_of_raising():

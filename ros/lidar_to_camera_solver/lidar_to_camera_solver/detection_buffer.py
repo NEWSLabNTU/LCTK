@@ -9,9 +9,10 @@ atomic commit, so an estimate can never outlive the exact captures that produced
 from __future__ import annotations
 
 import copy
+import itertools
 import threading
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 import cv2
@@ -25,6 +26,10 @@ from lctk_quality import (
 from lctk_quality.placements import Placement
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation
+
+# Review URLs must not change owners after deletion, restoration, or a new buffer.
+# These process-local IDs are not archive data; manual services still use indexes.
+_CAPTURE_IDS = itertools.count()
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,7 @@ class BufferSnapshot:
     placements: tuple[Placement, ...]
     correspondence_count: int
     outcome: SolveOutcome
+    capture_ids: tuple[int, ...] = ()
 
     @property
     def frame_count(self) -> int:
@@ -139,6 +145,7 @@ class _PreparedCapture:
     image_points: np.ndarray
     board: _BoardDetection
     weight: float
+    capture_id: int = field(default_factory=lambda: next(_CAPTURE_IDS))
 
 
 class _AdmissionError(ValueError):
@@ -397,6 +404,7 @@ class DetectionBuffer:
             placements=placements,
             correspondence_count=self._correspondence_count,
             outcome=outcome,
+            capture_ids=tuple(capture.capture_id for capture in self._captures),
         )
 
     def _prepare_pair(self, pair: DetectionPair) -> _PreparedCapture:

@@ -1067,6 +1067,7 @@ markers:
     pairs: [[top, cam]]
 sync: {tolerance_ms: 50, queue_size: 100, drop_policy: reject_new}
 assisted:
+  review_evidence_seconds: 2.5
   review_archive_path: $(session-dir)/out/detections.json
 """,
         encoding="utf-8",
@@ -1077,6 +1078,7 @@ assisted:
     assert pipeline.assisted.review_archive_path == str(
         session / "out" / "detections.json"
     )
+    assert pipeline.assisted.review_evidence_seconds == 2.5
     assert "$(" not in pipeline.assisted.review_archive_path
 
 

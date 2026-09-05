@@ -65,6 +65,21 @@ def make_buffer(*, minimum=2, enforce=False, camera_matrix=K):
     )
 
 
+def test_capture_ids_survive_removal_and_are_never_reused_after_reset():
+    buffer = make_buffer(minimum=100)
+    first = buffer.capture(make_pair()).snapshot
+    second = buffer.capture(make_pair(position=(0.3, 0.0, 3.0))).snapshot
+    ids = second.capture_ids
+    assert len(set(ids)) == 2
+    assert ids[0] == first.capture_ids[0]
+    assert buffer.remove(0).snapshot.capture_ids == (ids[1],)
+    buffer.clear()
+    restored = buffer.restore(second.pairs, append=False).snapshot
+    assert set(restored.capture_ids).isdisjoint(ids)
+    replacement = make_buffer(minimum=100).capture(make_pair()).snapshot
+    assert set(replacement.capture_ids).isdisjoint((*ids, *restored.capture_ids))
+
+
 def make_pair(
     position=(0.0, 0.0, 3.0),
     rotation=(0.0, 0.0, 0.0),

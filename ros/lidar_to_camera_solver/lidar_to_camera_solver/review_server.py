@@ -76,9 +76,10 @@ async function refresh() {
     '<div class="pair' + (i === 0 && pairs.length > 1 ? ' worst' : '') + '">' +
     (p.has_preview
       ? '<img src="/api/pair/' + p.id + '/preview.jpg?v=' + p.id + '">'
-      : '<img alt="no frame">') +
+      : '<img alt="no matching camera frame">') +
     '<div>#' + p.id +
-    (p.rms_px != null ? '<br>' + p.rms_px.toFixed(2) + ' px' : '') + '</div>' +
+    (p.rms_px != null ? '<br>' + p.rms_px.toFixed(2) + ' px' : '') +
+    (p.missing && p.missing.length ? '<br>Missing: ' + p.missing.join(', ') : '') + '</div>' +
     '<button onclick="dropPair(' + p.id + ')">drop</button></div>').join("");
 }
 async function post(url, body) {

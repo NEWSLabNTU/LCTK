@@ -70,11 +70,20 @@ from lidar_to_camera_solver.detection_format import (
     encode_detection_archive,
     select_loaded_adjustment,
 )
-from lidar_to_camera_solver.preview import PreviewStore, decode_image
+from lidar_to_camera_solver.evidence_store import EvidenceStore
 from lidar_to_camera_solver.review_server import ReviewServer
 from lidar_to_camera_solver.stability import StillnessTracker
 
 SOLVER_MODES = ("continuous", "manual", "assisted")
+
+
+def message_stamp_seconds(message) -> float:
+    """Source clock for evidence; never fall back to the node's stillness clock."""
+    try:
+        stamp = message.header.stamp
+        return float(stamp.sec) + float(stamp.nanosec) * 1e-9
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return float("nan")
 
 
 def target_identity_qos_profile() -> QoSProfile:
@@ -301,7 +310,8 @@ class LidarToCameraSolver(Node):
         # Assisted-mode state.  All three stay None in continuous and manual, which
         # is what keeps those two paths byte-for-byte the behaviour they had.
         self._stillness: StillnessTracker | None = None
-        self._preview_store: PreviewStore | None = None
+        self._evidence_store: EvidenceStore | None = None
+        self._review_capture_ids: set[int] = set()
         self._review_server: ReviewServer | None = None
         self._last_stillness = None
         self._last_epoch_resets = 0
@@ -441,6 +451,7 @@ class LidarToCameraSolver(Node):
             ("review_port", 8080),
             ("review_jpeg_quality", 80),
             ("review_max_previews", 64),
+            ("review_evidence_seconds", 1.0),
             ("review_archive_path", ""),
             ("export_autoware_target", ""),
             ("export_camera_frame", ""),
@@ -466,13 +477,14 @@ class LidarToCameraSolver(Node):
         self._novelty_orientation_tol_deg = self._double_parameter(
             "novelty_orientation_tol_deg"
         )
-        self._preview_store = PreviewStore(
+        self._evidence_store = EvidenceStore(
             max_previews=self._integer_parameter("review_max_previews"),
             jpeg_quality=self._integer_parameter("review_jpeg_quality"),
+            review_evidence_seconds=self._double_parameter("review_evidence_seconds"),
         )
         if camera_topic:
             # The image is for the reviewer, never for the solve, so it takes the
-            # same QoS as the detections and keeps only the newest frame.
+            # sensor QoS as the source camera and retains a short stamped history.
             self.image_subscription = self.create_subscription(
                 Image, camera_topic, self._image_callback, sensor_qos
             )
@@ -499,29 +511,22 @@ class LidarToCameraSolver(Node):
             )
 
     def _image_callback(self, message) -> None:
-        """Store the newest frame and return.
+        """Retain a stamped half-resolution frame and return.
 
         Per the ArcSwap guidance in CLAUDE.md this stays cheap: the annotate and
         JPEG encode happen at capture time, on the pair callback, not here.
         """
 
-        if self._preview_store is None:
+        if self._evidence_store is None:
             return
-        try:
-            frame = decode_image(
-                height=message.height,
-                width=message.width,
-                encoding=message.encoding,
-                step=message.step,
-                data=bytes(message.data),
-            )
-        except ValueError as error:
-            self.get_logger().warn(
-                f"preview disabled for this frame: {error}",
-                throttle_duration_sec=10.0,
-            )
-            return
-        self._preview_store.set_latest(frame)
+        self._evidence_store.observe_frame(
+            message_stamp_seconds(message),
+            height=message.height,
+            width=message.width,
+            encoding=message.encoding,
+            step=message.step,
+            data=message.data,
+        )
 
     def _create_services(self) -> None:
         services = (
@@ -572,6 +577,8 @@ class LidarToCameraSolver(Node):
         camera_matrix = np.asarray(msg.k, dtype=np.float64).reshape(3, 3)
         replacement = self._new_buffer(camera_matrix)
         with self.state_lock:
+            if self._evidence_store is not None:
+                self._evidence_store.observe_intrinsics(camera_matrix, msg.d)
             if self._camera_matrix is not None and np.array_equal(
                 camera_matrix, self._camera_matrix
             ):
@@ -581,6 +588,7 @@ class LidarToCameraSolver(Node):
             self.camera_info = msg
             self._camera_matrix = camera_matrix.copy()
             self.detection_buffer = replacement
+            self._prune_review_evidence_locked()
             self._clear_adjustment_locked()
             if changed:
                 self._identity_generation += 1
@@ -688,6 +696,14 @@ class LidarToCameraSolver(Node):
         """
 
         aruco, board = messages
+        with self.state_lock:
+            if not self.pair_source.is_cached_pair(messages):
+                self.get_logger().warn(
+                    "Ignoring assisted detection pair: cache entry was "
+                    "discarded or superseded before stillness evaluation",
+                    throttle_duration_sec=5.0,
+                )
+                return
         epoch_resets = self.pair_source.epoch_resets
         if epoch_resets != self._last_epoch_resets:
             # The recording changed under the synchronizer.  The window this
@@ -726,6 +742,13 @@ class LidarToCameraSolver(Node):
         # manual capture path does: an identity update must not be able to change
         # the accepted target between the two.
         with self.state_lock:
+            if not self.pair_source.is_cached_pair(messages):
+                self.get_logger().warn(
+                    "Ignoring assisted detection pair: cache entry was "
+                    "discarded or superseded before capture",
+                    throttle_duration_sec=5.0,
+                )
+                return
             generation = self._identity_generation
             buffer = self.detection_buffer
             identity_error = self.identity_gate.error
@@ -762,25 +785,39 @@ class LidarToCameraSolver(Node):
                     throttle_duration_sec=5.0,
                 )
                 return
-            pair_id = update.snapshot.frame_count - 1
+            pair_index = update.snapshot.frame_count - 1
             if update.added_new_placement is False:
                 # Still, but not a new placement.  Undo rather than pad the buffer
                 # with a view that adds no geometry and inflates every metric that
                 # counts frames.
-                buffer.remove(pair_id)
+                buffer.remove(pair_index)
                 self.get_logger().info(
                     "Held still, but this is not a new board placement; "
                     "move or tilt the board",
                     throttle_duration_sec=5.0,
                 )
                 return
+            pair_id = update.snapshot.capture_ids[pair_index]
+            self._prune_review_evidence_locked()
 
         # Outside the lock: annotating and JPEG-encoding a frame is real work, and
         # state_lock is also DetectionPairSource's admission lock.
-        self._preview_store.capture(
-            pair_id, corners=aruco_corner_quads(aruco), reprojected=None
+        self._evidence_store.capture(
+            pair_id,
+            message_stamp_seconds(aruco),
+            corners=aruco_corner_quads(aruco),
+            cloud_stamp=message_stamp_seconds(board),
         )
-        if not self._apply_update(update, expected_generation=generation):
+        with self.state_lock:
+            current = self._snapshot()
+            if current is None or pair_id not in current.capture_ids:
+                self._evidence_store.drop(pair_id)
+                return
+        if not self._apply_update(
+            update,
+            expected_generation=generation,
+            expected_revision=update.snapshot.revision,
+        ):
             self.get_logger().warn(
                 "Assisted capture invalidated by a target or session reset",
                 throttle_duration_sec=5.0,
@@ -897,6 +934,7 @@ class LidarToCameraSolver(Node):
         *,
         log_quality_warnings: bool = True,
         expected_generation: int | None = None,
+        expected_revision: int | None = None,
     ) -> bool:
         """Rebase or clear adjustment after one accepted buffer revision."""
         if not update.accepted:
@@ -907,6 +945,11 @@ class LidarToCameraSolver(Node):
                 expected_generation != self._identity_generation
             ):
                 return False
+            if expected_revision is not None:
+                buffer = self.detection_buffer
+                if buffer is None or buffer.snapshot().revision != expected_revision:
+                    return False
+            self._prune_review_evidence_locked()
             # A solved outcome is calibration-target-bound.  Never restore one
             # after the sticky identity gate has closed, even if the caller did
             # not have a generation token (for example, a legacy service path).
@@ -933,6 +976,16 @@ class LidarToCameraSolver(Node):
         self.current_tvec = None
         self.last_transform = None
         self.publishing_enabled = False
+
+    def _prune_review_evidence_locked(self) -> None:
+        """Forget removed captures without changing index-based manual services."""
+        if self._evidence_store is None:
+            return
+        snapshot = self._snapshot()
+        current_ids = set(snapshot.capture_ids) if snapshot is not None else set()
+        for pair_id in self._review_capture_ids - current_ids:
+            self._evidence_store.drop(pair_id)
+        self._review_capture_ids = current_ids
 
     def add_detection_callback(self, request, response):
         with self.state_lock:
@@ -1013,6 +1066,7 @@ class LidarToCameraSolver(Node):
             else:
                 self._clear_adjustment_locked()
             self.pair_source.discard_cached_pair()
+            self._prune_review_evidence_locked()
         response.success = True
         response.message = f"Cleared {old_size} detection pairs from buffer"
         return response
@@ -1391,8 +1445,19 @@ class LidarToCameraSolver(Node):
     def state(self) -> dict:
         """Everything the review page renders, as plain JSON-able data."""
 
-        snapshot = self._snapshot()
-        stillness = self._last_stillness
+        with self.state_lock:
+            snapshot = self._snapshot()
+            stillness = self._last_stillness
+            evidence = (
+                {
+                    pair_id: self._evidence_store.get(pair_id)
+                    for pair_id in (
+                        snapshot.capture_ids if snapshot is not None else ()
+                    )
+                }
+                if self._evidence_store is not None
+                else {}
+            )
         diversity = (
             compute_diversity(snapshot.placements) if snapshot is not None else None
         )
@@ -1441,13 +1506,23 @@ class LidarToCameraSolver(Node):
             },
             "pairs": [
                 {
-                    "id": index,
+                    "id": pair_id,
                     "rms_px": (
                         per_pose_rms[index] if index < len(per_pose_rms) else None
                     ),
-                    "has_preview": self.preview(index) is not None,
+                    "has_preview": (
+                        evidence.get(pair_id) is not None
+                        and evidence[pair_id].preview_jpeg is not None
+                    ),
+                    "missing": (
+                        list(evidence[pair_id].missing)
+                        if evidence.get(pair_id) is not None
+                        else ["camera frame", "plane inliers"]
+                    ),
                 }
-                for index in range(snapshot.frame_count if snapshot is not None else 0)
+                for index, pair_id in enumerate(
+                    snapshot.capture_ids if snapshot is not None else ()
+                )
             ],
             "export": {
                 "archive_path": self._string_parameter("review_archive_path"),
@@ -1460,9 +1535,16 @@ class LidarToCameraSolver(Node):
         }
 
     def preview(self, pair_id: int) -> bytes | None:
-        if self._preview_store is None:
-            return None
-        return self._preview_store.get(pair_id)
+        with self.state_lock:
+            snapshot = self._snapshot()
+            if (
+                self._evidence_store is None
+                or snapshot is None
+                or pair_id not in snapshot.capture_ids
+            ):
+                return None
+            evidence = self._evidence_store.get(pair_id)
+            return evidence.preview_jpeg if evidence is not None else None
 
     def drop(self, pair_id: int) -> tuple[bool, str]:
         with self.state_lock:
@@ -1470,11 +1552,13 @@ class LidarToCameraSolver(Node):
             if buffer is None:
                 return False, "No camera info available"
             generation = self._identity_generation
-            update = buffer.remove(pair_id)
+            ids = buffer.snapshot().capture_ids
+            if pair_id not in ids:
+                return False, f"No captured pair {pair_id}"
+            update = buffer.remove(ids.index(pair_id))
+            self._prune_review_evidence_locked()
         if not update.accepted:
             return False, self._rejection_text(update)
-        if self._preview_store is not None:
-            self._preview_store.drop(pair_id)
         if not self._apply_update(update, expected_generation=generation):
             return False, "Removal invalidated by a target or session reset; retry"
         return True, f"Dropped pair {pair_id}. {self._status_text(update.snapshot)}"
@@ -1545,6 +1629,8 @@ class LidarToCameraSolver(Node):
                     buffer.clear()
                 self.pair_source.discard_cached_pair()
                 self._clear_adjustment_locked()
+
+                self._prune_review_evidence_locked()
 
         if error is None and not was_ready:
             self.get_logger().info(

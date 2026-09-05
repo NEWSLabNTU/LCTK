@@ -56,6 +56,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [M-29](./archive/M-29-sample-data-path-dead-shared-bbox-and-icp-gate.md) | Medium | Sample-data path dead: shared crop box retuned for another rig + ICP gate under the noise floor | 🟢 |
 | [M-30](./archive/M-30-bag-playback-qos-mismatch-is-silent.md) | Medium | A `kind: bag` session in the default `offline` mode silently receives no LiDAR: recorded BEST_EFFORT QoS cannot feed a RELIABLE subscriber | 🟢 |
 | [M-31](./M-31-perforated-icp-parked-termination-findings.md) | Medium | Perforated ICP: `StablePose` publishes an unbounded residual and is reachable at a shipped budget; separation gate skipped on a lone success; two dead-code leftovers | 🔴 |
+| [M-32](./archive/M-32-assisted-review-evidence-shifts-after-drop.md) | Medium | Assisted review evidence changed owners after dropping or resetting captures | 🟢 |
 | [L-01](./archive/L-01-fit-board-icp-false-success.md) | Low | Library `fit_board_icp` reports non-converged fits as successful | 🟢 |
 | [L-02](./archive/L-02-rust-panics-empty-nan.md) | Low | Pure-Rust panics on empty / NaN point sets | 🟢 |
 | [L-03](./archive/L-03-pnp-solver-panic-distortion.md) | Low | `pnp-solver` panics on failed solve, truncates distortion | 🟢 |

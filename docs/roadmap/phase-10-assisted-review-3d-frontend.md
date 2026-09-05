@@ -35,5 +35,11 @@ and JavaScript build tooling remain outside this work.
 
 ## Baseline and results
 
-Pending verification. The controller's standalone flake8 and pep257 checks both fail on
-the clean tree; they are not included in this checkout's `just test` recipe.
+Clean-tree `just test`: exit 0; Rust 172 passed / 1 skipped; Python 676 passed /
+1 skipped. The controller's standalone flake8 and pep257 checks both fail on the clean
+tree; they are not included in this checkout's `just test` recipe.
+
+ROS tests require network and ROS home-log access. Running inside the restricted sandbox
+produced 35 Python failures and 12 errors; the same unchanged tree passes with those
+runtime resources available. Logs: `baseline-unrestricted.log`, `baseline.log`, and
+`controller-baseline.log` under the temporary directory above.

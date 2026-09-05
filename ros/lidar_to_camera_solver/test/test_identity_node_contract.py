@@ -127,7 +127,8 @@ def solver_harness(*, ready: bool) -> LidarToCameraSolver:
     solver.publishing_enabled = True
     solver._continuous_solve_count = 0
     solver._stillness = None
-    solver._preview_store = None
+    solver._evidence_store = None
+    solver._review_capture_ids = set()
     solver._review_server = None
     solver._last_stillness = None
     solver._last_epoch_resets = 0
