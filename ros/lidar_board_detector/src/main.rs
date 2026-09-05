@@ -2742,7 +2742,10 @@ mod covariance_tests {
     fn plane_inliers_publisher_is_always_reliable_and_relative() {
         let options = plane_inliers_publisher_options();
         assert_eq!(options.topic, "debug/plane_inliers");
-        assert_eq!(options.qos.history, QoSHistoryPolicy::KeepLast { depth: 10 });
+        assert_eq!(
+            options.qos.history,
+            QoSHistoryPolicy::KeepLast { depth: 10 }
+        );
         assert_eq!(options.qos.reliability, QoSReliabilityPolicy::Reliable);
         assert_eq!(options.qos.durability, QoSDurabilityPolicy::Volatile);
     }
