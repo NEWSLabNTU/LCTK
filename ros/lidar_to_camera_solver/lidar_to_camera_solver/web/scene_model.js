@@ -1,11 +1,8 @@
 import * as THREE from "./vendor/three.module.js";
+import { rmsColorHex } from "./quality.js";
 
 function rmsColor(rms, colored = true) {
-  if (!colored || rms == null || !Number.isFinite(Number(rms))) {
-    return new THREE.Color(0x8c98a8);
-  }
-  const value = Math.max(0, Math.min(1, (Number(rms) - 15) / 50));
-  return new THREE.Color().setRGB(0.24 + value * 0.70, 0.78 - value * 0.58, 0.35);
+  return new THREE.Color(rmsColorHex(rms, colored));
 }
 
 function pointsGeometry(points) {
@@ -107,7 +104,9 @@ export class SceneModel {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x171a1f);
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
-    this.camera.position.set(0, 1.5, 5);
+    // LCTK world frames follow Autoware: x front, y left, z up.
+    this.camera.up.set(0, 0, 1);
+    this.camera.position.set(4, 2.5, 3);
     this.root = new THREE.Group();
     this.scene.add(this.root);
     this.referenceGroup = null;
@@ -116,6 +115,8 @@ export class SceneModel {
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Line.threshold = 0.04;
     this._bindControls();
+    this.camera.lookAt(this.target);
+    this._setOrbitFromCamera();
     this._resize();
     this._onWindowResize = () => this._resize();
     window.addEventListener("resize", this._onWindowResize);
@@ -161,6 +162,7 @@ export class SceneModel {
       const offset = this.camera.position.clone().sub(this.target);
       offset.multiplyScalar(Math.max(0.2, Math.min(5, direction)));
       this.camera.position.copy(this.target).add(offset);
+      this._setOrbitFromCamera();
       this._render();
     }, { passive: false });
   }
@@ -175,13 +177,30 @@ export class SceneModel {
     this._render();
   }
 
-  _orbit(dx, dy) {
+  _setOrbitFromCamera() {
     const offset = this.camera.position.clone().sub(this.target);
-    const spherical = new THREE.Spherical().setFromVector3(offset);
-    spherical.theta -= dx * 0.006;
-    spherical.phi = Math.max(0.08, Math.min(Math.PI - 0.08, spherical.phi + dy * 0.006));
-    this.camera.position.setFromSpherical(spherical).add(this.target);
+    this._orbitRadius = Math.max(offset.length(), 0.001);
+    this._orbitYaw = Math.atan2(offset.y, offset.x);
+    this._orbitPitch = Math.atan2(offset.z, Math.hypot(offset.x, offset.y));
+  }
+
+  _setCameraFromOrbit() {
+    const horizontal = Math.cos(this._orbitPitch) * this._orbitRadius;
+    this.camera.position.set(
+      this.target.x + horizontal * Math.cos(this._orbitYaw),
+      this.target.y + horizontal * Math.sin(this._orbitYaw),
+      this.target.z + Math.sin(this._orbitPitch) * this._orbitRadius,
+    );
     this.camera.lookAt(this.target);
+  }
+
+  _orbit(dx, dy) {
+    // Keep yaw/pitch unbounded: crossing either pole continues the orbit
+    // instead of stopping against an artificial vertical wall.  Vertical
+    // drag is inverted to match the operator's view convention.
+    this._orbitYaw -= dx * 0.006;
+    this._orbitPitch -= dy * 0.006;
+    this._setCameraFromOrbit();
   }
 
   _pan(dx, dy) {
@@ -417,6 +436,7 @@ export class SceneModel {
     this.target.copy(center);
     this.camera.position.copy(center).add(new THREE.Vector3(radius, radius * 0.6, radius));
     this.camera.lookAt(this.target);
+    this._setOrbitFromCamera();
     for (const item of this.captureGroups.values()) {
       item.scale.setScalar(item.userData.captureId === this.selectedId ? 1.03 : 1);
     }
@@ -430,7 +450,7 @@ export class SceneModel {
     if (this.referenceGroup) box.expandByObject(this.referenceGroup);
     if (box.isEmpty()) {
       this.target.set(0, 0, 0);
-      this.camera.position.set(0, 1.5, 5);
+      this.camera.position.set(4, 2.5, 3);
     } else {
       const center = box.getCenter(new THREE.Vector3());
       const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.55, 1);
@@ -438,6 +458,7 @@ export class SceneModel {
       this.camera.position.copy(center).add(new THREE.Vector3(radius, radius * 0.6, radius));
     }
     this.camera.lookAt(this.target);
+    this._setOrbitFromCamera();
     this._render();
   }
 

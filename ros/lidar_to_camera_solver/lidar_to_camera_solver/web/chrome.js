@@ -5,6 +5,8 @@
  * module only reads that state and renders it into the approved page shell.
  */
 
+import { rmsBand } from "./quality.js";
+
 const PARAMETER_NAMES = [
   "stability_window_s",
   "stability_max_translation_m",
@@ -33,14 +35,16 @@ function formatCount(value) {
 }
 
 function pairClass(rms) {
-  const value = finiteNumber(rms);
-  if (value == null) return "";
-  return value > 45 ? "b" : value > 25 ? "m" : "g";
+  const band = rmsBand(rms);
+  return band === "high" ? "b" : band === "medium" ? "m" : band === "low" ? "g" : "";
 }
 
-function pairId(value) {
+export function pairId(value) {
+  if (value == null || typeof value === "boolean") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  if (typeof value !== "number" && typeof value !== "string") return null;
   const number = Number(value);
-  return Number.isSafeInteger(number) ? number : null;
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
 function capturesById(scene) {
@@ -110,6 +114,7 @@ export class Chrome {
     this._actionBusy = false;
     this._paramDraft = null;
     this._paramDirty = false;
+    this._paramDirtyNames = new Set();
     this._paramPendingEffective = null;
     this._bind();
   }
@@ -221,14 +226,17 @@ export class Chrome {
     if (reset) reset.addEventListener("click", () => {
       this._paramDraft = null;
       this._paramDirty = false;
+      this._paramDirtyNames.clear();
       this._paramPendingEffective = null;
       if (this._app) this._renderParams(this._app);
     });
-    for (const input of this._all(".param input")) {
+    for (const [index, input] of this._all(".param input").entries()) {
       input.addEventListener("input", () => {
         this._paramDraft = this._readParamDraft();
         this._paramDirty = true;
+        this._paramDirtyNames.add(PARAMETER_NAMES[index]);
         this._paramPendingEffective = null;
+        if (this._app) this._renderParams(this._app);
       });
     }
     this._bound = true;
@@ -380,6 +388,7 @@ export class Chrome {
             if (effective) {
               this._paramDraft = this._normaliseParamValues(effective);
               this._paramDirty = false;
+              this._paramDirtyNames.clear();
               this._paramPendingEffective = this._paramDraft;
             }
           }
@@ -662,8 +671,19 @@ export class Chrome {
         ? (app.state?.params_detail || "Parameter writes are disabled")
         : "Apply to future captures";
     }
+    const dirty = this._paramDirty;
+    this._all(".param input").forEach((input, index) => {
+      const name = PARAMETER_NAMES[index];
+      input.classList.toggle(
+        "dirty",
+        dirty && (this._paramDirtyNames.size === 0 || this._paramDirtyNames.has(name)),
+      );
+    });
     const reset = this._query("#paramReset");
-    if (reset) reset.disabled = this._actionBusy;
+    if (reset) {
+      reset.disabled = this._actionBusy;
+      reset.classList.toggle("dirty", dirty);
+    }
   }
 
   _renderExportAvailability(app) {

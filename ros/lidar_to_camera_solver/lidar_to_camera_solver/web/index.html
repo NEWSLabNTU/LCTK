@@ -65,6 +65,9 @@
     font: 12px ui-monospace, monospace; padding: .25rem .4rem; border-radius: 4px;
     width: 100%; text-align: right;
   }
+  .param input.dirty {
+    border-color: #4d8fe2; color: #a8c9f5; box-shadow: 0 0 0 1px #4d8fe233;
+  }
   .apply {
     margin: .5rem .5rem .2rem; width: calc(100% - 1rem); padding: .4rem;
     background: var(--accent); border: 0; color: #1a1204; border-radius: 5px;
@@ -179,6 +182,7 @@
     font: 12px ui-sans-serif, sans-serif; cursor: pointer;
   }
   .reset:hover { color: var(--text); border-color: var(--accent); }
+  .reset.dirty { color: #a8c9f5; border-color: #4d8fe2; background: #4d8fe21c; }
   .reset:disabled { cursor: not-allowed; opacity: .65; }
 
   /* ---------- footer: C's gauge rail, B's cell chrome ---------- */
@@ -256,6 +260,7 @@
       <div class="viewnotice" id="scene-status"></div>
       <div class="legend">
         <div><i style="background:#4bcf7d"></i>low RMS</div>
+        <div><i style="background:#f0a53a"></i>medium RMS</div>
         <div><i style="background:#ef5f80"></i>high RMS</div>
         <div class="sub" id="legendSummary">loading&hellip;</div>
         <div class="sub">LMB pan &middot; RMB orbit &middot; wheel zoom</div>

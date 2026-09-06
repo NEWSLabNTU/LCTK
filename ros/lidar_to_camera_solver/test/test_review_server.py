@@ -5,6 +5,7 @@ node, and no camera. If a test here needs rclpy, the seam has leaked.
 """
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,7 @@ def test_index_serves_the_local_frontend_modules(client):
     assert client.get("/static/chrome.js").status_code == 200
     assert client.get("/static/scene_model.js").status_code == 200
     assert client.get("/static/review_api.js").status_code == 200
+    assert client.get("/static/quality.js").status_code == 200
     assert client.get("/static/vendor/three.module.js").status_code == 200
 
 
@@ -141,6 +143,65 @@ def test_scene_model_has_world_reference_and_observed_sizing(client):
     assert "LiDAR XY reference" in source
     assert "ResizeObserver" in source
     assert "camera optical" in source
+
+
+def test_scene_model_uses_autoware_z_up_orbit_without_a_pole_wall(client):
+    source = client.get("/static/scene_model.js").data.decode()
+    assert "this.camera.up.set(0, 0, 1)" in source
+    assert "this._orbitPitch -= dy * 0.006" in source
+    assert "Math.cos(this._orbitPitch)" in source
+    assert "Math.max(0.08" not in source
+
+
+def test_advanced_parameter_drafts_have_a_distinct_dirty_style(client):
+    index = client.get("/").data.decode()
+    chrome = client.get("/static/chrome.js").data.decode()
+    assert ".param input.dirty" in index
+    assert ".reset.dirty" in index
+    assert 'classList.toggle("dirty"' in chrome
+
+
+def _run_frontend_module(script):
+    web = Path(__file__).resolve().parents[1] / "lidar_to_camera_solver" / "web"
+    return subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=web,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_frontend_selection_keeps_null_distinct_from_capture_zero():
+    result = _run_frontend_module(
+        """
+        import { pairId } from './chrome.js';
+        for (const value of [null, undefined, '', '  ', true, false, -1, 'bad']) {
+          if (pairId(value) !== null) throw new Error(`accepted invalid id: ${value}`);
+        }
+        if (pairId(0) !== 0 || pairId('0') !== 0) throw new Error('rejected capture zero');
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_frontend_rms_bands_match_the_sidebar_palette():
+    result = _run_frontend_module(
+        """
+        import { rmsBand, rmsColorHex } from './quality.js';
+        const cases = [
+          [null, null, 0x8c98a8], [4.999, 'low', 0x4bcf7d],
+          [5, 'medium', 0xf0a53a], [9.999, 'medium', 0xf0a53a],
+          [10, 'high', 0xef5f80],
+        ];
+        for (const [value, band, color] of cases) {
+          if (rmsBand(value) !== band) throw new Error(`bad band for ${value}`);
+          if (rmsColorHex(value) !== color) throw new Error(`bad color for ${value}`);
+        }
+        if (rmsColorHex(5, false) !== 0x8c98a8) throw new Error('toggle ignored');
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_index_is_the_packaged_static_asset(client):
