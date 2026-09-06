@@ -106,7 +106,11 @@ export class Chrome {
     this._previewKey = "";
     this._invalidSelection = null;
     this._autowareEntry = null;
+    this._autowareAvailabilityText = "";
     this._actionBusy = false;
+    this._paramDraft = null;
+    this._paramDirty = false;
+    this._paramPendingEffective = null;
     this._bind();
   }
 
@@ -202,12 +206,81 @@ export class Chrome {
       if (this._app) this._runAction("onExportArchive", this._app, path);
     });
     if (items[1]) items[1].addEventListener("click", () => {
-      if (this._app) this._runAction("onAutowarePreview", this._app);
+      if (!this._app) return;
+      const availability = this._autowareAvailability(this._app);
+      if (!availability.available) {
+        this._showActionError(availability.reason);
+        return;
+      }
+      this._runAction("onAutowarePreview", this._app);
     });
 
     const apply = this._query(".apply");
     if (apply) apply.addEventListener("click", () => this._applyParams());
+    const reset = this._query("#paramReset");
+    if (reset) reset.addEventListener("click", () => {
+      this._paramDraft = null;
+      this._paramDirty = false;
+      this._paramPendingEffective = null;
+      if (this._app) this._renderParams(this._app);
+    });
+    for (const input of this._all(".param input")) {
+      input.addEventListener("input", () => {
+        this._paramDraft = this._readParamDraft();
+        this._paramDirty = true;
+        this._paramPendingEffective = null;
+      });
+    }
     this._bound = true;
+  }
+
+  _readParamDraft() {
+    const inputs = this._all(".param input");
+    return Object.fromEntries(
+      PARAMETER_INPUTS.map((name, index) => [name, inputs[index]?.value ?? ""]),
+    );
+  }
+
+  _normaliseParamValues(values) {
+    return Object.fromEntries(
+      PARAMETER_NAMES.map((name) => {
+        const value = finiteNumber(values?.[name]);
+        return [name, value == null ? "" : String(value)];
+      }),
+    );
+  }
+
+  _writeParamDraft(draft) {
+    const inputs = this._all(".param input");
+    PARAMETER_INPUTS.forEach((name, index) => {
+      const value = draft?.[name] ?? "";
+      if (inputs[index] && inputs[index].value !== value) inputs[index].value = value;
+    });
+  }
+
+  _sameParamDraft(left, right) {
+    return PARAMETER_NAMES.every(
+      (name) => String(left?.[name] ?? "") === String(right?.[name] ?? ""),
+    );
+  }
+
+  _autowareAvailability(app) {
+    const explicit = app.state?.export_availability?.autoware;
+    const ready = explicit?.available ?? app.state?.export?.autoware_ready;
+    const missing = explicit?.missing
+      ?? app.state?.export?.autoware_missing
+      ?? [];
+    const reason = explicit?.reason
+      || (ready
+        ? "ready"
+        : (missing.length
+          ? `unset parameter(s): ${missing.join(", ")}`
+          : "Autoware export is unavailable"));
+    return {
+      available: ready === true,
+      reason,
+      missing,
+    };
   }
 
   _applyParams() {
@@ -239,14 +312,25 @@ export class Chrome {
       handle.title = this._sidebarCollapsed ? "Show sidebar" : "Hide sidebar";
     }
     const model = this._app?.model;
-    if (model && typeof model._resize === "function" && typeof window !== "undefined") {
+    if (
+      model
+      && !model._resizeObserver
+      && typeof model._resize === "function"
+      && typeof window !== "undefined"
+    ) {
       window.setTimeout(() => model._resize(), 180);
     }
   }
 
   _showActionError(detail) {
-    const box = this._query("#action-notice") || this._query("#autoware") || this._query("#scene-status");
-    if (box) setText(box, detail instanceof Error ? detail.message : detail);
+    const box = this._query("#action-notice")
+      || this._query("#autoware")
+      || this._query("#scene-status");
+    if (box) {
+      const message = detail instanceof Error ? detail.message : detail;
+      setText(box, message);
+      box.title = String(message ?? "");
+    }
   }
 
   _showActionResult(result) {
@@ -281,11 +365,27 @@ export class Chrome {
   }
 
   _runAction(name, app, ...args) {
+    const submittedDraft = name === "onSetParams" ? this._readParamDraft() : null;
     const result = this._call(name, app, ...args);
     if (result && typeof result.then === "function") {
       this._actionBusy = true;
       this._renderParams(app);
-      result.then((value) => this._showActionResult(value)).catch((error) => {
+      result.then((value) => {
+        if (name === "onSetParams" && value?.ok === true) {
+          const currentDraft = this._readParamDraft();
+          if (this._sameParamDraft(currentDraft, submittedDraft)) {
+            const effective = value.params
+              || app.state?.params
+              || app.state?.stability_params;
+            if (effective) {
+              this._paramDraft = this._normaliseParamValues(effective);
+              this._paramDirty = false;
+              this._paramPendingEffective = this._paramDraft;
+            }
+          }
+        }
+        this._showActionResult(value);
+      }).catch((error) => {
         this._showActionError(error);
       }).finally(() => {
         this._actionBusy = false;
@@ -298,6 +398,15 @@ export class Chrome {
   }
 
   _renderList(app, pairs, captures) {
+    const summary = this._query("#detSummary");
+    if (summary) {
+      if (app.state == null) {
+        setText(summary, "loading…");
+      } else {
+        const count = pairs.length;
+        setText(summary, `${count} capture${count === 1 ? "" : "s"}`);
+      }
+    }
     const list = this._query("#list");
     if (!list) return;
     const selected = pairId(app.selectedId);
@@ -327,6 +436,7 @@ export class Chrome {
       const pill = document.createElement("span");
       pill.className = "pill";
       pill.textContent = formatNumber(pair.rms_px, 1, " px");
+      pill.title = "Recomputed for all captures after calibration changes";
       top.append(idLabel, pill);
 
       const meta = document.createElement("div");
@@ -355,7 +465,6 @@ export class Chrome {
   _renderDetail(app, pair, capture) {
     const detail = this._query("#detail");
     const divider = this._query("#divider");
-    const preview = this._query("#preview");
     const drop = this._query(".dropbtn");
     if (!detail || !divider) return;
     const open = pair != null;
@@ -363,7 +472,6 @@ export class Chrome {
     divider.classList.toggle("open", open);
     if (!open) {
       this._previewKey = "";
-      if (preview) preview.hidden = true;
       return;
     }
     const id = pairId(pair.id);
@@ -375,29 +483,27 @@ export class Chrome {
       : null;
     setText(this._query("#kRange"), formatNumber(range, 2, " m"));
     const inliers = cloudPointCount(app.clouds?.get(id));
-    const kv = this._all("#detail .kv b");
-    if (kv[2]) setText(kv[2], inliers == null ? "unavailable" : formatCount(inliers));
+    setText(this._query("#kInliers"), inliers == null ? "unavailable" : formatCount(inliers));
     const markerCount = Array.isArray(capture?.marker_quads_world)
       ? capture.marker_quads_world.length
       : null;
     const expectedMarkers = finiteNumber(app.scene?.marker_count);
-    if (kv[3]) {
-      setText(kv[3], markerCount == null
-        ? "unavailable"
-        : `${formatCount(markerCount)}${expectedMarkers == null ? "" : ` / ${formatCount(expectedMarkers)}`}`);
-    }
+    setText(this._query("#kMarkers"), markerCount == null
+      ? "unavailable"
+      : `${formatCount(markerCount)}${expectedMarkers == null ? "" : ` / ${formatCount(expectedMarkers)}`}`);
     const stamp = pair.stamp_s ?? pair.timestamp_s ?? pair.timestamp;
-    if (kv[4]) setText(kv[4], stamp == null ? "not reported" : `t ${formatNumber(stamp, 3, " s")}`);
+    setText(this._query("#kCaptured"), stamp == null ? "not reported" : `t ${formatNumber(stamp, 3, " s")}`);
     if (drop) drop.disabled = this._actionBusy;
 
     const missing = Array.isArray(pair.missing) ? pair.missing : [];
     let host = this._query("#preview-host");
-    if (!host && preview) {
+    if (!host) {
       host = document.createElement("div");
       host.id = "preview-host";
       host.className = "preview-host";
-      preview.hidden = true;
-      preview.parentElement?.insertBefore(host, preview);
+      const inner = this._query("#detail .inner");
+      const metrics = inner?.querySelector(".kv");
+      if (inner) inner.insertBefore(host, metrics || inner.firstChild);
     }
     if (!host) return;
     const revision = finiteNumber(app.state?.scene_revision) ?? 0;
@@ -522,30 +628,59 @@ export class Chrome {
   }
 
   _renderParams(app) {
-    const inputs = this._all(".param input");
     const params = app.state?.params || app.state?.stability_params || {};
-    const values = PARAMETER_NAMES.map((name) => params[name]);
-    inputs.forEach((input, index) => {
-      if (document.activeElement === input || values[index] == null) return;
-      const value = finiteNumber(values[index]);
-      if (value != null) input.value = value.toFixed(3);
-    });
+    const serverDraft = this._normaliseParamValues(params);
+    if (this._paramDraft == null) {
+      this._paramDraft = serverDraft;
+      this._writeParamDraft(this._paramDraft);
+    } else if (!this._paramDirty) {
+      if (this._paramPendingEffective != null) {
+        if (this._sameParamDraft(serverDraft, this._paramPendingEffective)) {
+          this._paramPendingEffective = null;
+          this._paramDraft = serverDraft;
+          this._writeParamDraft(this._paramDraft);
+        } else {
+          this._writeParamDraft(this._paramPendingEffective);
+        }
+      } else {
+        this._paramDraft = serverDraft;
+        this._writeParamDraft(this._paramDraft);
+      }
+    }
     const apply = this._query(".apply");
     const caution = this._query("#paramCaution");
     const writable = app.state?.params_writable;
     if (caution) {
-      setText(
-        caution,
-        writable === false && app.state?.params_detail
-          ? app.state.params_detail
-          : "Applies to future captures. Already-buffered pairs keep the gate they were taken under.",
-      );
+      const text = writable === false && app.state?.params_detail
+        ? app.state.params_detail
+        : "Applies to future captures. Already-buffered pairs keep the gate they were taken under.";
+      if (caution.textContent !== text) caution.textContent = text;
     }
     if (apply) {
       apply.disabled = writable === false || this._actionBusy;
       apply.title = writable === false
         ? (app.state?.params_detail || "Parameter writes are disabled")
         : "Apply to future captures";
+    }
+    const reset = this._query("#paramReset");
+    if (reset) reset.disabled = this._actionBusy;
+  }
+
+  _renderExportAvailability(app) {
+    const item = this._all("#menu .item")[1];
+    const box = this._query("#autoware");
+    const availability = this._autowareAvailability(app);
+    if (item) {
+      item.disabled = !availability.available || this._actionBusy;
+      item.title = availability.available
+        ? "Preview the Autoware calibration diff"
+        : availability.reason;
+    }
+    if (!box || this._autowareEntry) return;
+    const text = availability.available ? "" : `Unavailable: ${availability.reason}`;
+    if (text !== this._autowareAvailabilityText) {
+      this._autowareAvailabilityText = text;
+      setText(box, text);
     }
   }
 
@@ -568,6 +703,7 @@ export class Chrome {
     this._renderDetail(app, selectedPair, captures.get(selected));
     this._renderFooter(app, pairs);
     this._renderParams(app);
+    this._renderExportAvailability(app);
 
     const notice = this._query("#action-notice");
     if (notice && app.notice) setText(notice, app.notice);

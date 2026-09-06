@@ -37,8 +37,8 @@
     border-radius: 4px; cursor: pointer;
   }
   .iconbtn:hover { background: #ffffff10; border-color: var(--line); }
-  .notice { max-width: 42vw; margin-right: .7rem; color: var(--dim); font-size: 11.5px;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .notice { max-width: 42vw; max-height: 42px; margin-right: .7rem; color: var(--dim); font-size: 11.5px;
+            overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
 
   .menu {
     position: absolute; right: .5rem; top: 40px; z-index: 30; width: 300px;
@@ -54,6 +54,7 @@
     cursor: pointer;
   }
   .menu .item:hover { background: #ffffff12; }
+  .menu .item:disabled { color: var(--dim); cursor: not-allowed; opacity: .65; }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: .4rem 0; }
   .toggle { display: flex; gap: .5rem; padding: .3rem .5rem; align-items: center; }
   .toggle input { accent-color: var(--accent); }
@@ -69,7 +70,8 @@
     background: var(--accent); border: 0; color: #1a1204; border-radius: 5px;
     font: 600 13px ui-sans-serif, sans-serif; cursor: pointer;
   }
-  .caution { margin: .3rem .55rem .3rem; font-size: 11.5px; color: var(--dim); }
+  .caution { margin: .3rem .55rem .3rem; font-size: 11.5px; color: var(--dim);
+             overflow-wrap: anywhere; white-space: pre-wrap; }
 
   /* ---------- body ---------- */
   .body { display: flex; min-height: 0; position: relative; }
@@ -159,7 +161,8 @@
   .detail-head button { background: none; border: 0; color: var(--dim);
                         font-size: 17px; cursor: pointer; line-height: 1; }
   .detail .inner { padding: .7rem; overflow-y: auto; }
-  .detail canvas { width: 100%; border-radius: 6px; display: block; }
+  .preview-host { width: 100%; }
+  .preview-image { display: block; width: 100%; height: auto; border-radius: 6px; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: .3rem .9rem;
         margin-top: .7rem; font-size: 12.5px; }
   .kv span { color: var(--dim); }
@@ -170,6 +173,13 @@
     font: inherit; cursor: pointer;
   }
   .dropbtn:hover { background: #ef5f8018; }
+  .reset {
+    margin: .15rem .5rem .35rem; width: calc(100% - 1rem); padding: .28rem;
+    background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 5px;
+    font: 12px ui-sans-serif, sans-serif; cursor: pointer;
+  }
+  .reset:hover { color: var(--text); border-color: var(--accent); }
+  .reset:disabled { cursor: not-allowed; opacity: .65; }
 
   /* ---------- footer: C's gauge rail, B's cell chrome ---------- */
   footer {
@@ -223,6 +233,7 @@
   <div class="param"><span>max_translation_m</span><input id="paramTranslation" inputmode="decimal"></div>
   <div class="param"><span>max_rotation_deg</span><input id="paramRotation" inputmode="decimal"></div>
   <button class="apply" id="paramApply">Apply to node</button>
+  <button class="reset" id="paramReset" type="button">Reset to current</button>
   <div class="caution" id="paramCaution">Applies to future captures. Already-buffered pairs keep the gate they were taken under.</div>
 </div>
 
@@ -257,13 +268,12 @@
         <button id="dClose">&times;</button>
       </div>
       <div class="inner">
-        <canvas id="preview" width="700" height="400"></canvas>
         <div class="kv">
-          <span>reprojection</span><b id="kRms">&mdash;</b>
+          <span title="Recomputed for all captures after calibration changes">reprojection (current fit)</span><b id="kRms">&mdash;</b>
           <span>range</span><b id="kRange">&mdash;</b>
           <span>plane inliers</span><b id="kInliers">&mdash;</b>
           <span>markers seen</span><b id="kMarkers">&mdash;</b>
-          <span>captured at</span><b id="kCaptured">&mdash;</b>
+          <span title="Source timestamp from the camera detection message">captured at (camera clock)</span><b id="kCaptured">&mdash;</b>
         </div>
         <button class="dropbtn">Drop this pair</button>
       </div>

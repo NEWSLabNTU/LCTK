@@ -118,12 +118,29 @@ def test_index_serves_a_self_contained_page(client):
     )
 
 
+def test_index_uses_the_image_host_and_keeps_action_text_readable(client):
+    body = client.get("/").data.decode()
+    assert 'id="preview"' not in body
+    assert 'id="preview-host"' not in body, "Chrome owns the dynamic preview host"
+    assert "text-overflow: ellipsis" not in body
+    assert "overflow-wrap: anywhere" in body
+    assert 'id="paramReset"' in body
+    assert "captured at (camera clock)" in body
+
+
 def test_index_serves_the_local_frontend_modules(client):
     assert client.get("/static/main.js").status_code == 200
     assert client.get("/static/chrome.js").status_code == 200
     assert client.get("/static/scene_model.js").status_code == 200
     assert client.get("/static/review_api.js").status_code == 200
     assert client.get("/static/vendor/three.module.js").status_code == 200
+
+
+def test_scene_model_has_world_reference_and_observed_sizing(client):
+    source = client.get("/static/scene_model.js").data.decode()
+    assert "LiDAR XY reference" in source
+    assert "ResizeObserver" in source
+    assert "camera optical" in source
 
 
 def test_index_is_the_packaged_static_asset(client):

@@ -6,17 +6,27 @@ from types import SimpleNamespace
 
 import numpy as np
 from lctk_target import load_target
-from lidar_to_camera_solver.detection_buffer import DetectionBuffer, DetectionPair
+from lidar_to_camera_solver.detection_buffer import (
+    BufferSnapshot,
+    DetectionBuffer,
+    DetectionPair,
+    Empty,
+)
 from lidar_to_camera_solver.main import LidarToCameraSolver
 
 ROOT = Path(__file__).resolve().parents[3]
 TARGET = load_target(ROOT / "ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5")
 
 
-def _board_message(position=(0.7, -0.4, 4.2)):
+def _board_message(position=(0.7, -0.4, 4.2), orientation=(0.0, 0.0, 0.0, 1.0)):
     pose = SimpleNamespace(
         position=SimpleNamespace(x=position[0], y=position[1], z=position[2]),
-        orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
+        orientation=SimpleNamespace(
+            x=orientation[0],
+            y=orientation[1],
+            z=orientation[2],
+            w=orientation[3],
+        ),
     )
     result = SimpleNamespace(pose=SimpleNamespace(pose=pose, covariance=[0.0] * 36))
     return SimpleNamespace(detections=[SimpleNamespace(results=[result])])
@@ -38,7 +48,7 @@ def _camera_info():
     return SimpleNamespace(width=640, height=480)
 
 
-def _solver():
+def _solver(*, orientation=(0.0, 0.0, 0.0, 1.0)):
     matrix = np.array(
         [[500.0, 0.0, 320.0], [0.0, 500.0, 240.0], [0.0, 0.0, 1.0]],
         dtype=np.float64,
@@ -61,7 +71,9 @@ def _solver():
         enforce_pose_diversity=False,
     )
     update = solver.detection_buffer.capture(
-        DetectionPair(aruco=_aruco_message(), board=_board_message())
+        DetectionPair(
+            aruco=_aruco_message(), board=_board_message(orientation=orientation)
+        )
     )
     assert update.accepted
     return solver
@@ -83,7 +95,45 @@ def test_scene_quads_are_the_detection_buffers_world_points():
 
     outline = np.asarray(payload["captures"][0]["board_outline_world"])
     assert outline.shape == (5, 3)
-    assert np.allclose(outline[0], [0.4, -0.7, 4.2], atol=1e-12, rtol=0.0)
+    radius = TARGET.plate.side_um * 1e-6 / np.sqrt(2.0)
+    assert np.allclose(
+        outline,
+        [
+            [0.7, -0.4 - radius, 4.2],
+            [0.7 + radius, -0.4, 4.2],
+            [0.7, -0.4 + radius, 4.2],
+            [0.7 - radius, -0.4, 4.2],
+            [0.7, -0.4 - radius, 4.2],
+        ],
+        atol=1e-12,
+        rtol=0.0,
+    )
+
+
+def test_scene_outline_uses_the_same_board_pose_as_marker_geometry():
+    angle = np.deg2rad(31.0)
+    solver = _solver(orientation=(0.0, 0.0, np.sin(angle / 2.0), np.cos(angle / 2.0)))
+    payload = solver.scene()
+    outline = np.asarray(payload["captures"][0]["board_outline_world"])
+    radius = TARGET.plate.side_um * 1e-6 / np.sqrt(2.0)
+    local = np.asarray(
+        [
+            [0.0, -radius, 0.0],
+            [radius, 0.0, 0.0],
+            [0.0, radius, 0.0],
+            [-radius, 0.0, 0.0],
+            [0.0, -radius, 0.0],
+        ]
+    )
+    rotation = np.asarray(
+        [
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    expected = (rotation @ local.T).T + np.asarray([0.7, -0.4, 4.2])
+    assert np.allclose(outline, expected, atol=1e-12, rtol=0.0)
 
 
 def test_scene_camera_uses_one_inverted_optical_pose():
@@ -100,3 +150,54 @@ def test_scene_revision_advances_when_node_marks_a_mutation():
     solver = _solver()
     solver._mark_scene_mutation_locked()
     assert solver.scene()["scene_revision"] == 1
+
+
+def test_state_reports_the_camera_source_stamp_and_export_availability():
+    solver = _solver()
+    solver.solver_mode = "assisted"
+    stamp = SimpleNamespace(sec=12, nanosec=345_000_000)
+    pair = DetectionPair(
+        aruco=SimpleNamespace(header=SimpleNamespace(stamp=stamp)),
+        board=SimpleNamespace(),
+    )
+    snapshot = BufferSnapshot(
+        revision=1,
+        pairs=(pair,),
+        placements=(),
+        correspondence_count=4,
+        outcome=Empty(),
+        capture_ids=(7,),
+    )
+    solver._snapshot = lambda: snapshot
+    solver._evidence_store = None
+    solver._last_stillness = None
+    solver._stillness = None
+    solver._stability_params = {}
+    solver._review_params_writable = False
+    solver._review_params_detail = ""
+    solver.pair_source = SimpleNamespace(status_line=lambda: "waiting")
+    solver.identity_gate = SimpleNamespace(error=None)
+    parameters = {
+        "review_archive_path": "",
+        "export_autoware_target": "",
+        "export_camera_frame": "camera",
+        "export_lidar_frame": "",
+    }
+    solver._string_parameter = lambda name: parameters[name]
+
+    state = solver.state()
+
+    assert state["pairs"] == [
+        {
+            "id": 7,
+            "rms_px": None,
+            "has_preview": False,
+            "missing": ["camera frame", "plane inliers"],
+            "stamp_s": 12.345,
+        }
+    ]
+    assert state["export"]["autoware_ready"] is False
+    assert state["export_availability"]["autoware"]["missing"] == [
+        "export_autoware_target",
+        "export_lidar_frame",
+    ]

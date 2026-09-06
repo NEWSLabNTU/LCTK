@@ -59,6 +59,28 @@ def marker_geometry_summary(target: ValidatedTarget) -> str:
     )
 
 
+def plate_outline_local(target: ValidatedTarget) -> np.ndarray:
+    """Return the physical plate perimeter in target-local coordinates.
+
+    ``corner_aligned_plate_center_v1`` puts the board origin at the centre of
+    the square while its local x/y axes point toward opposite plate corners.
+    Consequently the square perimeter is a diamond in those coordinates, not
+    an axis-aligned ``(+/- side/2, +/- side/2)`` box.
+    """
+
+    radius = float(target.plate.side_um) * 1e-6 / np.sqrt(2.0)
+    return np.asarray(
+        (
+            (0.0, -radius, 0.0),
+            (radius, 0.0, 0.0),
+            (0.0, radius, 0.0),
+            (-radius, 0.0, 0.0),
+            (0.0, -radius, 0.0),
+        ),
+        dtype=np.float64,
+    )
+
+
 def rotation_matrix_to_quaternion(rotation_matrix: np.ndarray) -> np.ndarray:
     """Convert a 3x3 rotation matrix to ROS quaternion order ``[x,y,z,w]``."""
 

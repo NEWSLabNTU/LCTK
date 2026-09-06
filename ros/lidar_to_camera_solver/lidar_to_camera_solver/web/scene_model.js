@@ -32,10 +32,40 @@ function disposeObject(object) {
   object.traverse((child) => {
     if (child.geometry) child.geometry.dispose();
     if (child.material) {
-      if (Array.isArray(child.material)) child.material.forEach((item) => item.dispose());
-      else child.material.dispose();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material.map) material.map.dispose();
+        if (material.alphaMap) material.alphaMap.dispose();
+        material.dispose();
+      }
     }
   });
+}
+
+function textSprite(text, color = "#e2e7ee", height = 0.12) {
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.height = 64;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.font = "600 28px ui-sans-serif, system-ui, sans-serif";
+  canvas.width = Math.ceil(context.measureText(String(text)).width + 16);
+  context.font = "600 28px ui-sans-serif, system-ui, sans-serif";
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = color;
+  context.textBaseline = "middle";
+  context.fillText(String(text), 8, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set((canvas.width / canvas.height) * height, height, 1);
+  return sprite;
 }
 
 function parseCloud(buffer) {
@@ -80,12 +110,20 @@ export class SceneModel {
     this.camera.position.set(0, 1.5, 5);
     this.root = new THREE.Group();
     this.scene.add(this.root);
+    this.referenceGroup = null;
+    this._referenceSignature = "";
     this.cameraGroup = null;
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Line.threshold = 0.04;
     this._bindControls();
     this._resize();
-    window.addEventListener("resize", () => this._resize());
+    this._onWindowResize = () => this._resize();
+    window.addEventListener("resize", this._onWindowResize);
+    this._resizeObserver = null;
+    if (typeof ResizeObserver === "function") {
+      this._resizeObserver = new ResizeObserver(() => this._resize());
+      this._resizeObserver.observe(canvas.parentElement || canvas);
+    }
   }
 
   _bindControls() {
@@ -234,6 +272,22 @@ export class SceneModel {
     for (const [start, end, color] of axisSpecs) {
       group.add(new THREE.Line(lineGeometry([start, end]), new THREE.LineBasicMaterial({ color })));
     }
+    const cameraLabel = textSprite("camera optical", "#e2e7ee");
+    if (cameraLabel) {
+      cameraLabel.position.set(0, 0.08, 0);
+      group.add(cameraLabel);
+    }
+    const axisLabels = [
+      ["X", [axisLength * 1.15, 0, 0], "#ef5f80"],
+      ["Y", [0, axisLength * 1.15, 0], "#4bcf7d"],
+      ["Z", [0, 0, axisLength * 1.15], "#4d8fe2"],
+    ];
+    for (const [label, position, color] of axisLabels) {
+      const sprite = textSprite(label, color);
+      if (!sprite) continue;
+      sprite.position.fromArray(position);
+      group.add(sprite);
+    }
     if (!showFrustum) return group;
     const { fx, fy, cx, cy } = cameraData.intrinsics || {};
     const { width, height } = cameraData.image_size || {};
@@ -260,6 +314,37 @@ export class SceneModel {
       lineGeometry(frustumPoints),
       new THREE.LineBasicMaterial({ color: 0x96a1af, transparent: true, opacity: 0.6 }),
     ));
+    return group;
+  }
+
+  _referenceObject(frameId) {
+    const group = new THREE.Group();
+    const frame = String(frameId || "world");
+    const grid = new THREE.GridHelper(8, 16, 0x44515f, 0x2d363f);
+    grid.rotation.x = Math.PI / 2;
+    grid.position.z = 0;
+    if (grid.material) {
+      const materials = Array.isArray(grid.material) ? grid.material : [grid.material];
+      for (const material of materials) {
+        material.transparent = true;
+        material.opacity = 0.55;
+        material.depthWrite = false;
+      }
+    }
+    group.add(grid);
+
+    const axes = new THREE.AxesHelper(0.45);
+    group.add(axes);
+    const originLabel = textSprite(`LiDAR (${frame})`, "#f0a53a");
+    if (originLabel) {
+      originLabel.position.set(0.05, 0.08, 0.04);
+      group.add(originLabel);
+    }
+    const gridLabel = textSprite("LiDAR XY reference", "#96a1af");
+    if (gridLabel) {
+      gridLabel.position.set(2.1, 0.1, 0.03);
+      group.add(gridLabel);
+    }
     return group;
   }
 
@@ -297,6 +382,17 @@ export class SceneModel {
       this.captureGroups.delete(id);
     }
 
+    const referenceSignature = String(sceneData.world_frame_id || "world");
+    if (referenceSignature !== this._referenceSignature) {
+      if (this.referenceGroup) {
+        this.scene.remove(this.referenceGroup);
+        disposeObject(this.referenceGroup);
+      }
+      this.referenceGroup = this._referenceObject(referenceSignature);
+      this.scene.add(this.referenceGroup);
+      this._referenceSignature = referenceSignature;
+    }
+
     const signature = JSON.stringify([sceneData.camera, app.layers?.frustum !== false]);
     if (signature !== this._cameraSignature) {
       if (this.cameraGroup) {
@@ -331,6 +427,7 @@ export class SceneModel {
     if (!this.available) return;
     const box = new THREE.Box3().setFromObject(this.root);
     if (this.cameraGroup) box.expandByObject(this.cameraGroup);
+    if (this.referenceGroup) box.expandByObject(this.referenceGroup);
     if (box.isEmpty()) {
       this.target.set(0, 0, 0);
       this.camera.position.set(0, 1.5, 5);
@@ -368,6 +465,9 @@ export class SceneModel {
     if (!this.available) return;
     for (const group of this.captureGroups.values()) disposeObject(group);
     if (this.cameraGroup) disposeObject(this.cameraGroup);
+    if (this.referenceGroup) disposeObject(this.referenceGroup);
+    this._resizeObserver?.disconnect();
+    if (this._onWindowResize) window.removeEventListener("resize", this._onWindowResize);
     this.renderer.dispose();
   }
 }

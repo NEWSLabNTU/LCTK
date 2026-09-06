@@ -515,6 +515,20 @@ def test_state_is_json_shaped_before_anything_has_been_captured():
         "archive_path": "/tmp/detections.json",
         "autoware_ready": False,
     }
+    assert state["export_availability"] == {
+        "autoware": {
+            "available": False,
+            "reason": (
+                "unset parameter(s): export_autoware_target, "
+                "export_camera_frame, export_lidar_frame"
+            ),
+            "missing": [
+                "export_autoware_target",
+                "export_camera_frame",
+                "export_lidar_frame",
+            ],
+        }
+    }
 
 
 def test_stability_params_update_future_captures_and_preserves_pairs():

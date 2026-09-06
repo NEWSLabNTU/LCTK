@@ -1,6 +1,7 @@
 """ROS adapter for continuous, manual and assisted LiDAR-to-camera calibration."""
 
 import json
+import math
 import os
 import sys
 import tempfile
@@ -56,6 +57,7 @@ from lidar_to_camera_solver.board_geometry import (
     ValidatedTarget,
     load_target_definition,
     marker_geometry_summary,
+    plate_outline_local,
     rotation_matrix_to_quaternion,
 )
 from lidar_to_camera_solver.detection_buffer import (
@@ -1643,6 +1645,45 @@ class LidarToCameraSolver(Node):
         )
         with self.state_lock:
             identity_error = self.identity_gate.error
+        export_values = {
+            "export_autoware_target": self._string_parameter("export_autoware_target"),
+            "export_camera_frame": self._string_parameter("export_camera_frame"),
+            "export_lidar_frame": self._string_parameter("export_lidar_frame"),
+        }
+        export_missing = [name for name, value in export_values.items() if not value]
+        autoware_ready = not export_missing
+        # ``per_pose_rms_px`` is deliberately recomputed by DetectionBuffer for
+        # the current joint estimate.  Both it and ``capture_ids`` follow the
+        # snapshot's capture order, so removing a pair can change every value
+        # without ever changing which stable ID each value belongs to.
+        pair_entries = []
+        for index, pair_id in enumerate(
+            snapshot.capture_ids if snapshot is not None else ()
+        ):
+            pair = (
+                snapshot.pairs[index]
+                if snapshot is not None and index < len(snapshot.pairs)
+                else None
+            )
+            source_stamp = message_stamp_seconds(getattr(pair, "aruco", None))
+            pair_entries.append(
+                {
+                    "id": pair_id,
+                    "rms_px": (
+                        per_pose_rms[index] if index < len(per_pose_rms) else None
+                    ),
+                    "has_preview": (
+                        evidence.get(pair_id) is not None
+                        and evidence[pair_id].preview_jpeg is not None
+                    ),
+                    "missing": (
+                        list(evidence[pair_id].missing)
+                        if evidence.get(pair_id) is not None
+                        else ["camera frame", "plane inliers"]
+                    ),
+                    "stamp_s": source_stamp if math.isfinite(source_stamp) else None,
+                }
+            )
         return {
             "mode": self.solver_mode,
             "scene_revision": scene_revision,
@@ -1697,33 +1738,21 @@ class LidarToCameraSolver(Node):
                     estimate.quality.residuals.rms_px if estimate is not None else None
                 ),
             },
-            "pairs": [
-                {
-                    "id": pair_id,
-                    "rms_px": (
-                        per_pose_rms[index] if index < len(per_pose_rms) else None
-                    ),
-                    "has_preview": (
-                        evidence.get(pair_id) is not None
-                        and evidence[pair_id].preview_jpeg is not None
-                    ),
-                    "missing": (
-                        list(evidence[pair_id].missing)
-                        if evidence.get(pair_id) is not None
-                        else ["camera frame", "plane inliers"]
-                    ),
-                }
-                for index, pair_id in enumerate(
-                    snapshot.capture_ids if snapshot is not None else ()
-                )
-            ],
+            "pairs": pair_entries,
             "export": {
                 "archive_path": self._string_parameter("review_archive_path"),
-                "autoware_ready": bool(
-                    self._string_parameter("export_autoware_target")
-                    and self._string_parameter("export_camera_frame")
-                    and self._string_parameter("export_lidar_frame")
-                ),
+                "autoware_ready": autoware_ready,
+            },
+            "export_availability": {
+                "autoware": {
+                    "available": autoware_ready,
+                    "reason": (
+                        "ready"
+                        if autoware_ready
+                        else f"unset parameter(s): {', '.join(export_missing)}"
+                    ),
+                    "missing": export_missing,
+                }
             },
         }
 
@@ -1745,18 +1774,7 @@ class LidarToCameraSolver(Node):
 
         captures = []
         if snapshot is not None and target is not None:
-            side = float(target.plate.side_um) * 1e-6
-            half = side / 2.0
-            local_outline = np.asarray(
-                [
-                    (-half, -half, 0.0),
-                    (half, -half, 0.0),
-                    (half, half, 0.0),
-                    (-half, half, 0.0),
-                    (-half, -half, 0.0),
-                ],
-                dtype=np.float64,
-            )
+            local_outline = plate_outline_local(target)
             for capture in snapshot.scene_captures:
                 board_position = np.asarray(capture.board_position, dtype=np.float64)
                 board_rotation = Rotation.from_quat(
