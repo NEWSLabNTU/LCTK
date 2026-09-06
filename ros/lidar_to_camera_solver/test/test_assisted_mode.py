@@ -17,6 +17,7 @@ import struct
 import threading
 from types import SimpleNamespace
 
+import lidar_to_camera_solver.main as solver_main
 import numpy as np
 import pytest
 from lctk_quality.placements import Placement
@@ -641,6 +642,74 @@ def test_export_autoware_refuses_without_a_solved_estimate():
     ok, detail, entry = solver.export_autoware(dry_run=True)
     assert (ok, entry) == (False, None)
     assert "no solved estimate" in detail
+
+
+def test_autoware_write_uses_the_previewed_estimate_and_rejects_mutation(
+    monkeypatch,
+):
+    solver = facade_harness()
+    solver.parameters.update(
+        {
+            "export_autoware_target": "/tmp/sensor_kit_calibration.yaml",
+            "export_camera_frame": "camera0/camera_link",
+            "export_lidar_frame": "velodyne_top_base_link",
+        }
+    )
+    estimate = SimpleNamespace(
+        rvec=np.array([1.0, 2.0, 3.0]),
+        tvec=np.array([4.0, 5.0, 6.0]),
+    )
+    solver._snapshot = lambda: SimpleNamespace(estimate=estimate)
+    calls = []
+
+    def fake_patch(_target, **kwargs):
+        calls.append(kwargs)
+        return {"x": 1.0}
+
+    monkeypatch.setattr(solver_main, "patch_calibration", fake_patch)
+    assert solver.export_autoware(dry_run=True)[0] is True
+    assert np.array_equal(calls[0]["rvec"], estimate.rvec)
+
+    with solver.state_lock:
+        solver._mark_scene_mutation_locked()
+    ok, detail, entry = solver.export_autoware(dry_run=False)
+    assert (ok, entry) == (False, None)
+    assert "preview" in detail.lower()
+    assert len(calls) == 1
+
+
+def test_autoware_write_does_not_resnapshot_after_preview(monkeypatch):
+    solver = facade_harness()
+    solver.parameters.update(
+        {
+            "export_autoware_target": "/tmp/sensor_kit_calibration.yaml",
+            "export_camera_frame": "camera0/camera_link",
+            "export_lidar_frame": "velodyne_top_base_link",
+        }
+    )
+    first = SimpleNamespace(
+        rvec=np.array([1.0, 2.0, 3.0]),
+        tvec=np.array([4.0, 5.0, 6.0]),
+    )
+    second = SimpleNamespace(
+        rvec=np.array([7.0, 8.0, 9.0]),
+        tvec=np.array([10.0, 11.0, 12.0]),
+    )
+    current = [first]
+    solver._snapshot = lambda: SimpleNamespace(estimate=current[0])
+    calls = []
+
+    def fake_patch(_target, **kwargs):
+        calls.append(kwargs)
+        return {"x": 1.0}
+
+    monkeypatch.setattr(solver_main, "patch_calibration", fake_patch)
+    assert solver.export_autoware(dry_run=True)[0] is True
+    current[0] = second
+    ok, _detail, _entry = solver.export_autoware(dry_run=False)
+    assert ok is True
+    assert np.array_equal(calls[1]["rvec"], first.rvec)
+    assert np.array_equal(calls[1]["tvec"], first.tvec)
 
 
 # --- the configurable novelty gate --------------------------------------------

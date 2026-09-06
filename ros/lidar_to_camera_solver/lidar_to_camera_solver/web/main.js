@@ -45,6 +45,11 @@ if (canvas) {
     render();
   }
 
+  async function retryMissingPreview() {
+    if (app.selectedId == null || app.preview.status !== "missing") return;
+    await loadPreview(app.selectedId);
+  }
+
   function select(id) {
     const numericId = Number(id);
     const exists = (app.state?.pairs || []).some(
@@ -68,21 +73,48 @@ if (canvas) {
     model.frameAll();
   }
 
+  function pruneCloudCaches() {
+    const pairIds = new Set(
+      (app.state?.pairs || [])
+        .map((pair) => Number(pair.id))
+        .filter((id) => Number.isFinite(id)),
+    );
+    const sceneIds = new Set(
+      (app.scene?.captures || [])
+        .map((capture) => Number(capture.id))
+        .filter((id) => Number.isFinite(id)),
+    );
+    const activeIds = new Set([...pairIds].filter((id) => sceneIds.has(id)));
+    for (const id of app.clouds.keys()) {
+      if (!activeIds.has(id)) app.clouds.delete(id);
+    }
+    api.pruneClouds(activeIds);
+  }
+
   async function syncScene(state) {
     if (Number(state.scene_revision) === sceneRevision && app.scene) return;
     const serial = ++sceneRequestSerial;
     const scene = await api.scene();
     if (serial !== sceneRequestSerial || !scene || scene.ok === false) return;
+    app.scene = scene;
+    sceneRevision = Number(scene.scene_revision);
+  }
+
+  async function syncMissingClouds() {
+    const captures = app.scene?.captures || [];
+    const missing = captures.filter((capture) => {
+      const id = Number(capture.id);
+      return Number.isFinite(id) && (!app.clouds.has(id) || app.clouds.get(id) == null);
+    });
     const cloudEntries = await Promise.all(
-      (scene.captures || []).map(async (capture) => [
+      missing.map(async (capture) => [
         Number(capture.id),
         await api.cloud(capture.id),
       ]),
     );
-    if (serial !== sceneRequestSerial) return;
-    app.scene = scene;
-    for (const [id, cloud] of cloudEntries) app.clouds.set(id, cloud);
-    sceneRevision = Number(scene.scene_revision);
+    for (const [id, cloud] of cloudEntries) {
+      if (cloud != null) app.clouds.set(id, cloud);
+    }
   }
 
   const chrome = new Chrome({
@@ -122,6 +154,9 @@ if (canvas) {
       const ids = new Set((state.pairs || []).map((pair) => Number(pair.id)));
       if (app.selectedId != null && !ids.has(app.selectedId)) clearSelection();
       await syncScene(state);
+      await syncMissingClouds();
+      await retryMissingPreview();
+      pruneCloudCaches();
       render();
     } finally {
       polling = false;

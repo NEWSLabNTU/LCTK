@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import secrets
 import threading
 from pathlib import Path
 from typing import Any, Protocol
@@ -93,9 +94,21 @@ def create_app(facade: NodeFacade, *, params_writable: bool = True) -> Flask:
         static_folder=str(static_folder),
         static_url_path="/static",
     )
-    # The confirmation token for the Autoware write: the buffer revision the
-    # operator was shown a diff for. Any mutation clears it.
-    pending: dict[str, Any] = {"previewed": False}
+    # One confirmation at a time per server. The node owns the immutable export
+    # snapshot; this token binds the browser's second request to its own diff.
+    pending: dict[str, Any] = {"token": None, "scene_revision": None}
+    pending_lock = threading.Lock()
+
+    def scene_revision() -> int | None:
+        """Read the integer scene token without letting facade failures escape."""
+
+        try:
+            value = facade.state().get("scene_revision")
+        except (AttributeError, TypeError, ValueError, KeyError):
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
 
     @app.get("/")
     def index() -> Response:
@@ -163,10 +176,12 @@ def create_app(facade: NodeFacade, *, params_writable: bool = True) -> Flask:
 
     @app.post("/api/pair/<int:pair_id>/drop")
     def drop(pair_id: int) -> Response:
-        ok, detail = facade.drop(pair_id)
-        if ok:
-            # The diff the operator was shown described a different buffer.
-            pending["previewed"] = False
+        with pending_lock:
+            ok, detail = facade.drop(pair_id)
+            if ok:
+                # The diff the operator was shown described a different buffer.
+                pending["token"] = None
+                pending["scene_revision"] = None
         return jsonify({"ok": ok, "detail": detail})
 
     @app.post("/api/export/archive")
@@ -180,24 +195,68 @@ def create_app(facade: NodeFacade, *, params_writable: bool = True) -> Flask:
 
     @app.post("/api/export/autoware/preview")
     def autoware_preview() -> Response:
-        ok, detail, entry = facade.export_autoware(dry_run=True)
-        pending["previewed"] = ok
-        return jsonify({"ok": ok, "detail": detail, "entry": entry})
+        with pending_lock:
+            pending["token"] = None
+            pending["scene_revision"] = None
+            before_revision = scene_revision()
+            ok, detail, entry = facade.export_autoware(dry_run=True)
+            token = secrets.token_urlsafe(24) if ok else None
+            revision = scene_revision() if ok else None
+            if ok and (before_revision is None or revision is None):
+                ok = False
+                detail = "cannot confirm Autoware diff: scene revision unavailable"
+                entry = None
+            elif ok and revision != before_revision:
+                ok = False
+                detail = "Autoware preview became stale; preview the diff again"
+                entry = None
+            if ok:
+                pending["token"] = token
+                pending["scene_revision"] = revision
+            response = jsonify(
+                {
+                    "ok": ok,
+                    "detail": detail,
+                    "entry": entry,
+                    "confirmation_token": token if ok else None,
+                }
+            )
+            return response
 
     @app.post("/api/export/autoware/write")
     def autoware_write() -> Response:
-        if not pending["previewed"]:
-            return jsonify(
-                {
-                    "ok": False,
-                    "detail": "preview the Autoware diff first; nothing is written "
-                    "unseen, and a buffer change invalidates an earlier preview",
-                    "entry": None,
-                }
-            )
-        ok, detail, entry = facade.export_autoware(dry_run=False)
-        pending["previewed"] = False
-        return jsonify({"ok": ok, "detail": detail, "entry": entry})
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            payload = {}
+        request_token = payload.get("confirmation_token")
+        with pending_lock:
+            expected_token = pending.get("token")
+            expected_revision = pending.get("scene_revision")
+            if expected_token is None or request_token != expected_token:
+                response = jsonify(
+                    {
+                        "ok": False,
+                        "detail": "preview the Autoware diff first; nothing is written unseen",
+                        "entry": None,
+                    }
+                )
+                return response
+            # Consume valid confirmations before checking the revision or doing
+            # file I/O. A failed/stale write cannot be retried unseen.
+            pending["token"] = None
+            pending["scene_revision"] = None
+            current_revision = scene_revision()
+            if current_revision != expected_revision:
+                response = jsonify(
+                    {
+                        "ok": False,
+                        "detail": "Autoware preview is stale; preview the diff again",
+                        "entry": None,
+                    }
+                )
+                return response
+            ok, detail, entry = facade.export_autoware(dry_run=False)
+            return jsonify({"ok": ok, "detail": detail, "entry": entry})
 
     return app
 

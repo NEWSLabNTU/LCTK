@@ -3,6 +3,8 @@ export class ReviewApi {
   constructor(baseUrl = "") {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.clouds = new Map();
+    this.cloudFailures = new Map();
+    this.autowareToken = null;
   }
 
   async _json(path, options = {}) {
@@ -44,24 +46,46 @@ export class ReviewApi {
   async cloud(id) {
     const key = Number(id);
     if (this.clouds.has(key)) return this.clouds.get(key);
+    const failure = this.cloudFailures.get(key);
+    if (failure && Date.now() < failure.nextAttemptMs) return null;
     try {
       const response = await fetch(
         this.baseUrl + `/api/pair/${encodeURIComponent(key)}/cloud.bin`,
       );
       if (!response.ok) {
-        this.clouds.set(key, null);
+        this._recordCloudFailure(key);
         return null;
       }
       const data = await response.arrayBuffer();
+      this.cloudFailures.delete(key);
       this.clouds.set(key, data);
       return data;
     } catch (_error) {
+      this._recordCloudFailure(key);
       return null;
     }
   }
 
+  _recordCloudFailure(key) {
+    const count = (this.cloudFailures.get(key)?.count || 0) + 1;
+    const delayMs = Math.min(30000, 500 * 2 ** Math.min(count - 1, 6));
+    this.cloudFailures.set(key, { count, nextAttemptMs: Date.now() + delayMs });
+  }
+
   forgetCloud(id) {
-    this.clouds.delete(Number(id));
+    const key = Number(id);
+    this.clouds.delete(key);
+    this.cloudFailures.delete(key);
+  }
+
+  pruneClouds(activeIds) {
+    const keep = new Set([...activeIds].map((id) => Number(id)));
+    for (const id of this.clouds.keys()) {
+      if (!keep.has(id)) this.forgetCloud(id);
+    }
+    for (const id of this.cloudFailures.keys()) {
+      if (!keep.has(id)) this.cloudFailures.delete(id);
+    }
   }
 
   async _post(path, body = {}) {
@@ -83,11 +107,17 @@ export class ReviewApi {
   }
 
   async autowarePreview() {
-    return this._post("/api/export/autoware/preview");
+    const result = await this._post("/api/export/autoware/preview");
+    this.autowareToken = result.ok ? result.confirmation_token || null : null;
+    return result;
   }
 
   async autowareWrite() {
-    return this._post("/api/export/autoware/write");
+    const result = await this._post("/api/export/autoware/write", {
+      confirmation_token: this.autowareToken,
+    });
+    this.autowareToken = null;
+    return result;
   }
 
   async setParams(values) {

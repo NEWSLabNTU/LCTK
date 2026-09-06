@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -85,6 +86,18 @@ from lidar_to_camera_solver.review_server import (
 from lidar_to_camera_solver.stability import StillnessTracker
 
 SOLVER_MODES = ("continuous", "manual", "assisted")
+
+
+@dataclass(frozen=True)
+class _PendingAutowareExport:
+    """Immutable export inputs captured by an Autoware dry run."""
+
+    scene_revision: int
+    target: str
+    camera_frame: str
+    lidar_frame: str
+    rvec: np.ndarray
+    tvec: np.ndarray
 
 
 def message_stamp_seconds(message) -> float:
@@ -391,6 +404,7 @@ class LidarToCameraSolver(Node):
         # Monotonic token for the review scene. It covers buffer mutations and
         # camera-pose/session resets, not just the buffer's index revision.
         self._scene_revision = 0
+        self._autoware_pending_export: _PendingAutowareExport | None = None
         self._stability_params: dict[str, float] = {}
         self._review_params_writable = False
         self._review_params_detail = (
@@ -823,14 +837,6 @@ class LidarToCameraSolver(Node):
                     throttle_duration_sec=5.0,
                 )
                 return
-        epoch_resets = self.pair_source.epoch_resets
-        if epoch_resets != self._last_epoch_resets:
-            # The recording changed under the synchronizer.  The window this
-            # tracker filled belongs to the previous epoch, and a "still" verdict
-            # must not carry across the seam.
-            self._last_epoch_resets = epoch_resets
-            self._stillness.reset()
-
         pose = board_pose_from_detections(board)
         if pose is None:
             self.get_logger().warn(
@@ -840,8 +846,88 @@ class LidarToCameraSolver(Node):
             return
         position, orientation = pose
         stamp_s = self.get_clock().now().nanoseconds * 1e-9
-        state = self._stillness.push(position, orientation, stamp_s)
-        self._last_stillness = state
+        pair_id = None
+        update = None
+        generation = None
+        # Tracker evaluation and the resulting buffer mutation share one lock.
+        # A parameter update therefore cannot land between ``should_capture``
+        # and capture acceptance.
+        with self.state_lock:
+            epoch_resets = self.pair_source.epoch_resets
+            if epoch_resets != self._last_epoch_resets:
+                # The recording changed under the synchronizer.  The window this
+                # tracker filled belongs to the previous epoch, and a "still"
+                # verdict must not carry across the seam.
+                self._last_epoch_resets = epoch_resets
+                self._stillness.reset()
+            if not self.pair_source.is_cached_pair(messages):
+                self.get_logger().warn(
+                    "Ignoring assisted detection pair: cache entry was "
+                    "discarded or superseded before stillness evaluation",
+                    throttle_duration_sec=5.0,
+                )
+                return
+            state = self._stillness.push(position, orientation, stamp_s)
+            self._last_stillness = state
+            if not state.should_capture:
+                capture = False
+            else:
+                capture = True
+            if capture:
+                generation = self._identity_generation
+                buffer = self.detection_buffer
+                identity_error = self.identity_gate.error
+                if identity_error is not None:
+                    self.get_logger().warn(
+                        "Skipping assisted capture before Target Identity agreement: "
+                        f"{identity_error}",
+                        throttle_duration_sec=5.0,
+                    )
+                    return
+                if buffer is None:
+                    self.get_logger().warn(
+                        "Skipping assisted capture: no camera info available",
+                        throttle_duration_sec=5.0,
+                    )
+                    return
+                if not placement_is_new(
+                    position,
+                    orientation,
+                    buffer.snapshot().placements,
+                    position_tol_m=self._novelty_position_tol_m,
+                    orientation_tol_deg=self._novelty_orientation_tol_deg,
+                ):
+                    self.get_logger().info(
+                        "Held still, but this placement is already captured; "
+                        "move or tilt the board",
+                        throttle_duration_sec=5.0,
+                    )
+                    return
+                update = buffer.capture(DetectionPair(aruco=aruco, board=board))
+                if not update.accepted:
+                    self.get_logger().warn(
+                        f"Assisted capture rejected: {self._rejection_text(update)}",
+                        throttle_duration_sec=5.0,
+                    )
+                    return
+                if update.changed:
+                    self._mark_scene_mutation_locked()
+                pair_index = update.snapshot.frame_count - 1
+                if update.added_new_placement is False:
+                    # Still, but not a new placement.  Undo rather than pad the
+                    # buffer with a view that adds no geometry and inflates every
+                    # metric that counts frames.
+                    buffer.remove(pair_index)
+                    self._mark_scene_mutation_locked()
+                    self.get_logger().info(
+                        "Held still, but this is not a new board placement; "
+                        "move or tilt the board",
+                        throttle_duration_sec=5.0,
+                    )
+                    return
+                pair_id = update.snapshot.capture_ids[pair_index]
+                self._prune_review_evidence_locked()
+
         # Every verdict, at debug level, because tuning the thresholds without it
         # means guessing. The obvious way to measure them -- record the board
         # detection topic and replay it through StillnessTracker offline -- feeds
@@ -854,73 +940,8 @@ class LidarToCameraSolver(Node):
             f"[{state.translation_span_m * 1000:.0f} mm / "
             f"{state.rotation_span_deg:.1f} deg over {state.frames} pairs]"
         )
-        if not state.should_capture:
+        if not capture:
             return
-
-        # One node lock over the identity check and the mutation, exactly as the
-        # manual capture path does: an identity update must not be able to change
-        # the accepted target between the two.
-        with self.state_lock:
-            if not self.pair_source.is_cached_pair(messages):
-                self.get_logger().warn(
-                    "Ignoring assisted detection pair: cache entry was "
-                    "discarded or superseded before capture",
-                    throttle_duration_sec=5.0,
-                )
-                return
-            generation = self._identity_generation
-            buffer = self.detection_buffer
-            identity_error = self.identity_gate.error
-            if identity_error is not None:
-                self.get_logger().warn(
-                    "Skipping assisted capture before Target Identity agreement: "
-                    f"{identity_error}",
-                    throttle_duration_sec=5.0,
-                )
-                return
-            if buffer is None:
-                self.get_logger().warn(
-                    "Skipping assisted capture: no camera info available",
-                    throttle_duration_sec=5.0,
-                )
-                return
-            if not placement_is_new(
-                position,
-                orientation,
-                buffer.snapshot().placements,
-                position_tol_m=self._novelty_position_tol_m,
-                orientation_tol_deg=self._novelty_orientation_tol_deg,
-            ):
-                self.get_logger().info(
-                    "Held still, but this placement is already captured; "
-                    "move or tilt the board",
-                    throttle_duration_sec=5.0,
-                )
-                return
-            update = buffer.capture(DetectionPair(aruco=aruco, board=board))
-            if not update.accepted:
-                self.get_logger().warn(
-                    f"Assisted capture rejected: {self._rejection_text(update)}",
-                    throttle_duration_sec=5.0,
-                )
-                return
-            if update.changed:
-                self._mark_scene_mutation_locked()
-            pair_index = update.snapshot.frame_count - 1
-            if update.added_new_placement is False:
-                # Still, but not a new placement.  Undo rather than pad the buffer
-                # with a view that adds no geometry and inflates every metric that
-                # counts frames.
-                buffer.remove(pair_index)
-                self._mark_scene_mutation_locked()
-                self.get_logger().info(
-                    "Held still, but this is not a new board placement; "
-                    "move or tilt the board",
-                    throttle_duration_sec=5.0,
-                )
-                return
-            pair_id = update.snapshot.capture_ids[pair_index]
-            self._prune_review_evidence_locked()
 
         # Outside the lock: annotating and JPEG-encoding a frame is real work, and
         # state_lock is also DetectionPairSource's admission lock.
@@ -1103,6 +1124,9 @@ class LidarToCameraSolver(Node):
         """Advance the review scene token while ``state_lock`` is held."""
 
         self._scene_revision = getattr(self, "_scene_revision", 0) + 1
+        # Any export diff shown before this mutation no longer describes the
+        # scene the operator is looking at.
+        self._autoware_pending_export = None
 
     def _prune_review_evidence_locked(self) -> None:
         """Forget removed captures without changing index-based manual services."""
@@ -1882,9 +1906,55 @@ class LidarToCameraSolver(Node):
         return bool(response.success), response.message
 
     def export_autoware(self, dry_run: bool) -> tuple[bool, str, dict | None]:
-        target = self._string_parameter("export_autoware_target")
-        camera_frame = self._string_parameter("export_camera_frame")
-        lidar_frame = self._string_parameter("export_lidar_frame")
+        if dry_run:
+            # Clear before every attempt. A failed or stale diff must never
+            # leave an older confirmation armed.
+            with self.state_lock:
+                self._autoware_pending_export = None
+                target = self._string_parameter("export_autoware_target")
+                camera_frame = self._string_parameter("export_camera_frame")
+                lidar_frame = self._string_parameter("export_lidar_frame")
+                snapshot = self._snapshot()
+                estimate = snapshot.estimate if snapshot is not None else None
+                scene_revision = getattr(self, "_scene_revision", 0)
+                if estimate is not None:
+                    try:
+                        rvec = np.array(
+                            estimate.rvec, dtype=np.float64, copy=True
+                        ).reshape(3)
+                        tvec = np.array(
+                            estimate.tvec, dtype=np.float64, copy=True
+                        ).reshape(3)
+                    except (
+                        AttributeError,
+                        TypeError,
+                        ValueError,
+                        OverflowError,
+                    ) as error:
+                        return False, f"invalid solved estimate: {error!s}", None
+        else:
+            with self.state_lock:
+                pending = getattr(self, "_autoware_pending_export", None)
+                self._autoware_pending_export = None
+                if pending is None:
+                    return (
+                        False,
+                        "preview the Autoware diff first; nothing is written unseen",
+                        None,
+                    )
+                if getattr(self, "_scene_revision", 0) != pending.scene_revision:
+                    return (
+                        False,
+                        "Autoware preview is stale; preview the diff again",
+                        None,
+                    )
+                scene_revision = pending.scene_revision
+                target = pending.target
+                camera_frame = pending.camera_frame
+                lidar_frame = pending.lidar_frame
+                rvec = pending.rvec.copy()
+                tvec = pending.tvec.copy()
+
         missing = [
             name
             for name, value in (
@@ -1896,9 +1966,7 @@ class LidarToCameraSolver(Node):
         ]
         if missing:
             return False, f"unset parameter(s): {', '.join(missing)}", None
-        snapshot = self._snapshot()
-        estimate = snapshot.estimate if snapshot is not None else None
-        if estimate is None:
+        if dry_run and estimate is None:
             return False, "no solved estimate to export", None
         try:
             # The raw solver rvec/tvec (T_optical<-lidar) is what the exporter
@@ -1906,14 +1974,30 @@ class LidarToCameraSolver(Node):
             # inverted (M-01).
             entry = patch_calibration(
                 target,
-                rvec=np.asarray(estimate.rvec, dtype=np.float64).reshape(3),
-                tvec=np.asarray(estimate.tvec, dtype=np.float64).reshape(3),
+                rvec=rvec,
+                tvec=tvec,
                 camera_frame=camera_frame,
                 lidar_frame=lidar_frame,
                 dry_run=dry_run,
             )
         except (ExportError, OSError, KeyError, TypeError, ValueError) as error:
             return False, f"{error!s}", None
+        if dry_run:
+            with self.state_lock:
+                if getattr(self, "_scene_revision", 0) != scene_revision:
+                    return (
+                        False,
+                        "Autoware preview became stale; preview the diff again",
+                        None,
+                    )
+                self._autoware_pending_export = _PendingAutowareExport(
+                    scene_revision=scene_revision,
+                    target=target,
+                    camera_frame=camera_frame,
+                    lidar_frame=lidar_frame,
+                    rvec=rvec,
+                    tvec=tvec,
+                )
         verb = "Would write" if dry_run else "Wrote"
         return True, f"{verb} {camera_frame} under {target}", dict(entry)
 

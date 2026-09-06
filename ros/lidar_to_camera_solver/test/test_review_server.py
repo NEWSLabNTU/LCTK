@@ -31,9 +31,11 @@ class FakeFacade:
         self.dropped = []
         self.exported = []
         self.autoware_calls = []
+        self.mutate_during_preview = False
         self.param_calls = []
         self._state = {
             "mode": "assisted",
+            "scene_revision": 4,
             "sync": "sync: groups=12",
             "stillness": {"is_still": True, "reason": "held still", "frames": 5},
             "diversity": {"n_placements": 2, "shortfalls": ["move the board"]},
@@ -76,6 +78,7 @@ class FakeFacade:
         if pair_id not in self._previews:
             return False, f"no pair {pair_id}"
         self.dropped.append(pair_id)
+        self._state["scene_revision"] += 1
         return True, "dropped"
 
     def export_archive(self, path):
@@ -84,6 +87,8 @@ class FakeFacade:
 
     def export_autoware(self, dry_run):
         self.autoware_calls.append(dry_run)
+        if dry_run and self.mutate_during_preview:
+            self._state["scene_revision"] += 1
         return True, "ok", {"x": 1.0, "y": 2.0}
 
 
@@ -264,6 +269,7 @@ def test_autoware_preview_does_not_write(client):
     payload = json.loads(response.data)
     assert payload["ok"] is True
     assert payload["entry"] == {"x": 1.0, "y": 2.0}
+    assert payload["confirmation_token"]
     assert client.facade.autoware_calls == [True], "preview must be a dry run"
 
 
@@ -276,10 +282,68 @@ def test_autoware_write_is_refused_before_a_preview(client):
 
 
 def test_autoware_write_is_allowed_after_a_preview(client):
-    client.post("/api/export/autoware/preview")
-    response = client.post("/api/export/autoware/write")
+    preview = client.post("/api/export/autoware/preview")
+    token = json.loads(preview.data)["confirmation_token"]
+    response = client.post(
+        "/api/export/autoware/write",
+        data=json.dumps({"confirmation_token": token}),
+        content_type="application/json",
+    )
     assert json.loads(response.data)["ok"] is True
     assert client.facade.autoware_calls == [True, False]
+
+
+def test_autoware_write_requires_the_explicit_preview_token(client):
+    client.post("/api/export/autoware/preview")
+    response = client.post("/api/export/autoware/write")
+    payload = json.loads(response.data)
+    assert payload["ok"] is False
+    assert client.facade.autoware_calls == [True]
+
+
+def test_autoware_write_rejects_a_confirmation_from_another_preview(client):
+    preview = client.post("/api/export/autoware/preview")
+    token = json.loads(preview.data)["confirmation_token"]
+    response = client.post(
+        "/api/export/autoware/write",
+        data=json.dumps({"confirmation_token": "not-the-preview-token"}),
+        content_type="application/json",
+    )
+    payload = json.loads(response.data)
+    assert payload["ok"] is False
+    assert "preview" in payload["detail"].lower()
+    assert client.facade.autoware_calls == [True]
+    response = client.post(
+        "/api/export/autoware/write",
+        data=json.dumps({"confirmation_token": token}),
+        content_type="application/json",
+    )
+    assert json.loads(response.data)["ok"] is True
+    assert client.facade.autoware_calls == [True, False]
+
+
+def test_autoware_write_rejects_a_scene_mutation_between_requests(client):
+    preview = client.post("/api/export/autoware/preview")
+    token = json.loads(preview.data)["confirmation_token"]
+    client.facade._state["scene_revision"] += 1
+    response = client.post(
+        "/api/export/autoware/write",
+        data=json.dumps({"confirmation_token": token}),
+        content_type="application/json",
+    )
+    payload = json.loads(response.data)
+    assert payload["ok"] is False
+    assert "stale" in payload["detail"].lower()
+    assert client.facade.autoware_calls == [True]
+
+
+def test_autoware_preview_refuses_when_scene_changes_during_dry_run(client):
+    client.facade.mutate_during_preview = True
+    response = client.post("/api/export/autoware/preview")
+    payload = json.loads(response.data)
+    assert payload["ok"] is False
+    assert "stale" in payload["detail"].lower()
+    assert payload["confirmation_token"] is None
 
 
 def test_a_drop_invalidates_a_pending_autoware_confirmation(client):
