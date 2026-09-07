@@ -127,6 +127,29 @@ def test_late_cloud_for_the_exact_board_stamp_completes_a_capture():
     )
 
 
+def test_evidence_revision_advances_when_delayed_cloud_completes():
+    store = make_store()
+    store.observe_intrinsics(camera_matrix(), np.zeros(5, dtype=np.float64))
+    observe_frame(store, stamp=10.0)
+    store.capture(7, 10.0, corners=[], cloud_stamp=10.5)
+    before = store.evidence_revision(7)
+
+    store.observe_cloud(10.5, [[7.0, 8.0, 9.0]])
+
+    assert before == 1
+    assert store.evidence_revision(7) == 2
+
+
+def test_evicted_and_recaptured_evidence_has_a_fresh_revision():
+    store = make_store(max_previews=1)
+    store.capture(1, 1.0, corners=[])
+    original = store.evidence_revision(1)
+    store.capture(2, 2.0, corners=[])
+    assert store.snapshot([1])[1] == (None, 0)
+    store.capture(1, 1.0, corners=[])
+    assert store.evidence_revision(1) > original
+
+
 def test_late_cloud_does_not_fill_from_a_neighboring_sweep():
     store = make_store()
     store.observe_intrinsics(camera_matrix(), np.zeros(5, dtype=np.float64))

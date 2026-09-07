@@ -5,6 +5,115 @@ function rmsColor(rms, colored = true) {
   return new THREE.Color(rmsColorHex(rms, colored));
 }
 
+function sceneId(value) {
+  if (value == null || typeof value === "boolean") return null;
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+function bytesKey(value) {
+  let bytes;
+  if (value instanceof ArrayBuffer) bytes = new Uint8Array(value);
+  else if (ArrayBuffer.isView(value)) {
+    bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  } else return "";
+  let hash = 2166136261;
+  for (const byte of bytes) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  return `${bytes.byteLength}:${hash}`;
+}
+
+const cloudObjectIds = new WeakMap();
+let nextCloudObjectId = 1;
+
+function cloudToken(value) {
+  if (!value || typeof value !== "object") return null;
+  let token = cloudObjectIds.get(value);
+  if (token == null) {
+    token = nextCloudObjectId;
+    nextCloudObjectId += 1;
+    cloudObjectIds.set(value, token);
+  }
+  return token;
+}
+
+function keyValue(value, seen = new WeakSet()) {
+  if (value === undefined) return "[undefined]";
+  if (value == null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) return "[nan]";
+    if (value === Infinity) return "[infinity]";
+    if (value === -Infinity) return "[-infinity]";
+    return value;
+  }
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[cycle]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((entry) => keyValue(entry, seen));
+  if (value instanceof Map) {
+    return [...value.entries()]
+      .map(([key, entry]) => [keyValue(key, seen), keyValue(entry, seen)])
+      .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+  }
+  if (ArrayBuffer.isView(value)) return { type: value.constructor.name, bytes: bytesKey(value) };
+  if (value instanceof ArrayBuffer) return { type: "ArrayBuffer", bytes: bytesKey(value) };
+  const result = {};
+  for (const key of Object.keys(value).sort()) result[key] = keyValue(value[key], seen);
+  return result;
+}
+
+function valueKey(value) {
+  return JSON.stringify(keyValue(value));
+}
+
+function cloudFor(clouds, id) {
+  if (clouds instanceof Map) return clouds.get(id);
+  if (clouds && typeof clouds === "object") return clouds[id];
+  return null;
+}
+
+function cloudEntries(app) {
+  const entries = new Map();
+  const clouds = app?.clouds;
+  const revisions = app?.cloudRevisions;
+  const add = (id, revision, cloud) => {
+    const number = sceneId(id);
+    if (number == null) return;
+    entries.set(number, {
+      revision: revision == null ? null : Number(revision),
+      token: cloudToken(cloud),
+    });
+  };
+  if (revisions instanceof Map) {
+    for (const [id, revision] of revisions) add(id, revision, cloudFor(clouds, sceneId(id)));
+  } else if (revisions && typeof revisions === "object") {
+    for (const [id, revision] of Object.entries(revisions)) add(id, revision, cloudFor(clouds, sceneId(id)));
+  }
+  if (clouds instanceof Map) {
+    for (const [id, cloud] of clouds) {
+      const number = sceneId(id);
+      if (number == null || entries.has(number)) continue;
+      add(number, null, cloud);
+    }
+  } else if (clouds && typeof clouds === "object") {
+    for (const [id, cloud] of Object.entries(clouds)) {
+      const number = sceneId(id);
+      if (number == null || entries.has(number)) continue;
+      add(number, null, cloud);
+    }
+  }
+  return [...entries.entries()].sort((left, right) => left[0] - right[0]);
+}
+
+function captureGeometryKey(capture) {
+  return valueKey({
+    id: sceneId(capture?.id),
+    board_outline_world: capture?.board_outline_world,
+    marker_quads_world: capture?.marker_quads_world,
+  });
+}
+
 function pointsGeometry(points) {
   const geometry = new THREE.BufferGeometry();
   const values = [];
@@ -88,6 +197,8 @@ export class SceneModel {
     this.captureGroups = new Map();
     this.target = new THREE.Vector3();
     this._cameraSignature = "";
+    this._syncSignature = null;
+    this.selectedId = null;
     this._drag = null;
     this.available = true;
     try {
@@ -225,10 +336,12 @@ export class SceneModel {
     this.camera.lookAt(this.target);
   }
 
-  _captureGroup(capture, pair, cloud) {
+  _captureGroup(capture, pair, cloud, cloudSignature = cloudToken(cloud)) {
     const group = new THREE.Group();
     group.userData.captureId = Number(capture.id);
     group.userData.cloudBuffer = cloud;
+    group.userData.cloudSignature = cloudSignature;
+    group.userData.geometryKey = captureGeometryKey(capture);
     const color = rmsColor(pair && pair.rms_px);
     group.userData.color = color;
 
@@ -248,18 +361,19 @@ export class SceneModel {
       group.add(marker);
       group.userData.markers.push(marker);
     }
-    this._setCloud(group, cloud);
+    this._setCloud(group, cloud, cloudSignature);
     group.scale.setScalar(group.userData.captureId === this.selectedId ? 1.03 : 1);
     return group;
   }
 
-  _setCloud(group, cloud) {
+  _setCloud(group, cloud, cloudSignature = cloudToken(cloud)) {
     const existing = group.userData.points;
     if (existing) {
       group.remove(existing);
       disposeObject(existing);
       delete group.userData.points;
     }
+    group.userData.cloudSignature = cloudSignature;
     if (!(cloud instanceof ArrayBuffer)) return;
     const points = new THREE.Points(
       pointsGeometry(parseCloud(cloud)),
@@ -270,7 +384,7 @@ export class SceneModel {
     group.add(points);
   }
 
-  _updateGroup(group, pair, cloud, showPoints, colorByRms) {
+  _updateGroup(group, pair, cloud, showPoints, colorByRms, cloudSignature = cloudToken(cloud)) {
     const color = rmsColor(pair && pair.rms_px, colorByRms);
     group.userData.color = color;
     group.userData.board.material.color.copy(color);
@@ -279,9 +393,9 @@ export class SceneModel {
       group.userData.points.visible = showPoints;
       group.userData.points.material.color.copy(color);
     }
-    if (cloud !== group.userData.cloudBuffer) {
+    if (cloud !== group.userData.cloudBuffer || cloudSignature !== group.userData.cloudSignature) {
       group.userData.cloudBuffer = cloud;
-      this._setCloud(group, cloud);
+      this._setCloud(group, cloud, cloudSignature);
       if (group.userData.points) group.userData.points.visible = showPoints;
     }
     group.scale.setScalar(group.userData.captureId === this.selectedId ? 1.03 : 1);
@@ -381,29 +495,64 @@ export class SceneModel {
   sync(app) {
     if (!this.available) return;
     const sceneData = app.scene || { captures: [], camera: null };
+    const captures = Array.isArray(sceneData.captures) ? sceneData.captures : [];
+    const cloudSignatures = new Map(cloudEntries(app));
+    const selected = sceneId(app.selectedId);
+    // Include scene values as well as server revisions. Cloud buffers are
+    // immutable ReviewSession-owned objects, so identity tokens avoid scanning
+    // every point on each eligible sync.
+    const signature = valueKey({
+      epoch: app.sessionEpoch == null ? null : String(app.sessionEpoch),
+      sceneRevision: sceneData.scene_revision ?? null,
+      worldFrameId: sceneData.world_frame_id || "world",
+      captures,
+      camera: sceneData.camera,
+      captureRevision: app.state?.capture_revision ?? null,
+      pairs: app.state?.pairs || [],
+      clouds: [...cloudSignatures.entries()],
+      selected,
+      layers: {
+        points: app.layers?.points !== false,
+        frustum: app.layers?.frustum !== false,
+        rms: app.layers?.rms !== false,
+      },
+    });
+    if (signature === this._syncSignature) return;
+    this._syncSignature = signature;
+    this.selectedId = selected;
     const pairs = new Map((app.state && app.state.pairs || []).map((pair) => [Number(pair.id), pair]));
     const clouds = app.clouds || new Map();
     const seen = new Set();
-    for (const capture of sceneData.captures || []) {
-      const id = Number(capture.id);
+    for (const capture of captures) {
+      const id = sceneId(capture.id);
+      if (id == null) continue;
       seen.add(id);
       const pair = pairs.get(id);
-      const cloud = clouds.get(id);
+      const cloud = cloudFor(clouds, id);
+      const cloudEntry = cloudSignatures.get(id);
+      const captureCloudSignature = cloudEntry?.[1]?.token || null;
+      const geometryKey = captureGeometryKey(capture);
       let group = this.captureGroups.get(id);
-      if (!group) {
-        group = this._captureGroup(capture, pair, cloud);
+      if (!group || group.userData.geometryKey !== geometryKey) {
+        const replacement = this._captureGroup(capture, pair, cloud, captureCloudSignature);
+        if (!replacement) continue;
+        replacement.userData.geometryKey = geometryKey;
+        if (group) {
+          this.root.remove(group);
+          disposeObject(group);
+        }
+        group = replacement;
         this.captureGroups.set(id, group);
         this.root.add(group);
-        this._updateGroup(
-          group,
-          pair,
-          cloud,
-          app.layers?.points !== false,
-          app.layers?.rms !== false,
-        );
-      } else {
-        this._updateGroup(group, pair, cloud, app.layers?.points !== false, app.layers?.rms !== false);
       }
+      this._updateGroup(
+        group,
+        pair,
+        cloud,
+        app.layers?.points !== false,
+        app.layers?.rms !== false,
+        captureCloudSignature,
+      );
     }
     for (const [id, group] of this.captureGroups) {
       if (seen.has(id)) continue;
@@ -423,15 +572,15 @@ export class SceneModel {
       this._referenceSignature = referenceSignature;
     }
 
-    const signature = JSON.stringify([sceneData.camera, app.layers?.frustum !== false]);
-    if (signature !== this._cameraSignature) {
+    const cameraSignature = valueKey([sceneData.camera, app.layers?.frustum !== false]);
+    if (cameraSignature !== this._cameraSignature) {
       if (this.cameraGroup) {
         this.scene.remove(this.cameraGroup);
         disposeObject(this.cameraGroup);
       }
       this.cameraGroup = this._cameraObject(sceneData.camera, app.layers?.frustum !== false);
       if (this.cameraGroup) this.scene.add(this.cameraGroup);
-      this._cameraSignature = signature;
+      this._cameraSignature = cameraSignature;
     }
     this._render();
   }

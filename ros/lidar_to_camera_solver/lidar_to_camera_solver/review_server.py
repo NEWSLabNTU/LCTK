@@ -12,7 +12,9 @@ change between the two invalidates the confirmation.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
+import json
 import math
 import secrets
 import threading
@@ -87,6 +89,48 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
+def _etag_value(payload: object, kind: str) -> str:
+    """Build a stable validator without changing an endpoint's JSON shape."""
+
+    if isinstance(payload, dict):
+        epoch = payload.get("session_epoch")
+        revision = payload.get(
+            "state_revision" if kind == "state" else "scene_revision"
+        )
+        if epoch is not None and revision is not None:
+            return f"lctk-{kind}-{epoch}-{revision}"
+    try:
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=str,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError):
+        encoded = repr(payload).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    return f"lctk-{kind}-{digest}"
+
+
+def _conditional_json(payload: dict[str, Any], kind: str) -> Response:
+    """Return JSON or a bodyless 304 when the browser's validator matches."""
+
+    etag = _etag_value(payload, kind)
+    if request.if_none_match.contains(etag):
+        return Response(
+            status=304,
+            headers={
+                "ETag": f'"{etag}"',
+                "Cache-Control": "private, max-age=0, must-revalidate",
+            },
+        )
+    response = jsonify(payload)
+    response.set_etag(etag)
+    response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+    return response
+
+
 def create_app(facade: NodeFacade, *, params_writable: bool = True) -> Flask:
     static_folder = Path(__file__).resolve().parent / "web"
     app = Flask(
@@ -116,11 +160,11 @@ def create_app(facade: NodeFacade, *, params_writable: bool = True) -> Flask:
 
     @app.get("/api/state")
     def state() -> Response:
-        return jsonify(facade.state())
+        return _conditional_json(facade.state(), "state")
 
     @app.get("/api/scene")
     def scene() -> Response:
-        return jsonify(facade.scene())
+        return _conditional_json(facade.scene(), "scene")
 
     @app.post("/api/params")
     def set_params() -> Response:

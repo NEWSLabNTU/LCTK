@@ -134,6 +134,7 @@ def test_index_serves_the_local_frontend_modules(client):
     assert client.get("/static/chrome.js").status_code == 200
     assert client.get("/static/scene_model.js").status_code == 200
     assert client.get("/static/review_api.js").status_code == 200
+    assert client.get("/static/review_session.js").status_code == 200
     assert client.get("/static/quality.js").status_code == 200
     assert client.get("/static/vendor/three.module.js").status_code == 200
 
@@ -309,6 +310,46 @@ def test_state_is_returned_verbatim(client):
     response = client.get("/api/state")
     assert response.status_code == 200
     assert json.loads(response.data) == client.facade.state()
+
+
+def test_state_supports_conditional_requests_without_changing_the_json_shape(client):
+    first = client.get("/api/state")
+    assert first.status_code == 200
+    etag = first.headers.get("ETag")
+    assert etag
+
+    second = client.get("/api/state", headers={"If-None-Match": etag})
+
+    assert second.status_code == 304
+    assert second.data == b""
+    assert second.headers.get("ETag") == etag
+
+
+def test_scene_supports_conditional_requests(client):
+    first = client.get("/api/scene")
+    etag = first.headers.get("ETag")
+    assert first.status_code == 200 and etag
+
+    second = client.get("/api/scene", headers={"If-None-Match": etag})
+
+    assert second.status_code == 304
+    assert second.data == b""
+    assert second.headers.get("ETag") == etag
+
+
+def test_changed_state_revision_returns_a_new_representation(client):
+    first = client.get("/api/state")
+    etag = first.headers["ETag"]
+    client.facade._state["stillness"] = {
+        "is_still": False,
+        "reason": "moving",
+        "frames": 6,
+    }
+
+    second = client.get("/api/state", headers={"If-None-Match": etag})
+
+    assert second.status_code == 200
+    assert second.headers["ETag"] != etag
 
 
 def test_scene_is_returned_verbatim(client):

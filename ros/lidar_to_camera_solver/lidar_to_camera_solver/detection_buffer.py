@@ -372,6 +372,12 @@ class DetectionBuffer:
                 snapshot=self._snapshot_locked(),
             )
 
+    @property
+    def revision(self) -> int:
+        """Read the mutation token without copying captured sensor messages."""
+        with self._lock:
+            return self._revision
+
     def snapshot(self) -> BufferSnapshot:
         with self._lock:
             return self._snapshot_locked()

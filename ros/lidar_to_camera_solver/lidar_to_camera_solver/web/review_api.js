@@ -1,9 +1,11 @@
-/** Small, fetch-owning boundary for the assisted review server. */
+/** HTTP-only boundary for the assisted review server.
+ *
+ * ReviewSession owns state, validators, retries, and asset caches. Keeping
+ * this module transport-only prevents a second cache from diverging from it.
+ */
 export class ReviewApi {
   constructor(baseUrl = "") {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.clouds = new Map();
-    this.cloudFailures = new Map();
     this.autowareToken = null;
   }
 
@@ -13,9 +15,14 @@ export class ReviewApi {
         headers: { Accept: "application/json", ...(options.headers || {}) },
         ...options,
       });
-      const payload = await response.json();
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_error) {
+        payload = {};
+      }
       if (!response.ok) {
-        return { ok: false, detail: payload.detail || response.statusText };
+        return { ok: false, detail: payload?.detail || response.statusText };
       }
       return payload;
     } catch (error) {
@@ -23,18 +30,46 @@ export class ReviewApi {
     }
   }
 
-  async state() {
-    return this._json("/api/state");
+  async _read(path, options = {}) {
+    try {
+      const response = await fetch(this.baseUrl + path, {
+        headers: { Accept: "application/json", ...(options.headers || {}) },
+        ...options,
+      });
+      const etag = response.headers?.get?.("ETag") || null;
+      if (response.status === 304) return { ok: true, notModified: true, etag };
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_error) {
+        payload = {};
+      }
+      if (!response.ok) {
+        return { ok: false, detail: payload?.detail || response.statusText };
+      }
+      return { ok: true, notModified: false, etag, payload };
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
   }
 
-  async scene() {
-    return this._json("/api/scene");
+  async state(etag = null) {
+    return this._read("/api/state", {
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
+  }
+
+  async scene(etag = null) {
+    return this._read("/api/scene", {
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
   }
 
   async preview(id) {
     try {
       const response = await fetch(
         this.baseUrl + `/api/pair/${encodeURIComponent(Number(id))}/preview.jpg`,
+        { headers: { Accept: "image/jpeg" } },
       );
       if (!response.ok) return null;
       return await response.blob();
@@ -44,47 +79,15 @@ export class ReviewApi {
   }
 
   async cloud(id) {
-    const key = Number(id);
-    if (this.clouds.has(key)) return this.clouds.get(key);
-    const failure = this.cloudFailures.get(key);
-    if (failure && Date.now() < failure.nextAttemptMs) return null;
     try {
       const response = await fetch(
-        this.baseUrl + `/api/pair/${encodeURIComponent(key)}/cloud.bin`,
+        this.baseUrl + `/api/pair/${encodeURIComponent(Number(id))}/cloud.bin`,
+        { headers: { Accept: "application/octet-stream" } },
       );
-      if (!response.ok) {
-        this._recordCloudFailure(key);
-        return null;
-      }
-      const data = await response.arrayBuffer();
-      this.cloudFailures.delete(key);
-      this.clouds.set(key, data);
-      return data;
+      if (!response.ok) return null;
+      return await response.arrayBuffer();
     } catch (_error) {
-      this._recordCloudFailure(key);
       return null;
-    }
-  }
-
-  _recordCloudFailure(key) {
-    const count = (this.cloudFailures.get(key)?.count || 0) + 1;
-    const delayMs = Math.min(30000, 500 * 2 ** Math.min(count - 1, 6));
-    this.cloudFailures.set(key, { count, nextAttemptMs: Date.now() + delayMs });
-  }
-
-  forgetCloud(id) {
-    const key = Number(id);
-    this.clouds.delete(key);
-    this.cloudFailures.delete(key);
-  }
-
-  pruneClouds(activeIds) {
-    const keep = new Set([...activeIds].map((id) => Number(id)));
-    for (const id of this.clouds.keys()) {
-      if (!keep.has(id)) this.forgetCloud(id);
-    }
-    for (const id of this.cloudFailures.keys()) {
-      if (!keep.has(id)) this.cloudFailures.delete(id);
     }
   }
 
@@ -97,9 +100,7 @@ export class ReviewApi {
   }
 
   async drop(id) {
-    const result = await this._post(`/api/pair/${encodeURIComponent(id)}/drop`);
-    if (result.ok) this.forgetCloud(id);
-    return result;
+    return this._post(`/api/pair/${encodeURIComponent(id)}/drop`);
   }
 
   async exportArchive(path) {
@@ -124,3 +125,5 @@ export class ReviewApi {
     return this._post("/api/params", values);
   }
 }
+
+export default ReviewApi;

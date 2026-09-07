@@ -39,6 +39,67 @@ function pairClass(rms) {
   return band === "high" ? "b" : band === "medium" ? "m" : band === "low" ? "g" : "";
 }
 
+// Cloud payloads are immutable once they enter ReviewSession.  Revisions are
+// the normal invalidation signal; the identity token catches a replacement
+// buffer from a small embedder that has not assigned a revision yet, without
+// scanning a potentially large point cloud on every heartbeat.
+const cloudObjectIds = new WeakMap();
+let nextCloudObjectId = 1;
+
+function cloudToken(cloud) {
+  if (!cloud || typeof cloud !== "object") return null;
+  let token = cloudObjectIds.get(cloud);
+  if (token == null) {
+    token = nextCloudObjectId;
+    nextCloudObjectId += 1;
+    cloudObjectIds.set(cloud, token);
+  }
+  return token;
+}
+
+function valueKey(value) {
+  return JSON.stringify(value);
+}
+
+function cloudEntries(app) {
+  const entries = new Map();
+  const revisions = app?.cloudRevisions;
+  const clouds = app?.clouds;
+  const add = (id, revision, cloud) => {
+    const number = pairId(id);
+    if (number == null) return;
+    entries.set(number, {
+      revision: revision == null ? null : Number(revision),
+      token: cloudToken(cloud),
+    });
+  };
+  if (revisions instanceof Map) {
+    for (const [id, revision] of revisions) add(id, revision, cloudFor(clouds, pairId(id)));
+  } else if (revisions && typeof revisions === "object") {
+    for (const [id, revision] of Object.entries(revisions)) add(id, revision, cloudFor(clouds, pairId(id)));
+  }
+  if (clouds instanceof Map) {
+    for (const [id, cloud] of clouds) {
+      const number = pairId(id);
+      if (number == null || entries.has(number)) continue;
+      add(number, null, cloud);
+    }
+  } else if (clouds && typeof clouds === "object") {
+    for (const [id, cloud] of Object.entries(clouds)) {
+      const number = pairId(id);
+      if (number == null || entries.has(number)) continue;
+      add(number, null, cloud);
+    }
+  }
+  return [...entries.entries()].sort((left, right) => left[0] - right[0]);
+}
+
+function cloudFor(app, id) {
+  if (app?.clouds instanceof Map) return app.clouds.get(id);
+  if (app?.clouds && typeof app.clouds === "object") return app.clouds[id];
+  return null;
+}
+
 export function pairId(value) {
   if (value == null || typeof value === "boolean") return null;
   if (typeof value === "string" && value.trim() === "") return null;
@@ -84,12 +145,17 @@ function diversityMetric(diversity, key, digits, suffix) {
 }
 
 function setText(element, value) {
-  if (element) element.textContent = value == null ? "" : String(value);
+  if (!element) return;
+  const text = value == null ? "" : String(value);
+  if (element.textContent !== text) element.textContent = text;
 }
 
 function setClass(element, className) {
   if (!element) return;
-  element.classList.remove("ok", "bad", "warn");
+  const classes = ["ok", "bad", "warn"];
+  const current = classes.find((name) => element.classList.contains(name)) || null;
+  if (current === className) return;
+  element.classList.remove(...classes);
   if (className) element.classList.add(className);
 }
 
@@ -116,6 +182,15 @@ export class Chrome {
     this._paramDirty = false;
     this._paramDirtyNames = new Set();
     this._paramPendingEffective = null;
+    this._listRenderKey = null;
+    this._detailRenderKey = null;
+    this._footerGaugeRenderKey = null;
+    this._footerLiveRenderKey = null;
+    this._footerLegendRenderKey = null;
+    this._paramsRenderKey = null;
+    this._exportRenderKey = null;
+    this._rows = new Map();
+    this._emptyListRow = null;
     this._bind();
   }
 
@@ -406,68 +481,130 @@ export class Chrome {
     return result;
   }
 
+  _createElement(tagName) {
+    const owner = this.root?.ownerDocument;
+    if (owner?.createElement) return owner.createElement(tagName);
+    if (typeof document !== "undefined" && document.createElement) {
+      return document.createElement(tagName);
+    }
+    return null;
+  }
+
+  _buildListRow(app, id) {
+    const row = this._createElement("div");
+    if (!row) return null;
+    row.className = "row";
+    row.dataset.pairId = String(id);
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    const top = this._createElement("div");
+    const idLabel = this._createElement("span");
+    const pill = this._createElement("span");
+    const meta = this._createElement("div");
+    if (!top || !idLabel || !pill || !meta) return null;
+    top.className = "top";
+    idLabel.className = "id";
+    // The capture id is immutable for the lifetime of a keyed row.  Keeping
+    // this write in the constructor path avoids touching static labels on
+    // every heartbeat.
+    idLabel.textContent = `#${id}`;
+    pill.className = "pill";
+    pill.title = "Recomputed for all captures after calibration changes";
+    meta.className = "meta";
+    top.append(idLabel, pill);
+    row.append(top, meta);
+    row._chromeParts = { pill, meta };
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this._call("onSelect", this._app || app, id);
+    });
+    return row;
+  }
+
+  _updateListRow(app, row, pair, capture, selected) {
+    const id = pairId(pair.id);
+    if (id == null || !row) return;
+    const className = `row ${pairClass(pair.rms_px)}${selected === id ? " sel" : ""}`;
+    if (row.className !== className) row.className = className;
+    if (row.getAttribute?.("aria-pressed") !== String(selected === id)) {
+      row.setAttribute("aria-pressed", String(selected === id));
+    }
+    const position = capture?.position;
+    const range = Array.isArray(position) && position.length >= 3
+      ? Math.hypot(Number(position[0]), Number(position[1]), Number(position[2]))
+      : null;
+    const inliers = cloudPointCount(cloudFor(app, id));
+    const parts = [];
+    if (range != null && Number.isFinite(range)) parts.push(`range ${range.toFixed(2)} m`);
+    if (inliers != null) parts.push(`${formatCount(inliers)} inliers`);
+    if (pair.missing?.length) parts.push(`missing ${pair.missing.join(", ")}`);
+    const metaText = parts.length ? parts.join(" · ") : "evidence unavailable";
+    const rowParts = row._chromeParts || {};
+    setText(rowParts.pill, formatNumber(pair.rms_px, 1, " px"));
+    setText(rowParts.meta, metaText);
+  }
+
   _renderList(app, pairs, captures) {
     const summary = this._query("#detSummary");
+    const validPairs = pairs
+      .map((pair) => [pairId(pair.id), pair])
+      .filter(([id]) => id != null);
     if (summary) {
       if (app.state == null) {
         setText(summary, "loading…");
       } else {
-        const count = pairs.length;
+        const count = validPairs.length;
         setText(summary, `${count} capture${count === 1 ? "" : "s"}`);
       }
     }
     const list = this._query("#list");
     if (!list) return;
+    this._rows ||= new Map();
     const selected = pairId(app.selectedId);
-    list.replaceChildren();
-    if (pairs.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "shortfall";
-      empty.textContent = "No captures yet";
-      list.append(empty);
+    const desired = [];
+    for (const [id, pair] of validPairs) {
+      let row = this._rows.get(id);
+      if (!row) {
+        row = this._buildListRow(app, id);
+        if (!row) continue;
+        this._rows.set(id, row);
+      }
+      this._updateListRow(app, row, pair, captures.get(id), selected);
+      desired.push(row);
+    }
+
+    const desiredSet = new Set(desired);
+    for (const [id, row] of this._rows) {
+      if (desiredSet.has(row)) continue;
+      row.remove?.();
+      this._rows.delete(id);
+    }
+
+    if (desired.length === 0) {
+      if (!this._emptyListRow) {
+        this._emptyListRow = this._createElement("div");
+        if (this._emptyListRow) {
+          this._emptyListRow.className = "shortfall";
+          this._emptyListRow.textContent = "No captures yet";
+        }
+      }
+      const empty = this._emptyListRow;
+      if (empty && list.children?.[0] !== empty) list.insertBefore(empty, list.children?.[0] || null);
+      for (const child of [...(list.children || [])]) {
+        if (child !== empty) child.remove?.();
+      }
       return;
     }
-    for (const pair of pairs) {
-      const id = pairId(pair.id);
-      if (id == null) continue;
-      const row = document.createElement("div");
-      row.className = `row ${pairClass(pair.rms_px)}${selected === id ? " sel" : ""}`;
-      row.dataset.pairId = String(id);
-      row.tabIndex = 0;
-      row.setAttribute("role", "button");
-      row.setAttribute("aria-pressed", String(selected === id));
 
-      const top = document.createElement("div");
-      top.className = "top";
-      const idLabel = document.createElement("span");
-      idLabel.className = "id";
-      idLabel.textContent = `#${id}`;
-      const pill = document.createElement("span");
-      pill.className = "pill";
-      pill.textContent = formatNumber(pair.rms_px, 1, " px");
-      pill.title = "Recomputed for all captures after calibration changes";
-      top.append(idLabel, pill);
-
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      const capture = captures.get(id);
-      const position = capture?.position;
-      const range = Array.isArray(position) && position.length >= 3
-        ? Math.hypot(Number(position[0]), Number(position[1]), Number(position[2]))
-        : null;
-      const inliers = cloudPointCount(app.clouds?.get(id));
-      const parts = [];
-      if (range != null && Number.isFinite(range)) parts.push(`range ${range.toFixed(2)} m`);
-      if (inliers != null) parts.push(`${formatCount(inliers)} inliers`);
-      if (pair.missing?.length) parts.push(`missing ${pair.missing.join(", ")}`);
-      meta.textContent = parts.length ? parts.join(" · ") : "evidence unavailable";
-      row.append(top, meta);
-      row.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        this._call("onSelect", app, id);
-      });
-      list.append(row);
+    if (this._emptyListRow) this._emptyListRow.remove?.();
+    // Move a row only when its position in the keyed order is wrong.  This
+    // preserves focus, hover state, and the event listener for unchanged rows.
+    desired.forEach((row, index) => {
+      if (list.children?.[index] !== row) list.insertBefore(row, list.children?.[index] || null);
+    });
+    for (const child of [...(list.children || [])]) {
+      if (!desiredSet.has(child)) child.remove?.();
     }
   }
 
@@ -515,7 +652,9 @@ export class Chrome {
       if (inner) inner.insertBefore(host, metrics || inner.firstChild);
     }
     if (!host) return;
-    const revision = finiteNumber(app.state?.scene_revision) ?? 0;
+    const revision = finiteNumber(pair.evidence_revision)
+      ?? finiteNumber(app.state?.scene_revision)
+      ?? 0;
     const hasPreview = pair.has_preview === true && !missing.includes("camera frame");
     const previewState = app.preview?.id === id
       ? app.preview
@@ -567,7 +706,7 @@ export class Chrome {
     host.append(loading, image);
   }
 
-  _renderFooter(app, pairs) {
+  _renderFooterGauges(app) {
     const state = app.state || {};
     const diversity = state.diversity || {};
     const gauges = this._all("footer .gauge");
@@ -595,29 +734,32 @@ export class Chrome {
       const track = gauge.querySelector(".track");
       const fill = track?.querySelector("i");
       if (index === 0) {
-        setText(label?.querySelector("span"), metric[0]);
         const target = metric[1].target == null ? null : formatCount(metric[1].target);
         setText(value, target == null ? metric[1].value : `${metric[1].value} / ${target}`);
         if (fill) fill.style.width = `${metric[1].fraction * 100}%`;
         track?.classList.toggle("short", metric[2] || (target != null && metric[1].fraction < 1));
       } else {
-        setText(label?.querySelector("span"), metric[0]);
         setText(value, metric[1].target == null ? metric[1].value : `${metric[1].value} / ${metric[1].target}`);
         if (fill) fill.style.width = `${metric[1].fraction * 100}%`;
         track?.classList.toggle("short", metric[1].short);
       }
     });
+  }
 
+  _renderFooterLive(app) {
+    const state = app.state || {};
     const cells = this._all("footer .cell");
     const stillness = state.stillness || {};
     const stillValue = cells[4]?.querySelector(".value");
     setClass(stillValue, stillness.is_still ? "ok" : "bad");
     if (stillValue) {
-      const dot = document.createElement("span");
-      dot.className = "dot";
-      stillValue.replaceChildren(dot, document.createTextNode(
-        `${stillness.is_still ? "still" : "moving"} — ${stillness.reason || "waiting"}`,
-      ));
+      const text = `${stillness.is_still ? "still" : "moving"} — ${stillness.reason || "waiting"}`;
+      const existingDot = stillValue.querySelector(".dot");
+      if (!existingDot || stillValue.textContent !== text) {
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        stillValue.replaceChildren(dot, document.createTextNode(text));
+      }
     }
     const solve = state.solve || {};
     const solveValue = cells[5]?.querySelector(".value");
@@ -626,14 +768,25 @@ export class Chrome {
     setText(solveValue, `${solve.status || "unknown"}${solve.rms_px == null ? "" : ` — RMS ${formatNumber(solve.rms_px, 1, " px")}`}`);
     const syncValue = cells[6]?.querySelector(".value");
     setText(syncValue, state.sync || "waiting for synchronization");
+  }
 
+  _renderFooterLegend(app, pairs) {
     const legendSubs = this._all(".legend .sub");
     const cloudPoints = pairs.reduce((total, pair) => {
-      const count = cloudPointCount(app.clouds?.get(pairId(pair.id)));
+      const count = cloudPointCount(cloudFor(app, pairId(pair.id)));
       return total + (count == null ? 0 : count);
     }, 0);
     setText(legendSubs[0], `${pairs.length} pair${pairs.length === 1 ? "" : "s"} · ${cloudPoints} inliers`);
-    setText(legendSubs[1], "LMB pan · RMB orbit · wheel zoom");
+    // The second legend line is part of the static page shell.  It is never
+    // rewritten by a heartbeat.
+  }
+
+  // Kept as a small compatibility seam for embedders that called the old
+  // private helper while the page was still rendered as one footer block.
+  _renderFooter(app, pairs) {
+    this._renderFooterGauges(app);
+    this._renderFooterLive(app);
+    this._renderFooterLegend(app, pairs);
   }
 
   _renderParams(app) {
@@ -704,8 +857,8 @@ export class Chrome {
     }
   }
 
-  /** Render all DOM owned by Chrome.  Callbacks are the only write path. */
-  render(app = {}) {
+  /** Render DOM whose revision/selection key changed. */
+  render(app = {}, dirty = { all: true }) {
     this._app = app;
     this._bind();
     const state = app.state || {};
@@ -719,11 +872,83 @@ export class Chrome {
     } else if (selectedPair) {
       this._invalidSelection = null;
     }
-    this._renderList(app, pairs, captures);
-    this._renderDetail(app, selectedPair, captures.get(selected));
-    this._renderFooter(app, pairs);
-    this._renderParams(app);
-    this._renderExportAvailability(app);
+    const cloudKey = valueKey(cloudEntries(app));
+    const listKey = valueKey({
+      // ``capture_revision`` is the cheap common case; including the actual
+      // projection keeps this correct for older facades and for in-place
+      // updates delivered by a test/fake facade.
+      captureRevision: state.capture_revision ?? null,
+      pairs,
+      captures: [...captures.entries()].map(([id, capture]) => [id, capture?.position]),
+      evidenceRevisions: state.evidence_revisions || {},
+      clouds: cloudKey,
+      selected,
+    });
+    // Dirty hints are scheduling hints, not truth.  Delayed evidence is
+    // allowed to complete while ``list`` is false, so the value key always
+    // gets the final say.
+    if (listKey !== this._listRenderKey) {
+      this._listRenderKey = listKey;
+      this._renderList(app, pairs, captures);
+    }
+
+    const detailKey = valueKey([
+      selected,
+      selectedPair,
+      captures.get(selected),
+      app.preview,
+      cloudKey,
+    ]);
+    if (detailKey !== this._detailRenderKey) {
+      this._detailRenderKey = detailKey;
+      this._renderDetail(app, selectedPair, captures.get(selected));
+    }
+
+    const footerGaugeKey = valueKey(state.diversity || {});
+    if (footerGaugeKey !== this._footerGaugeRenderKey) {
+      this._footerGaugeRenderKey = footerGaugeKey;
+      this._renderFooterGauges(app);
+    }
+
+    const footerLiveKey = valueKey({
+      stillness: state.stillness || {},
+      solve: state.solve || {},
+      sync: state.sync || "",
+    });
+    if (footerLiveKey !== this._footerLiveRenderKey) {
+      this._footerLiveRenderKey = footerLiveKey;
+      this._renderFooterLive(app);
+    }
+
+    const footerLegendKey = valueKey({ pairs: pairs.map((pair) => pairId(pair.id)), clouds: cloudKey });
+    if (footerLegendKey !== this._footerLegendRenderKey) {
+      this._footerLegendRenderKey = footerLegendKey;
+      this._renderFooterLegend(app, pairs);
+    }
+
+    const paramsKey = valueKey([
+      app.state?.stability_params,
+      app.state?.params,
+      app.state?.params_writable,
+      app.state?.params_detail,
+      this._actionBusy,
+      this._paramDirty,
+    ]);
+    if (paramsKey !== this._paramsRenderKey) {
+      this._paramsRenderKey = paramsKey;
+      this._renderParams(app);
+    }
+
+    const exportKey = valueKey([
+      app.state?.export_availability,
+      app.state?.export,
+      this._autowareEntry,
+      this._actionBusy,
+    ]);
+    if (exportKey !== this._exportRenderKey) {
+      this._exportRenderKey = exportKey;
+      this._renderExportAvailability(app);
+    }
 
     const notice = this._query("#action-notice");
     if (notice && app.notice) setText(notice, app.notice);

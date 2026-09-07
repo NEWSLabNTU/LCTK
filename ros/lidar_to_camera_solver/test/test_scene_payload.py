@@ -194,6 +194,7 @@ def test_state_reports_the_camera_source_stamp_and_export_availability():
             "has_preview": False,
             "missing": ["camera frame", "plane inliers"],
             "stamp_s": 12.345,
+            "evidence_revision": 0,
         }
     ]
     assert state["export"]["autoware_ready"] is False
@@ -201,3 +202,42 @@ def test_state_reports_the_camera_source_stamp_and_export_availability():
         "export_autoware_target",
         "export_lidar_frame",
     ]
+
+
+def test_review_scene_reuses_snapshot_until_buffer_or_pose_changes(monkeypatch):
+    solver = _solver()
+    original = solver.detection_buffer.snapshot
+    copies = []
+
+    def counted_snapshot():
+        copies.append(True)
+        return original()
+
+    monkeypatch.setattr(solver.detection_buffer, "snapshot", counted_snapshot)
+    first = solver.scene()
+    assert solver.scene() is first
+    assert len(copies) == 1
+
+    solver.current_tvec[0, 0] += 1
+    moved = solver.scene()
+    assert moved["scene_revision"] > first["scene_revision"]
+    assert moved["camera"] != first["camera"]
+    assert len(copies) == 1
+
+    solver.detection_buffer.remove(0)
+    empty = solver.scene()
+    assert empty["captures"] == []
+    assert empty["scene_revision"] > moved["scene_revision"]
+    assert len(copies) == 2
+
+
+def test_review_scene_republishes_revision_when_geometry_returns_to_an_old_key():
+    solver = _solver()
+    first = solver.scene()
+    solver.current_tvec[0, 0] += 1.0
+    moved = solver.scene()
+    solver.current_tvec[0, 0] -= 1.0
+    returned = solver.scene()
+
+    assert moved["scene_revision"] > first["scene_revision"]
+    assert returned["scene_revision"] > moved["scene_revision"]

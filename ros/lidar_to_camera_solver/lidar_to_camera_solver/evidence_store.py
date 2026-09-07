@@ -92,6 +92,10 @@ class EvidenceStore:
         self._intrinsics: _Intrinsics | None = None
         self._evidence: OrderedDict[int, CaptureEvidence] = OrderedDict()
         self._pending: dict[int, _PendingCapture] = {}
+        # Per-capture tokens let the review page retry evidence that completed
+        # after capture without treating a missing asset as a permanent result.
+        self._evidence_revisions: dict[int, int] = {}
+        self._revision_sequence = 0
         self._lock = threading.RLock()
 
     def observe_frame(
@@ -269,6 +273,7 @@ class EvidenceStore:
             pair_id = int(pair_id)
             self._evidence[pair_id] = evidence
             self._evidence.move_to_end(pair_id)
+            self._bump_evidence_revision_locked(pair_id)
             if retryable or cloud is None:
                 self._pending[pair_id] = _PendingCapture(
                     camera_stamp=camera_stamp,
@@ -289,18 +294,47 @@ class EvidenceStore:
                 self._evidence.move_to_end(int(pair_id))
             return evidence
 
+    def peek(self, pair_id: int) -> CaptureEvidence | None:
+        """Return evidence without changing the LRU order.
+
+        Review state projection calls this on every heartbeat; a read must not
+        evict a genuinely recent preview merely because the browser is polling.
+        """
+
+        with self._lock:
+            return self._evidence.get(int(pair_id))
+
+    def evidence_revision(self, pair_id: int) -> int:
+        """Return the monotonic token for one capture's evidence."""
+
+        with self._lock:
+            return int(self._evidence_revisions.get(int(pair_id), 0))
+
+    def snapshot(self, pair_ids):
+        """Read immutable payload references and their tokens under one lock."""
+        with self._lock:
+            return {
+                int(pair_id): (
+                    self._evidence.get(int(pair_id)),
+                    self._evidence_revisions.get(int(pair_id), 0),
+                )
+                for pair_id in pair_ids
+            }
+
     def drop(self, pair_id: int) -> None:
         """Forget all evidence associated with one review id."""
         with self._lock:
             pair_id = int(pair_id)
             self._evidence.pop(pair_id, None)
             self._pending.pop(pair_id, None)
+            self._evidence_revisions.pop(pair_id, None)
 
     def clear(self) -> None:
         """Forget captures and buffered source payloads, retaining intrinsics."""
         with self._lock:
             self._evidence.clear()
             self._pending.clear()
+            self._evidence_revisions.clear()
             self._frames.clear()
             self._clouds.clear()
 
@@ -391,6 +425,7 @@ class EvidenceStore:
                 missing=missing,
             )
             self._evidence.move_to_end(pair_id)
+            self._bump_evidence_revision_locked(pair_id)
             if not missing:
                 self._pending.pop(pair_id, None)
 
@@ -426,6 +461,7 @@ class EvidenceStore:
                 missing=missing,
             )
             self._evidence.move_to_end(pair_id)
+            self._bump_evidence_revision_locked(pair_id)
             if not missing:
                 self._pending.pop(pair_id, None)
 
@@ -437,6 +473,12 @@ class EvidenceStore:
         while len(self._evidence) > self._max_previews:
             pair_id, _ = self._evidence.popitem(last=False)
             self._pending.pop(pair_id, None)
+            self._evidence_revisions.pop(pair_id, None)
+
+    def _bump_evidence_revision_locked(self, pair_id: int) -> None:
+        pair_id = int(pair_id)
+        self._revision_sequence += 1
+        self._evidence_revisions[pair_id] = self._revision_sequence
 
 
 def _finite_stamp(value: Any) -> float | None:

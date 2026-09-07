@@ -499,6 +499,8 @@ def facade_harness(**kwargs) -> LidarToCameraSolver:
 def test_state_is_json_shaped_before_anything_has_been_captured():
     solver = facade_harness()
     state = solver.state()
+    repeat = solver.state()
+    assert repeat["state_revision"] == state["state_revision"]
     assert state["mode"] == "assisted"
     assert state["sync"] == "sync: groups=12"
     assert state["identity_error"] is None
@@ -576,6 +578,31 @@ def test_state_reports_a_closed_identity_gate():
     solver = facade_harness()
     solver.identity_gate = _Gate(error="camera identity disagrees")
     assert solver.state()["identity_error"] == "camera identity disagrees"
+
+
+def test_live_and_evidence_changes_do_not_recompute_capture_quality(monkeypatch):
+    solver = facade_harness()
+    hold(solver, 6)
+    calls = []
+    original = solver_main.compute_diversity
+
+    def counted(placements):
+        calls.append(True)
+        return original(placements)
+
+    monkeypatch.setattr(solver_main, "compute_diversity", counted)
+    first = solver.state()
+    assert solver.state()["state_revision"] == first["state_revision"]
+    solver.pair_source.status_line = lambda: "sync: groups=13"
+    live = solver.state()
+    assert live["state_revision"] > first["state_revision"]
+    assert live["capture_revision"] == first["capture_revision"]
+    solver._evidence_store.dropped.append(0)
+    missing = solver.state()
+    assert not missing["pairs"][0]["has_preview"]
+    assert missing["evidence_revisions"]["0"] > first["evidence_revisions"]["0"]
+    assert missing["capture_revision"] == first["capture_revision"]
+    assert len(calls) == 1
 
 
 def test_drop_removes_the_pair_and_its_preview():

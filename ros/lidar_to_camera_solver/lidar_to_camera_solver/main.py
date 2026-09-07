@@ -80,6 +80,7 @@ from lidar_to_camera_solver.detection_format import (
     select_loaded_adjustment,
 )
 from lidar_to_camera_solver.evidence_store import EvidenceStore
+from lidar_to_camera_solver.review_read_model import ReviewReadModel
 from lidar_to_camera_solver.review_server import (
     ReviewServer,
     is_loopback_host,
@@ -100,6 +101,21 @@ class _PendingAutowareExport:
     lidar_frame: str
     rvec: np.ndarray
     tvec: np.ndarray
+
+
+@dataclass(frozen=True)
+class _ReviewSceneSource:
+    """Scene inputs copied together under ``state_lock``."""
+
+    cache_key: tuple
+    scene_revision: int
+    snapshot: BufferSnapshot | None
+    camera_matrix: np.ndarray | None
+    rvec: np.ndarray | None
+    tvec: np.ndarray | None
+    image_size: tuple[int, int] | None
+    target: object | None
+    world_frame_id: str
 
 
 def message_stamp_seconds(message) -> float:
@@ -392,6 +408,7 @@ class LidarToCameraSolver(Node):
         # is what keeps those two paths byte-for-byte the behaviour they had.
         self._stillness: StillnessTracker | None = None
         self._evidence_store: EvidenceStore | None = None
+        self._review_read_model: ReviewReadModel | None = None
         self._review_capture_ids: set[int] = set()
         self._review_server: ReviewServer | None = None
         self._last_stillness = None
@@ -580,6 +597,7 @@ class LidarToCameraSolver(Node):
             jpeg_quality=self._integer_parameter("review_jpeg_quality"),
             review_evidence_seconds=self._double_parameter("review_evidence_seconds"),
         )
+        self._review_read_model = ReviewReadModel()
         if camera_topic:
             # The image is for the reviewer, never for the solve, so it takes the
             # sensor QoS as the source camera and retains a short stamped history.
@@ -1607,33 +1625,10 @@ class LidarToCameraSolver(Node):
     # state_lock is also DetectionPairSource's admission lock and the publishing
     # timer's lock, so holding it over a file write would stall the graph.
 
-    def state(self) -> dict:
-        """Everything the review page renders, as plain JSON-able data."""
+    @staticmethod
+    def _review_capture_projection(snapshot):
+        """Build the immutable capture/quality portion of review state."""
 
-        with self.state_lock:
-            snapshot = self._snapshot()
-            stillness = self._last_stillness
-            scene_revision = getattr(self, "_scene_revision", 0)
-            tracker = getattr(self, "_stillness", None)
-            stability_params = dict(
-                getattr(
-                    tracker,
-                    "params",
-                    getattr(self, "_stability_params", {}),
-                )
-            )
-            params_writable = bool(getattr(self, "_review_params_writable", False))
-            params_detail = getattr(self, "_review_params_detail", "")
-            evidence = (
-                {
-                    pair_id: self._evidence_store.get(pair_id)
-                    for pair_id in (
-                        snapshot.capture_ids if snapshot is not None else ()
-                    )
-                }
-                if self._evidence_store is not None
-                else {}
-            )
         diversity = (
             compute_diversity(snapshot.placements) if snapshot is not None else None
         )
@@ -1643,19 +1638,8 @@ class LidarToCameraSolver(Node):
             if estimate is not None
             else []
         )
-        with self.state_lock:
-            identity_error = self.identity_gate.error
-        export_values = {
-            "export_autoware_target": self._string_parameter("export_autoware_target"),
-            "export_camera_frame": self._string_parameter("export_camera_frame"),
-            "export_lidar_frame": self._string_parameter("export_lidar_frame"),
-        }
-        export_missing = [name for name, value in export_values.items() if not value]
-        autoware_ready = not export_missing
-        # ``per_pose_rms_px`` is deliberately recomputed by DetectionBuffer for
-        # the current joint estimate.  Both it and ``capture_ids`` follow the
-        # snapshot's capture order, so removing a pair can change every value
-        # without ever changing which stable ID each value belongs to.
+        # ``per_pose_rms_px`` follows capture order. Removing one capture can
+        # therefore change every value, even though the stable IDs do not shift.
         pair_entries = []
         for index, pair_id in enumerate(
             snapshot.capture_ids if snapshot is not None else ()
@@ -1672,19 +1656,197 @@ class LidarToCameraSolver(Node):
                     "rms_px": (
                         per_pose_rms[index] if index < len(per_pose_rms) else None
                     ),
-                    "has_preview": (
-                        evidence.get(pair_id) is not None
-                        and evidence[pair_id].preview_jpeg is not None
-                    ),
-                    "missing": (
-                        list(evidence[pair_id].missing)
-                        if evidence.get(pair_id) is not None
-                        else ["camera frame", "plane inliers"]
-                    ),
                     "stamp_s": source_stamp if math.isfinite(source_stamp) else None,
                 }
             )
         return {
+            "diversity": diversity,
+            "estimate": estimate,
+            "per_pose_rms": per_pose_rms,
+            "pairs": pair_entries,
+        }
+
+    def state(self) -> dict:
+        """Everything the review page renders, as plain JSON-able data."""
+
+        model = self._review_model()
+        with model.lock:
+            return self._review_state(model)
+
+    def _review_model(self):
+        with self.state_lock:
+            model = getattr(self, "_review_read_model", None)
+            if model is None:
+                model = ReviewReadModel()
+                self._review_read_model = model
+            return model
+
+    def _review_snapshot_locked(self, model):
+        buffer = self.detection_buffer
+        revision = getattr(buffer, "revision", None)
+        # Small facade test doubles may expose only snapshot(). Production
+        # buffers provide the cheap token so a heartbeat never copies messages.
+        if revision is None:
+            return self._snapshot()
+        return model.cached((buffer, revision), self._snapshot, slot="snapshot")
+
+    def _review_scene_key_locked(self, snapshot):
+        def array_key(name):
+            value = getattr(self, name, None)
+            return None if value is None else np.asarray(value).tobytes()
+
+        camera = getattr(self, "camera_info", None)
+        return (
+            getattr(self, "_scene_revision", 0),
+            self.detection_buffer,
+            snapshot.revision if snapshot else None,
+            array_key("current_rvec"),
+            array_key("current_tvec"),
+            array_key("_camera_matrix"),
+            getattr(camera, "width", None),
+            getattr(camera, "height", None),
+            getattr(self, "parent_frame", ""),
+        )
+
+    def _review_scene_revision_locked(self, model, snapshot):
+        """Observe the complete key and return its monotonic public token."""
+
+        return model.observe_scene(self._review_scene_key_locked(snapshot))
+
+    def _review_scene_source_locked(self, model) -> _ReviewSceneSource:
+        """Copy one coherent scene source while ``state_lock`` is held."""
+
+        snapshot = self._review_snapshot_locked(model)
+        cache_key = self._review_scene_key_locked(snapshot)
+        scene_revision = model.observe_scene(cache_key)
+        camera_info = getattr(self, "camera_info", None)
+        current_matrix = getattr(self, "_camera_matrix", None)
+        current_rvec = getattr(self, "current_rvec", None)
+        current_tvec = getattr(self, "current_tvec", None)
+        image_size = None
+        if camera_info is not None:
+            image_size = (
+                int(getattr(camera_info, "width", 0)),
+                int(getattr(camera_info, "height", 0)),
+            )
+        return _ReviewSceneSource(
+            cache_key=cache_key,
+            scene_revision=scene_revision,
+            snapshot=snapshot,
+            camera_matrix=(
+                None
+                if current_matrix is None
+                else np.asarray(current_matrix, dtype=np.float64).copy()
+            ),
+            rvec=(
+                None
+                if current_rvec is None
+                else np.asarray(current_rvec, dtype=np.float64).copy()
+            ),
+            tvec=(
+                None
+                if current_tvec is None
+                else np.asarray(current_tvec, dtype=np.float64).copy()
+            ),
+            image_size=image_size,
+            target=getattr(self, "target", None),
+            world_frame_id=str(getattr(self, "parent_frame", "")),
+        )
+
+    def _review_state(self, read_model):
+
+        with self.state_lock:
+            snapshot = self._review_snapshot_locked(read_model)
+            buffer_key = (
+                self.detection_buffer,
+                snapshot.revision if snapshot else None,
+            )
+            stillness = self._last_stillness
+            scene_revision = self._review_scene_revision_locked(read_model, snapshot)
+            tracker = getattr(self, "_stillness", None)
+            stability_params = dict(
+                getattr(
+                    tracker,
+                    "params",
+                    getattr(self, "_stability_params", {}),
+                )
+            )
+            params_writable = bool(getattr(self, "_review_params_writable", False))
+            params_detail = getattr(self, "_review_params_detail", "")
+            evidence_reader = getattr(self._evidence_store, "peek", None)
+            if evidence_reader is None and self._evidence_store is not None:
+                evidence_reader = self._evidence_store.get
+            store_snapshot = getattr(self._evidence_store, "snapshot", None)
+            evidence = (
+                {
+                    pair_id: evidence_reader(pair_id)
+                    for pair_id in (
+                        snapshot.capture_ids if snapshot is not None else ()
+                    )
+                }
+                if evidence_reader is not None and store_snapshot is None
+                else {}
+            )
+            evidence_versions = {}
+            if store_snapshot is not None:
+                entries = store_snapshot(snapshot.capture_ids if snapshot else ())
+                evidence = {pair_id: entry[0] for pair_id, entry in entries.items()}
+                evidence_versions = {
+                    pair_id: entry[1] for pair_id, entry in entries.items()
+                }
+            identity_error = self.identity_gate.error
+
+        capture_revision = None
+        evidence_revisions = {}
+        session_epoch = None
+        if read_model is not None:
+            capture_revision = read_model.observe_capture(buffer_key)
+            evidence_signatures = {
+                pair_id: (
+                    evidence_versions.get(pair_id, 0),
+                    current is not None,
+                    current.preview_jpeg is not None if current is not None else False,
+                    current.cloud_xyz is not None if current is not None else False,
+                    tuple(current.missing)
+                    if current is not None
+                    else (
+                        "camera frame",
+                        "plane inliers",
+                    ),
+                )
+                for pair_id, current in evidence.items()
+            }
+            evidence_revisions = read_model.observe_evidence(evidence_signatures)
+            session_epoch = read_model.session_epoch
+            projection = read_model.cached(
+                buffer_key,
+                lambda: self._review_capture_projection(snapshot),
+            )
+        else:
+            projection = self._review_capture_projection(snapshot)
+        diversity = projection["diversity"]
+        estimate = projection["estimate"]
+        pair_entries = [dict(pair) for pair in projection["pairs"]]
+        for pair in pair_entries:
+            current = evidence.get(pair["id"])
+            pair.update(
+                {
+                    "has_preview": current is not None
+                    and current.preview_jpeg is not None,
+                    "missing": list(current.missing)
+                    if current
+                    else ["camera frame", "plane inliers"],
+                    "evidence_revision": evidence_revisions.get(pair["id"], 0),
+                }
+            )
+        export_values = {
+            "export_autoware_target": self._string_parameter("export_autoware_target"),
+            "export_camera_frame": self._string_parameter("export_camera_frame"),
+            "export_lidar_frame": self._string_parameter("export_lidar_frame"),
+        }
+        export_missing = [name for name, value in export_values.items() if not value]
+        autoware_ready = not export_missing
+        response = {
             "mode": self.solver_mode,
             "scene_revision": scene_revision,
             "stability_params": stability_params,
@@ -1755,22 +1917,46 @@ class LidarToCameraSolver(Node):
                 }
             },
         }
+        if read_model is not None:
+            revisions = read_model.revisions()
+            # Keep this map string-keyed in the JSON model so browser lookups do
+            # not depend on JSON's integer-key coercion.
+            response.update(
+                {
+                    "session_epoch": session_epoch,
+                    "capture_revision": capture_revision,
+                    "evidence_revisions": {
+                        str(pair_id): revision
+                        for pair_id, revision in revisions.evidence_revisions.items()
+                    },
+                }
+            )
+            response["state_revision"] = read_model.observe_state(
+                json.dumps(response, sort_keys=True, separators=(",", ":"), default=str)
+            )
+        return response
 
     def scene(self) -> dict:
         """Return one coherent world-space scene snapshot for the review page."""
 
-        with self.state_lock:
-            snapshot = self._snapshot()
-            scene_revision = getattr(self, "_scene_revision", 0)
-            camera_info = getattr(self, "camera_info", None)
-            current_matrix = getattr(self, "_camera_matrix", None)
-            camera_matrix = None if current_matrix is None else current_matrix.copy()
-            current_rvec = getattr(self, "current_rvec", None)
-            current_tvec = getattr(self, "current_tvec", None)
-            rvec = None if current_rvec is None else current_rvec.copy()
-            tvec = None if current_tvec is None else current_tvec.copy()
-            target = getattr(self, "target", None)
-            world_frame_id = getattr(self, "parent_frame", "")
+        model = self._review_model()
+        with model.lock:
+            with self.state_lock:
+                source = self._review_scene_source_locked(model)
+            return model.cached(
+                (source.cache_key, source.scene_revision),
+                lambda: self._review_scene(source),
+                slot="scene",
+            )
+
+    def _review_scene(self, source: _ReviewSceneSource):
+        snapshot = source.snapshot
+        scene_revision = source.scene_revision
+        camera_matrix = source.camera_matrix
+        rvec = source.rvec
+        tvec = source.tvec
+        target = source.target
+        world_frame_id = source.world_frame_id
 
         captures = []
         if snapshot is not None and target is not None:
@@ -1796,7 +1982,7 @@ class LidarToCameraSolver(Node):
 
         camera = None
         if (
-            camera_info is not None
+            source.image_size is not None
             and camera_matrix is not None
             and rvec is not None
             and tvec is not None
@@ -1822,19 +2008,23 @@ class LidarToCameraSolver(Node):
                         "cy": float(camera_matrix[1, 2]),
                     },
                     "image_size": {
-                        "width": int(camera_info.width),
-                        "height": int(camera_info.height),
+                        "width": source.image_size[0],
+                        "height": source.image_size[1],
                     },
                 }
             except (cv2.error, ValueError, np.linalg.LinAlgError):
                 camera = None
 
-        return {
+        payload = {
             "scene_revision": int(scene_revision),
             "world_frame_id": world_frame_id,
             "captures": captures,
             "camera": camera,
         }
+        read_model = getattr(self, "_review_read_model", None)
+        if read_model is not None:
+            payload["session_epoch"] = read_model.session_epoch
+        return payload
 
     def preview(self, pair_id: int) -> bytes | None:
         with self.state_lock:
