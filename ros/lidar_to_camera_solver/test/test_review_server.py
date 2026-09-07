@@ -148,9 +148,95 @@ def test_scene_model_has_world_reference_and_observed_sizing(client):
 def test_scene_model_uses_autoware_z_up_orbit_without_a_pole_wall(client):
     source = client.get("/static/scene_model.js").data.decode()
     assert "this.camera.up.set(0, 0, 1)" in source
-    assert "this._orbitPitch -= dy * 0.006" in source
+    assert "this._orbitPitch += dy * 0.006" in source
     assert "Math.cos(this._orbitPitch)" in source
     assert "Math.max(0.08" not in source
+
+
+def test_frontend_orbit_crosses_the_sky_without_a_half_turn_flip():
+    result = _run_frontend_module(
+        """
+        import * as THREE from './vendor/three.module.js';
+        import { SceneModel } from './scene_model.js';
+
+        const model = Object.create(SceneModel.prototype);
+        model.target = new THREE.Vector3();
+        model.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+        model.camera.up.set(0, 0, 1);
+        model._orbitYaw = 0.4;
+        model._orbitPitch = Math.PI / 2 - 0.03;
+        model._orbitRadius = 3;
+        model._setCameraFromOrbit();
+        const before = model.camera.quaternion.clone();
+
+        // A small downward drag crosses the sky-facing pole.
+        model._orbit(0, 10);
+        const after = model.camera.quaternion.clone();
+        if (before.angleTo(after) > 0.2) {
+          throw new Error(`orbit flipped ${before.angleTo(after)} radians`);
+        }
+        if (model.camera.position.distanceTo(model.target) < 2.99) {
+          throw new Error('orbit radius changed while crossing the pole');
+        }
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_frontend_orbit_downward_drag_raises_camera_elevation():
+    result = _run_frontend_module(
+        """
+        import * as THREE from './vendor/three.module.js';
+        import { SceneModel } from './scene_model.js';
+
+        const model = Object.create(SceneModel.prototype);
+        model.target = new THREE.Vector3();
+        model.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+        model.camera.up.set(0, 0, 1);
+        model._orbitYaw = 0.4;
+        model._orbitPitch = 0.35;
+        model._orbitRadius = 3;
+        model._setCameraFromOrbit();
+        const beforeZ = model.camera.position.z;
+
+        // Downward pointer motion must raise the camera in elevation.
+        model._orbit(0, 10);
+        if (!(model.camera.position.z > beforeZ)) {
+          throw new Error('downward drag lowered camera elevation');
+        }
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_frontend_orbit_zoom_keeps_an_over_pole_orientation():
+    result = _run_frontend_module(
+        """
+        import * as THREE from './vendor/three.module.js';
+        import { SceneModel } from './scene_model.js';
+
+        const model = Object.create(SceneModel.prototype);
+        model.target = new THREE.Vector3();
+        model.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+        model.camera.up.set(0, 0, 1);
+        model._orbitYaw = -0.7;
+        model._orbitPitch = Math.PI / 2 + 0.4;
+        model._orbitRadius = 3;
+        model._setCameraFromOrbit();
+        const before = model.camera.quaternion.clone();
+        model._zoom(1.25);
+        if (Math.abs(model._orbitPitch - (Math.PI / 2 + 0.4)) > 1e-12) {
+          throw new Error('zoom canonicalized the over-pole pitch');
+        }
+        if (Math.abs(model.camera.position.distanceTo(model.target) - 3.75) > 1e-9) {
+          throw new Error('zoom changed the wrong orbit radius');
+        }
+        if (before.angleTo(model.camera.quaternion) > 1e-9) {
+          throw new Error('zoom changed the over-pole orientation');
+        }
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_advanced_parameter_drafts_have_a_distinct_dirty_style(client):

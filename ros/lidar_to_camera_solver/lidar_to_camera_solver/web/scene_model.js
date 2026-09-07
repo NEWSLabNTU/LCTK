@@ -115,8 +115,8 @@ export class SceneModel {
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Line.threshold = 0.04;
     this._bindControls();
-    this.camera.lookAt(this.target);
     this._setOrbitFromCamera();
+    this._setCameraFromOrbit();
     this._resize();
     this._onWindowResize = () => this._resize();
     window.addEventListener("resize", this._onWindowResize);
@@ -159,10 +159,8 @@ export class SceneModel {
     this.canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
       const direction = Math.exp(event.deltaY * 0.0012);
-      const offset = this.camera.position.clone().sub(this.target);
-      offset.multiplyScalar(Math.max(0.2, Math.min(5, direction)));
-      this.camera.position.copy(this.target).add(offset);
-      this._setOrbitFromCamera();
+      const scale = Math.max(0.2, Math.min(5, direction));
+      this._zoom(scale);
       this._render();
     }, { passive: false });
   }
@@ -185,13 +183,26 @@ export class SceneModel {
   }
 
   _setCameraFromOrbit() {
-    const horizontal = Math.cos(this._orbitPitch) * this._orbitRadius;
+    const cosPitch = Math.cos(this._orbitPitch);
+    const sinPitch = Math.sin(this._orbitPitch);
+    const cosYaw = Math.cos(this._orbitYaw);
+    const sinYaw = Math.sin(this._orbitYaw);
+    const horizontal = cosPitch * this._orbitRadius;
     this.camera.position.set(
-      this.target.x + horizontal * Math.cos(this._orbitYaw),
-      this.target.y + horizontal * Math.sin(this._orbitYaw),
-      this.target.z + Math.sin(this._orbitPitch) * this._orbitRadius,
+      this.target.x + horizontal * cosYaw,
+      this.target.y + horizontal * sinYaw,
+      this.target.z + sinPitch * this._orbitRadius,
     );
+    // Keep the view's up direction tangent to the orbit. A fixed world-Z up
+    // vector reverses screen-right and screen-up directions when pitch crosses
+    // either pole, which appears as an abrupt 180-degree roll.
+    this.camera.up.set(-sinPitch * cosYaw, -sinPitch * sinYaw, cosPitch);
     this.camera.lookAt(this.target);
+  }
+
+  _zoom(scale) {
+    this._orbitRadius = Math.max(this._orbitRadius * scale, 0.001);
+    this._setCameraFromOrbit();
   }
 
   _orbit(dx, dy) {
@@ -199,7 +210,7 @@ export class SceneModel {
     // instead of stopping against an artificial vertical wall.  Vertical
     // drag is inverted to match the operator's view convention.
     this._orbitYaw -= dx * 0.006;
-    this._orbitPitch -= dy * 0.006;
+    this._orbitPitch += dy * 0.006;
     this._setCameraFromOrbit();
   }
 
@@ -435,8 +446,8 @@ export class SceneModel {
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.8, 0.8);
     this.target.copy(center);
     this.camera.position.copy(center).add(new THREE.Vector3(radius, radius * 0.6, radius));
-    this.camera.lookAt(this.target);
     this._setOrbitFromCamera();
+    this._setCameraFromOrbit();
     for (const item of this.captureGroups.values()) {
       item.scale.setScalar(item.userData.captureId === this.selectedId ? 1.03 : 1);
     }
@@ -457,8 +468,8 @@ export class SceneModel {
       this.target.copy(center);
       this.camera.position.copy(center).add(new THREE.Vector3(radius, radius * 0.6, radius));
     }
-    this.camera.lookAt(this.target);
     this._setOrbitFromCamera();
+    this._setCameraFromOrbit();
     this._render();
   }
 
