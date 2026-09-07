@@ -104,3 +104,9 @@ _Avoid_: Solved estimate, calibration result
 A versioned saved representation of a Detection Buffer, its Quality Verdict, and an optional
 Adjusted Transform.
 _Avoid_: Dump file, saved buffer
+
+**Assisted Review Session**:
+The browser's coherent view of one current Detection Buffer, its Quality Verdict, live stillness and
+synchronization status, and the matched evidence for its Captures. Evidence may be absent while a
+Capture remains valid.
+_Avoid_: page state, API response, cache
