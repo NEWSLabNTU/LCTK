@@ -507,8 +507,9 @@ export class SceneModel {
       worldFrameId: sceneData.world_frame_id || "world",
       captures,
       camera: sceneData.camera,
-      captureRevision: app.state?.capture_revision ?? null,
-      pairs: app.state?.pairs || [],
+      captureRevision: (app.captures || app.state)?.capture_revision ?? null,
+      capturesRevision: (app.captures || app.state)?.captures_revision ?? null,
+      pairs: (app.captures || app.state)?.pairs || [],
       clouds: [...cloudSignatures.entries()],
       selected,
       layers: {
@@ -520,7 +521,8 @@ export class SceneModel {
     if (signature === this._syncSignature) return;
     this._syncSignature = signature;
     this.selectedId = selected;
-    const pairs = new Map((app.state && app.state.pairs || []).map((pair) => [Number(pair.id), pair]));
+    const capturesState = app.captures || app.state || {};
+    const pairs = new Map((capturesState.pairs || []).map((pair) => [Number(pair.id), pair]));
     const clouds = app.clouds || new Map();
     const seen = new Set();
     for (const capture of captures) {

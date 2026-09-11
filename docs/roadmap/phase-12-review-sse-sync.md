@@ -40,16 +40,16 @@ session restart; stale asynchronous responses are discarded.
 
 - [x] Publish the feature branch and this phase record.
 - [x] Amend ADR 0008 with the split-read/SSE decision and retained constraints.
-- [ ] Add read-model revisions, mutation notifications, and endpoint snapshots.
-- [ ] Add the bounded SSE hub and `/api/live`, `/api/captures`, and
+- [x] Add read-model revisions, mutation notifications, and endpoint snapshots.
+- [x] Add the bounded SSE hub and `/api/live`, `/api/captures`, and
       `/api/revisions` routes.
-- [ ] Replace the browser heartbeat with bootstrap + SSE, independent fetches,
+- [x] Replace the browser heartbeat with bootstrap + SSE, independent fetches,
       and `/api/revisions` fallback.
-- [ ] Add regression tests for bandwidth/DOM isolation, reconnect/coalescing,
+- [x] Add regression tests for bandwidth/DOM isolation, reconnect/coalescing,
       epochs, evidence completion, and independent ETags.
-- [ ] Run deliberate-failure test checks, `just build`, `just test`, and
+- [x] Run deliberate-failure test checks, `just build`, `just test`, and
       `just lint`; restore any generated `Cargo.lock` changes.
-- [ ] Publish every verified checkpoint and record the command/results below.
+- [x] Publish every verified checkpoint and record the command/results below.
 
 ## Progress log
 
@@ -57,11 +57,18 @@ session restart; stale asynchronous responses are discarded.
 |------|------------|--------|
 | 2026-09-11 | Baseline branch | Started from `origin/main` at `59ec995`; branch published. |
 | 2026-09-11 | Design | Read-only Astra review confirmed split projections, SSE hints, epoch guards, and fallback contract. |
+| 2026-09-11 | Documentation | Amended ADR 0008 in place and pushed checkpoint `ee1456b`. |
+| 2026-09-11 | Implementation | Added independent read-model revisions/listeners, split Flask projections, bounded SSE, fallback polling, mutation notifications, and browser-owned projection/asset caches. |
+| 2026-09-11 | Regression coverage | Focused Python/Node/ROS contract suites: 113 passed. Deliberately broken assertion failed, then was restored. |
+| 2026-09-11 | Build | `env -u OPENCV_INCLUDE_PATHS -u OPENCV_LINK_PATHS -u OPENCV_LINK_LIBS JUST_TEMPDIR=tmp just build` passed. The shell's configured `/home/jetson/opt/opencv-4.5.4` prefix is absent; apt's matching `opencv4` was used without installing anything. No Cargo.lock changes. |
+| 2026-09-11 | Full verification | `just test` passed: 173 Rust passed/1 skipped and 794 Python passed/1 skipped. `just lint` passed (existing non-fatal Rust warnings only). |
+| 2026-09-11 | Remote | Verified branch tracking and pushed implementation checkpoint; no merge to `main`. |
 
 ## Verification record
 
 The previous implementation baseline was 777 tests passed and one skipped,
-with `just build` and `just lint` successful. New verification entries will be
-added here as each checkpoint lands. Browser visual verification remains an
-operator check when the Firefox runtime is available; JavaScript tests cover
-the transport and rendering contracts without requiring WebGL.
+with `just build` and `just lint` successful. The completed branch runs 173
+Rust tests (one skipped) and 794 Python tests (one skipped), with the added
+SSE/cache regression tests included. Browser visual verification remains an
+operator check when the Firefox runtime is available; JavaScript tests cover the
+transport and rendering contracts without requiring WebGL.

@@ -140,6 +140,29 @@ def test_evidence_revision_advances_when_delayed_cloud_completes():
     assert store.evidence_revision(7) == 2
 
 
+def test_change_callback_publishes_capture_and_delayed_evidence_updates():
+    revisions = []
+    store = make_store(on_change=lambda: revisions.append(store.evidence_revision(7)))
+    store.observe_intrinsics(camera_matrix(), np.zeros(5, dtype=np.float64))
+    observe_frame(store, stamp=10.0)
+
+    store.capture(7, 10.0, corners=[], cloud_stamp=10.5)
+    assert revisions == [1]
+
+    store.observe_cloud(10.5, [[7.0, 8.0, 9.0]])
+    assert revisions == [1, 2]
+
+
+def test_change_callback_is_not_called_for_unmatched_source_messages():
+    changes = []
+    store = make_store(on_change=lambda: changes.append(True))
+    store.observe_intrinsics(camera_matrix(), np.zeros(5, dtype=np.float64))
+    observe_frame(store, stamp=10.0)
+    store.observe_cloud(10.5, [[1.0, 2.0, 3.0]])
+
+    assert changes == []
+
+
 def test_evicted_and_recaptured_evidence_has_a_fresh_revision():
     store = make_store(max_previews=1)
     store.capture(1, 1.0, corners=[])

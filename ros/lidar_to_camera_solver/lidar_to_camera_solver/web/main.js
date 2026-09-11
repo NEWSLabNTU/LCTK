@@ -75,10 +75,11 @@ if (canvas) {
   };
 
   render({ all: true });
-  setInterval(() => session.poll(), 500);
 
-  // Start the cheap state request before loading the vendored Three.js module.
-  // The first list/footer paint should not wait for WebGL parsing or context
-  // creation. Scene hydration remains independent and fills in when ready.
+  // Bootstrap the combined projection once, then let SSE carry only revision
+  // hints. ReviewSession independently fetches live, capture, and scene
+  // projections and falls back to the tiny revisions endpoint when the stream
+  // is unavailable. The first list/footer paint still does not wait for WebGL
+  // parsing or evidence hydration.
   void session.start();
 }

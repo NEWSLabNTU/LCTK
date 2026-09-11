@@ -30,6 +30,44 @@ function pairMap(state) {
   );
 }
 
+function liveProjection(state) {
+  if (!state || typeof state !== "object") return null;
+  const fields = [
+    "mode", "stillness", "sync", "identity_error", "stability_params",
+    "params_writable", "params_detail", "export", "export_availability",
+    "live_revision", "session_epoch",
+  ];
+  return Object.fromEntries(fields
+    .filter((field) => field in state)
+    .map((field) => [field, state[field]]));
+}
+
+function capturesProjection(state) {
+  if (!state || typeof state !== "object") return null;
+  const fields = [
+    "mode", "pairs", "diversity", "solve", "capture_revision",
+    "captures_revision", "evidence_revisions", "session_epoch",
+  ];
+  return Object.fromEntries(fields
+    .filter((field) => field in state)
+    .map((field) => [field, state[field]]));
+}
+
+function revisionVector(value) {
+  if (!value || typeof value !== "object") return null;
+  const epoch = value.session_epoch == null ? null : String(value.session_epoch);
+  const live = finiteRevision(value.live_revision);
+  const captures = finiteRevision(value.captures_revision);
+  const scene = finiteRevision(value.scene_revision);
+  if (epoch == null || live == null || captures == null || scene == null) return null;
+  return {
+    session_epoch: epoch,
+    live_revision: live,
+    captures_revision: captures,
+    scene_revision: scene,
+  };
+}
+
 function finiteRevision(value, fallback = null) {
   const revision = Number(value);
   return Number.isSafeInteger(revision) && revision >= 0 ? revision : fallback;
@@ -52,6 +90,8 @@ export class ReviewSession {
     previewCacheLimit = 32,
     cloudCacheLimit = 256,
     cloudConcurrency = 4,
+    eventSourceFactory = null,
+    revisionsRetryMs = 1000,
   } = {}) {
     this.api = api;
     this.onChange = onChange;
@@ -64,6 +104,8 @@ export class ReviewSession {
     this.previewCacheLimit = Math.max(1, Number(previewCacheLimit) || 32);
     this.cloudCacheLimit = Math.max(1, Number(cloudCacheLimit) || 256);
     this.cloudConcurrency = Math.max(1, Number(cloudConcurrency) || 4);
+    this.eventSourceFactory = eventSourceFactory;
+    this.revisionsRetryMs = Math.max(100, Number(revisionsRetryMs) || 1000);
 
     // Successful bytes live here. A missing response is a retryable failure,
     // so it is kept only in the backoff map and never in either cache.
@@ -76,19 +118,39 @@ export class ReviewSession {
     this.cloudHydrationPromise = null;
 
     this.stateEtag = null;
+    this.liveEtag = null;
+    this.capturesEtag = null;
+    this.revisionsEtag = null;
     this.sceneEtag = null;
     this.stateRequest = null;
+    this.liveRequest = null;
+    this.capturesRequest = null;
+    this.revisionsRequest = null;
     this.sceneRequest = null;
     this.stateGeneration = 0;
+    this.liveGeneration = 0;
+    this.capturesGeneration = 0;
+    this.revisionsGeneration = 0;
     this.sceneGeneration = 0;
     this.assetGeneration = 0;
     this.selectionGeneration = 0;
     this.epoch = null;
     this.pairGenerations = new Map();
+    this.eventSource = null;
+    this.fallbackTimer = null;
+    this.eventWatchdog = null;
+    this.syncStarted = false;
+    this._needsBootstrap = false;
+    this._desiredRevisions = {};
+    this.projectionRetryTimers = new Map();
+    this.projectionRetryCounts = new Map();
 
     this.app = {
       api,
       state: null,
+      live: null,
+      captures: null,
+      revisions: null,
       scene: { scene_revision: -1, captures: [], camera: null },
       clouds: new Map(),
       cloudRevisions: new Map(),
@@ -106,7 +168,7 @@ export class ReviewSession {
   }
 
   _activePair(id) {
-    return pairMap(this.app.state).get(numberId(id)) || null;
+    return pairMap(this.app.captures || this.app.state).get(numberId(id)) || null;
   }
 
   _revokeDisplayedPreview() {
@@ -163,6 +225,66 @@ export class ReviewSession {
 
   _stateEpoch(state) {
     return state?.session_epoch == null ? null : String(state.session_epoch);
+  }
+
+  _setProjectionState(state) {
+    this.app.live = liveProjection(state);
+    this.app.captures = capturesProjection(state);
+    this.app.revisions = revisionVector(state);
+  }
+
+  _mergeProjection(projection, kind) {
+    if (!projection || typeof projection !== "object") return;
+    if (kind === "live") this.app.live = projection;
+    if (kind === "captures") this.app.captures = projection;
+    if (kind === "scene") this.app.scene = projection;
+    if (kind === "live" || kind === "captures") {
+      this.app.state = { ...(this.app.state || {}), ...projection };
+    }
+    const vector = revisionVector({
+      ...(this.app.revisions || {}),
+      ...(projection || {}),
+      session_epoch: projection.session_epoch ?? this.epoch,
+    });
+    if (vector) this.app.revisions = vector;
+  }
+
+  _prepareEpoch(nextEpoch, { bootstrap = false } = {}) {
+    if (nextEpoch == null) return true;
+    if (this.epoch == null) {
+      this.epoch = nextEpoch;
+      this.app.sessionEpoch = this.epoch;
+      return true;
+    }
+    if (this.epoch === nextEpoch) return true;
+    if (!bootstrap) {
+      this._needsBootstrap = true;
+      this.reset();
+      void this.refreshState();
+      return false;
+    }
+    this.assetGeneration += 1;
+    this.sceneGeneration += 1;
+    this.liveGeneration += 1;
+    this.capturesGeneration += 1;
+    this.revisionsGeneration += 1;
+    this.sceneRequest = null;
+    this.liveRequest = null;
+    this.capturesRequest = null;
+    this.revisionsRequest = null;
+    this._clearAssetCaches();
+    this.sceneEtag = null;
+    this.liveEtag = null;
+    this.capturesEtag = null;
+    this.revisionsEtag = null;
+    this.app.scene = { scene_revision: -1, captures: [], camera: null };
+    this.app.selectedId = null;
+    this.app.selectedCaptureId = null;
+    this.selectionGeneration += 1;
+    this.onFrameAll();
+    this.epoch = nextEpoch;
+    this.app.sessionEpoch = this.epoch;
+    return true;
   }
 
   _pairGeneration(id) {
@@ -249,6 +371,27 @@ export class ReviewSession {
     });
   }
 
+  _scheduleProjectionRetry(kind) {
+    if (this.projectionRetryTimers.has(kind)) return;
+    const count = (this.projectionRetryCounts.get(kind) || 0) + 1;
+    this.projectionRetryCounts.set(kind, count);
+    const delay = Math.min(30000, 250 * 2 ** Math.min(count - 1, 6));
+    const timer = setTimeout(() => {
+      this.projectionRetryTimers.delete(kind);
+      if (kind === "live") void this.refreshLive();
+      else if (kind === "captures") void this.refreshCaptures();
+      else if (kind === "scene") void this.refreshScene();
+    }, delay);
+    this.projectionRetryTimers.set(kind, timer);
+  }
+
+  _clearProjectionRetry(kind) {
+    const timer = this.projectionRetryTimers.get(kind);
+    if (timer != null) clearTimeout(timer);
+    this.projectionRetryTimers.delete(kind);
+    this.projectionRetryCounts.delete(kind);
+  }
+
   async refreshState() {
     if (this.stateRequest) return this.stateRequest;
     const requestGeneration = this.stateGeneration;
@@ -287,19 +430,7 @@ export class ReviewSession {
       const oldEpoch = this.epoch;
       const nextEpoch = this._stateEpoch(state);
       const epochChanged = oldEpoch != null && nextEpoch != null && oldEpoch !== nextEpoch;
-      if (epochChanged) {
-        this.assetGeneration += 1;
-        this.sceneGeneration += 1;
-        this.sceneRequest = null;
-        this._clearAssetCaches();
-        this.sceneEtag = null;
-        this.app.scene = { scene_revision: -1, captures: [], camera: null };
-        this.app.selectedId = null;
-        this.app.selectedCaptureId = null;
-        this.selectionGeneration += 1;
-        this.onFrameAll();
-      }
-      if (nextEpoch != null) this.epoch = nextEpoch;
+      if (!this._prepareEpoch(nextEpoch, { bootstrap: true })) return false;
       this.app.sessionEpoch = this.epoch;
 
       const oldPairs = pairMap(oldState);
@@ -309,7 +440,12 @@ export class ReviewSession {
       }
       const oldCaptureRevision = finiteRevision(oldState?.capture_revision);
       const nextCaptureRevision = finiteRevision(state.capture_revision);
-      const captureChanged = oldState == null || oldCaptureRevision !== nextCaptureRevision;
+      const oldCapturesRevision = finiteRevision(oldState?.captures_revision);
+      const nextCapturesRevision = finiteRevision(state.captures_revision);
+      const captureChanged = oldState == null ||
+        (nextCapturesRevision != null
+          ? oldCapturesRevision !== nextCapturesRevision
+          : oldCaptureRevision !== nextCaptureRevision);
       const oldSceneRevision = finiteRevision(oldState?.scene_revision);
       const nextSceneRevision = finiteRevision(state.scene_revision);
       const sceneChanged = oldState == null || oldSceneRevision !== nextSceneRevision;
@@ -324,6 +460,8 @@ export class ReviewSession {
       // newest accepted state. Keeping the old state here makes an evidence
       // revision change invisible to the selected preview/cloud paths.
       this.app.state = state;
+      this._setProjectionState(state);
+      this._needsBootstrap = false;
       const selected = numberId(this.app.selectedId);
       let selectionDropped = false;
       if (selected != null && !nextPairs.has(selected)) {
@@ -365,13 +503,283 @@ export class ReviewSession {
     }
   }
 
+  _projectionRevision(kind, payload) {
+    const field = kind === "live" ? "live_revision" :
+      kind === "captures" ? "captures_revision" : "scene_revision";
+    return finiteRevision(payload?.[field]);
+  }
+
+  _projectionRequestName(kind) {
+    return `${kind}Request`;
+  }
+
+  _projectionEtagName(kind) {
+    return `${kind}Etag`;
+  }
+
+  _projectionGenerationName(kind) {
+    return `${kind}Generation`;
+  }
+
+  async _refreshProjection(kind) {
+    const fetcher = this.api?.[kind];
+    if (typeof fetcher !== "function") return false;
+    const requestName = this._projectionRequestName(kind);
+    const etagName = this._projectionEtagName(kind);
+    const generationName = this._projectionGenerationName(kind);
+    if (this[requestName]) return this[requestName];
+    const requestGeneration = this[generationName];
+    const expectedEpoch = this.epoch;
+    const desiredRevision = this._desiredRevisions?.[kind] ?? null;
+    const request = (async () => {
+      let raw;
+      try {
+        raw = await fetcher.call(this.api, this[etagName]);
+      } catch (error) {
+        this.app.notice = `server unavailable: ${error instanceof Error ? error.message : String(error)}`;
+        this._emit({ notice: true, live: true });
+        this._scheduleProjectionRetry(kind);
+        return false;
+      }
+      if (requestGeneration !== this[generationName]) return false;
+      const result = readResult(raw);
+      if (result.ok === false) {
+        this.app.notice = `server unavailable: ${result.detail || "request failed"}`;
+        this._emit({ notice: true, live: true });
+        this._scheduleProjectionRetry(kind);
+        return false;
+      }
+      if (result.notModified) {
+        if (result.etag) this[etagName] = result.etag;
+        const current = this._projectionRevision(kind, this.app[kind]);
+        if (desiredRevision != null && (current == null || current < desiredRevision)) {
+          this[etagName] = null;
+          queueMicrotask(() => void this._refreshProjection(kind));
+        }
+        return false;
+      }
+      const payload = result.payload;
+      if (!payload || payload.ok === false) {
+        this._scheduleProjectionRetry(kind);
+        return false;
+      }
+      const payloadEpoch = this._stateEpoch(payload);
+      if (payloadEpoch != null && !this._prepareEpoch(payloadEpoch)) return false;
+      if (expectedEpoch != null && expectedEpoch !== this.epoch) return false;
+      this[etagName] = result.etag || this[etagName];
+      const returnedRevision = this._projectionRevision(kind, payload);
+      if (desiredRevision != null && returnedRevision != null && returnedRevision < desiredRevision) {
+        this[etagName] = null;
+        queueMicrotask(() => void this._refreshProjection(kind));
+        return false;
+      }
+      if (kind === "live") {
+        this._mergeProjection(payload, "live");
+        this._emit({ state: true, live: true, footer: true });
+      } else if (kind === "captures") {
+        const oldState = this.app.state;
+        const oldPairs = pairMap(this.app.captures || oldState);
+        const nextPairs = pairMap(payload);
+        for (const id of oldPairs.keys()) {
+          if (!nextPairs.has(id)) this._forgetPair(id);
+        }
+        this._mergeProjection(payload, "captures");
+        let selectionDropped = false;
+        const selected = numberId(this.app.selectedId);
+        if (selected != null && !nextPairs.has(selected)) {
+          this._clearSelectionState();
+          selectionDropped = true;
+        }
+        const selectedPair = this._activePair(selected);
+        if (selectedPair && this.app.preview.id === selected &&
+            this.app.preview.revision !== revisionOf(selectedPair)) {
+          this._revokeDisplayedPreview();
+          this.app.preview = {
+            id: selected,
+            revision: revisionOf(selectedPair),
+            url: null,
+            status: selectedPair.has_preview === true ? "loading" : "missing",
+          };
+        }
+        this._pruneClouds();
+        this._emit({
+          state: true,
+          list: true,
+          footer: true,
+          detail: selectionDropped,
+          preview: selectionDropped,
+        });
+        if (selectionDropped) this.onFrameAll();
+        this._scheduleHydration();
+      }
+      if (this._desiredRevisions?.[kind] === returnedRevision) {
+        delete this._desiredRevisions[kind];
+      }
+      this._clearProjectionRetry(kind);
+      return true;
+    })();
+    this[requestName] = request;
+    try {
+      return await request;
+    } finally {
+      if (this[requestName] === request) {
+        this[requestName] = null;
+        const desired = this._desiredRevisions?.[kind];
+        const current = this._projectionRevision(kind, this.app[kind]);
+        if (desired != null && (current == null || current < desired) &&
+            !this.projectionRetryTimers.has(kind)) {
+          queueMicrotask(() => void this._refreshProjection(kind));
+        }
+      }
+    }
+  }
+
+  async refreshLive() {
+    return this._refreshProjection("live");
+  }
+
+  async refreshCaptures() {
+    return this._refreshProjection("captures");
+  }
+
+  async refreshRevisions() {
+    const fetcher = this.api?.revisions;
+    if (typeof fetcher !== "function") return this.refreshState();
+    if (this.revisionsRequest) return this.revisionsRequest;
+    const requestGeneration = this.revisionsGeneration;
+    const request = (async () => {
+      let raw;
+      try {
+        raw = await fetcher.call(this.api, this.revisionsEtag);
+      } catch (_error) {
+        return false;
+      }
+      if (requestGeneration !== this.revisionsGeneration) return false;
+      const result = readResult(raw);
+      if (result.ok === false) return false;
+      if (result.notModified) {
+        if (result.etag) this.revisionsEtag = result.etag;
+        return false;
+      }
+      const vector = revisionVector(result.payload);
+      if (!vector) return false;
+      if (!this._prepareEpoch(vector.session_epoch)) return false;
+      this.revisionsEtag = result.etag || this.revisionsEtag;
+      this._handleRevisionHint(vector);
+      return true;
+    })();
+    this.revisionsRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.revisionsRequest === request) this.revisionsRequest = null;
+    }
+  }
+
+  _handleRevisionHint(value) {
+    const vector = revisionVector(value);
+    if (!vector) return;
+    if (!this._prepareEpoch(vector.session_epoch)) return;
+    if (!this._desiredRevisions) this._desiredRevisions = {};
+    const current = this.app.revisions || {};
+    for (const kind of ["live", "captures", "scene"]) {
+      const key = `${kind}_revision`;
+      if (vector[key] > finiteRevision(current[key], -1)) {
+        this._desiredRevisions[kind] = Math.max(
+          vector[key], this._desiredRevisions[kind] || -1,
+        );
+        if (kind === "live") void this.refreshLive();
+        else if (kind === "captures") void this.refreshCaptures();
+        else void this.refreshScene();
+      }
+    }
+    this._armEventWatchdog();
+  }
+
+  _armEventWatchdog() {
+    if (!this.eventSource) return;
+    if (this.eventWatchdog != null) clearTimeout(this.eventWatchdog);
+    this.eventWatchdog = setTimeout(() => {
+      this._startFallback();
+    }, Math.max(5000, this.revisionsRetryMs * 4));
+  }
+
+  _stopFallback() {
+    if (this.fallbackTimer != null) clearInterval(this.fallbackTimer);
+    this.fallbackTimer = null;
+  }
+
+  _startFallback() {
+    if (typeof this.api?.revisions !== "function") return;
+    if (this.fallbackTimer == null) {
+      void this.refreshRevisions();
+      this.fallbackTimer = setInterval(() => void this.refreshRevisions(), this.revisionsRetryMs);
+    }
+  }
+
+  startEvents() {
+    if (this.syncStarted) return this.eventSource;
+    this.syncStarted = true;
+    const factory = this.eventSourceFactory || this.api?.openEvents?.bind(this.api);
+    if (typeof factory !== "function") {
+      this._startFallback();
+      return null;
+    }
+    let source;
+    try {
+      source = factory();
+    } catch (_error) {
+      this._startFallback();
+      return null;
+    }
+    if (!source) {
+      this._startFallback();
+      return null;
+    }
+    this.eventSource = source;
+    source.onopen = () => {
+      this._stopFallback();
+      this._armEventWatchdog();
+      void this.refreshRevisions();
+    };
+    source.onerror = () => {
+      this._startFallback();
+      this._armEventWatchdog();
+    };
+    const receive = (event) => {
+      try {
+        const data = typeof event?.data === "string" ? JSON.parse(event.data) : event?.data;
+        this._handleRevisionHint(data);
+      } catch (_error) {
+        // An invalid hint is harmless; the fallback remains authoritative.
+      }
+    };
+    source.onmessage = receive;
+    if (typeof source.addEventListener === "function") {
+      source.addEventListener("revisions", receive);
+      source.addEventListener("heartbeat", () => this._armEventWatchdog());
+    }
+    this._armEventWatchdog();
+    return source;
+  }
+
+  stopEvents() {
+    if (this.eventWatchdog != null) clearTimeout(this.eventWatchdog);
+    this.eventWatchdog = null;
+    this._stopFallback();
+    if (this.eventSource?.close) this.eventSource.close();
+    this.eventSource = null;
+    this.syncStarted = false;
+  }
+
   async refreshScene() {
     const state = this.app.state;
     if (!state) return null;
     if (this.sceneRequest) return this.sceneRequest;
     const expectedEpoch = this.epoch;
     const expectedStateGeneration = this.stateGeneration;
-    const expectedRevision = finiteRevision(state.scene_revision, -1);
+    const expectedRevision = this._desiredRevisions?.scene ??
+      finiteRevision(state.scene_revision, -1);
     if (finiteRevision(this.app.scene?.scene_revision, -2) === expectedRevision) return null;
     const requestGeneration = this.sceneGeneration;
     const request = (async () => {
@@ -379,36 +787,55 @@ export class ReviewSession {
       try {
         raw = await this.api.scene(this.sceneEtag);
       } catch (_error) {
+        this._scheduleProjectionRetry("scene");
         return false;
       }
       if (requestGeneration !== this.sceneGeneration ||
           expectedStateGeneration !== this.stateGeneration ||
           expectedEpoch !== this.epoch) return false;
       const result = readResult(raw);
-      if (result.ok === false) return false;
+      if (result.ok === false) {
+        this._scheduleProjectionRetry("scene");
+        return false;
+      }
       if (result.notModified) {
         // A 304 is useful only when the retained scene already represents the
         // current state revision. Otherwise the validator was stale and the
         // next heartbeat must retry without accepting a mismatched scene.
         if (finiteRevision(this.app.scene?.scene_revision, -2) !== expectedRevision) {
           this.sceneEtag = null;
+          this._scheduleProjectionRetry("scene");
           return false;
         }
         if (result.etag) this.sceneEtag = result.etag;
         return false;
       }
       const scene = result.payload;
-      if (!scene || scene.ok === false) return false;
+      if (!scene || scene.ok === false) {
+        this._scheduleProjectionRetry("scene");
+        return false;
+      }
       const currentState = this.app.state;
       const sceneEpoch = this._stateEpoch(scene);
       if (expectedEpoch !== this.epoch ||
           expectedStateGeneration !== this.stateGeneration ||
           !currentState ||
-          finiteRevision(currentState.scene_revision, -1) !== finiteRevision(scene.scene_revision, -2) ||
+          (this._desiredRevisions?.scene == null &&
+            finiteRevision(currentState.scene_revision, -1) !== finiteRevision(scene.scene_revision, -2)) ||
           finiteRevision(scene.scene_revision, -2) !== expectedRevision ||
           (sceneEpoch != null && sceneEpoch !== this.epoch)) return false;
       this.sceneEtag = result.etag || this.sceneEtag;
       this.app.scene = scene;
+      this.app.state = { ...(this.app.state || {}), scene_revision: scene.scene_revision };
+      if (this.app.revisions) {
+        this.app.revisions = revisionVector({
+          ...this.app.revisions,
+          scene_revision: scene.scene_revision,
+          session_epoch: scene.session_epoch ?? this.epoch,
+        }) || this.app.revisions;
+      }
+      if (this._desiredRevisions?.scene === expectedRevision) delete this._desiredRevisions.scene;
+      this._clearProjectionRetry("scene");
       this._emit({ scene: true });
       this._scheduleHydration();
       return true;
@@ -417,7 +844,15 @@ export class ReviewSession {
     try {
       return await request;
     } finally {
-      if (this.sceneRequest === request) this.sceneRequest = null;
+      if (this.sceneRequest === request) {
+        this.sceneRequest = null;
+        const desired = this._desiredRevisions?.scene;
+        const current = this._projectionRevision("scene", this.app.scene);
+        if (desired != null && (current == null || current < desired) &&
+            !this.projectionRetryTimers.has("scene")) {
+          queueMicrotask(() => void this.refreshScene());
+        }
+      }
     }
   }
 
@@ -625,7 +1060,7 @@ export class ReviewSession {
   }
 
   _pruneClouds() {
-    const active = pairMap(this.app.state);
+    const active = pairMap(this.app.captures || this.app.state);
     for (const id of this.app.clouds.keys()) {
       const pair = active.get(id);
       if (!pair || this.app.cloudRevisions.get(id) !== revisionOf(pair)) {
@@ -686,9 +1121,14 @@ export class ReviewSession {
 
   async start() {
     await this.refreshState();
+    if (this.app.state) this.startEvents();
   }
 
   async poll() {
+    if (this.syncStarted && typeof this.api?.revisions === "function") {
+      await this.refreshRevisions();
+      return;
+    }
     await this.refreshState();
   }
 
@@ -712,16 +1152,32 @@ export class ReviewSession {
 
   reset() {
     this.stateGeneration += 1;
+    this.liveGeneration += 1;
+    this.capturesGeneration += 1;
+    this.revisionsGeneration += 1;
     this.sceneGeneration += 1;
     this.assetGeneration += 1;
     this.selectionGeneration += 1;
     this.stateRequest = null;
+    this.liveRequest = null;
+    this.capturesRequest = null;
+    this.revisionsRequest = null;
     this.sceneRequest = null;
     this._clearAssetCaches();
+    for (const timer of this.projectionRetryTimers.values()) clearTimeout(timer);
+    this.projectionRetryTimers.clear();
+    this.projectionRetryCounts.clear();
     this.stateEtag = null;
+    this.liveEtag = null;
+    this.capturesEtag = null;
+    this.revisionsEtag = null;
     this.sceneEtag = null;
+    this._desiredRevisions = {};
     this.epoch = null;
     this.app.state = null;
+    this.app.live = null;
+    this.app.captures = null;
+    this.app.revisions = null;
     this.app.scene = { scene_revision: -1, captures: [], camera: null };
     this.app.selectedId = null;
     this.app.selectedCaptureId = null;

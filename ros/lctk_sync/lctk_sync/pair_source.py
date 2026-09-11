@@ -83,6 +83,8 @@ class DetectionPairSource:
     admission predicate and cache mutation with a consumer's invalidation; the
     predicate runs while that context manager is held. The lock must be reentrant:
     consumers may invalidate the source while already holding their state lock.
+    `on_status` is an optional notification for live operational read models and
+    runs after a synchronized group or epoch reset updates the source counters.
     `status_line()` reports what the synchronization is doing. Everything else is
     internal.
     """
@@ -96,6 +98,7 @@ class DetectionPairSource:
         config: PairSourceConfig | None = None,
         qos=None,
         on_pair: Callable[[tuple[Any, ...]], None] | None = None,
+        on_status: Callable[[], None] | None = None,
         admit_pair: Callable[[tuple[Any, ...]], str | None] | None = None,
         admission_lock: ReentrantLock | None = None,
     ):
@@ -106,6 +109,7 @@ class DetectionPairSource:
         self._topics = list(topics)
         self._config = config or PairSourceConfig()
         self._on_pair = on_pair
+        self._on_status = on_status
         self._admit_pair = admit_pair
         # Optional consumer-owned lock.  When supplied, admission and cache
         # mutation are one atomic operation from the consumer's point of view.
@@ -248,6 +252,25 @@ class DetectionPairSource:
         self._latest = None
         self._latest_at = None
 
+    def _notify_status(self) -> None:
+        """Notify an optional live-status consumer without breaking sync."""
+
+        callback = getattr(self, "_on_status", None)
+        if callback is None:
+            return
+        try:
+            callback()
+        except (
+            AttributeError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            debug = getattr(self._node.get_logger(), "debug", None)
+            if callable(debug):
+                debug(f"review status listener failed: {error!s}")
+
     @staticmethod
     def _stamp_s(msg) -> float:
         return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -275,6 +298,7 @@ class DetectionPairSource:
             aruco_count=counts[0], board_count=counts[-1], age_s=0.0
         )
         self._last_group_at = now
+        self._notify_status()
 
         if self._config.require_non_empty and not all(counts):
             # Both sides warn, at the same level and both throttled. These used to be
@@ -361,6 +385,7 @@ class DetectionPairSource:
         with self._cache_context():
             self._clear_cached_pair()
         self._max_skew_ms = 0.0
+        self._notify_status()
         self._node.get_logger().warn(
             f"Nothing has paired while both streams keep arriving: the recording "
             f"changed under the synchronizer (a new bag, a --loop wrap, or a stream "

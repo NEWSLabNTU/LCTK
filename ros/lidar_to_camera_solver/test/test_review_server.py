@@ -9,7 +9,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from lidar_to_camera_solver.review_server import create_app, is_loopback_host
+from lidar_to_camera_solver.review_read_model import ReviewReadModel
+from lidar_to_camera_solver.review_server import (
+    ReviewEventHub,
+    create_app,
+    is_loopback_host,
+)
 
 
 @pytest.mark.parametrize(
@@ -356,6 +361,170 @@ def test_scene_is_returned_verbatim(client):
     response = client.get("/api/scene")
     assert response.status_code == 200
     assert json.loads(response.data) == client.facade.scene()
+
+
+def test_split_read_endpoints_keep_payloads_and_etags_independent():
+    facade = FakeFacade()
+    facade.live = lambda: {
+        "session_epoch": "epoch",
+        "live_revision": 2,
+        "stillness": {"is_still": True},
+    }
+    facade.captures = lambda: {
+        "session_epoch": "epoch",
+        "captures_revision": 3,
+        "capture_revision": 1,
+        "pairs": [{"id": 1}],
+    }
+    facade.revisions = lambda: {
+        "session_epoch": "epoch",
+        "live_revision": 2,
+        "captures_revision": 3,
+        "scene_revision": 4,
+    }
+    app = create_app(facade)
+    app.config["TESTING"] = True
+    with app.test_client() as split_client:
+        live = split_client.get("/api/live")
+        captures = split_client.get("/api/captures")
+        revisions = split_client.get("/api/revisions")
+
+        assert live.status_code == 200
+        assert "pairs" not in live.json
+        assert captures.status_code == 200
+        assert "stillness" not in captures.json
+        assert revisions.json == {
+            "session_epoch": "epoch",
+            "live_revision": 2,
+            "captures_revision": 3,
+            "scene_revision": 4,
+        }
+        assert live.headers["ETag"] != captures.headers["ETag"]
+        assert (
+            split_client.get(
+                "/api/live", headers={"If-None-Match": live.headers["ETag"]}
+            ).status_code
+            == 304
+        )
+
+        facade.live = lambda: {
+            "session_epoch": "epoch",
+            "live_revision": 3,
+            "stillness": {"is_still": False},
+        }
+        changed = split_client.get(
+            "/api/live", headers={"If-None-Match": live.headers["ETag"]}
+        )
+        assert changed.status_code == 200
+        assert (
+            split_client.get(
+                "/api/captures", headers={"If-None-Match": captures.headers["ETag"]}
+            ).status_code
+            == 304
+        )
+
+
+def test_sse_starts_with_current_vector_and_has_no_capture_payload():
+    vector = {
+        "session_epoch": "epoch",
+        "live_revision": 4,
+        "captures_revision": 7,
+        "scene_revision": 9,
+    }
+    hub = ReviewEventHub(revision_reader=lambda: vector, keepalive_seconds=0.1)
+    app = create_app(FakeFacade(), event_hub=hub)
+    app.config["TESTING"] = True
+    with app.test_client() as sse_client:
+        response = sse_client.get("/api/events", buffered=False)
+        first = next(response.response).decode()
+        response.close()
+
+    assert "event: revisions\n" in first
+    assert (
+        'data: {"captures_revision":7,"live_revision":4,"scene_revision":9,"session_epoch":"epoch"}'
+        in first
+    )
+    assert "pairs" not in first
+    assert response.headers["Cache-Control"] == "no-cache"
+    assert response.headers["X-Accel-Buffering"] == "no"
+    hub.close()
+
+
+def test_sse_client_slot_coalesces_bursts_to_the_latest_vector():
+    hub = ReviewEventHub(keepalive_seconds=0.1)
+    stream = hub.events()
+    initial = next(stream)
+    assert "event: revisions" in initial
+
+    hub.publish(
+        {
+            "session_epoch": "epoch",
+            "live_revision": 1,
+            "captures_revision": 0,
+            "scene_revision": 0,
+        }
+    )
+    hub.publish(
+        {
+            "session_epoch": "epoch",
+            "live_revision": 2,
+            "captures_revision": 0,
+            "scene_revision": 0,
+        }
+    )
+    assert not hub.publish(
+        {
+            "session_epoch": "epoch",
+            "live_revision": 1,
+            "captures_revision": 0,
+            "scene_revision": 0,
+        }
+    )
+    latest = next(stream)
+    assert '"live_revision":2' in latest
+    assert '"live_revision":1' not in latest
+    assert hub.subscriber_count == 1
+
+    stream.close()
+    assert hub.subscriber_count == 0
+    hub.close()
+
+
+def test_sse_subscribe_does_not_regress_a_vector_published_during_read():
+    newer = {
+        "session_epoch": "epoch",
+        "live_revision": 2,
+        "captures_revision": 0,
+        "scene_revision": 0,
+    }
+    state = {"value": dict(newer, live_revision=1), "hub": None}
+
+    def read_vector():
+        state["hub"].publish(newer)
+        return state["value"]
+
+    hub = ReviewEventHub(revision_reader=read_vector, keepalive_seconds=0.1)
+    state["hub"] = hub
+    stream = hub.events()
+    first = next(stream)
+    assert '"live_revision":2' in first
+    stream.close()
+    hub.close()
+
+
+def test_create_app_uses_a_revision_source_for_sse_reconnects():
+    model = ReviewReadModel(session_epoch="epoch")
+    app = create_app(FakeFacade(), revision_source=model)
+    app.config["TESTING"] = True
+    model.mark_live_changed()
+
+    with app.test_client() as sse_client:
+        response = sse_client.get("/api/events", buffered=False)
+        first = next(response.response).decode()
+        response.close()
+
+    assert '"live_revision":1' in first
+    app.extensions["review_event_hub"].close()
 
 
 def test_params_updates_whitelisted_values_and_returns_effective_set(client):

@@ -282,7 +282,7 @@ export class Chrome {
 
     const items = this._all("#menu .item");
     if (items[0]) items[0].addEventListener("click", () => {
-      const path = this._app?.state?.export?.archive_path || "";
+      const path = (this._app?.live || this._app?.state)?.export?.archive_path || "";
       if (this._app) this._runAction("onExportArchive", this._app, path);
     });
     if (items[1]) items[1].addEventListener("click", () => {
@@ -348,10 +348,11 @@ export class Chrome {
   }
 
   _autowareAvailability(app) {
-    const explicit = app.state?.export_availability?.autoware;
-    const ready = explicit?.available ?? app.state?.export?.autoware_ready;
+    const live = app.live || app.state || {};
+    const explicit = live.export_availability?.autoware;
+    const ready = explicit?.available ?? live.export?.autoware_ready;
     const missing = explicit?.missing
-      ?? app.state?.export?.autoware_missing
+      ?? live.export?.autoware_missing
       ?? [];
     const reason = explicit?.reason
       || (ready
@@ -369,8 +370,9 @@ export class Chrome {
   _applyParams() {
     const app = this._app;
     if (!app) return;
-    if (app.state?.params_writable === false) {
-      this._showActionError(app.state.params_detail || "Parameter writes are disabled");
+    const live = app.live || app.state || {};
+    if (live.params_writable === false) {
+      this._showActionError(live.params_detail || "Parameter writes are disabled");
       return;
     }
     const values = {};
@@ -707,7 +709,7 @@ export class Chrome {
   }
 
   _renderFooterGauges(app) {
-    const state = app.state || {};
+    const state = app.captures || app.state || {};
     const diversity = state.diversity || {};
     const gauges = this._all("footer .gauge");
     const placementTarget = finiteNumber(
@@ -747,9 +749,10 @@ export class Chrome {
   }
 
   _renderFooterLive(app) {
-    const state = app.state || {};
+    const live = app.live || app.state || {};
+    const captures = app.captures || app.state || {};
     const cells = this._all("footer .cell");
-    const stillness = state.stillness || {};
+    const stillness = live.stillness || {};
     const stillValue = cells[4]?.querySelector(".value");
     setClass(stillValue, stillness.is_still ? "ok" : "bad");
     if (stillValue) {
@@ -761,13 +764,13 @@ export class Chrome {
         stillValue.replaceChildren(dot, document.createTextNode(text));
       }
     }
-    const solve = state.solve || {};
+    const solve = captures.solve || {};
     const solveValue = cells[5]?.querySelector(".value");
     const solved = String(solve.status || "").toLowerCase().startsWith("solved");
     setClass(solveValue, solved ? "ok" : "bad");
     setText(solveValue, `${solve.status || "unknown"}${solve.rms_px == null ? "" : ` — RMS ${formatNumber(solve.rms_px, 1, " px")}`}`);
     const syncValue = cells[6]?.querySelector(".value");
-    setText(syncValue, state.sync || "waiting for synchronization");
+    setText(syncValue, live.sync || "waiting for synchronization");
   }
 
   _renderFooterLegend(app, pairs) {
@@ -790,7 +793,8 @@ export class Chrome {
   }
 
   _renderParams(app) {
-    const params = app.state?.params || app.state?.stability_params || {};
+    const live = app.live || app.state || {};
+    const params = live.params || live.stability_params || {};
     const serverDraft = this._normaliseParamValues(params);
     if (this._paramDraft == null) {
       this._paramDraft = serverDraft;
@@ -811,17 +815,17 @@ export class Chrome {
     }
     const apply = this._query(".apply");
     const caution = this._query("#paramCaution");
-    const writable = app.state?.params_writable;
+    const writable = live.params_writable;
     if (caution) {
-      const text = writable === false && app.state?.params_detail
-        ? app.state.params_detail
+      const text = writable === false && live.params_detail
+        ? live.params_detail
         : "Applies to future captures. Already-buffered pairs keep the gate they were taken under.";
       if (caution.textContent !== text) caution.textContent = text;
     }
     if (apply) {
       apply.disabled = writable === false || this._actionBusy;
       apply.title = writable === false
-        ? (app.state?.params_detail || "Parameter writes are disabled")
+        ? (live.params_detail || "Parameter writes are disabled")
         : "Apply to future captures";
     }
     const dirty = this._paramDirty;
@@ -861,7 +865,8 @@ export class Chrome {
   render(app = {}, dirty = { all: true }) {
     this._app = app;
     this._bind();
-    const state = app.state || {};
+    const state = app.captures || app.state || {};
+    const live = app.live || app.state || {};
     const pairs = Array.isArray(state.pairs) ? state.pairs : [];
     const captures = capturesById(app.scene);
     const selected = pairId(app.selectedId);
@@ -878,6 +883,7 @@ export class Chrome {
       // projection keeps this correct for older facades and for in-place
       // updates delivered by a test/fake facade.
       captureRevision: state.capture_revision ?? null,
+      capturesRevision: state.captures_revision ?? null,
       pairs,
       captures: [...captures.entries()].map(([id, capture]) => [id, capture?.position]),
       evidenceRevisions: state.evidence_revisions || {},
@@ -911,9 +917,9 @@ export class Chrome {
     }
 
     const footerLiveKey = valueKey({
-      stillness: state.stillness || {},
+      stillness: live.stillness || {},
       solve: state.solve || {},
-      sync: state.sync || "",
+      sync: live.sync || "",
     });
     if (footerLiveKey !== this._footerLiveRenderKey) {
       this._footerLiveRenderKey = footerLiveKey;
@@ -927,10 +933,10 @@ export class Chrome {
     }
 
     const paramsKey = valueKey([
-      app.state?.stability_params,
-      app.state?.params,
-      app.state?.params_writable,
-      app.state?.params_detail,
+      live.stability_params,
+      live.params,
+      live.params_writable,
+      live.params_detail,
       this._actionBusy,
       this._paramDirty,
     ]);
@@ -940,8 +946,8 @@ export class Chrome {
     }
 
     const exportKey = valueKey([
-      app.state?.export_availability,
-      app.state?.export,
+      live.export_availability,
+      live.export,
       this._autowareEntry,
       this._actionBusy,
     ]);
@@ -951,7 +957,9 @@ export class Chrome {
     }
 
     const notice = this._query("#action-notice");
-    if (notice && app.notice) setText(notice, app.notice);
+    if (notice && notice.textContent !== (app.notice || "")) {
+      setText(notice, app.notice || "");
+    }
 
     const status = this._query("#scene-status");
     if (status && app.model?.error) setText(status, `3D viewport unavailable: ${app.model.error}`);
