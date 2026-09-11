@@ -59,6 +59,33 @@ export class ReviewApi {
     });
   }
 
+  async live(etag = null) {
+    return this._read("/api/live", {
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
+  }
+
+  async captures(etag = null) {
+    return this._read("/api/captures", {
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
+  }
+
+  async revisions(etag = null) {
+    return this._read("/api/revisions", {
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
+  }
+
+  eventsUrl() {
+    return this.baseUrl + "/api/events";
+  }
+
+  openEvents() {
+    if (typeof EventSource !== "function") return null;
+    return new EventSource(this.eventsUrl());
+  }
+
   async scene(etag = null) {
     return this._read("/api/scene", {
       headers: etag ? { "If-None-Match": etag } : {},

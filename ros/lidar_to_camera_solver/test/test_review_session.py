@@ -54,6 +54,58 @@ def test_first_state_paints_before_scene_or_cloud_hydration():
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def test_revisions_fallback_refreshes_only_the_changed_projection():
+    result = run_module(
+        """
+        import { ReviewSession } from './review_session.js';
+        let revisionCalls = 0;
+        let liveCalls = 0;
+        let capturesCalls = 0;
+        const api = {
+          state: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', state_revision: 1, live_revision: 1,
+            captures_revision: 1, capture_revision: 1, scene_revision: 1,
+            stillness: {is_still: false}, pairs: [{id: 4, evidence_revision: 1}],
+          }}),
+          openEvents: () => null,
+          revisions: async () => {
+            revisionCalls += 1;
+            return {ok: true, payload: {
+              session_epoch: 'epoch-1', live_revision: revisionCalls > 1 ? 2 : 1,
+              captures_revision: 1, scene_revision: 1,
+            }};
+          },
+          live: async () => {
+            liveCalls += 1;
+            return {ok: true, payload: {
+              session_epoch: 'epoch-1', live_revision: 2,
+              stillness: {is_still: true},
+            }};
+          },
+          captures: async () => {
+            capturesCalls += 1;
+            return {ok: true, payload: {
+              session_epoch: 'epoch-1', captures_revision: 1,
+              pairs: [{id: 4, evidence_revision: 1}],
+            }};
+          },
+          scene: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', scene_revision: 1, captures: [],
+          }}),
+          cloud: async () => null,
+        };
+        const session = new ReviewSession(api, {revisionsRetryMs: 100});
+        await session.start();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        session.stopEvents();
+        if (revisionCalls < 2) throw new Error(`fallback polled ${revisionCalls} times`);
+        if (liveCalls !== 1) throw new Error(`live fetched ${liveCalls} times`);
+        if (capturesCalls !== 0) throw new Error(`captures fetched ${capturesCalls} times`);
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_preview_cache_reuses_bytes_and_discards_stale_selection_results():
     result = run_module(
         """
@@ -168,6 +220,129 @@ def test_cloud_hydration_limits_concurrency_across_overlapping_heartbeats():
         }
         await Promise.all([first, second]);
         if (maximum > 4) throw new Error(`cloud concurrency exceeded: ${maximum}`);
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_live_only_sse_hint_does_not_fetch_captures_projection():
+    result = run_module(
+        """
+        import { ReviewSession } from './review_session.js';
+        class Source {
+          constructor() { this.listeners = new Map(); }
+          addEventListener(name, callback) {
+            const list = this.listeners.get(name) || [];
+            list.push(callback);
+            this.listeners.set(name, list);
+          }
+          emit(name, data) {
+            for (const callback of this.listeners.get(name) || []) callback({data: JSON.stringify(data)});
+          }
+          close() {}
+        }
+        const source = new Source();
+        let liveCalls = 0;
+        let capturesCalls = 0;
+        const api = {
+          state: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', state_revision: 1, live_revision: 1,
+            captures_revision: 1, capture_revision: 1, scene_revision: 1,
+            stillness: {is_still: false}, sync: 'sync: groups=1',
+            pairs: [{id: 4, evidence_revision: 1}],
+          }}),
+          live: async () => {
+            liveCalls += 1;
+            return {ok: true, payload: {
+              session_epoch: 'epoch-1', live_revision: 2,
+              stillness: {is_still: true}, sync: 'sync: groups=2',
+            }};
+          },
+          captures: async () => {
+            capturesCalls += 1;
+            return {ok: true, payload: {
+              session_epoch: 'epoch-1', captures_revision: 1,
+              capture_revision: 1, pairs: [{id: 4, evidence_revision: 1}],
+            }};
+          },
+          revisions: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', live_revision: 1,
+            captures_revision: 1, scene_revision: 1,
+          }}),
+          scene: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', scene_revision: 1, captures: [],
+          }}),
+          openEvents: () => source,
+          cloud: async () => null,
+        };
+        const session = new ReviewSession(api);
+        await session.start();
+        source.emit('revisions', {
+          session_epoch: 'epoch-1', live_revision: 2,
+          captures_revision: 1, scene_revision: 1,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        session.stopEvents();
+        if (liveCalls !== 1) throw new Error(`live fetched ${liveCalls} times`);
+        if (capturesCalls !== 0) throw new Error(`captures fetched ${capturesCalls} times`);
+        if (session.app.captures.pairs.length !== 1) throw new Error('capture list changed');
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_captures_sse_hint_fetches_only_capture_projection():
+    result = run_module(
+        """
+        import { ReviewSession } from './review_session.js';
+        class Source {
+          constructor() { this.listeners = new Map(); }
+          addEventListener(name, callback) {
+            const list = this.listeners.get(name) || [];
+            list.push(callback);
+            this.listeners.set(name, list);
+          }
+          emit(name, data) {
+            for (const callback of this.listeners.get(name) || []) callback({data: JSON.stringify(data)});
+          }
+          close() {}
+        }
+        const source = new Source();
+        let capturesCalls = 0;
+        let liveCalls = 0;
+        const api = {
+          state: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', state_revision: 1, live_revision: 1,
+            captures_revision: 1, capture_revision: 1, scene_revision: 1,
+            pairs: [{id: 4, evidence_revision: 1}],
+          }}),
+          live: async () => { liveCalls += 1; return {ok: true, payload: {session_epoch: 'epoch-1', live_revision: 1}}; },
+          captures: async () => {
+            capturesCalls += 1;
+            return {ok: true, payload: {
+              session_epoch: 'epoch-1', captures_revision: 2,
+              capture_revision: 2, pairs: [{id: 4, evidence_revision: 2}, {id: 5, evidence_revision: 1}],
+            }};
+          },
+          revisions: async () => ({ok: true, payload: {
+            session_epoch: 'epoch-1', live_revision: 1,
+            captures_revision: 1, scene_revision: 1,
+          }}),
+          scene: async () => ({ok: true, payload: {session_epoch: 'epoch-1', scene_revision: 1, captures: []}}),
+          openEvents: () => source,
+          cloud: async () => null,
+        };
+        const session = new ReviewSession(api);
+        await session.start();
+        source.emit('revisions', {
+          session_epoch: 'epoch-1', live_revision: 1,
+          captures_revision: 2, scene_revision: 1,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        session.stopEvents();
+        if (capturesCalls !== 1) throw new Error(`captures fetched ${capturesCalls} times`);
+        if (liveCalls !== 0) throw new Error(`live fetched ${liveCalls} times`);
+        if (session.app.captures.pairs.length !== 2) throw new Error('capture projection not applied');
         """
     )
     assert result.returncode == 0, result.stderr or result.stdout

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +21,7 @@ DEFAULT_STAMP_TOLERANCE_S = 0.001
 
 _FRAME_RING_MAX_ITEMS = 64
 _CLOUD_RING_MAX_ITEMS = 256
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class EvidenceStore:
         jpeg_quality: int,
         review_evidence_seconds: float = 1.0,
         stamp_tolerance_s: float = DEFAULT_STAMP_TOLERANCE_S,
+        on_change: Callable[[], None] | None = None,
     ) -> None:
         max_previews = int(max_previews)
         if max_previews < 1:
@@ -97,6 +101,25 @@ class EvidenceStore:
         self._evidence_revisions: dict[int, int] = {}
         self._revision_sequence = 0
         self._lock = threading.RLock()
+        self._on_change = on_change
+
+    def _notify_change(self) -> None:
+        """Notify the review read model after releasing the store lock."""
+
+        callback = self._on_change
+        if callback is not None:
+            try:
+                callback()
+            except (
+                AttributeError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ) as error:
+                # Evidence is optional review metadata. A transport listener
+                # must never make a camera callback fail or reject a capture.
+                _LOGGER.debug("evidence change listener failed: %s", error)
 
     def observe_frame(
         self,
@@ -151,6 +174,7 @@ class EvidenceStore:
                 self._invalidate_pending_locked()
             return
 
+        changed = False
         with self._lock:
             old_epoch = self._frames.epoch
             self._frames.put(stamp_s, stored)
@@ -162,7 +186,9 @@ class EvidenceStore:
                 self._clouds.clear()
                 self._invalidate_pending_locked()
             else:
-                self._complete_pending_frame_locked(stamp_s)
+                changed = self._complete_pending_frame_locked(stamp_s)
+        if changed:
+            self._notify_change()
 
     def observe_cloud(self, stamp: float, points: Any) -> None:
         """Pack one cloud's XYZ points as little-endian float32 bytes."""
@@ -188,6 +214,7 @@ class EvidenceStore:
                 self._invalidate_pending_locked()
             return
 
+        changed = False
         with self._lock:
             old_epoch = self._clouds.epoch
             self._clouds.put(stamp_s, packed)
@@ -195,7 +222,9 @@ class EvidenceStore:
                 self._frames.clear()
                 self._invalidate_pending_locked()
             else:
-                self._complete_pending_cloud_locked(stamp_s, packed)
+                changed = self._complete_pending_cloud_locked(stamp_s, packed)
+        if changed:
+            self._notify_change()
 
     def observe_intrinsics(self, camera_matrix: Any, distortion: Any) -> None:
         """Replace the current camera model, refusing malformed values."""
@@ -284,7 +313,8 @@ class EvidenceStore:
             else:
                 self._pending.pop(pair_id, None)
             self._trim_evidence_locked()
-            return evidence
+        self._notify_change()
+        return evidence
 
     def get(self, pair_id: int) -> CaptureEvidence | None:
         """Return cached evidence and mark it as recently used."""
@@ -323,20 +353,32 @@ class EvidenceStore:
 
     def drop(self, pair_id: int) -> None:
         """Forget all evidence associated with one review id."""
+        changed = False
         with self._lock:
             pair_id = int(pair_id)
+            changed = (
+                pair_id in self._evidence
+                or pair_id in self._pending
+                or pair_id in self._evidence_revisions
+            )
             self._evidence.pop(pair_id, None)
             self._pending.pop(pair_id, None)
             self._evidence_revisions.pop(pair_id, None)
+        if changed:
+            self._notify_change()
 
     def clear(self) -> None:
         """Forget captures and buffered source payloads, retaining intrinsics."""
+        changed = False
         with self._lock:
+            changed = bool(self._evidence or self._pending or self._evidence_revisions)
             self._evidence.clear()
             self._pending.clear()
             self._evidence_revisions.clear()
             self._frames.clear()
             self._clouds.clear()
+        if changed:
+            self._notify_change()
 
     def _render_preview_locked(
         self,
@@ -409,7 +451,8 @@ class EvidenceStore:
         except (TypeError, ValueError, OverflowError, cv2.error):
             return None, ("camera frame",), owned_corners, False
 
-    def _complete_pending_cloud_locked(self, stamp: float, cloud: bytes) -> None:
+    def _complete_pending_cloud_locked(self, stamp: float, cloud: bytes) -> bool:
+        changed = False
         for pair_id, pending in tuple(self._pending.items()):
             if pending.cloud_stamp != stamp:
                 continue
@@ -426,13 +469,16 @@ class EvidenceStore:
             )
             self._evidence.move_to_end(pair_id)
             self._bump_evidence_revision_locked(pair_id)
+            changed = True
             if not missing:
                 self._pending.pop(pair_id, None)
+        return changed
 
-    def _complete_pending_frame_locked(self, stamp: float) -> None:
+    def _complete_pending_frame_locked(self, stamp: float) -> bool:
         frame = self._frames.match_exact(stamp)
         if frame is None:
-            return
+            return False
+        changed = False
         for pair_id, pending in tuple(self._pending.items()):
             if pending.camera_stamp != stamp:
                 continue
@@ -462,8 +508,10 @@ class EvidenceStore:
             )
             self._evidence.move_to_end(pair_id)
             self._bump_evidence_revision_locked(pair_id)
+            changed = True
             if not missing:
                 self._pending.pop(pair_id, None)
+        return changed
 
     def _invalidate_pending_locked(self) -> None:
         """Prevent a new timestamp epoch from completing old evidence slots."""

@@ -493,6 +493,11 @@ class LidarToCameraSolver(Node):
                 if self.solver_mode == "assisted"
                 else None
             ),
+            on_status=(
+                self._review_sync_status_changed
+                if self.solver_mode == "assisted"
+                else None
+            ),
             admit_pair=self._admit_detection_pair,
             admission_lock=self.state_lock,
         )
@@ -592,12 +597,13 @@ class LidarToCameraSolver(Node):
         self._novelty_orientation_tol_deg = self._double_parameter(
             "novelty_orientation_tol_deg"
         )
+        self._review_read_model = ReviewReadModel()
         self._evidence_store = EvidenceStore(
             max_previews=self._integer_parameter("review_max_previews"),
             jpeg_quality=self._integer_parameter("review_jpeg_quality"),
             review_evidence_seconds=self._double_parameter("review_evidence_seconds"),
+            on_change=self._review_captures_changed,
         )
-        self._review_read_model = ReviewReadModel()
         if camera_topic:
             # The image is for the reviewer, never for the solve, so it takes the
             # sensor QoS as the source camera and retains a short stamped history.
@@ -630,7 +636,10 @@ class LidarToCameraSolver(Node):
             else "parameter writes are disabled: the review server is not bound to a loopback address"
         )
         self._review_server = ReviewServer(
-            self, host=host, port=self._integer_parameter("review_port")
+            self,
+            host=host,
+            port=self._integer_parameter("review_port"),
+            revision_source=self._review_read_model,
         )
         self._review_server.start()
         if not self._review_params_writable:
@@ -740,10 +749,16 @@ class LidarToCameraSolver(Node):
             self.detection_buffer = replacement
             self._prune_review_evidence_locked()
             self._clear_adjustment_locked()
+            self._review_capture_changed()
             self._mark_scene_mutation_locked()
             if changed:
                 self._identity_generation += 1
                 self.pair_source.discard_cached_pair()
+        if changed:
+            model = getattr(self, "_review_read_model", None)
+            reset = getattr(model, "reset", None)
+            if callable(reset):
+                reset()
         if changed:
             self.get_logger().warn(
                 "Camera intrinsic matrix changed; started a new calibration session"
@@ -799,6 +814,7 @@ class LidarToCameraSolver(Node):
                 (DetectionPair(aruco=aruco, board=board),), append=False
             )
             if update.accepted and update.changed:
+                self._review_capture_changed()
                 self._mark_scene_mutation_locked()
         if not update.accepted:
             self.get_logger().error(
@@ -889,6 +905,7 @@ class LidarToCameraSolver(Node):
                 return
             state = self._stillness.push(position, orientation, stamp_s)
             self._last_stillness = state
+            self._review_sync_status_changed()
             if not state.should_capture:
                 capture = False
             else:
@@ -931,6 +948,7 @@ class LidarToCameraSolver(Node):
                     )
                     return
                 if update.changed:
+                    self._review_capture_changed()
                     self._mark_scene_mutation_locked()
                 pair_index = update.snapshot.frame_count - 1
                 if update.added_new_placement is False:
@@ -938,6 +956,7 @@ class LidarToCameraSolver(Node):
                     # buffer with a view that adds no geometry and inflates every
                     # metric that counts frames.
                     buffer.remove(pair_index)
+                    self._review_capture_changed()
                     self._mark_scene_mutation_locked()
                     self.get_logger().info(
                         "Held still, but this is not a new board placement; "
@@ -1000,6 +1019,38 @@ class LidarToCameraSolver(Node):
         """
 
         return self.identity_gate.error
+
+    def _review_sync_status_changed(self) -> None:
+        """Publish a live-review invalidation after a synchronized group changes."""
+
+        model = getattr(self, "_review_read_model", None)
+        marker = getattr(model, "mark_live_changed", None)
+        if callable(marker):
+            marker()
+
+    def _review_capture_changed(self) -> None:
+        """Publish a DetectionBuffer mutation to the assisted review stream."""
+
+        model = getattr(self, "_review_read_model", None)
+        marker = getattr(model, "mark_capture_changed", None)
+        if callable(marker):
+            marker()
+
+    def _review_captures_changed(self) -> None:
+        """Publish an evidence/list mutation to the assisted review stream."""
+
+        model = getattr(self, "_review_read_model", None)
+        marker = getattr(model, "mark_captures_changed", None)
+        if callable(marker):
+            marker()
+
+    def _review_scene_changed(self) -> None:
+        """Publish a world-geometry mutation to the assisted review stream."""
+
+        model = getattr(self, "_review_read_model", None)
+        marker = getattr(model, "mark_scene_changed", None)
+        if callable(marker):
+            marker()
 
     def _publish_axis_markers(self):
         if self.last_transform is None:
@@ -1112,6 +1163,12 @@ class LidarToCameraSolver(Node):
                 buffer = self.detection_buffer
                 if buffer is None or buffer.snapshot().revision != expected_revision:
                     return False
+            previous_rvec = (
+                None if self.current_rvec is None else self.current_rvec.copy()
+            )
+            previous_tvec = (
+                None if self.current_tvec is None else self.current_tvec.copy()
+            )
             self._prune_review_evidence_locked()
             # A solved outcome is calibration-target-bound.  Never restore one
             # after the sticky identity gate has closed, even if the caller did
@@ -1128,6 +1185,22 @@ class LidarToCameraSolver(Node):
                 self.publishing_enabled = True
             else:
                 self._clear_adjustment_locked()
+            current_changed = (
+                (previous_rvec is None) != (self.current_rvec is None)
+                or (previous_tvec is None) != (self.current_tvec is None)
+                or (
+                    previous_rvec is not None
+                    and self.current_rvec is not None
+                    and not np.array_equal(previous_rvec, self.current_rvec)
+                )
+                or (
+                    previous_tvec is not None
+                    and self.current_tvec is not None
+                    and not np.array_equal(previous_tvec, self.current_tvec)
+                )
+            )
+            if current_changed:
+                self._mark_scene_mutation_locked()
         if isinstance(outcome, Solved) and log_quality_warnings:
             warnings = outcome.estimate.quality.warnings()
             if warnings:
@@ -1144,6 +1217,7 @@ class LidarToCameraSolver(Node):
         """Advance the review scene token while ``state_lock`` is held."""
 
         self._scene_revision = getattr(self, "_scene_revision", 0) + 1
+        self._review_scene_changed()
         # Any export diff shown before this mutation no longer describes the
         # scene the operator is looking at.
         self._autoware_pending_export = None
@@ -1202,6 +1276,7 @@ class LidarToCameraSolver(Node):
                 return response
             update = buffer.capture(DetectionPair(aruco=aruco, board=board))
             if update.accepted and update.changed:
+                self._review_capture_changed()
                 self._mark_scene_mutation_locked()
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
@@ -1236,7 +1311,10 @@ class LidarToCameraSolver(Node):
             scene_changed = old_size > 0 or self.current_rvec is not None
             if self.detection_buffer is not None:
                 update = self.detection_buffer.clear()
-                scene_changed = scene_changed or update.changed
+                update_changed = bool(getattr(update, "changed", old_size > 0))
+                scene_changed = scene_changed or update_changed
+                if update_changed:
+                    self._review_capture_changed()
                 self._clear_adjustment_locked()
             else:
                 self._clear_adjustment_locked()
@@ -1287,6 +1365,7 @@ class LidarToCameraSolver(Node):
                 return response
             update = buffer.remove(request.index)
             if update.accepted and update.changed:
+                self._review_capture_changed()
                 self._mark_scene_mutation_locked()
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
@@ -1467,6 +1546,7 @@ class LidarToCameraSolver(Node):
                 return response
             update = buffer.restore(archive.pairs, append=request.append)
             if update.accepted and update.changed:
+                self._review_capture_changed()
                 self._mark_scene_mutation_locked()
         response.num_detections = len(archive.pairs)
         response.buffer_size = update.snapshot.frame_count
@@ -1670,8 +1750,53 @@ class LidarToCameraSolver(Node):
         """Everything the review page renders, as plain JSON-able data."""
 
         model = self._review_model()
-        with model.lock:
-            return self._review_state(model)
+        return self._review_state(model)
+
+    def live(self) -> dict:
+        """Return only rapidly changing review status and confirmed controls."""
+
+        model = self._review_model()
+        state = self._review_state(model)
+        fields = (
+            "mode",
+            "session_epoch",
+            "live_revision",
+            "stillness",
+            "sync",
+            "identity_error",
+            "stability_params",
+            "params_writable",
+            "params_detail",
+            "export",
+            "export_availability",
+        )
+        return {field: state[field] for field in fields if field in state}
+
+    def captures(self) -> dict:
+        """Return one atomic capture/quality/evidence review projection."""
+
+        model = self._review_model()
+        state = self._review_state(model)
+        fields = (
+            "mode",
+            "session_epoch",
+            "captures_revision",
+            "capture_revision",
+            "evidence_revisions",
+            "diversity",
+            "solve",
+            "pairs",
+        )
+        return {field: state[field] for field in fields if field in state}
+
+    def revisions(self) -> dict:
+        """Return the compact vector used by SSE and its HTTP fallback."""
+
+        model = self._review_model()
+        with self.state_lock:
+            snapshot = self._review_snapshot_locked(model)
+            self._review_scene_revision_locked(model, snapshot)
+        return model.revisions().event_vector()
 
     def _review_model(self):
         with self.state_lock:
@@ -1800,7 +1925,6 @@ class LidarToCameraSolver(Node):
         evidence_revisions = {}
         session_epoch = None
         if read_model is not None:
-            capture_revision = read_model.observe_capture(buffer_key)
             evidence_signatures = {
                 pair_id: (
                     evidence_versions.get(pair_id, 0),
@@ -1816,7 +1940,9 @@ class LidarToCameraSolver(Node):
                 )
                 for pair_id, current in evidence.items()
             }
-            evidence_revisions = read_model.observe_evidence(evidence_signatures)
+            capture_revision, evidence_revisions = read_model.observe_captures(
+                buffer_key, evidence_signatures
+            )
             session_epoch = read_model.session_epoch
             projection = read_model.cached(
                 buffer_key,
@@ -1918,6 +2044,23 @@ class LidarToCameraSolver(Node):
             },
         }
         if read_model is not None:
+            live_revision = read_model.observe_live(
+                json.dumps(
+                    {
+                        "stillness": response["stillness"],
+                        "sync": response["sync"],
+                        "identity_error": response["identity_error"],
+                        "stability_params": response["stability_params"],
+                        "params_writable": response["params_writable"],
+                        "params_detail": response["params_detail"],
+                        "export": response["export"],
+                        "export_availability": response["export_availability"],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+            )
             revisions = read_model.revisions()
             # Keep this map string-keyed in the JSON model so browser lookups do
             # not depend on JSON's integer-key coercion.
@@ -1925,6 +2068,8 @@ class LidarToCameraSolver(Node):
                 {
                     "session_epoch": session_epoch,
                     "capture_revision": capture_revision,
+                    "captures_revision": revisions.captures_revision,
+                    "live_revision": live_revision,
                     "evidence_revisions": {
                         str(pair_id): revision
                         for pair_id, revision in revisions.evidence_revisions.items()
@@ -1940,14 +2085,13 @@ class LidarToCameraSolver(Node):
         """Return one coherent world-space scene snapshot for the review page."""
 
         model = self._review_model()
-        with model.lock:
-            with self.state_lock:
-                source = self._review_scene_source_locked(model)
-            return model.cached(
-                (source.cache_key, source.scene_revision),
-                lambda: self._review_scene(source),
-                slot="scene",
-            )
+        with self.state_lock:
+            source = self._review_scene_source_locked(model)
+        return model.cached(
+            (source.cache_key, source.scene_revision),
+            lambda: self._review_scene(source),
+            slot="scene",
+        )
 
     def _review_scene(self, source: _ReviewSceneSource):
         snapshot = source.snapshot
@@ -2079,6 +2223,7 @@ class LidarToCameraSolver(Node):
             effective = ", ".join(
                 f"{name}={value:g}" for name, value in self._stability_params.items()
             )
+        self._review_sync_status_changed()
         return True, f"updated stability parameters for future captures ({effective})"
 
     def drop(self, pair_id: int) -> tuple[bool, str]:
@@ -2092,6 +2237,7 @@ class LidarToCameraSolver(Node):
                 return False, f"No captured pair {pair_id}"
             update = buffer.remove(ids.index(pair_id))
             if update.accepted and update.changed:
+                self._review_capture_changed()
                 self._mark_scene_mutation_locked()
             self._prune_review_evidence_locked()
         if not update.accepted:
@@ -2214,10 +2360,12 @@ class LidarToCameraSolver(Node):
     ) -> None:
         """Record one latched observer identity and update the admission gate."""
 
+        session_reset = False
         with self.state_lock:
             was_ready = self.identity_gate.ready
             error = self.identity_gate.update(source, message)
             if error is not None and was_ready:
+                session_reset = True
                 # A source restart must not leave a previously solved transform
                 # publishing under a different target binding.
                 self._identity_generation += 1
@@ -2225,7 +2373,10 @@ class LidarToCameraSolver(Node):
                 scene_changed = self.current_rvec is not None
                 if buffer is not None:
                     update = buffer.clear()
-                    scene_changed = scene_changed or update.changed
+                    update_changed = bool(getattr(update, "changed", True))
+                    scene_changed = scene_changed or update_changed
+                    if update_changed:
+                        self._review_capture_changed()
                 self.pair_source.discard_cached_pair()
                 self._clear_adjustment_locked()
 
@@ -2234,6 +2385,12 @@ class LidarToCameraSolver(Node):
 
                 self._prune_review_evidence_locked()
 
+        if session_reset:
+            model = getattr(self, "_review_read_model", None)
+            reset = getattr(model, "reset", None)
+            if callable(reset):
+                reset()
+        self._review_sync_status_changed()
         if error is None and not was_ready:
             self.get_logger().info(
                 "LiDAR, camera, and local Target Identities agree; "
