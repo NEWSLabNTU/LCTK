@@ -41,5 +41,5 @@ demonstrate.
 
 `bbox_vlp32.json5` and `bbox_falcon.json5` are the true-board reference boxes for
 this recording, one per sensor. The shipped detector presets here are `bbox_free`
-and do not read them; they are the `--bbox` arguments of the
-`experiments/board-detection-2d` benchmark, which labels frames against this rig.
+and do not read them. They are retained as recording reference geometry for
+historical validation and operator inspection.

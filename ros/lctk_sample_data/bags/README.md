@@ -24,8 +24,9 @@ board from a two-LiDAR rig:
 
 The board is held static within each bag.
 
-To use them in the `boarddet` experiment, export to its `.npz` cache first —
-see `experiments/board-detection-2d/README.md`.
+These bags are retained for manual ROS session replay and operator validation.
+They are not generated test fixtures; verify their metadata before replaying a
+session.
 
 Verify a bag with:
 

@@ -1,9 +1,10 @@
 # Side Track: Method E — Motion / Background Subtraction
 
-Implements strategy **E** of [`side-track_auto-bounding-box.md`](side-track_auto-bounding-box.md)
-as generator `"e"` in the `boarddet` experiment
-(`experiments/board-detection-2d/`), and validates it on the real sample
-recordings by **leave-one-out cross-dataset background construction**.
+This is the historical validation record for strategy **E** of
+[`side-track_auto-bounding-box.md`](side-track_auto-bounding-box.md), originally
+implemented as generator `"e"` in the `boarddet` experiment. The experiment was
+retired after the detector migrated to Rust; production code now lives in
+`rust/board-cluster-detector`.
 
 Status: 🟢 validated on real data. Recommended operating point reaches
 **88.4% recall at 100% precision**, against

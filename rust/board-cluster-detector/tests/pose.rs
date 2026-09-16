@@ -1,5 +1,3 @@
-mod common;
-
 use board_cluster_detector::{
     config::IsolationBand,
     geometry::PlaneModel,
@@ -157,19 +155,6 @@ fn board_pose_corners_wind_ccw_about_minus_x() {
     let d1 = det.corners_3d[2] - det.corners_3d[0];
     let d2 = det.corners_3d[3] - det.corners_3d[1];
     assert!(d1.dot(&d2).abs() < 1e-9, "diagonals must be perpendicular");
-}
-
-#[test]
-fn pose_corners_parity_against_python() {
-    // Compare pose corners only where Python detected AND this port also detects
-    // in agreement -- the documented, controller-accepted per-frame divergences
-    // (`common::KNOWN_PER_FRAME_MISMATCHES`, RNG-driven) are frames Rust rejects,
-    // so there are no corners to compare. See detect_parity.rs / task-9 report.
-    for f in common::load_all().into_iter().filter(|f| {
-        f.golden.detected && !common::KNOWN_PER_FRAME_MISMATCHES.contains(&f.name.as_str())
-    }) {
-        common::assert_pose_corners_parity(&f); // corners_3d set within a few cm of Python
-    }
 }
 
 #[test]

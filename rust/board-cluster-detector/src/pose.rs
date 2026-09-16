@@ -1,6 +1,6 @@
 //! Board pose from a scored quad + its plane, plus the stance/isolation gates.
 //!
-//! Port of `experiments/board-detection-2d/src/boarddet/pose.py` (`board_pose`),
+//! Port of the former Python `boarddet` pose helper (`board_pose`),
 //! `detector.py:_stance`, and `isolation.py:isolation_density`.
 //!
 //! **Deliberate divergence from that Python source:** [`board_pose`] returns its

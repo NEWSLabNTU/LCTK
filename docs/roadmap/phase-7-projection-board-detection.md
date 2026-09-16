@@ -9,9 +9,12 @@ square border using OpenCV-style image processing. The goal is to eventually
 **real-time, full-scene board detection** that works for both spinning LiDARs
 (VLP-32C) and solid-state LiDARs (Livox-style non-repetitive scan).
 
-Status: 🟡 experiment phase — standalone Python project, no ROS integration yet.
+Status: archived — the detector was migrated to Rust and integrated into
+`ros/lidar_board_detector`. The standalone Python experiment and its generated
+parity fixtures were retired after the migration; the results and limitations
+below are historical evidence.
 
-Experiment code: `experiments/board-detection-2d/` (uv project).
+Historical experiment source: `experiments/board-detection-2d/` (retired uv project).
 
 ## Motivation
 

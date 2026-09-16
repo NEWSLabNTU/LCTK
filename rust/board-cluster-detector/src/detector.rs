@@ -1,6 +1,6 @@
 //! Detection orchestration: downsample -> foreground candidates -> square-fit
-//! discriminator -> best pose. Port of the `square_icp=True` branch of
-//! `experiments/board-detection-2d/src/boarddet/detector.py:detect`.
+//! discriminator -> best pose. Port of the former Python `boarddet` detector
+//! pipeline's `square_icp=True` branch.
 //!
 //! Only the square-icp branch is ported (the production path). The non-icp
 //! scoring branch is out of scope.

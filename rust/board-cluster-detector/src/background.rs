@@ -1,6 +1,6 @@
 //! Accumulated static-scene voxel occupancy for background/foreground diffing.
 //!
-//! Port of `experiments/board-detection-2d/src/boarddet/background.py`
+//! Port of the former Python `boarddet` background model.
 //! (Method E of `docs/roadmap/side-track_auto-bounding-box.md`): a
 //! static-mounted sensor sees the same room every frame, so voxels that are
 //! reliably occupied are background and points landing in never-occupied

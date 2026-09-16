@@ -1,7 +1,6 @@
 //! Candidate generators: full scene -> plausible board plane patches.
 //!
-//! Port of `experiments/board-detection-2d/src/boarddet/candidates/__init__.py`,
-//! `cluster_after_ground.py` and `background_diff.py`.
+//! Port of the former Python `boarddet` candidate generators and gates.
 
 use crate::{
     background::BackgroundModel,

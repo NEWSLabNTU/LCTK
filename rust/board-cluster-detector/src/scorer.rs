@@ -1,4 +1,4 @@
-//! Reduced port of `boarddet/scorer.py`.
+//! Reduced port of the former Python `boarddet` scorer.
 //!
 //! Under the production `square_icp=True` path, `score_candidate`'s
 //! raster/morphology/fillPoly/findContours/fill-ratio machinery does not

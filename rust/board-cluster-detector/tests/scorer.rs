@@ -1,4 +1,4 @@
-#![allow(deprecated)] // Legacy fixture/config contract.
+#![allow(deprecated)] // Legacy API compatibility contract.
 
 use board_cluster_detector::{
     config::{production_tuning, TargetDetectionParams, TargetSide},

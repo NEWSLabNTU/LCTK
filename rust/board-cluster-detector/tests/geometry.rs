@@ -1,4 +1,3 @@
-mod common;
 use board_cluster_detector::geometry::*;
 use nalgebra::{Point3, Translation3};
 use proptest::prelude::*;

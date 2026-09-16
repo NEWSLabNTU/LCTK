@@ -1,4 +1,3 @@
-mod common;
 use board_cluster_detector::background::BackgroundModel;
 use nalgebra::Point3;
 
@@ -20,14 +19,4 @@ fn foreground_keeps_new_geometry_drops_static() {
         "static wall not suppressed: {fg:?}"
     );
     assert_eq!(fg.len(), 1);
-}
-
-#[test]
-fn foreground_parity_against_python() {
-    for f in common::load_all()
-        .into_iter()
-        .filter(|f| f.generator_is_bg())
-    {
-        common::assert_foreground_parity(&f);
-    }
 }

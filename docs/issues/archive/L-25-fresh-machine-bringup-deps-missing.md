@@ -2,8 +2,17 @@
 
 - **Severity:** Low
 - **Area:** setup / developer onboarding
-- **Status:** Open
+- **Status:** Resolved 2026-09-16
 - **Verified:** Reproduced 2026-08-27 bringing up a freshly cloned tree on a new machine (Jetson/Tegra, Ubuntu 22.04)
+
+## Resolution
+
+The setup engine installs and verifies `python3-json5` through rosdep and the pinned `ruff`
+binary, initializes the required submodule, and fingerprints each step's installer and
+verifier. The retired Python `boarddet` experiment, generated Rust parity fixtures, and their
+`uv`-based exporter were removed on 2026-09-16, so `just test` no longer has a fixture-generation
+or `uv` prerequisite. The active setup step installs `ruff` only. Host-specific ROS test launch
+fixes remain separate from this cleanup.
 
 ## Problem
 
@@ -65,5 +74,5 @@ newcomer.
 
 ## Related
 
-- [L-09](./archive/L-09-setup-fragility-export-labeling.md) — setup installers are version-pinned with env overrides
-- [M-22](./archive/M-22-root-cargo-patch-block-single-source.md) — the other fresh-clone blocker found in the same bring-up
+- [L-09](./L-09-setup-fragility-export-labeling.md) — setup installers are version-pinned with env overrides
+- [M-22](./M-22-root-cargo-patch-block-single-source.md) — the other fresh-clone blocker found in the same bring-up

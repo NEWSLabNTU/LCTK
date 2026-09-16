@@ -4,8 +4,6 @@
 # NOTE: as a root member it now shares the ROS-poisoned root resolve
 # (aruco-detector -> sensor_msgs = "*", yanked), so plain `cargo test` here no
 # longer works — build/test only via colcon (`just build` / `just test`).
-# Parity fixtures (~51 MB) stay local/gitignored (regenerate via
-# experiments/board-detection-2d/tools/export_golden.py).
 
 [package]
 name = "board-cluster-detector"
@@ -23,7 +21,6 @@ rand = { workspace = true }
 
 [dev-dependencies]
 approx = { workspace = true }
-serde_json = { workspace = true }
 # Pinned directly (not a workspace.dependencies entry) -- matches the pin
 # used by rust/hollow-board-detector's now-deleted proptest suite.
 proptest = "1.5"

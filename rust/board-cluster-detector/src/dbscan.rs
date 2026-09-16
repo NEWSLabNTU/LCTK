@@ -1,8 +1,7 @@
 //! Anisotropic-scaled, grid-accelerated Euclidean DBSCAN.
 //!
-//! Ports `_anisotropic_scaled` from
-//! `experiments/board-detection-2d/src/boarddet/candidates/cluster_after_ground.py:19-47`
-//! plus a grid-accelerated Euclidean DBSCAN matching open3d `cluster_dbscan`
+//! Ports the former Python `boarddet` anisotropic scaling plus a grid-accelerated
+//! Euclidean DBSCAN matching open3d `cluster_dbscan`
 //! semantics: a point is core if it has `>= min_points` neighbours within
 //! `eps` INCLUDING itself; clusters are connected components of core points
 //! plus their border points.

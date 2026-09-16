@@ -1,6 +1,3 @@
-#![allow(deprecated)] // Legacy fixture/config contract.
-
-mod common;
 use board_cluster_detector::{
     candidates::*,
     config::{production_tuning, TargetDetectionParams, TargetSide},
@@ -25,11 +22,4 @@ fn plausible_patch_accepts_board_rejects_small() {
     assert!(plausible_board_patch(&patch, &params).is_some());
     let tiny: Vec<_> = patch.iter().take(10).copied().collect();
     assert!(plausible_board_patch(&tiny, &params).is_none());
-}
-
-#[test]
-fn candidate_parity_against_python() {
-    for f in common::load_all() {
-        common::assert_candidate_parity(&f);
-    }
 }

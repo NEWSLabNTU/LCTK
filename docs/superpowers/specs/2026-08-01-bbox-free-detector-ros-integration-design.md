@@ -5,6 +5,10 @@
 **Predecessor:** sub-project 1 (HEAD ~`d51c278`) delivered `rust/board-cluster-detector`, a
 parity-validated, OpenCV/open3d-free Rust port of the `boarddet` crop-box-free detector.
 
+**Historical note (2026-09-16):** The standalone Python experiment and its golden-vector parity
+harness were retired after this migration. The crate's maintained tests are deterministic Rust
+unit and detector-contract tests.
+
 ## Goal
 
 Let a user locate the calibration board with **no bounding box** by setting `detection_mode:
@@ -46,9 +50,9 @@ root member and must path-depend on the detector.
   the yanked wildcard `sensor_msgs` — see CLAUDE.md.
 
 **Consequence to document in the crate header:** once a root member, the crate shares the
-ROS-poisoned root resolve, so plain `cargo test` in the crate dir no longer works. The crate's
-parity tests now run **only** under colcon (`just test`). The 51 MB parity fixtures remain local /
-gitignored (regenerate via `experiments/board-detection-2d/tools/export_golden.py`).
+ROS-poisoned root resolve, so plain `cargo test` in the crate dir no longer works. The migration
+parity tests ran under colcon (`just test`) and used local 51 MB fixtures; both the parity harness
+and its exporter have since been retired.
 
 ---
 
@@ -194,7 +198,7 @@ entirely (no background); warmup gates **only** `background_subtraction`.
 
 ## Testing
 
-- **Crate parity:** unchanged; runs under colcon after the fold (`just test`), fixtures local.
+- **Crate tests:** maintained Rust unit and detector-contract tests run under colcon (`just test`).
 - **Config parse:** unit test — `board_detector.json5` with `detection_mode: bbox_free` parses to
   the expected `BoardConfig` and asserts the shipped `bbox_free.board` equals the production
   operating point (flatness 0.045, stance_floor 0.9, isolation true) — guards the serde-default

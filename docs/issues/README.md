@@ -81,7 +81,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [L-22](./archive/L-22-advanced-solver-undeclared-lctk-interfaces-dep.md) | Low | `advanced_extrinsic_solver` imports `lctk_interfaces` without declaring the dependency | 🟢 |
 | [L-23](./L-23-debug-mode-parameter-never-read.md) | Low | `debug_mode` declared by both solvers, read by neither | 🔴 |
 | [L-24](./archive/L-24-board-geometry-import-test-egl-stdout.md) | Low | Board-geometry import test rejects unrelated Jetson EGL stdout | 🟢 |
-| [L-25](./L-25-fresh-machine-bringup-deps-missing.md) | Low | `setup.sh` installs none of the tools `just test` and `just lint` need | 🔴 |
+| [L-25](./archive/L-25-fresh-machine-bringup-deps-missing.md) | Low | `setup.sh` installs none of the tools `just test` and `just lint` need | 🟢 |
 | [L-30](./archive/L-30-extrinsic-solver-launch-xml-missing-target-config.md) | Low | `extrinsic_solver_node.launch.xml` (lidar_to_camera_solver) never passes `target_config` → node can't start | 🟢 |
 | [L-31](./L-31-plane-estimator-orphaned-crate.md) | Low | `rust/plane-estimator` is a live workspace member with zero consumers | 🔴 |
 

@@ -2,7 +2,7 @@
 //! fitting a KNOWN-side square's 3 DOF (center, theta) directly to its 2D
 //! points, instead of trusting the 2D quad's (raw-point minAreaRect) angle.
 //!
-//! Port of `experiments/board-detection-2d/src/boarddet/square_fit.py`.
+//! Port of the former Python `boarddet` square fitting helper.
 //!
 //! Deliberately NOT filled-square ICP: an ICP-style fit that only pulls its
 //! model's occupied interior onto matched points has zero residual gradient

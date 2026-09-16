@@ -1,6 +1,6 @@
 //! Self-contained characterization of the bbox-free target-side observation.
 
-#![allow(deprecated)] // Legacy parity remains a deliberately covered facade.
+#![allow(deprecated)] // Legacy API remains a deliberately covered facade.
 
 use approx::assert_relative_eq;
 use board_cluster_detector::{

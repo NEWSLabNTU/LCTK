@@ -1,6 +1,6 @@
 //! Plane fitting and 2D plane-coordinate projection (the chosen projection).
 //!
-//! Port of `experiments/board-detection-2d/src/boarddet/geometry.py`.
+//! Port of the former Python `boarddet` geometry helpers.
 
 use nalgebra::{DMatrix, Point3, Vector3};
 use std::collections::BTreeMap;

@@ -6,7 +6,11 @@
 - **Ported by:** [Phase 9](../../roadmap/phase-9-port-bbox-free-branch-work.md), item 8
 - **Date:** 2026-08-30
 - **Supersedes the shape of:** `setup.sh`, `setup/justfile`, `setup/scripts/*`
-- **Related:** [L-25](../../issues/L-25-fresh-machine-bringup-deps-missing.md), L-09 (version pinning)
+- **Related:** [L-25](../../issues/archive/L-25-fresh-machine-bringup-deps-missing.md), L-09 (version pinning)
+
+**Historical note (2026-09-16):** The standalone `boarddet` experiment and its generated parity
+fixtures were retired. The current `lint-tools` setup step installs `ruff` only; the `uv` and
+fixture references below describe the original setup design snapshot.
 
 ## Why
 

@@ -155,9 +155,9 @@ clears it; nothing in the source tree references the file.
 
 Fresh-clone build note: a clean tree could not build until `sync-root-cargo-config.sh` learned to
 synthesise the root `[patch.crates-io]` block as the union of every per-package block (`0df4f48`).
-The generated golden fixtures under `rust/board-cluster-detector/tests/fixtures/` are gitignored and
-must be regenerated with `experiments/board-detection-2d/tools/export_golden.py` before the Rust
-suite is complete on a new machine.
+The generated golden fixtures were migration artifacts. The standalone exporter and Rust parity
+harness were retired after the detector moved to Rust, so a fresh checkout now runs the maintained
+Rust unit and detector-contract tests without generating Python fixtures.
 
 W5-E1 deleted the compatibility path W5-D left without callers: the four legacy node parameters
 (`board_detector_file`/`aruco_pattern_file` on the detector, `aruco_config_file` on the locator and
@@ -203,10 +203,12 @@ complete it -- and `members = ["rust/*"]` is a glob, so no manifest edit was nee
 
 The adapter was removed without removing the function it wrapped. `detect()` is not a thin shim:
 beyond delegating to `detect_for_target` it owns pose construction, the legacy
-stance-before-isolation gate order and lowest-residual selection, and the Python-parity goldens over
-~50 MB of recorded fixtures compare against its pose output, which neutral evidence cannot produce.
+stance-before-isolation gate order and lowest-residual selection. During migration, Python-parity
+goldens over ~50 MB of recorded fixtures compared against its pose output, which neutral evidence
+could not produce; those parity artifacts are now retired.
 `BoardConfig`, its private `side_m` and the `d_side_m() -> 1.0` hollow assumption are gone; the
-physical side now enters as a `TargetSide` argument. All three parity goldens still pass.
+physical side now enters as a `TargetSide` argument. The migration parity suite passed before its
+fixtures were retired.
 
 Coverage moved before the crates did. The ICP convergence suite went to
 `calibration-target-detector`, the voxel tests to `board-cluster-detector` and the node, and the

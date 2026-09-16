@@ -308,14 +308,14 @@ STEPS = [
     ),
     Step(
         id="lint-tools",
-        title="ruff and uv",
+        title="ruff",
         group="Test and lint tooling",
         script="install-lint-tools.sh",
-        verify="command -v ruff && command -v uv",
-        why="just lint needs ruff; regenerating parity fixtures needs uv (L-25)",
+        verify="command -v ruff",
+        why="just lint needs ruff",
         needs=["system-base"],
         sudo=False,
-        size_mb=60,
+        size_mb=15,
     ),
     Step(
         id="cuda",
