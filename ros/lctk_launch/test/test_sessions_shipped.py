@@ -146,6 +146,7 @@ def test_the_two_lidar_session_keeps_its_per_device_detector_override():
     assert presets == {"top_lidar": "velodyne.json5", "front_lidar": "seyond.json5"}
 
 
+@_needs_bag("solid600-handheld-vlp")
 def test_the_solid_session_keeps_its_tighter_sync_window():
     """50 ms, not the 100 ms every hollow session uses: the solid board is
     hand-held and moving, so a mis-paired frame is wrong rather than merely

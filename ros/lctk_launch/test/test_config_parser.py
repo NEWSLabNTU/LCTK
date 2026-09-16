@@ -38,6 +38,14 @@ needs_two_lidar_bag = pytest.mark.skipif(
         "-- see ros/lctk_sample_data/bags/README.md to obtain one"
     ),
 )
+_SOLID600_BAG = SESSIONS / "solid600-handheld-vlp" / "bag"
+needs_solid600_bag = pytest.mark.skipif(
+    not _SOLID600_BAG.is_dir(),
+    reason=(
+        f"no recording at {_SOLID600_BAG}; the solid600 field capture is gitignored "
+        "-- see sessions/solid600-handheld-vlp/README.md to obtain one"
+    ),
+)
 
 try:
     from lctk_launch.config_parser import CalibrationConfigParser, parse_config
@@ -107,7 +115,11 @@ def test_vehicle_config():
             marks=needs_two_lidar_bag,
         ),
         ("vehicle-multisensor", "hollow_1000_aruco_4"),
-        ("solid600-handheld-vlp", "solid_600_aruco_1"),
+        pytest.param(
+            "solid600-handheld-vlp",
+            "solid_600_aruco_1",
+            marks=needs_solid600_bag,
+        ),
     ],
 )
 def test_maintained_sessions_select_their_target(session_name, expected_target_id):
@@ -271,6 +283,7 @@ def test_two_lidar_node_parity():
     assert len(pipeline.lidar_camera_solvers) == 0
 
 
+@needs_solid600_bag
 def test_solid_600_handheld_config():
     """solid600-handheld-vlp parses to the single-pair pipeline it claims,
     with the tighter sync window its hand-held (moving) board requires.

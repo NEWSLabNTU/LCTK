@@ -22,6 +22,14 @@ from lctk_launch.node_plan import (
 )
 
 SESSIONS = Path(__file__).resolve().parents[3] / "sessions"
+_TWO_LIDAR_BAG = SESSIONS / "twolidar-vlp32-falcon" / "bag"
+needs_two_lidar_bag = pytest.mark.skipif(
+    not _TWO_LIDAR_BAG.is_dir(),
+    reason=(
+        f"no recording at {_TWO_LIDAR_BAG}; the TWO_LIDAR_* bags are gitignored "
+        "-- see ros/lctk_sample_data/bags/README.md to obtain one"
+    ),
+)
 
 
 def plan_for(session: str, **settings) -> list:
@@ -51,6 +59,7 @@ def test_a_lidar_camera_session_produces_the_four_expected_nodes():
     assert not nodes_named(plan, "lidar_to_lidar_solver")
 
 
+@needs_two_lidar_bag
 def test_two_lidars_produce_two_detectors_and_a_lidar_lidar_solver():
     plan = plan_for("twolidar-vlp32-falcon")
     assert len(nodes_named(plan, "lidar_board_detector")) == 2
@@ -60,6 +69,7 @@ def test_two_lidars_produce_two_detectors_and_a_lidar_lidar_solver():
     assert not nodes_named(plan, "lidar_to_camera_solver")
 
 
+@needs_two_lidar_bag
 def test_each_detector_carries_its_own_devices_reliability():
     """TWO_LIDAR_1 records a RELIABLE Falcon beside a BEST_EFFORT VLP-32.
 
@@ -104,6 +114,7 @@ def test_each_node_is_announced_by_the_message_before_it():
     assert "Board detector" in announcement.text
 
 
+@needs_two_lidar_bag
 def test_the_sync_section_reaches_both_solver_kinds_unchanged():
     """Not a preset derived from anything: the numbers in the file, verbatim."""
     pipeline = parse_config(str(SESSIONS / "twolidar-vlp32-falcon" / "session.yaml"))

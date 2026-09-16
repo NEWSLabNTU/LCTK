@@ -686,8 +686,11 @@ def _missing_recording(manifest: Path) -> str | None:
         return None
     return (
         f"{manifest.parent.name} needs its recording at {bag}, which is "
-        "gitignored -- see ros/lctk_sample_data/bags/README.md to obtain it"
+        f"gitignored -- see {manifest.parent / 'README.md'} to obtain it"
     )
+
+
+_SOLID600_RECORDING_REASON = _missing_recording(_session("solid600-handheld-vlp"))
 
 
 _SESSION_PARAMS = [
@@ -775,6 +778,10 @@ def test_maintained_sessions_use_only_the_new_target_schema(
         assert None not in params.values()
 
 
+@pytest.mark.skipif(
+    _SOLID600_RECORDING_REASON is not None,
+    reason=_SOLID600_RECORDING_REASON or "solid600 recording is available",
+)
 def test_solid_600_handheld_session_selects_solid_target(
     calibrate_launch: ModuleType,
 ):
