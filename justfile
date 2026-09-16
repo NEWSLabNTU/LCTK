@@ -4,6 +4,10 @@
 
 set shell := ["bash", "-uc"]
 
+# Keep just's generated recipe scripts inside the repository. Some hosts expose
+# XDG_RUNTIME_DIR as read-only, which otherwise prevents any recipe from starting.
+set tempdir := "tmp"
+
 # Default configuration values
 debug_mode := "true"
 log_level := "info"
@@ -220,8 +224,12 @@ test: _check-rust-tests-collectable
     #!/usr/bin/env bash
     set -eo pipefail
     ./setup/scripts/test-guard-rosidl-bindings.sh
+
     cargo nextest run --workspace --cargo-profile test-release --no-fail-fast
     source install/setup.bash
+    mkdir -p tmp/ros-log
+    export ROS_LOG_DIR="$PWD/tmp/ros-log"
+    export RCUTILS_LOGGING_DIRECTORY="$ROS_LOG_DIR"
     # `python3 -m pytest`, not `pytest`: apt's python3-pytest installs the module and a
     # `pytest-3` script but no bare `pytest` on PATH, so the plain name exits 127 and the
     # Python half never runs. Same failure class as M-18 -- a suite that silently is not
