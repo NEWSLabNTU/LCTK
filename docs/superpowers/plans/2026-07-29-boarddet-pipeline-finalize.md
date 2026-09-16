@@ -8,6 +8,10 @@
 
 **Tech Stack:** Python 3, `uv` project, numpy, open3d, opencv, scipy, `velodyne_decoder` (real-pcap ingest), pytest (+ nextest is Rust-only — this experiment is pytest-only).
 
+> **Historical note (2026-09-16):** This plan records the retired standalone Python experiment.
+> Its source, exporter, and parity artifacts were removed after the detector migrated to Rust.
+> The commands below preserve the migration record and must not be run against the current tree.
+
 ## Global Constraints
 
 - Work inside `experiments/board-detection-2d/`. Run everything through `uv`: `cd experiments/board-detection-2d && uv run pytest`.

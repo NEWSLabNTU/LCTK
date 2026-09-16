@@ -1,2 +1,8 @@
 /target
 /Cargo.lock
+
+# Legacy parity artifacts may remain in older worktrees, but their generator and
+# tests were retired. Keep them local so stale files cannot be staged by mistake.
+/tests/fixtures/*.f32
+/tests/fixtures/*.i64
+/tests/fixtures/*.json

@@ -43,7 +43,7 @@ Each item is independent; order below is roughly lowest-risk first.
 | 4 | Unify the two colcon invocations; refresh the stale M-18 comment | `justfile`, `CLAUDE.md` | ☑ |
 | 5 | Shared pip-shadow guard | `setup/scripts/check-python-env.sh`, `justfile` | ☑ |
 | 6 | `install-dev-tools` split into debug + docs | `setup/scripts/install-dev-tools{,-debug,-docs}.sh` | ☑ |
-| 7 | New install steps: `just`, `ruff`/`uv` | `setup/scripts/install-{just,lint-tools}.sh` | ☑ |
+| 7 | New install steps: `just`, `ruff` | `setup/scripts/install-{just,lint-tools}.sh` | ☑ |
 | 8 | Setup engine + curses TUI + tests | `setup/{steps.py,tui.py,setup.sh,justfile,test/}` | ☑ |
 | 9 | Phase-8 rename and framing note | `docs/roadmap/`, `docs/superpowers/specs/`, `docs/adr/`, refs | ☑ |
 | 10 | Assisted capture and review design | — | **not ported, superseded** |
