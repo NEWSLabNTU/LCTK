@@ -142,7 +142,7 @@ ros2 run lctk_autoware_export export \
   updated in lockstep. Single source of truth: exporter reads the dump JSON rvec/tvec
   (raw solver output, direction unambiguous), *not* the re-labeled TF topic.
 - `ruamel.yaml` — new Python dep; apt `python3-ruamel.yaml` exists on Ubuntu 22.04
-  (no pip needed; see CLAUDE.md pip-shadowing hazard).
+  (no pip needed; see AGENTS.md pip-shadowing hazard).
 
 ## 6. Test plan (headless)
 

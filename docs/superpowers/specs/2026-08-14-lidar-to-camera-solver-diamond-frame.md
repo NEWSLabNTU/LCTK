@@ -182,7 +182,7 @@ as the move:
 One parameter, `solver_mode`, with values `continuous` and `manual`. Default `continuous`.
 
 It is deliberately **not** named `mode`: that name already denotes the `offline`/`realtime` processing
-mode across `calibrate.launch.py`, the justfile and CLAUDE.md, and two unrelated meanings in one
+mode across `calibrate.launch.py`, the justfile and AGENTS.md, and two unrelated meanings in one
 launch file would be actively confusing.
 
 `use_advanced_solver` is **removed outright, with no deprecated alias**. It is declared in
@@ -268,7 +268,7 @@ fixtures, which declare `"version": 2`, are updated.
 **Stage 1**, six commits in this order:
 
 1. `git mv` and rename, updating `interactive_solver_controller`, the Autoware export guide,
-   `CLAUDE.md`, `package.xml`, `setup.py`, the root `Cargo.toml` member list and the justfile test
+   `AGENTS.md`, `package.xml`, `setup.py`, the root `Cargo.toml` member list and the justfile test
    path in the same commit;
 2. extract `board_geometry.py`, no behaviour change;
 3. add the frame-convention guard;
@@ -289,7 +289,7 @@ dataset 3 rather than assumed.
 
 **Stage 3** deletes `advanced_extrinsic_solver` and `extrinsic_solver_node` and every reference to
 them: the root `Cargo.toml` members, `lctk_launch`'s `package.xml` exec-depends, both stale package
-READMEs, the duplicate `extrinsic_solver_node.launch.xml` files each ships, `CLAUDE.md`, `README.md`,
+READMEs, the duplicate `extrinsic_solver_node.launch.xml` files each ships, AGENTS.md, README.md,
 `CONTRIBUTING.md`, and the book's architecture and build-system directory trees.
 
 ### The golden fixture

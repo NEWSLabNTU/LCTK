@@ -146,7 +146,7 @@ Standalone uv project. No ROS.
   shared `scorer.py`, `pose.py`; board geometry (diamond side length, optional
   holes) in one small config dataclass.
 - **Dependencies:** numpy, opencv-python-headless, velodyne-decoder, open3d,
-  matplotlib — all inside the uv venv (no system pip risk; see CLAUDE.md
+  matplotlib — all inside the uv venv (no system pip risk; see AGENTS.md
   Known Issue 3).
 
 ### Benchmark protocol

@@ -6,7 +6,7 @@
 
 **Architecture:** The with-Method-E side is already produced by `benchmark_e_loo.py` (leave-one-out cross-dataset background) which natively classifies each accepted detection's centre against a per-rig `bbox.json5` into recall/precision/timing. The without-Method-E side is generator **B** (the same clustering + same 2D scorer Method E reuses, minus the background-subtraction stage), run per-frame. No existing harness runs generator B over bags with the per-sensor knobs and emits recall/precision — `benchmark.py` is pcap-only and reports detection-rate only. So Task 2 adds a dedicated no-E runner `boarddet.benchmark_noe` that mirrors `benchmark_e_loo`'s CLI and output schema exactly (minus `--min-sources`/background), and Task 1 fixes a one-line gap so generator B honours `cluster_min_points` (today only generator E does — without the fix the VLP-bag no-E baseline would silently use the wrong clustering density and the ablation would not be like-for-like). Tasks 3–4 run all scenarios; Task 5 pools everything into one table.
 
-**Tech Stack:** Python 3.11, `uv` project at `experiments/board-detection-2d/`, numpy, opencv, `json5`, pytest. No ROS, no system pip (CLAUDE.md Known Issue 3 — everything stays inside the `uv` venv).
+**Tech Stack:** Python 3.11, `uv` project at `experiments/board-detection-2d/`, numpy, opencv, `json5`, pytest. No ROS, no system pip (AGENTS.md Known Issue 3 — everything stays inside the `uv` venv).
 
 ## Global Constraints
 

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Never `pip3 install --user` anything.** `CLAUDE.md` Known Issue 3 — pip installs of `setuptools`, `numpy`, `scipy` and `anyio` have shadowed apt packages and broken this build four separate times.
+- **Never `pip3 install --user` anything.** `AGENTS.md` Known Issue 3 — pip installs of `setuptools`, `numpy`, `scipy` and `anyio` have shadowed apt packages and broken this build four separate times.
 - **Build with `just build`**, never a raw `colcon build`.
 - **Run tests as `python3 -m pytest`, never bare `pytest`** — apt's `python3-pytest` ships no `pytest` executable, which is L-28.
 - **`just lint-py` must stay clean** (`ruff check ros/` + `ruff format --check ros/`, line length 88).
@@ -2119,7 +2119,7 @@ git commit -m "refactor(sessions): migrate the six examples; close M-26 and M-27
 
 **Files:**
 - Create: `book/src/user-guide/sessions.md`
-- Modify: `book/src/SUMMARY.md`, `CLAUDE.md`, `README.md`, `ros/lctk_launch/README.md`, `ros/lctk_launch/config/README.md`
+- Modify: `book/src/SUMMARY.md`, `AGENTS.md`, `README.md`, `ros/lctk_launch/README.md`, `ros/lctk_launch/config/README.md`
 - Modify: `docs/issues/README.md`, `docs/issues/M-26-*.md`, `docs/issues/M-27-*.md` (close them)
 - Move: both issue files to `docs/issues/archive/`
 
@@ -2143,7 +2143,7 @@ rig or an externally-played bag needs; only its example comment changes.
 
 Removing `assisted` means the assisted-capture guide's `just assisted` instructions change to
 `just solver_mode=assisted run <session>`; update
-`book/src/user-guide/assisted-capture.md` and `CLAUDE.md` in the steps below.
+`book/src/user-guide/assisted-capture.md` and `AGENTS.md` in the steps below.
 
 - [ ] **Step 1: Write the user guide**
 
@@ -2152,10 +2152,10 @@ what a session is, the directory contents, the manifest with every key, the thre
 and why the topic rule differs between them, `session:=` always being an explicit path,
 preparing a new experiment, and where outputs land.
 
-- [ ] **Step 2: Update `SUMMARY.md`, `CLAUDE.md` and the READMEs**
+- [ ] **Step 2: Update `SUMMARY.md`, `AGENTS.md` and the READMEs**
 
 Every place that names `config/examples/…` or `just demo`'s pinned dataset changes. In
-`CLAUDE.md`, the "Config-Driven Calibration" section gains the `data:` section and
+`AGENTS.md`, the "Config-Driven Calibration" section gains the `data:` section and
 `$(session-dir)`, and the example-config list becomes the session list.
 
 - [ ] **Step 3: Close M-26 and M-27**

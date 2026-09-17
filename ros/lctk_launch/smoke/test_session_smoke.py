@@ -24,7 +24,7 @@ Design notes, since both matter for trusting the result:
 - Teardown kills the **process group**, in a `finally`. `ros2 launch` spawns a
   driver, a decoder, detectors and solvers; killing the parent alone orphans them
   and the next session then fails on topics that are still live. That is the trap
-  `CLAUDE.md` Known Issue 6 describes.
+  `AGENTS.md` Known Issue 6 describes.
 """
 
 from __future__ import annotations

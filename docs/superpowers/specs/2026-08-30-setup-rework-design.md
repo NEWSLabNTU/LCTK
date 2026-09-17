@@ -41,7 +41,7 @@ machine:
   were missing. `ros-deps`' input is every `ros/*/package.xml` in the tree — a set that
   changes on most feature branches — so a durable marker on it is always wrong.
 
-This is the same failure class CLAUDE.md's Testing Practices section describes: a step
+This is the same failure class AGENTS.md's Testing Practices section describes: a step
 that cannot fail converts "not installed" into "believed installed", which is the more
 expensive state.
 
@@ -294,7 +294,7 @@ just -f setup/justfile status   ->  ./setup.sh --status
 ```
 
 The shim is a generated one-liner per step. Docs, muscle memory and
-`CLAUDE.md` references keep working.
+`AGENTS.md` references keep working.
 
 ### Why this rather than bootstrapping `just`
 

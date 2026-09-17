@@ -63,7 +63,7 @@ theirs that way, and `session.launch.py` forwards them automatically.
 ### Calibration Configs
 
 Full calibration configs (devices, markers, sync, pairs) are **session manifests** now, in
-`sessions/<name>/session.yaml`. See the repo root `CLAUDE.md`'s "Calibration Sessions"
+`sessions/<name>/session.yaml`. See the repo root `AGENTS.md`'s "Calibration Sessions"
 section for the schema and a description of each shipped session, or run
 `ros2 run lctk_launch lctk_session list`.
 

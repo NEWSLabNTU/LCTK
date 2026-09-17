@@ -12,7 +12,7 @@
 
 - All work lives under `experiments/board-detection-2d/`; no changes to `ros/` or `rust/`.
 - No ROS dependency anywhere in the experiment.
-- All Python deps installed only inside the uv venv — never `pip3 install --user` (CLAUDE.md Known Issue 3).
+- All Python deps installed only inside the uv venv — never `pip3 install --user` (AGENTS.md Known Issue 3).
 - Board prior is geometry only: diamond (square rotated 45°) with configurable side length, default 1.0 m; holes must never be required.
 - `ring` may be stored for diagnostics but must never be used by any algorithm (solid-state compatibility).
 - Algorithm code must not read `intensity` (geometry-only decision from brainstorming); it is cached for future diagnostics only.

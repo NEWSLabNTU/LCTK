@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that every relative Markdown link in the repository's docs resolves.
 
-CLAUDE.md requires that when an issue is closed and its file moves to
+AGENTS.md requires that when an issue is closed and its file moves to
 ``docs/issues/archive/``, every relative link crossing the move is repaired in
 both directions.  That rule is only enforceable if something checks it, so this
 is that something: Phase 8's W6-A release gate names a "docs relative-link
@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Directories scanned in full, plus individually named files.
 SCAN_DIRS = ("docs", "book/src")
-SCAN_GLOBS = ("README.md", "CONTRIBUTING.md", "CLAUDE.md", "ros/*/README.md")
+SCAN_GLOBS = ("README.md", "CONTRIBUTING.md", "AGENTS.md", "ros/*/README.md")
 
 # `[text](target)` -- target runs to the first closing paren or whitespace.
 # Titles (`[t](target "title")`) are handled by splitting on whitespace below.

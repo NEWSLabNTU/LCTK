@@ -648,7 +648,7 @@ class LidarToCameraSolver(Node):
     def _image_callback(self, message) -> None:
         """Retain a stamped half-resolution frame and return.
 
-        Per the ArcSwap guidance in CLAUDE.md this stays cheap: the annotate and
+        Per the ArcSwap guidance in AGENTS.md this stays cheap: the annotate and
         JPEG encode happen at capture time, on the pair callback, not here.
         """
 

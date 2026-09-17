@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Guard against pip --user packages shadowing the apt ones ROS 2 Humble was built
-# against (CLAUDE.md Known Issue 3).
+# against (AGENTS.md Known Issue 3).
 #
 # ~/.local/lib/python3.10/site-packages precedes /usr/lib/python3/dist-packages on
 # sys.path, so a pip --user install silently replaces the apt package and fails far from

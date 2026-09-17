@@ -40,7 +40,7 @@ Each item is independent; order below is roughly lowest-risk first.
 | 1 | `package.xml` runtime dependencies | `ros/{calibration_judge,extrinsic_solver_node,lctk_launch,lidar_to_camera_solver}/package.xml` | ☑ |
 | 2 | `colcon-cargo-ros2` version floor `>=0.5.3` | `setup/scripts/install-colcon-rust.sh` | ☑ |
 | 3 | `sync-root-cargo-config.sh` stands down under colcon >= 0.5.3 | `setup/scripts/sync-root-cargo-config.sh` | ☑ |
-| 4 | Unify the two colcon invocations; refresh the stale M-18 comment | `justfile`, `CLAUDE.md` | ☑ |
+| 4 | Unify the two colcon invocations; refresh the stale M-18 comment | `justfile`, `AGENTS.md` | ☑ |
 | 5 | Shared pip-shadow guard | `setup/scripts/check-python-env.sh`, `justfile` | ☑ |
 | 6 | `install-dev-tools` split into debug + docs | `setup/scripts/install-dev-tools{,-debug,-docs}.sh` | ☑ |
 | 7 | New install steps: `just`, `ruff` | `setup/scripts/install-{just,lint-tools}.sh` | ☑ |

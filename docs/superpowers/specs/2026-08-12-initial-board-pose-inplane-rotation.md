@@ -23,7 +23,7 @@
 >
 > Still open: the 45° fix itself, and the sign question in §7.
 
-**Why this file lives in `docs/superpowers/specs/`:** repo convention (CLAUDE.md) puts one file per
+**Why this file lives in `docs/superpowers/specs/`:** repo convention (AGENTS.md) puts one file per
 finding in `docs/issues/`, but every issue file must be indexed in `docs/issues/README.md`, and this
 task forbids editing existing files — an unindexed issue file would break that convention. The
 closest existing issue, M-17, already owns the "the initial-pose rewrite was never proven

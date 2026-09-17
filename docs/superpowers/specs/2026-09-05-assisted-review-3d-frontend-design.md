@@ -471,7 +471,7 @@ would make a rendering regression indistinguishable from a packaging mistake.
 
 ## Testing
 
-Per `CLAUDE.md`, every new suite has an assertion broken deliberately and a non-zero exit
+Per `AGENTS.md`, every new suite has an assertion broken deliberately and a non-zero exit
 confirmed before it is trusted. `ros/lidar_to_camera_solver/test` is already wired into the
 `test` recipe, so no recipe change is needed; the `lidar_board_detector` change is covered by
 `cargo nextest`.

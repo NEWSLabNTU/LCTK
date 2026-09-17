@@ -287,7 +287,7 @@ reporting zero broken links.
 W6-A closed the headless release gate, and with it every packet in this phase that can be closed
 without real sensor data.
 
-The correction that mattered most was CLAUDE.md's detection-archive section, which documented
+The correction that mattered most was AGENTS.md's detection-archive section, which documented
 version 4 while the code writes and requires version 5 and refuses to restore a v4 archive. An
 operator following its example produced a file the current build rejects. It now describes v5's
 Target Identity block, what v4 remains good for (export, not restore), and the two-hop migration
@@ -308,7 +308,7 @@ M-16, H-12, H-13, M-21 and solid-preset validation were out of scope by the pack
 were not touched beyond pointer repair.
 
 The gate itself named a "docs relative-link checker" that did not exist -- it had only ever been a
-snippet retyped by hand, which is a poor foundation for a rule CLAUDE.md enforces about links
+snippet retyped by hand, which is a poor foundation for a rule AGENTS.md enforces about links
 crossing an archive move. `setup/scripts/check-doc-links.py` and `just check-docs` now provide it,
 and it immediately found two broken links the ad-hoc version could not see, because that one
 resolved only `.md` targets: a plan doc linking `pose.py` one directory level too shallow, and an
@@ -409,7 +409,7 @@ config-driven launch, and neither of its own launch files
 file. So the node was unstartable through its own shipped launch files before this phase touched
 anything; Phase 8 only removes the one config that would have let an operator start it by hand with
 an explicit `aruco_config_file` override. Recording this explicitly is so a later reader does not
-mistake an already-inert deletion for an accidental breakage. CLAUDE.md already notes the package
+mistake an already-inert deletion for an accidental breakage. AGENTS.md already notes the package
 is "pending deletion" by the diamond-frame plan.
 
 **Dead configuration awaiting W5-E3.**
@@ -427,12 +427,12 @@ filename either. These belong to W5-E3's zero-reference sweep. The issue tracker
 carry an entry for that orphaned launch file; that is a parallel finding, not one to duplicate
 here.
 
-**CLAUDE.md is stale on the detection archive format.** It documents "Detection File Format
+**AGENTS.md is stale on the detection archive format.** It documents "Detection File Format
 (version 4)" with a `"version": 4` example. `ros/lidar_to_camera_solver/lidar_to_camera_solver/
 detection_format.py` sets `FORMAT_VERSION = ARCHIVE_V5` and refuses to restore a v4 archive,
 requiring the explicit `migrate_detections` migration command instead. This is in scope for W6-A
-("update CLAUDE.md, package READMEs and book workflow/migration pages"), but it is worth flagging
-as actively wrong today, not merely outdated: an operator following CLAUDE.md's own example would
+("update AGENTS.md, package READMEs and book workflow/migration pages"), but it is worth flagging
+as actively wrong today, not merely outdated: an operator following AGENTS.md's own example would
 write a file the current code refuses to load.
 
 ## Outcome
@@ -460,7 +460,7 @@ termination, or historical sample-data provenance.
 5. Targeted tests run inside a packet. Every wave ends with `just build` and `just test`; Python
    waves also run `just lint-py`. The final headless gate runs `just lint`.
 6. Builds use `just build`, never raw `cargo build` or `colcon build`. Interface-message changes
-   follow CLAUDE.md's rosidl clean/regeneration procedure.
+   follow AGENTS.md's rosidl clean/regeneration procedure.
 7. Real bags decide field performance. Synthetic data verifies algorithms and schemas only.
 
 ## Stable seams during migration
@@ -935,7 +935,7 @@ Wave 5 full build/test/lint gate.
 - run both target interfaces through bbox/bbox-free detector tests;
 - run hollow sample regressions and launch graph tests;
 - run v4/v5 archive/export xacro e2e;
-- update CLAUDE.md, package READMEs and book workflow/migration pages;
+- update AGENTS.md, package READMEs and book workflow/migration pages;
 - reconcile overlapping issues only when their exact acceptance evidence exists.
 
 **Commands:** `just build`, `just test`, `just lint-py`, `just lint`, `git diff --check`, and the docs
@@ -1004,7 +1004,7 @@ Every dispatched packet receives:
 
 ```text
 Implement packet <ID> from docs/roadmap/phase-8-single-source-target-definition.md.
-Read CLAUDE.md, the accepted spec, ADR 0003, and the packet's dependencies.
+Read AGENTS.md, the accepted spec, ADR 0003, and the packet's dependencies.
 Edit only <owned paths>. Preserve unrelated/user changes.
 Do not broaden into listed adjacent issues.
 Run <targeted tests>. Report changed files, interface impact, evidence, and remaining blockers.

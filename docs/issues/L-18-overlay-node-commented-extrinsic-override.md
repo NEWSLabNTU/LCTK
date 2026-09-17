@@ -17,7 +17,7 @@ produces a plausible-looking overlay that has nothing to do with the actual solv
 failure shape as [M-03](./archive/M-03-hardcoded-plane-normal-x.md) (hardcoded plane-normal flip).
 
 Related, lower still: the node's `min_depth` / `max_depth` parameters are declared with hardcoded
-defaults (`0.0` / `20.0`), mildly against CLAUDE.md's "All nodes require explicit config file
+defaults (`0.0` / `20.0`), mildly against AGENTS.md's "All nodes require explicit config file
 parameters (no hardcoded defaults)" — though consistent with this node's existing
 `declare_parameter` style, so it is not obviously worth changing on its own.
 

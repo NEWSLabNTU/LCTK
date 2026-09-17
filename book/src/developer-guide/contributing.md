@@ -160,7 +160,7 @@ just build
 - [ ] Tests added for new features
 - [ ] All tests pass
 - [ ] Documentation updated
-- [ ] CLAUDE.md updated (if adding known issues/patterns)
+- [ ] AGENTS.md updated (if adding known issues/patterns)
 
 **PR Template:**
 ```markdown

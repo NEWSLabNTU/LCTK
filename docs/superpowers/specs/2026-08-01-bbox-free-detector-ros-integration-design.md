@@ -47,7 +47,7 @@ root member and must path-depend on the detector.
   `board-cluster-detector = { version = "0.1.0", path = "../../rust/board-cluster-detector" }`.
 - **Lockfile:** regenerate via `just build` (colcon, in the sourced ROS env:
   `source /opt/ros/humble/setup.bash && source install/setup.bash`). Plain `cargo update` aborts on
-  the yanked wildcard `sensor_msgs` — see CLAUDE.md.
+  the yanked wildcard `sensor_msgs` — see AGENTS.md.
 
 **Consequence to document in the crate header:** once a root member, the crate shares the
 ROS-poisoned root resolve, so plain `cargo test` in the crate dir no longer works. The migration
@@ -154,7 +154,7 @@ handoff. `bbox_params` / bbox debug publishers are simply not exercised in this 
 ## Component 4 — Method E warmup lifecycle (task 4)
 
 Method E needs a `BackgroundModel` built from board-free frames before it can diff. The node runs a
-small state machine, decoupled from the subscription callback per CLAUDE.md's high-frequency-sensor
+small state machine, decoupled from the subscription callback per AGENTS.md's high-frequency-sensor
 `ArcSwap` pattern.
 
 **State** (`ArcSwap<BackgroundState>`):

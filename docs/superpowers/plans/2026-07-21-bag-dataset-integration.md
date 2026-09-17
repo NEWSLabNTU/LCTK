@@ -49,7 +49,7 @@ it and cross-bag LOO returns 0%. Task 6 measures this before any benchmark is ru
 
 - All `boarddet` work runs through `uv` from `experiments/board-detection-2d/`: `uv run pytest`, `uv run python -m boarddet.<module>`.
 - The export tool is the **only** code that may import ROS. It runs under system Python 3.10 with `/opt/ros/humble/setup.bash` sourced, and is never imported by `boarddet` or its tests.
-- **Never `pip3 install --user` numpy, scipy, or setuptools** (CLAUDE.md Known Issue 3). Dependencies go in via `uv add`.
+- **Never `pip3 install --user` numpy, scipy, or setuptools** (AGENTS.md Known Issue 3). Dependencies go in via `uv add`.
 - Bag data is **not** committed to git. 2.4 GB of `.db3` plus 1.9 GB of `.zip` stays local.
 - Existing behavior must stay byte-identical when new code paths are unused: the five pcap datasets, generators a/b/c/e, and every current test keep working unchanged.
 - Exported `.npz` files use the **existing** `ingest.py` cache schema — `stamps` plus per-frame `xyz_{i}`, `intensity_{i}`, `ring_{i}` — so both sources produce identical `Frame` objects downstream.
@@ -63,7 +63,7 @@ it and cross-bag LOO returns 0%. Task 6 measures this before any benchmark is ru
 
 **Files:**
 - Modify: `.gitignore`
-- Modify: `CLAUDE.md`
+- Modify: `AGENTS.md`
 - Create: `ros/lctk_sample_data/bags/README.md`
 
 **Interfaces:**
@@ -136,9 +136,9 @@ ros2 bag info ros/lctk_sample_data/bags/TWO_LIDAR_1
 ```
 ```
 
-- [ ] **Step 4: Correct CLAUDE.md**
+- [ ] **Step 4: Correct AGENTS.md**
 
-`CLAUDE.md` currently asserts twice that the repo has no rosbags. Both statements are now wrong.
+`AGENTS.md` currently asserts twice that the repo has no rosbags. Both statements are now wrong.
 
 In the `lctk_sample_data/` bullet under **Project Structure**, replace:
 
@@ -180,12 +180,12 @@ Expected: **no output** (the directory is ignored; `bags/README.md` is inside an
 
 ```bash
 git add -f ros/lctk_sample_data/bags/README.md
-git add .gitignore CLAUDE.md
+git add .gitignore AGENTS.md
 git commit -m "chore(sample-data): gitignore recorded TWO_LIDAR bags, document layout
 
 The bags are ~2.4 GB of .db3 plus ~1.9 GB of .zip, which must not enter git
 history. Document the expected on-disk layout and both topics instead, and
-correct CLAUDE.md's two now-false claims that the repo ships no rosbags."
+correct AGENTS.md's two now-false claims that the repo ships no rosbags."
 ```
 
 ---

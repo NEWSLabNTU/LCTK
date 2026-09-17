@@ -29,7 +29,7 @@ This shape has produced concrete invariant failures:
 - tests cannot construct the domain concept, so they bind node methods onto fake objects or use
   `LidarToCameraSolver.__new__()` to bypass ROS construction.
 
-The [project glossary](../../CONTEXT.md) distinguishes a **Capture** from a **Board Placement**. A
+The [project glossary](../../AGENTS.md#domain-language) distinguishes a **Capture** from a **Board Placement**. A
 Capture is one deliberately retained synchronized Detection Pair. Several Captures can observe one
 Board Placement: those repeated frames may average down frame noise, but they add no new geometry.
 The buffer must preserve that distinction everywhere.

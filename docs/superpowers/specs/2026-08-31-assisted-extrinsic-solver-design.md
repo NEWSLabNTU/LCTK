@@ -8,7 +8,7 @@
 ## The problem
 
 Capturing a multi-pose LiDAR-camera calibration today is three jobs done at once by one
-person. From `CLAUDE.md`'s manual-mode workflow and
+person. From `AGENTS.md`'s manual-mode workflow and
 `interactive_solver_controller`'s key bindings, the operator must:
 
 1. hold the board still in a new pose,
@@ -163,7 +163,7 @@ Subscribes to the same image topic the camera's `aruco_locator_node` consumes, w
 mode-derived QoS (`RELIABLE` offline, `BEST_EFFORT` realtime).
 
 The subscription callback is deliberately trivial — it stores the latest frame and returns,
-following the `ArcSwap` pattern `CLAUDE.md` prescribes for high-rate sensor data with slow
+following the `ArcSwap` pattern `AGENTS.md` prescribes for high-rate sensor data with slow
 downstream processing. Nothing decodes or encodes in the callback.
 
 When a pair is queued, `capture(pair_id)` takes the latest frame, draws the detected ArUco
@@ -178,7 +178,7 @@ preview path.
 ### `review_server.py` — the Flask app
 
 Flask **2.0.1 from apt** (`python3-flask`, already installed). This is not a pip
-dependency: `CLAUDE.md` Known Issue 3 records pip `--user` installs shadowing apt's
+dependency: `AGENTS.md` Known Issue 3 records pip `--user` installs shadowing apt's
 `setuptools`, `numpy`, `scipy` and `anyio` and breaking the build four separate times. The
 apt package sidesteps that entirely.
 
@@ -266,7 +266,7 @@ that is the level of protection being claimed, and it should not be mistaken for
 | export | extends the existing `lctk_autoware_export` tests for the two-step diff-then-write path |
 | mode plumbing | `assisted` is accepted by `parse_solver_mode` and by `calibrate.launch.py`'s validation, and `continuous` / `manual` still behave as before |
 
-Per `CLAUDE.md`'s testing practice, each new recipe or suite is verified by breaking an
+Per `AGENTS.md`'s testing practice, each new recipe or suite is verified by breaking an
 assertion deliberately and confirming a non-zero exit before it is trusted.
 
 ## Risks

@@ -53,7 +53,7 @@ def _write_new_schema_detector_config(tmp_path: Path) -> Path:
     target_config = TARGETS_ROOT / "solid_600_aruco_1_v1.json5"
     # Never opened by the parser or this launch file -- just opaque path
     # strings that must round-trip unchanged. Named "not-a-real-file" and
-    # placed under tmp_path (never /tmp/, per CLAUDE.md) so no reader
+    # placed under tmp_path (never /tmp/, per AGENTS.md) so no reader
     # mistakes them for files this test depends on existing.
     detector_config = tmp_path / "not-a-real-file-detector-tuning.json5"
     bbox_config = tmp_path / "not-a-real-file-bbox.json5"
@@ -148,7 +148,7 @@ def _write_new_schema_camera_config(tmp_path: Path) -> Path:
     target_config = TARGETS_ROOT / "solid_600_aruco_1_v1.json5"
     # Never opened by the parser or this launch file -- just opaque path
     # strings that must round-trip unchanged. Placed under tmp_path (never
-    # /tmp/, per CLAUDE.md).
+    # /tmp/, per AGENTS.md).
     detector_config = tmp_path / "not-a-real-file-detector-tuning.json5"
     bbox_config = tmp_path / "not-a-real-file-bbox.json5"
     config_path = tmp_path / "new_schema_camera.yaml"

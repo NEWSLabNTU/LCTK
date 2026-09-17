@@ -21,7 +21,7 @@ OpenCV/open3d-free (deps: nalgebra, anyhow, serde, json5, log, rand).
 ## Global Constraints
 
 - **Build only with `just build`** (colcon, base-paths `ros`, `--cargo-args --profile=test-release`),
-  never raw `cargo`/`colcon`. Run from project root. See CLAUDE.md for pip-shadowing + `bindgen.lock`
+  never raw `cargo`/`colcon`. Run from project root. See AGENTS.md for pip-shadowing + `bindgen.lock`
   known issues.
 - **Dependency/lockfile changes must run inside the sourced ROS env:**
   `source /opt/ros/humble/setup.bash && source install/setup.bash`. Plain `cargo update` aborts on
@@ -144,7 +144,7 @@ just build
 ```
 
 Expected: PASS. The root `Cargo.lock` now contains `board-cluster-detector` resolved once for
-the whole workspace. If the build fails on stale bindings, apply CLAUDE.md Known Issue 7
+the whole workspace. If the build fails on stale bindings, apply AGENTS.md Known Issue 7
 (`rm -f build/.colcon/bindgen.lock`) and rebuild — do not delete `build/lctk_interfaces` unless a
 `.msg`/`.srv` changed (it did not).
 

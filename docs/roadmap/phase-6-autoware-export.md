@@ -35,7 +35,7 @@ Design: [2026-07-16-autoware-export-design.md](../superpowers/specs/2026-07-16-a
    direction; fixing the publisher's labels later without touching the exporter would
    silently flip the export. Mitigation baked into the design: exporter reads the dump
    JSON rvec/tvec (raw solver output), never the re-labeled TF topic.
-2. Dependency: `python3-ruamel.yaml` from **apt**, not pip (CLAUDE.md pip-shadowing
+2. Dependency: `python3-ruamel.yaml` from **apt**, not pip (AGENTS.md pip-shadowing
    hazard; installer update belongs to Phase 4's setup work).
 
 ## Non-goals

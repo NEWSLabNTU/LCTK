@@ -86,7 +86,7 @@ build: _check-python-env
         --cargo-args --profile=test-release
     # Refresh from what colcon just wrote. Never hand-maintain this file: a *stale*
     # root config fails the build with "Unable to update .../install/.../rust"
-    # (CLAUDE.md Known Issue 1).
+    # (AGENTS.md Known Issue 1).
     ./setup/scripts/sync-root-cargo-config.sh
     ./setup/scripts/guard-rosidl-bindings.sh --record
 
@@ -133,7 +133,7 @@ lint: lint-rust lint-py
 
 # Rust only. This is the slow half: clippy over all targets takes minutes.
 # rustfmt is pinned to nightly, so stable `cargo fmt` produces a diff this
-# rejects -- see the nightly note in CLAUDE.md.
+# rejects -- see the nightly note in AGENTS.md.
 # Lint Rust (nightly rustfmt + clippy)
 lint-rust:
     cargo +nightly fmt --check
@@ -146,7 +146,7 @@ lint-py:
     ruff format --check ros/
 
 # Check that every relative link in the docs resolves.
-# Part of the release gate: CLAUDE.md requires that when an issue closes and
+# Part of the release gate: AGENTS.md requires that when an issue closes and
 # moves into docs/issues/archive/, every link crossing the move is repaired in
 # both directions -- which only holds if something checks it.
 # Verify every relative link under docs/ resolves

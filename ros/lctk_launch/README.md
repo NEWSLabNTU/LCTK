@@ -47,7 +47,7 @@ ros2 launch lctk_launch calibrate.launch.py \
 naming a Target Definition + Detector Tuning preset), calibration pairs, and a required `sync:`
 section. A session manifest is exactly that plus a `data:` section, which
 `calibrate.launch.py` ignores. See `sessions/sample3-hollow-velodyne/session.yaml` for a
-complete example and the "Configuration Format" section of the repo root `CLAUDE.md` for the
+complete example and the "Configuration Format" section of the repo root `AGENTS.md` for the
 full schema.
 
 ### With Debug Logging and RViz

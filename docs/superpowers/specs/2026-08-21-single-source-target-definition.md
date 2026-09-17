@@ -61,7 +61,7 @@ Changing only constants is unsafe:
 
 ## Domain language
 
-The canonical terms are recorded in the repository `CONTEXT.md`:
+The canonical terms are recorded in the repository `AGENTS.md` under **Domain Language**:
 
 - **Calibration Target** — physical plate, fiducial layout, canonical frame and identity.
 - **Target Definition** — immutable physical description; no sensor tuning or crop box.
@@ -592,7 +592,7 @@ select the solid profile. No existing recording is relabelled as the new target.
 
 ### Documentation and tracking
 
-- update `CLAUDE.md`, package READMEs and book user/developer guides;
+- update `AGENTS.md`, package READMEs and book user/developer guides;
 - preserve historical archived issue/spec terminology;
 - repair current docs that call all targets hollow boards;
 - track field-only tuning and validation work explicitly rather than claiming it headlessly complete.

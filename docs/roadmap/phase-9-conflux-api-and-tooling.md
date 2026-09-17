@@ -54,7 +54,7 @@ A suite that reports green while running nothing is worse than no suite, because
 | [L-18](../issues/archive/L-18-conflux-result-not-exported.md) | Low | `ConfluxResult` is an IntEnum, exported; `last_push_result` returns it (closed alongside M-23) |
 | [M-24](../issues/archive/M-24-conflux-py-buffer-size-validation.md) | Medium | `buffer_size < 2` now raises `ValueError`; `_handle` set before validation |
 | [M-25](../issues/archive/M-25-conflux-py-tests-never-ran.md) | Medium | `test-python` now invokes pytest directly; exit codes propagate |
-| [L-26](../issues/archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` uninstalled; hazard documented in CLAUDE.md |
+| [L-26](../issues/archive/L-26-anyio-breaks-pytest.md) | Low | pip `--user` `anyio` uninstalled; hazard documented in AGENTS.md |
 
 ### Open
 

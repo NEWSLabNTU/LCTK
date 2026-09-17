@@ -15,7 +15,7 @@ This node processes 3D point cloud data to detect hollow calibration boards used
 ## Quick Start
 
 ```bash
-# Build the node (always via just build -- see the repo root CLAUDE.md)
+# Build the node (always via just build -- see the repo root AGENTS.md)
 just build
 
 # Run the node directly (normally launched by lctk_launch's calibrate.launch.py instead)
@@ -36,7 +36,7 @@ ros2 run lidar_board_detector lidar_board_detector \
 ## Configuration
 
 The node reads two required, separately-scoped configuration files -- see the repo root
-`CLAUDE.md`'s "Config-Driven Calibration" section for the full split:
+`AGENTS.md`'s "Calibration Sessions" → "Configuration Format" section for the full split:
 - **Target Definition** (physical target geometry: plate, cutouts, fiducial layout), e.g.
   `config/targets/hollow_1000_aruco_4_v1.json5`
 - **Detector Tuning** (sensor-specific ICP/RANSAC parameters; no geometry), e.g.

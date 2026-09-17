@@ -5,7 +5,7 @@
 # nothing in setup used to install it, so a freshly set-up machine could not lint.
 #
 # Ruff ships as a self-contained static binary with no Python dependencies, so it
-# cannot drag in the setuptools/numpy/scipy that CLAUDE.md Known Issue 3 warns about.
+# cannot drag in the setuptools/numpy/scipy that AGENTS.md Known Issue 3 warns about.
 # The musl build is used so the same command works on the Jetson hosts.
 
 set -euo pipefail

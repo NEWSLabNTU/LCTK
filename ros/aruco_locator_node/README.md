@@ -16,7 +16,7 @@ This node subscribes to camera images and publishes detected ArUco marker positi
 ## Quick Start
 
 Always build via `just build` from the repo root (never a raw `cargo build`/`colcon build`
-invocation — see the repo root `CLAUDE.md`).
+invocation — see the repo root `AGENTS.md`).
 
 ```bash
 just build

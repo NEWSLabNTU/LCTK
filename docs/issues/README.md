@@ -17,7 +17,7 @@ Closed issues (🟢 fixed, ⚪ won't-fix/by-design) are archived under [`archive
 | [H-03](./archive/H-03-pointcloud-datatype-endian.md) | High | Point cloud XYZ decoded as LE float32 without checking datatype/endianness | 🟢 |
 | [H-04](./archive/H-04-board-detector-mandatory-params.md) | High | Detector declares params mandatory that launch adds only "if present" | 🟢 |
 | [H-05](./archive/H-05-conflux-error-stats-collapse.md) | High | Conflux FFI collapses all push errors to BufferFull → corrupt stats | 🟢 |
-| [H-06](./archive/H-06-config-schema-drift.md) | High | CLAUDE.md documents a config schema the parser does not accept | 🟢 |
+| [H-06](./archive/H-06-config-schema-drift.md) | High | AGENTS.md documents a config schema the parser does not accept | 🟢 |
 | [H-07](./archive/H-07-no-pose-diversity-gate.md) | High | Degenerate pose sets accepted silently; extrinsic under-constrained | 🟢 |
 | [H-08](./archive/H-08-no-subpixel-corner-refinement.md) | High | ArUco corners never sub-pixel refined (`CORNER_REFINE_NONE`) | 🟢 |
 | [H-09](./archive/H-09-no-extrinsic-quality-metric.md) | High | The extrinsic solution has no quality metric of any kind | 🟢 |
@@ -117,7 +117,7 @@ unblocks the pose-diversity work.
 Worth stating plainly, because it reframes everything above: **`just demo` had been silently
 producing zero calibrations.** The board detector's ICP accept gate (`icp_good_fit_threshold`) had
 been tightened to `0.012` — *below the VLP-32C's ±3 cm range noise*, and below the 0.026–0.029 loss
-that `CLAUDE.md`'s own profiling section records as normal. No fit could ever pass. The rejection
+that `AGENTS.md`'s own profiling section records as normal. No fit could ever pass. The rejection
 was logged at `debug`, so the detector emitted empty detections forever without a word.
 
 That is [C-04](./archive/C-04-board-detector-gate-unreachable.md), now fixed: 0 → 1,049 board detections,

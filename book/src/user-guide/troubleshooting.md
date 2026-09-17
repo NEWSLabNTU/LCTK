@@ -165,7 +165,7 @@ pkill rviz2 && rviz2
 ```
 
 **Overlay images wrong:**
-- Known issue with 45° tilt (see CLAUDE.md)
+- Known issue with 45° tilt (see AGENTS.md)
 - Verify extrinsic transform is being published
 - Check TF tree: `ros2 run tf2_tools view_frames`
 
@@ -209,7 +209,7 @@ If issues persist:
 
 1. **Check configuration files** match your physical setup
 2. **Try sample data first** to isolate hardware issues
-3. **Review CLAUDE.md** for known issues
+3. **Review AGENTS.md** for known issues
 4. **Report bugs** at GitHub issues with:
    - Error messages
    - Configuration files

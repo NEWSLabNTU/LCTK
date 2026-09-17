@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Never `pip3 install --user` anything.** `CLAUDE.md` Known Issue 3: pip installs of `setuptools`, `numpy`, `scipy` and `anyio` have shadowed apt packages and broken the build four separate times. Flask comes from apt (`python3-flask`, 2.0.1, already installed). Declare it in `package.xml` as `<depend>python3-flask</depend>`, following the existing `python3-json5` pattern.
+- **Never `pip3 install --user` anything.** `AGENTS.md` Known Issue 3: pip installs of `setuptools`, `numpy`, `scipy` and `anyio` have shadowed apt packages and broken the build four separate times. Flask comes from apt (`python3-flask`, 2.0.1, already installed). Declare it in `package.xml` as `<depend>python3-flask</depend>`, following the existing `python3-json5` pattern.
 - **Build with `just build`**, never a raw `colcon build`.
 - **Run tests from the repo root** with `python3 -m pytest` (never bare `pytest` — apt's `python3-pytest` ships no `pytest` executable, which is L-28).
 - **No hardcoded node defaults for physical or operational values.** Every new tunable is a declared ROS parameter fed from the calibration config.
@@ -20,7 +20,7 @@
 - **`setup.py` uses `find_packages`**, so new `.py` files in `ros/lidar_to_camera_solver/lidar_to_camera_solver/` are picked up with no packaging change.
 - **Format strings use named parameters** (`f"{e}"`), per the repo coding guidelines.
 - **Threading model:** the node runs on a plain single-threaded `rclpy.spin` with no callback groups. The review server's thread is the *only* other thread that will touch node state. `DetectionBuffer` is internally locked and safe to call from that thread; node-level state (`current_rvec`, `current_tvec`, `last_transform`, `publishing_enabled`, `camera_info`, `_camera_matrix`, `_identity_generation`) requires `self.state_lock`, which is *also* the `DetectionPairSource` admission lock — so never hold it across HTTP or disk I/O.
-- **After adding or changing any test recipe, break an assertion deliberately and confirm a non-zero exit** before trusting it (`CLAUDE.md` Testing Practices). Do not read `$?` through a pipe.
+- **After adding or changing any test recipe, break an assertion deliberately and confirm a non-zero exit** before trusting it (`AGENTS.md` Testing Practices). Do not read `$?` through a pipe.
 
 ---
 
@@ -1318,7 +1318,7 @@ Change the `on_pair` selection (`:222-225`):
                 ),
 ```
 
-The image callback stays trivial, per the `ArcSwap` guidance in `CLAUDE.md`:
+The image callback stays trivial, per the `ArcSwap` guidance in `AGENTS.md`:
 
 ```python
     def _image_callback(self, message):
@@ -1704,7 +1704,7 @@ git commit -m "feat(assisted): plumb the third mode through launch and the justf
 **Files:**
 - Create: `book/src/user-guide/assisted-capture.md`
 - Modify: `book/src/SUMMARY.md`
-- Modify: `CLAUDE.md` (the solver-mode list and the generated-nodes section)
+- Modify: `AGENTS.md` (the solver-mode list and the generated-nodes section)
 - Modify: `ros/lidar_to_camera_solver/README.md:21-35` (which currently says the accepted values are "exactly `continuous` and `manual`")
 - Modify: `README.md:184`, `ros/lctk_launch/README.md:67`
 
@@ -1719,7 +1719,7 @@ Add a bullet linking `./user-guide/assisted-capture.md` with the title
 rather than as a literal snippet because `setup/scripts/check-doc-links.py` does not skip
 fenced code blocks, and would resolve the example link relative to this plan.)
 
-- [ ] **Step 3: Update `CLAUDE.md` and the three READMEs**
+- [ ] **Step 3: Update `AGENTS.md` and the three READMEs**
 
 Everywhere the two modes are enumerated, add the third with a one-line description. `ros/lidar_to_camera_solver/README.md` needs its "exactly `continuous` and `manual`" sentence corrected.
 
@@ -1737,7 +1737,7 @@ Expected: "all relative documentation links resolve", and a clean mdbook build.
 
 ```bash
 cd /home/jetson/LCTK
-git add book/ CLAUDE.md README.md ros/lidar_to_camera_solver/README.md ros/lctk_launch/README.md
+git add book/ AGENTS.md README.md ros/lidar_to_camera_solver/README.md ros/lctk_launch/README.md
 git commit -m "docs(assisted): document the assisted capture mode"
 ```
 

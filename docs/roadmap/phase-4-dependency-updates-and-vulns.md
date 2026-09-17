@@ -67,7 +67,7 @@ On crates.io, `sensor_msgs` is only a `0.0.0` placeholder. The real versions
 (`sensor_msgs 4.2.4`, etc.) are produced by `rosidl_cargo` during the colcon
 build at `build/<pkg>/rosidl_cargo/` and injected via a path/registry override
 that is only active inside the `just build` environment (related to the
-`.cargo/config.toml` note in CLAUDE.md's Known Issues).
+`.cargo/config.toml` note in AGENTS.md's Known Issues).
 
 Consequently, running `cargo update` (even targeted, `-p <crate> --precise …`)
 from a **bare shell** re-resolves the wildcard message requirements against
@@ -183,7 +183,7 @@ pulled transitively (arrow / datafusion chain). Options, in order of preference:
 
 - Audit findings index: [`docs/issues/README.md`](../issues/README.md)
 - GitHub Dependabot: <https://github.com/NEWSLabNTU/LCTK/security/dependabot>
-- CLAUDE.md → Known Issues (the `.cargo/config.toml` conflict is the same
+- AGENTS.md → Known Issues (the `.cargo/config.toml` conflict is the same
   generated-message override mechanism referenced above).
 
 ## Execution Log (2026-07-16)

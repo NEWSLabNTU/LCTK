@@ -42,10 +42,10 @@ implementation elsewhere, and `plane-estimator` was not it even before the delet
 - **It is advertised as a project library in `book/`.** The architecture doc
   (`book/src/developer-guide/architecture.md`, "Project Structure" tree) lists `plane-estimator/`
   alongside `calibration-target/` and `calibration-target-detector/` as one of the `rust/` core
-  libraries. Note this is a *correction* to this issue's own filing brief: `CLAUDE.md`'s
+  libraries. Note this is a *correction* to this issue's own filing brief: `AGENTS.md`'s
   "Project Structure" section listed `plane-estimator` in its `rust/` library summary until W5-E2
   (`21142ac`) dropped it — apparently incidentally, as part of swapping `hollow-board-detector` for
-  `calibration-target-detector` in the same parenthetical list — so as of this filing, `CLAUDE.md`
+  `calibration-target-detector` in the same parenthetical list — so as of this filing, `AGENTS.md`
   itself no longer names it, but `book/`'s architecture doc still does. Either way, at least one
   maintained document currently presents it as part of the project's library surface.
 
@@ -74,5 +74,5 @@ weigh, not this issue:
 
 Whoever owns this decision should either: (a) delete it and its `book/` mention, following the
 L-12 precedent, or (b) explicitly document it as a standalone library with no in-repo consumer (and
-fix `CLAUDE.md`'s now-inconsistent omission one way or the other). Either is a legitimate choice;
+fix `AGENTS.md`'s now-inconsistent omission one way or the other). Either is a legitimate choice;
 what should not happen is the crate continuing to exist by accident, uncounted by any decision.

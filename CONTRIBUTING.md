@@ -289,7 +289,7 @@ When `debug_mode=true` is enabled:
 
 ## Additional Resources
 
-- **CLAUDE.md**: AI assistant instructions and detailed setup information
+- **AGENTS.md**: AI assistant instructions and detailed setup information
 - **README.md**: Quick start guide and usage examples
 - **Individual package READMEs**: Detailed documentation for each component
 - **Launch files**: `ros/lctk_launch/launch/` (config-driven; see `calibrate.launch.py`)
