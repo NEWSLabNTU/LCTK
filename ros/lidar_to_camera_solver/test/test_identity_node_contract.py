@@ -247,6 +247,19 @@ def test_dump_succeeds_with_open_gate_and_writes_local_target_identity(tmp_path)
     assert written["target_identity"] == identity_fields(solver.target.identity)
 
 
+def test_dump_creates_a_missing_destination_parent(tmp_path):
+    solver = solver_harness(ready=True)
+    solver.detection_buffer = _DumpBuffer(_one_pair_snapshot())
+    destination = tmp_path / "out" / "detections.json"
+    request, response = _dump_request_response(destination)
+
+    result = LidarToCameraSolver.dump_detections_callback(solver, request, response)
+
+    assert result.success is True
+    assert destination.exists()
+    assert not list(destination.parent.glob(".detections.json.*.tmp"))
+
+
 def test_identity_subscriptions_use_relative_latched_contract():
     node = _SubscriptionNode()
     updates = []

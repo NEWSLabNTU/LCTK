@@ -1360,6 +1360,10 @@ class LidarToCameraSolver(Node):
         destination = Path(request.file_path)
         temp_path: Path | None = None
         try:
+            # Session output directories are gitignored and therefore may not
+            # exist on a fresh checkout. Create the parent before placing the
+            # atomic sibling temp file there.
+            destination.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temp_name = tempfile.mkstemp(
                 dir=str(destination.parent),
                 prefix=f".{destination.name}.",
