@@ -81,6 +81,27 @@ def test_failing_script_propagates_its_exit_code(sandbox, monkeypatch):
     assert not step.marker.exists()
 
 
+def test_verifier_sees_rustup_bin_before_login_reload(sandbox, tmp_path, monkeypatch):
+    """A newly installed Cargo tool must verify in the same setup process."""
+    cargo_home = tmp_path / "cargo-home"
+    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    step = make_step(
+        sandbox,
+        body=(
+            'mkdir -p "$CARGO_HOME/bin"\n'
+            'for tool in cargo cargo-nextest; do\n'
+            "  printf '#!/usr/bin/env bash\\nexit 0\\n' > \"$CARGO_HOME/bin/$tool\"\n"
+            '  chmod +x "$CARGO_HOME/bin/$tool"\n'
+            "done"
+        ),
+        verify="command -v cargo && command -v cargo-nextest",
+    )
+
+    monkeypatch.setitem(S.BY_ID, step.id, step)
+    assert S.cmd_run(Args(step.id)) == 0
+
+
 # --- content-addressed markers ------------------------------------------------------
 
 

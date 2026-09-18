@@ -181,7 +181,6 @@ checklist cannot nest sub-options or show live per-step state.)
    [x] rosdep init + workspace deps                                     ! always re-runs
  [x] Rust
    [x] rustup + rustfmt/clippy       ~1 GB                              ✓ installed
-   [x] cargo-ament-build        0.1.11                                  ✓ installed
    [x] cargo-nextest            0.9.137                                 ✓ installed
    [x] just                     1.57.0                                  ✓ installed
    [x] colcon-cargo-ros2        >=0.5.3                                 ✓ 0.5.3
@@ -227,7 +226,7 @@ JetPack-only OpenCV prefix on x86_64).
 
 `mdbook`, `mdbook-mermaid`, `ruff`, `uv` and `just` are currently unpinned or absent.
 All get the established `NAME_VERSION="${NAME_VERSION:-x.y.z}"` env-override form
-already used by `CARGO_AMENT_BUILD_VERSION` and `CARGO_NEXTEST_VERSION`.
+already used by `CARGO_NEXTEST_VERSION`.
 
 ## What this would have caught
 

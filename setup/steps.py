@@ -40,6 +40,21 @@ CACHE_HASH = "hash"  # skip while the script+verifier hash is unchanged (the def
 CACHE_NEVER = "never"  # always re-run: the step's real input is the working tree
 
 
+def step_environment():
+    """Return the environment setup scripts and verifiers should share.
+
+    Rustup installs Cargo tools under ``$CARGO_HOME/bin`` (normally
+    ``~/.cargo/bin``).  An installer can export that path for its own child shell,
+    but it cannot update this Python process's environment.  Include it explicitly
+    so a newly installed tool is visible to the verifier during the same setup run.
+    """
+    env = dict(os.environ)
+    cargo_home = env.get("CARGO_HOME") or str(Path.home() / ".cargo")
+    cargo_bin = Path(cargo_home).expanduser() / "bin"
+    env["PATH"] = os.pathsep.join((str(cargo_bin), env.get("PATH", "")))
+    return env
+
+
 class Step:
     """One installable unit.
 
@@ -129,6 +144,7 @@ class Step:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             cwd=str(PROJECT_ROOT),
+            env=step_environment(),
         )
         return r.returncode == 0
 
@@ -208,8 +224,8 @@ STEPS = [
         title="Rust toolchain",
         group="Rust",
         script="install-rust.sh",
-        verify="command -v cargo && command -v cargo-nextest && command -v cargo-ament-build",
-        why="rustc/cargo plus the pinned cargo-ament-build and cargo-nextest",
+        verify="command -v cargo && command -v cargo-nextest",
+        why="rustc/cargo plus the pinned cargo-nextest",
         needs=["system-base"],
         sudo=False,
         size_mb=1000,
@@ -510,7 +526,8 @@ def cmd_run(args):
         return 0
 
     print(f"{c('yellow', '->')} {s.title} ({s.id})")
-    env = dict(os.environ, PROJECT_ROOT=str(PROJECT_ROOT), ARCH=platform.machine())
+    env = step_environment()
+    env.update(PROJECT_ROOT=str(PROJECT_ROOT), ARCH=platform.machine())
     r = subprocess.run(
         ["bash", str(s.script_path)], cwd=str(PROJECT_ROOT), env=env, check=False
     )
