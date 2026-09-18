@@ -6,11 +6,12 @@ set -e
 
 echo "Installing network packet capture libraries..."
 
+# Only the library and headers: velodyne_driver links libpcap to replay the sample
+# data. The capture *tools* (tcpdump, wireshark-common) are analysis conveniences, not
+# project dependencies -- and wireshark-common's debconf prompt about non-root dumpcap
+# stalls an unattended run behind an invisible dialog, leaving dpkg locked. Install
+# them by hand if you want them.
 sudo apt-get update
-sudo apt-get install -y \
-    libpcap-dev \
-    libpcap0.8-dev \
-    tcpdump \
-    wireshark-common
+sudo apt-get install -y libpcap-dev
 
 echo "Network libraries installation complete."

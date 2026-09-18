@@ -216,7 +216,7 @@ JetPack-only OpenCV prefix on x86_64).
 | `python` | **dependency fix** — currently `needs ros2`, which forces a 2.5 GB ROS install before apt python. Should need only `system-base`. |
 | `dev-tools` | **split** into `dev-tools-debug` (apt) and `dev-tools-docs` (mdbook, `needs rust`). Removes the silent-skip path and lets you take debuggers without a Rust build. |
 | `rust` | `just` extracted into its own pinned step so `setup.sh` can install it before anything else needs it. |
-| `network-libs` | `wireshark-common` prompts via debconf about non-root `dumpcap`; needs `DEBIAN_FRONTEND=noninteractive` or it hangs `--yes`. |
+| `network-libs` | **trimmed** to `libpcap-dev`. `tcpdump` and `wireshark-common` are analysis tools no build or runtime path uses, and `wireshark-common`'s debconf prompt about non-root `dumpcap` hung the run behind an invisible dialog. `steps.py` now also exports `DEBIAN_FRONTEND=noninteractive` for every step. |
 | `ros-deps` | `cache=never`. |
 | `lint-tools` | **new** — `ruff` and `uv`, both pinned, both self-contained binaries with no Python deps (so they cannot drag in the setuptools/numpy/scipy that Known Issue 3 warns about). Closes L-25 #2 and #3. |
 | `python-guard` | **new** — the pip-shadowing check currently smeared across the tails of `install-python.sh` and `install-colcon-rust.sh`, hoisted into one step that runs after every pip-installing step and is callable standalone. Same check as `just build`'s `_check-python-env`. |

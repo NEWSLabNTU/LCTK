@@ -47,11 +47,17 @@ def step_environment():
     ``~/.cargo/bin``).  An installer can export that path for its own child shell,
     but it cannot update this Python process's environment.  Include it explicitly
     so a newly installed tool is visible to the verifier during the same setup run.
+
+    Steps also run as a child process whose stdin nobody is watching, so a package
+    that opens a debconf dialog would hang the run behind an invisible prompt and
+    hold the dpkg lock against the next attempt.  ``noninteractive`` makes apt take
+    the package defaults instead.
     """
     env = dict(os.environ)
     cargo_home = env.get("CARGO_HOME") or str(Path.home() / ".cargo")
     cargo_bin = Path(cargo_home).expanduser() / "bin"
     env["PATH"] = os.pathsep.join((str(cargo_bin), env.get("PATH", "")))
+    env["DEBIAN_FRONTEND"] = "noninteractive"
     return env
 
 
