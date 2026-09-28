@@ -1,14 +1,15 @@
 # LiDAR-Camera Calibration
 
-This guide shows how to calibrate a LiDAR sensor with a camera, computing the transformation that allows you to project point clouds onto images.
+This guide shows the current session-driven workflow for estimating the transform
+between a LiDAR frame and a camera frame.
 
-## Workflow Overview
+## Workflow
 
 ```mermaid
 graph LR
-    A[(Camera)] --> C[ArUco Detector]
-    B[(LiDAR)] --> D[Board Detector]
-    C -->|2D corners| F[Extrinsic Solver]
+    A[(Camera)] --> C[ArUco detector]
+    B[(LiDAR)] --> D[Calibration Target detector]
+    C -->|2D corners| F[Extrinsic solver]
     D -->|3D pose| F
     F --> G>Transform]
 
@@ -21,115 +22,113 @@ graph LR
     class G output
 ```
 
-**What happens:**
-1. **ArUco Detector** finds markers on the calibration board in camera images (2D corners)
-2. **Board Detector** finds the hollow board pattern in point clouds (3D pose)
-3. **Extrinsic Solver** computes the LiDAR-to-camera transformation using PnP algorithm
+The camera detector supplies image-space fiducial corners. The LiDAR detector supplies
+a pose for the same Calibration Target. The extrinsic solver uses synchronized
+observations from both sensors.
 
 ## Calibration Target
 
-You need a **1m x 1m board** with:
-- **3** circular holes (150mm radius), one omitted so the board's orientation
-  is resolvable — see [the board model](../developer-guide/architecture.md#the-board-model-and-its-frame)
-- ArUco markers (5x5 dictionary, IDs: 696, 64, 306, 195) printed on the board face
+The shipped `sample3-hollow-velodyne` session uses the hollow 1000 mm Target
+Definition:
 
-**Hang the board as a diamond**, standing on one corner. Every rig in this
-repository does, the shipped detector configs assume it, and a board hung
-square-on will not be detected without setting
-`initial_inplane_rotation_deg` to its actual roll.
-
-The board must be visible to both sensors simultaneously.
-
-> **Known issue — this pipeline is currently untrustworthy.** The board
-> detector publishes poses in the corner-aligned board frame, while the
-> Python extrinsic solvers still build their marker geometry in the
-> previous edge-aligned one. The resulting extrinsic is wrong by a 45°
-> in-plane rotation, and that half of the error is *silent* — the
-> reprojection error stays low. See
-> `docs/issues/archive/H-11-camera-solvers-stale-board-frame.md`. LiDAR-to-LiDAR
-> calibration is unaffected.
-
-## Step-by-Step Process
-
-### 1. Prepare Your Data
-
-Use the included sample data:
-```bash
-cd ~/repos/LCTK
-just sample-data
+```
+$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
 ```
 
-Or record your own:
-- **LiDAR**: PCAP file from Velodyne sensor
-- **Camera**: Video file (MP4/AVI) or live stream
+Other sessions use other Target Definitions, including the solid 600 mm target. Do
+not treat the hollow target, its dimensions, or its fiducial layout as universal
+requirements. The physical target, its mounting, and the selected Target Definition
+must agree.
 
-### 2. Launch Calibration
+The selected Detector Tuning preset supplies sensor-specific settings such as the
+orientation reference and ICP parameters. The Target Definition supplies the physical
+geometry and marker layout.
 
-A run is described by a [session](./sessions.md): one directory holding the data source and
-everything needed to calibrate against it. The shipped `sample3-hollow-velodyne` session plays
-its own pcap and avi, so this is the whole thing:
+## Run the shipped example
+
+The shipped session includes its pcap and camera recording:
 
 ```bash
 source install/setup.bash
+just check sample3-hollow-velodyne
+just demo
+```
+
+`just demo` starts playback and calibration through `play_launch`. Its status page
+is at <http://localhost:8000>; the justfile defaults to assisted solver mode, whose
+review page is at <http://localhost:8080>.
+
+The direct launch form starts the same session without `play_launch`:
+
+```bash
 ros2 launch lctk_launch session.launch.py \
     session:=$(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
 ```
 
-Through the justfile, which resolves a bare session name:
+Direct launch defaults to continuous mode. It does not create the `:8000`
+`play_launch` status page. Pass `solver_mode:=assisted` if you want the solver
+review page.
 
-```bash
-just demo                   # the same session
-just run <name-or-path>     # any other session
-```
-
-For your own data, scaffold a session and edit its manifest — see
+For your own sensors or recording, scaffold a session and edit its manifest. See
 [Calibration Sessions](./sessions.md).
 
-### 3. Monitor Progress
+## Inspect the graph
 
-Open `http://localhost:8000` to see the web UI.
+Topic names are derived from the session's device and marker names. In
+`sample3-hollow-velodyne`, the relevant topics are:
 
-Check detection rates (should be >1 Hz). Topics are namespaced `<lidar>_<marker>` / `<camera>` /
-`<lidar>_<camera>` from your session's device and marker names; `sample3-hollow-velodyne` names
-them `top`, `calibration_board` and `front_center`:
 ```bash
 source install/setup.bash
+
+ros2 topic echo /calibration/top_front_center/extrinsic_transform
 ros2 topic hz /calibration/front_center/aruco_detections
 ros2 topic hz /calibration/top_calibration_board/calibration_board_detections
 ```
 
-View the calibration result:
+The `hz` commands report what the running graph is receiving; LCTK does not promise a
+universal detection rate.
+
+When direct launch is used, enable the overlay explicitly:
+
 ```bash
-ros2 topic echo /calibration/top_front_center/extrinsic_transform
+ros2 launch lctk_launch session.launch.py \
+    session:=/path/to/session \
+    enable_overlay:=true
 ```
 
-### 4. Validate Results
+The overlay is enabled by default by the `just` recipes. When enabled, inspect
+`/calibration/pointcloud_overlay` and the camera image with projected LiDAR points.
 
-The overlay visualization shows point clouds projected onto camera images. Check the `/calibration/pointcloud_overlay` topic to verify alignment.
+## Detector tuning
 
-If misaligned, check:
-- Camera intrinsics file is correct
-- Board geometry matches physical target
-- Board is detected by both sensors
+The hollow-target Velodyne preset is:
 
-## Configuration
+```
+$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+```
 
-Key parameters in the marker's Detector Tuning preset, e.g.
-`ros/lctk_launch/config/board/hollow_1000/velodyne.json5`:
-- `plane_ransac_max_iterations`: RANSAC iterations (default: 2000)
-- `plane_ransac_inlier_threshold`: Inlier distance in meters (default: 0.05)
-- `max_icp_iterations`: ICP refinement iterations (default: 10)
+Its current values include:
 
-Board geometry itself (plate size, cutout positions, marker layout) lives in the Target
-Definition, e.g. `ros/lctk_launch/config/targets/hollow_1000_aruco_4_v1.json5`, not in the
-Detector Tuning preset.
+- `detection_mode: "bbox_free"`;
+- `skip_ransac: true`, so the RANSAC iteration settings are not used by this preset;
+- `sensor_up_axis: "z"`;
+- `initial_inplane_rotation_deg: 0.0`;
+- `max_icp_iterations: 100`.
 
-See [Configuration Guide](./configuration.md) for full details.
+Other presets have different values. For example, the bbox-mode Velodyne preset
+requires a session-local `bbox_config`, and the Seyond presets use a different
+sensor-up-axis convention. Change the preset only with the corresponding physical
+sensor and Target Definition.
 
-## Tips for Good Calibration
+## Practical checks
 
-- **Placement**: Position board 3-5 meters from sensors
-- **Coverage**: Move board to different positions for robustness
-- **Lighting**: Ensure even lighting for ArUco detection
-- **Stability**: Keep board stationary during data capture
-- **Duration**: Record 30-60 seconds per position
+- Ensure both sensors observe the same Calibration Target at overlapping times.
+- Confirm the camera image and camera-info topics are available.
+- Confirm the LiDAR topic and frame ID in the session manifest.
+- Run `lctk_session check` before launching a bag-backed session.
+- Capture distinct Board Placements when using manual or assisted multi-pose solving.
+- Treat the resulting Quality Verdict as separate from whether the numerical solve
+  returned an estimate.
+
+For configuration details, see [Configuration](./configuration.md). For failures, see
+[Troubleshooting](./troubleshooting.md).

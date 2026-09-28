@@ -1,85 +1,12 @@
-# Field Validation Runbook (Wave 7)
+# Field Validation Runbook
 
-This is the operating guide for running the calibrator against real recordings and producing the
-evidence Wave 7 requires. It assumes you have operated the pre-Phase-8 calibrator and wants to tell
-you what is different, not what a calibration is.
+This runbook covers a current field run using a session manifest, real sensor data,
+and either manual or assisted capture. It does not treat a successful numerical solve
+as proof that the extrinsic is physically correct.
 
-Two things to know before anything else:
+## 1. Prepare a session
 
-- **Nothing in Phase 8 has been run against real sensor data.** Every gate the phase passed was
-  headless. Your first session is an experiment, not a regression check. Budget time for the
-  pipeline not working the first time, and read [Reading the system](#reading-the-system) before you
-  need it.
-- **The evidence tooling has no bag reader and no command line.** `lctk_quality`'s
-  `EvidenceCollector` is a library and a schema. There is no `ros2 run` that turns a bag into a
-  report. See [Collecting evidence](#collecting-evidence-for-w7-b) — you will be recording
-  observations by hand against a defined schema.
-
-## What changed since your last session
-
-Your workflow shape is unchanged: launch the graph, play a bag in a second terminal, drive the TUI,
-watch RViz, read logs. These are the differences that will actually stop you.
-
-| Change | What it means for you |
-|---|---|
-| Marker schema | Your own YAML needs `target_config` + `detector_config`. The old `type` / `board_config` / `aruco_config` keys are **refused with an error**, not ignored. |
-| `sync:` section | Now **required** in every config. Missing it fails at parse time, before any node starts. |
-| Target-identity gate | New, and **fail-closed**. Solvers admit nothing until observers announce a matching target. Looks like nothing happening. |
-| Detection archives | Now version 5 and carry a Target Identity. **Your old saved dumps will not load** without an explicit migration. |
-| Detector presets | Moved to `config/board/<target>/<sensor>.json5`. The old `board_detector*.json5` files are gone. |
-| ICP correctness | Issue H-15: until recently the perforated ICP applied its correction *backwards*. If you tried the new detector before that fix, what you saw was that bug. |
-
-Unchanged: the TUI, its key bindings, `just extrinsic-solver-controller`, the solver services, and the
-overall manual-mode capture loop.
-
-## Before you start: fix your config
-
-If you are reusing a YAML from before Phase 8, edit it before you get to the field.
-
-1. **Add a `sync:` block** at top level. All three keys are required:
-
-   ```yaml
-   sync:
-     tolerance_ms: 100        # finite and > 0
-     queue_size: 100          # positive integer
-     drop_policy: reject_new  # or drop_oldest
-   ```
-
-   Use `reject_new` for replaying a recording: it loses no recorded data. `drop_oldest` is for live
-   sensors where the latest data matters more than completeness.
-
-   For a **moving, hand-held board**, tighten `tolerance_ms`. A mis-paired camera frame and LiDAR
-   sweep is not merely noisy — it is *wrong*, because the board is not where the other sensor saw
-   it. The `solid600-handheld-vlp` session states 50 ms, and says plainly that the number is
-   intent rather than measurement. Confirming it is one of your first tasks; see
-   [the sync line](#the-sync-line).
-
-2. **Rewrite each marker.** Delete `type`, `board_config`, `aruco_config`. Add:
-
-   ```yaml
-   markers:
-     calibration_board:
-       target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
-       detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
-       pairs:
-         - [seyond_lidar, left_camera]
-   ```
-
-   Available targets: `hollow_1000_aruco_4_v1.json5`, `solid_600_aruco_1_v1.json5`.
-   Available presets: `hollow_1000/{velodyne,velodyne_bbox,seyond}.json5`,
-   `solid_600/{velodyne,seyond}.json5`.
-
-3. **Drop `bbox_config`** unless your chosen preset is `hollow_1000/velodyne_bbox.json5` — that is
-   the only shipped preset in `bbox` mode. Every other preset is `bbox_free` and never reads a crop
-   box.
-
-4. **Per-LiDAR overrides**: rename `board_config:` to `detector_config:` under
-   `devices.lidars.<name>`. This is how two differently-sampled LiDARs share one target;
-   the `twolidar-vlp32-falcon` session does exactly that.
-
-Configs are **sessions** now: one directory per run, holding the manifest plus everything
-session-local to that recording. Scaffold from the closest shipped one rather than editing a
-config in place — `seyond-left` for LiDAR + camera, `twolidar-vlp32-falcon` for two LiDARs:
+Start from the closest shipped session rather than maintaining a detached YAML file:
 
 ```bash
 source install/setup.bash
@@ -87,330 +14,158 @@ ros2 run lctk_launch lctk_session new ~/calib/my-rig \
     --from $(ros2 pkg prefix lctk_launch --share)/sessions/seyond-left
 ```
 
-Then edit `~/calib/my-rig/session.yaml`. See [Calibration Sessions](./sessions.md) for the
-manifest format and the `data:` section.
+Edit `~/calib/my-rig/session.yaml` so that it describes the actual rig:
 
-**Check it before you travel.** `lctk_session check` resolves every path in the manifest,
-confirms the data exists, verifies bag topics against the bag's own `metadata.yaml`, and prints
-the topics and frames each device will actually use — without starting a graph. This is the
-single highest-value command in this runbook:
+- use the correct `data.kind` (`live`, `bag`, or `pcap_avi`);
+- state each device's topic and frame;
+- select the physical Calibration Target with `target_config`;
+- select sensor-specific Detector Tuning with `detector_config`;
+- add `bbox_config` only when the selected preset uses `detection_mode: "bbox"`;
+- set the required `sync:` section;
+- add `data.republish` when a compressed camera topic must become a raw
+  `sensor_msgs/Image` topic.
+
+For a bag-backed session, make the bag available at the manifest's `data.path`.
+For a live Seyond session, the camera may publish `CompressedImage`; use the
+republish command documented in that session's README or declare the bridge in the
+manifest.
+
+Validate before starting any nodes:
 
 ```bash
 ros2 run lctk_launch lctk_session check ~/calib/my-rig
 ```
 
-## Running a session
+The check resolves paths, confirms required files, and verifies bag topics against
+the bag metadata.
 
-Four terminals, same as before.
+## 2. Start the graph
 
-**Terminal 1 — the graph.** If the session declares `kind: bag`, this also plays the bag:
-
-```bash
-ros2 launch lctk_launch session.launch.py \
-    session:=~/calib/my-rig solver_mode:=manual enable_judge:=false
-```
-
-Or, through the justfile, which additionally resolves a bare session *name* against
-`./sessions/` and the installed share:
+For a bag-backed or pcap/AVI session, run the complete session:
 
 ```bash
 just solver_mode=manual enable_judge=false run ~/calib/my-rig
 ```
 
-`session:=` is always an explicit path — there is no search path. If you are playing the data
-yourself, run only the calibration half against the manifest:
+This starts the session data source and calibration graph. The `just` recipe uses
+`play_launch` and exposes its launch status page at <http://localhost:8000>.
+
+For a live rig, the same command starts the calibration nodes and any configured
+`data.republish` bridges; the sensors must already be publishing. If data is played
+independently, start only the calibration graph:
 
 ```bash
 just solver_mode=manual enable_judge=false calibrate ~/calib/my-rig/session.yaml
 ```
 
-> **Always pass `enable_judge=false` for a field session.** The justfile defaults it to `true`, and
-> the launch file never passes a ground-truth file, so the judge falls back to a hardcoded matrix
-> from one historical rig. On any other rig it scores your solve against someone else's extrinsic
-> and prints confident-looking numbers that mean nothing.
-
-Useful overrides: `debug_mode=true`
-(default; publishes the LiDAR `debug/*` clouds and the ArUco overlay image), `log_level=debug` (this
-is what raises log verbosity — `debug_mode` does not), `rviz_enabled=false`.
-
-**Terminal 2 — the data.** Only needed if your session declares `kind: live`, or if you chose
-the calibration-only form above. `just run twolidar-vlp32-falcon` plays the bag too; `session.launch.py`
-plays whatever the manifest's `data:` section declares, and nothing under `live`. To play a
-bag yourself:
+Direct launch is also supported:
 
 ```bash
-ros2 bag play /path/to/your.bag --clock
+ros2 launch lctk_launch session.launch.py \
+    session:="$HOME/calib/my-rig" \
+    solver_mode:=manual \
+    enable_judge:=false
 ```
 
-If you point a session's `data.kind: bag` at that recording instead, startup verifies your
-device topics against the bag's `metadata.yaml` and refuses a name the bag does not publish,
-listing the names it does. That check is why a mistyped topic is now an error rather than a
-graph that launches cleanly and detects nothing.
+The direct launch defaults differ from the justfile. The justfile defaults to assisted
+mode and enables debug, overlay, and judge; direct session launch defaults to continuous
+mode with those optional features disabled. State the desired values explicitly for a
+field run.
 
-If your bag carries `CompressedImage`, republish to raw first — the locator subscribes to `Image`:
+Disable the judge unless a matching ground-truth file is intentionally configured for
+the rig. A judge result is not a substitute for field validation.
 
-```bash
-ros2 run image_transport republish compressed raw \
-  --ros-args -r in/compressed:=/camera/left/image_raw/compressed \
-             -r out:=/camera/left/image_raw
+## 3. Observe the running system
+
+Topic namespaces come from the manifest:
+
+```
+/calibration/<lidar>_<marker>/calibration_board_detections
+/calibration/<camera>/aruco_detections
+/calibration/<lidar>_<camera>/extrinsic_transform
 ```
 
-Your bag must also carry `camera_info` alongside the image: the locator derives that topic from the
-image topic's namespace.
+For a multi-LiDAR pair, the output is instead:
 
-**Terminal 3 — the TUI.**
+```
+/calibration/<lidar1>_<lidar2>/lidar_to_lidar_transform
+```
+
+Use `ros2 topic list`, `ros2 topic hz`, and `ros2 topic echo` with the concrete
+names printed by `lctk_session check` and the session manifest. Do not assume a
+universal detection frequency.
+
+If debug output is enabled, inspect the namespaced debug topics created for the
+detector. If the overlay is enabled, inspect the pointcloud overlay and confirm the
+projected points agree with the camera image.
+
+## 4. Collect multiple poses
+
+For manual capture, run:
 
 ```bash
 just extrinsic-solver-controller
 ```
 
-It discovers the solver on the graph by itself. If more than one lidar-camera pair exists it offers
-a numbered picker. If it reports no services, the solver is not in manual mode — services exist only
-under `solver_mode=manual`. To bind explicitly (the justfile recipe forwards no arguments):
+The controller discovers the solver services. Services are available in manual and
+assisted modes, but not continuous mode.
 
-```bash
-ros2 run interactive_solver_controller interactive_solver_controller \
-  --service-base /calibration/<lidar>_<camera>
-```
+For assisted capture, use `solver_mode=assisted` and review the page on port 8080.
+The node queues synchronized observations when its stillness and novelty gates pass.
+The browser can remove captures and re-solve the current Detection Buffer.
 
-Key bindings are unchanged: `Space` add, `Backspace` remove last, `c` clear, `p` save
-(`~/detections.json`), `o` load, `q/a w/s e/d` translate, `r/f t/g y/b` rotate, `]` `[` step size,
-`0` re-solve from buffer, `ESC` exit. The footer shows the last service reply — that is where a
-refusal message appears.
+A Capture is one synchronized camera/LiDAR observation retained in the buffer. Several
+Captures can describe the same Board Placement. Move the Calibration Target through
+distinct positions and orientations rather than relying only on repeated observations
+of one placement.
 
-**Terminal 4 — RViz.** The shipped configs are wired to specific examples:
+Record the conditions of the run and retain the session manifest, Detector Tuning
+files, bag metadata, and output archive together. The exact number of captures and
+the useful placement geometry depend on the rig and are not established by a
+universal threshold in the repository.
 
-| Config | Fixed frame | Matches |
-|---|---|---|
-| `config/rviz/calibration.rviz` (default) | `seyond` | `seyond_left.yaml` / `seyond_right.yaml` |
-| `config/rviz/two_lidar_calibration.rviz` | `velodyne` | `two_lidar.yaml` |
+## 5. Review the result
 
-`just run` always uses the first one regardless of the config you pass, and there is no
-justfile variable to change it. For any other rig, run with `rviz_enabled=false` and start RViz
-yourself, or use the launch file directly with `rviz_config:=<path>`.
+Separate these outcomes:
 
-Both configs also reference two topics no node publishes (`debug/initial_board_marker`,
-`/calibration/icp_debug/correspondences`). Those displays stay empty; that is not a fault.
+- a numerical solve produces a **Solved Estimate**;
+- the quality code produces a **Quality Verdict** about the geometry in the current
+  Detection Buffer;
+- a manually edited result is an **Adjusted Transform**;
+- an archive records a buffer revision, verdict, and optional adjustment.
 
-## Reading the system
+A low residual by itself does not establish that the physical transform is correct.
+Check the overlay, frame conventions, target identity, placement coverage, and
+repeatability on independently selected data.
 
-### Topics
+When an archive is saved, keep the version and Target Identity with the field record.
+The current LiDAR-camera archive format is version 5. The migration utility supports
+the explicit transitions v3 to v4 and v4 to v5; v1 and v2 are not supported by those
+commands.
 
-Namespacing is derived from your config's device and marker names:
+## 6. Export only after review
 
-```
-/calibration/<lidar>_<marker>/calibration_board_detections
-/calibration/<lidar>_<marker>/target_identity
-/calibration/<lidar>_<marker>/debug/*              (debug_mode only, 11 topics)
-/calibration/<camera>/aruco_detections
-/calibration/<camera>/target_identity
-/calibration/<camera>/image_with_detections        (debug_mode only)
-/calibration/<lidar>_<camera>/extrinsic_transform
-/calibration/<lidar>_<camera>/lidar_to_camera_solver/*   (services, manual mode only)
-```
+Use the raw detection archive with
+[Exporting to Autoware](./autoware-export.md). The exporter accepts version 4 and
+version 5 archives with the supported board-frame convention and refuses archives it
+cannot validate.
 
-For `two_lidar.yaml` the solver output is
-`/calibration/top_lidar_front_lidar/lidar_to_lidar_transform`.
+The published ROS transform has the correct frame labels. The numeric value used by
+the exporter comes from the raw archive transform, whose coordinate representation is
+composed into the Autoware camera-link entry by the exporter.
 
-### The identity gate — the failure that looks like silence
+## Field record
 
-This is new and it is the one most likely to waste your time. Before any detection pair is admitted,
-the solver requires that its own target and **both** observers' announced identities match exactly
-on all five fields (`schema_version`, `target_id`, `revision`, `semantic_sha256`,
-`board_frame_convention`).
+For each sensor-target campaign, keep:
 
-**When it is working**, you see this once:
+- the session manifest and the exact Target Definition and Detector Tuning files;
+- the data source path and, for bags, `metadata.yaml`;
+- the synchronization settings and observed data conditions;
+- the captures kept and removed during review;
+- the Solved Estimate, Quality Verdict, and any Adjusted Transform;
+- overlay or TF verification results;
+- the archive and any export preview/write result.
 
-```
-LiDAR, camera, and local Target Identities agree; Detection Pair admission enabled
-```
-
-If you never see that line, the gate never opened, and no `Space` press will ever capture anything.
-
-**When it is not**, the messages are:
-
-- `LiDAR Target Identity is missing` / `camera Target Identity is missing` — that observer has not
-  announced. Usually it did not start, or its topic is not reaching the solver. Note that a solver
-  logs *nothing* about an observer that never appears, so silence is itself the symptom.
-- `... does not exactly match the local Target Identity (...)` — one observer is on a different
-  target than the solver.
-- `... Target Identities disagree; no Detection Pair will be accepted` — the two observers disagree
-  with each other.
-- `Cannot capture before Target Identity agreement: ...` — what the TUI footer shows when you press
-  `Space` with the gate shut.
-
-**One trap worth memorising:** if you change `target_config` and restart only the observer nodes,
-the still-running solver sees a *changed* identity from a source and blocks **permanently** — it
-cannot be recovered without restarting the solver. Restart the whole graph after any target change.
-The same event clears any captures you had buffered.
-
-### The sync line
-
-`DetectionPairSource` prints this every 10 s, but only when it changes:
-
-```
-sync: groups=580; pair skew last=12.4ms max=31.8ms; aruco_detections: received=800 rejected=0 dropped=0; calibration_board_detections: received=400 rejected=0 dropped=0
-```
-
-- `groups` — time-matched pairs emitted. Stuck at 0 while `received` climbs means the window is too
-  tight or the two streams' header stamps do not overlap.
-- **`pair skew max=` is the number that tells you whether your `tolerance_ms` is right.** It should
-  sit comfortably *below* your window. Pinned near the tolerance means the window is doing the work
-  and is too wide for a moving board; far below means you have headroom to tighten. **This is how
-  you confirm or correct the solid example's provisional 50 ms.** Write the observed value down —
-  it is evidence.
-- `received` — messages reaching this node at all; a wiring check.
-- `rejected` / `dropped` — buffer overflow under your drop policy.
-
-If nothing pairs for 10 s you get a diagnosis naming which stream stopped, or telling you both are
-arriving but not pairing (compare header stamps). Looping a bag prints a reset notice; that is
-normal.
-
-In manual mode, `Space` refuses if the newest pair is older than 2 s — pressing it after playback
-stops is expected to fail.
-
-### Detector rejections
-
-The detector logs one line per rejected frame at INFO, unthrottled — on a 10 Hz LiDAR that is 10
-lines a second when nothing is detected. Plan to `grep`, not watch.
-
-```
-bbox_free: no board selected — <description>; measured=<m> vs threshold=<t> [<unit>]; candidates=N, foreground_pts=M
-```
-
-The reason tells you which gate to loosen: `NoClusters` (nothing survived foreground extraction),
-`Flatness`, `Extent`, `SizeGate`, `SquareResidual`, `Stance` (board not standing corner-up enough),
-`Isolation` (board embedded in coplanar clutter). Target-aware rejections appear as
-`target rejected: target=<id>@<rev> reason=<code> ...` with codes including `board_up_alignment`,
-`insufficient_outer_edge_evidence`, `ambiguous_cutout_evidence` and `perforated_icp_failure`.
-
-Success looks like:
-
-```
-Target detection successful: target=<id>@<rev>, pose=(x, y, z)
-```
-
-**Background warmup.** Every `bbox_free` preset uses background subtraction with
-`bg_warmup_frames: 20`. Until warmup completes the detector emits nothing at all, printing
-`background warmup <seen>/<needed>`. **Your recording must begin with at least 20 consecutive
-board-absent frames** — roughly 2 s at 10 Hz — before the board enters. A bag that opens with the
-board already in view will never detect anything, and the symptom is silence.
-
-## Saving and loading
-
-`p` writes a version-5 archive to `~/detections.json`, atomically. It refuses when the buffer is
-empty, or when the identity gate is shut.
-
-**Old dumps do not load.** A v4 file is refused with a migration command; v3 and earlier need two
-hops, because each hop is a separate claim you are making:
-
-```bash
-# v3 -> v4: assert the board-frame convention the file was CAPTURED in
-ros2 run lidar_to_camera_solver migrate_detections \
-  --input old-v3.json --output mid-v4.json \
-  --assume-convention corner_aligned_plate_center_v1
-
-# v4 -> v5: assert the Target Definition it was CAPTURED against
-ros2 run lidar_to_camera_solver migrate_detections \
-  --input mid-v4.json --output new-v5.json \
-  --target-config $(ros2 pkg prefix lctk_launch --share)/config/targets/hollow_1000_aruco_4_v1.json5
-```
-
-Doing both in one invocation is refused deliberately. The v4→v5 step checks that every marker ID the
-archive observed belongs to the target you named — it catches an obviously wrong choice, but it
-cannot prove which physical board produced the recording. That remains your assertion.
-
-## Collecting evidence for W7-B
-
-**There is no tool that reads a bag and emits a report.** `lctk_quality`'s `EvidenceCollector` is a
-library with no console script, and the bag adapter is explicitly deferred to a future packet — the
-spec forbids fabricating one rather than documenting and verifying the topic/message mapping first.
-
-So treat `ros/lctk_quality/lctk_quality/evidence.py` as **the schema you record against**, and
-produce the report yourself.
-
-### Run each preset separately
-
-Validation status is per **sensor-target preset**, not per target. Velodyne-solid and Seyond-solid
-are two independent campaigns with two separate reports.
-
-### Label your intervals
-
-Exactly three labels exist: `visible`, `absent`, `stationary`. Record start and end times in
-nanoseconds. You need, per campaign:
-
-- a **moving** interval (`visible`) — the primary evidence, a hand-held board moved slowly through
-  range, tilt and image position;
-- a **board-absent** interval (`absent`) — for false detections. This doubles as your background
-  warmup;
-- a short **stationary** interval (`stationary`) — for pose jitter. Hand-held motion must never be
-  reported as estimator jitter, so jitter is only meaningful over an interval where the board is
-  genuinely still.
-
-### Record, per campaign
-
-- **Detection coverage** over `visible`, always as a fraction with its denominator — `accepted` and
-  `rejected` out of `frames`. Never quote a bare rate.
-- **False detections** over `absent` — that interval's `accepted` count *is* the false-detection
-  count.
-- **Jitter** over `stationary` — translation and rotation spread.
-- **Quadrant continuity** — any 90-degree flip in the reported board orientation. A temporal jump
-  alone is not proof; it must be confirmed against synchronised ArUco orientation in a common frame.
-  **A confirmed flip blocks promotion of that preset** until the cause is found.
-- **Extrinsic self-consistency** — solve from independent, non-overlapping time windows or subsets
-  and compare. No shipped tool computes this; do it by capturing separate buffers and comparing the
-  solved transforms.
-- **Overlay check** — LiDAR-camera projection looks right (`enable_overlay=true`, published on
-  `/calibration/pointcloud_overlay`).
-- **The observed `pair skew max=`**, and whether your sync window needed changing.
-- **The preset values you ended up with.** Tuning point-count, voxel, cluster, square-fit and
-  acceptance gates per operating profile is part of the work, not a side effect.
-
-### What does not count
-
-- Synthetic or fabricated clouds — never field evidence, at any point.
-- The historical hollow bags as an A/B baseline — different motion, duration and target size make
-  them a reference, not a comparison.
-- Low ICP or reprojection residual on its own. A single-capture solve can post an excellent residual
-  and still be wrong; that is why continuous mode is not the evidence path.
-- Invented thresholds. Do not assert a pass/fail number before real baselines exist — report what
-  you measured.
-
-### Promotion
-
-Promotion out of EXPERIMENTAL takes a published evidence report **plus explicit operator/maintainer
-sign-off**, then a small config/docs commit editing the `// EXPERIMENTAL` header in
-`config/board/solid_600/<sensor>.json5`. There is deliberately no automatic promotion, and no
-universal thresholds have been invented ahead of your first datasets.
-
-## Traps
-
-- **`enable_judge=false`.** Covered above; the default is wrong for your rig.
-- **`solid_600_handheld.yaml`'s topics alias the sample data.** Its placeholder topics are byte
-  identical to what `just sample-data` publishes from the *hollow* dataset. Running both together
-  connects a solid Target Definition to a hollow-board recording, and **the identity gate cannot
-  catch this** — both observers are told by config to expect solid-600, so they agree. The mismatch
-  is physical. Confirm your actual data source before trusting any solid run. Tracked as M-27.
-- **`just two-lidar` is gone.** It was hardcoded to `two_lidar.yaml`, whose topics matched no
-  in-repo source (M-26). Supply and remap your own.
-- **Restarting observers after a target change** permanently blocks a running solver. Restart
-  everything.
-- **Continuous mode discards prior placements** (H-12). Use `solver_mode=manual` for anything you
-  intend to trust.
-- **The published transform's frame labels are inverted** (M-01). Use the dump JSON's raw
-  `rvec`/`tvec` for export, not the TF topic's labels.
-
-## If you get stuck
-
-The fastest sanity check that the pipeline works at all uses data already in the repo:
-
-```bash
-just enable_judge=false demo
-```
-
-which is `ros2 launch lctk_launch session.launch.py session:=<share>/sessions/sample3-hollow-velodyne`
-— the shipped session plays its own pcap and avi, so there is no second terminal.
-
-Known target, known data, no bag preparation. If that produces detections and a solve, the pipeline
-is healthy and the problem is in your config or your bag. If it does not, the problem is upstream of
-you — and it would be the first time anyone has run this path on real data, so say so.
+This record is the evidence for deciding whether a rig-specific calibration is ready
+for use. Repository examples and detection smoke tests do not replace that field
+validation.

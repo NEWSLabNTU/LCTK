@@ -4,26 +4,24 @@ This tutorial walks you through your first calibration using included sample dat
 
 ## Step 1: Install LCTK
 
-```bash
-cd ~/repos  # or your preferred location
-git clone https://github.com/your-org/LCTK.git
-cd LCTK
+Follow the [Installation guide](./installation.md) to clone the repository, install its
+dependencies, and build LCTK. Return here when setup is complete.
 
-# Run setup (installs ROS 2, Rust, dependencies)
-./setup.sh
-
-# Reload shell after setup
-source ~/.bashrc
-
-# Build the project
-just build
-```
-
-## Step 2: Run Demo
+## Step 2: Run the demo
 
 The demo is a [session](./sessions.md) — one directory holding the sample recording and
-everything needed to calibrate against it. `session.launch.py` plays the data and runs the
-calibration graph:
+everything needed to calibrate against it. The simplest command starts both the sample
+playback and calibration graph:
+
+```bash
+just demo
+```
+
+`just demo` runs through `play_launch`, whose status page is at
+`http://localhost:8000`. The justfile defaults to assisted solver mode; its review
+page is at `http://localhost:8080`.
+
+The direct launch form is useful when you do not need `play_launch`:
 
 ```bash
 source install/setup.bash
@@ -31,18 +29,13 @@ ros2 launch lctk_launch session.launch.py \
     session:=$(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
 ```
 
-Or, with the justfile shorthand:
-
-```bash
-just demo
-```
-
-Open `http://localhost:8000` in your browser to see the web UI showing node status.
+Direct launch defaults to continuous mode and does not provide the `play_launch` status
+page. Pass `solver_mode:=assisted` if you want the review page on port 8080.
 
 The system will:
 1. Play back recorded LiDAR and camera data
-2. Detect the calibration board in point clouds
-3. Detect ArUco markers in camera images
+2. Detect the Calibration Target in point clouds
+3. Detect ArUco markers on the Calibration Target in camera images
 4. Compute the LiDAR-to-camera transformation
 
 ## Step 3: Monitor Progress
@@ -56,25 +49,28 @@ source install/setup.bash
 # device names; sample3-hollow-velodyne names them top + front_center)
 ros2 topic echo /calibration/top_front_center/extrinsic_transform
 
-# Check detection rates (should be >1 Hz)
+# Inspect the two detection streams
 ros2 topic hz /calibration/front_center/aruco_detections
 ros2 topic hz /calibration/top_calibration_board/calibration_board_detections
 ```
 
-When calibration succeeds, you'll see a `TransformStamped` message with the LiDAR-to-camera transformation.
+When the solver has a current estimate, the transform topic contains a `TransformStamped`
+message. The topic is namespaced from the session's device and marker names; other
+sessions use different names.
 
 ## Step 4: Visualize (Optional)
 
-If you have a display, launch RViz:
+If you have a display, `just demo` already launches RViz by default. To open RViz
+separately against the default layout, run:
 
 ```bash
 just rviz
 ```
 
-Or enable RViz in the demo. Justfile variables go **before** the recipe name:
+To disable RViz for the demo, put the justfile variable **before** the recipe name:
 
 ```bash
-just rviz_enabled=true demo
+just rviz_enabled=false demo
 ```
 
 In RViz:
@@ -85,8 +81,8 @@ In RViz:
 ## What Happened?
 
 The calibration system:
-- **Detected** a calibration board with circular holes in the LiDAR point cloud
-- **Detected** ArUco markers on the same board in camera images
+- **Detected** a Calibration Target with circular holes in the LiDAR point cloud
+- **Detected** ArUco markers on the same Calibration Target in camera images
 - **Solved** the 3D transformation from LiDAR frame to camera frame
 
 ## Next Steps

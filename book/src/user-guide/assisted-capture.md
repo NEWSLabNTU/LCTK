@@ -1,7 +1,7 @@
 # Assisted Capture
 
 Assisted capture is the third `solver_mode` on `lidar_to_camera_solver`. It watches the
-board detections, queues a pair by itself whenever the board is held still in a placement it
+Calibration Target detections, queues a pair by itself whenever the target is held still in a placement it
 has not seen before, and serves a web page for reviewing what it captured.
 
 `continuous` and `manual` are unchanged and still selectable — `solver_mode` remains the
@@ -10,7 +10,7 @@ switch, so you can run the older paths for comparison at any time.
 ## Why the mode exists
 
 Capturing a multi-pose calibration by hand is three jobs done at once by one person: hold the
-board still, decide by eye that it is still enough and different enough from what you already
+Calibration Target still, decide by eye that it is still enough and different enough from what you already
 have, and reach for a keyboard.
 
 The middle job is the expensive one, and until now the tooling gave no help with it. The TUI
@@ -32,6 +32,15 @@ ros2 launch lctk_launch session.launch.py \
     solver_mode:=assisted
 ```
 
+The shipped `seyond-left` live session expects a raw `Image`, while the camera in its
+README publishes `CompressedImage`. Republish it before launching the session:
+
+```bash
+ros2 run image_transport republish compressed raw \
+    --ros-args -r in/compressed:=/camera/left/image_raw/compressed \
+               -r out:=/camera/left/image_raw
+```
+
 Then open <http://localhost:8080>.
 
 If the data is already flowing — a live rig, or a bag you are playing yourself — start only
@@ -46,28 +55,31 @@ ros2 launch lctk_launch calibrate.launch.py \
 The `just` shorthand resolves a bare session name and fills in `solver_mode:=assisted`:
 
 ```bash
+ln -sfn /path/to/recording sessions/solid600-handheld-vlp/bag
 just solver_mode=assisted run solid600-handheld-vlp
 just solver_mode=assisted run <session>   # the same thing, spelled generally
 ```
 
-The review archive is written where the session's `assisted.review_archive_path` says,
-conventionally `$(session-dir)/out/detections.json`.
+The bag-backed example requires the recording at the session's declared `bag` path;
+`lctk_session check` refuses the run when it is missing. Set
+`assisted.review_archive_path` explicitly if you want *Export archive* to write a
+file. The empty default does not choose a path automatically.
 
 ## The workflow
 
 1. **Start the pipeline and open the page.** It shows a stillness banner, a diversity meter,
    the queue, and the current solve.
-2. **Walk the board around the scene.** Hold each pose for about a second. The banner turns
-   green and the pair appears in the queue on its own; your hands never leave the board.
+2. **Walk the Calibration Target around the scene.** Hold each pose for about a second. The
+   banner turns green and the pair appears in the queue on its own.
 3. **Watch the diversity meter, not the residual.** It reads `placements`, `normal span`,
    `depth range` and `lateral span` against the collection targets, and prints what is
-   missing in plain words — *"board normals span only 14 deg (aim for 20+); vary the board's
+   missing in plain words — *"target normals span only 14 deg (aim for 20+); vary the target's
    yaw and pitch"*.
 4. **Stop when the meter is satisfied**, not when the queue looks long.
-5. **Review the queue.** Each row shows the frame the pair was measured in, with the detected
-   ArUco corners drawn on and corner 0 marked, plus that pair's reprojection RMS. Rows are
-   sorted worst-first. Drop anything blurred, occluded or glared; dropping re-solves
-   immediately.
+5. **Review the queue.** Each row is shown in capture order. Available evidence can include
+   the measured frame, ArUco corner overlay, corner 0, and reprojection RMS; previews or
+   fit values can be absent for an individual capture. Drop anything blurred, occluded or
+   glared; dropping re-solves immediately.
 6. **Export.** *Export archive* writes the version-5 `detections.json`. *Export to Autoware*
    shows the diff first and writes only on a second click.
 
@@ -75,46 +87,35 @@ conventionally `$(session-dir)/out/detections.json`.
 
 A pair is queued only if it passes both.
 
-**Stillness** — the board's pose must stay within `stability_max_translation_m` and
+**Stillness** — the Calibration Target's pose must stay within `stability_max_translation_m` and
 `stability_max_rotation_deg` across the last `stability_window_s` seconds, and at least
 three synchronized pairs must land inside that window.
 
-The gate measures the **span across the window**, not the frame-to-frame delta. A board
+The gate measures the **span across the window**, not the frame-to-frame delta. A target
 drifting steadily at 1 mm per frame has a negligible per-frame delta and is plainly not
 still; only the span sees it. Getting that wrong would auto-capture exactly the slow drift
 you would then have to find by hand in review.
 
-The window is a **duration**, not a count of pairs, and the difference is not cosmetic.
-Synchronized pairs arrive irregularly — the board leaves the field of view, an ICP fit is
-rejected, a sweep returns too few points — so a fixed number of pairs covers an
-unpredictable amount of time. On the 58 s `solid600-handheld-vlp` recording a ten-pair
-window ran from 0.48 s to 19.42 s, median 1.30 s, with 71 of 195 windows shorter than a
-second. A frame count is therefore simultaneously too permissive during a dense burst and
-unboundedly stale across a dropout.
+The window is a **duration**, not a count of pairs. Synchronized pairs arrive irregularly,
+so a fixed number of pairs would cover an unpredictable amount of time.
 
 The three-pair floor is the other half of that gate: a time window on its own is not
 evidence, because with sparse detections two pairs a second apart satisfy a one-second
-window while saying nothing about what the board did in between. When either half is
+window while saying nothing about what the target did in between. When either half is
 unmet the page's banner says which, and names the measured value — `filling the window:
 0.62/1.00 s` or `too few detections: 2 in the last 1.00 s (need 3)` — so the number you
 tune against is the one you were shown.
 
-**Tune the stillness tolerances loose.** This gate is not the quality filter; the queue
-below is. Every captured pair arrives with a preview, its own reprojection RMS and a drop
-button, and the rows sort worst-first — so a marginal capture costs you one click, while a
-capture the gate refused costs you walking the board back to that spot and holding it
-again. Where a threshold is uncertain, take the permissive end.
+The stillness gate is not the only review step. A captured pair can be kept or dropped in
+the browser, and its evidence may be incomplete when preview generation or solving has not
+produced that value yet.
 
 **Novelty** — the pose must form a new placement under
 `lctk_quality.distinct_placements`, by default 5 cm and 5°.
 
-This gate matters more than it looks. Measured on a real field capture, reprojection RMSE and
-subset resampling both *invert*: a degenerate capture — one placement filmed nine times —
-scores **better** on both, and reports a confident ±0.22° / ±9 mm. Only placement diversity
-separates a good capture from a degenerate one. An auto-queueing loop without this gate would
-manufacture that degenerate capture, and every quality number on the page would applaud it.
-
-That is why the diversity meter is the prominent thing on the page and the residual is not.
+The diversity meter is therefore useful when deciding whether the current Detection Buffer
+contains enough distinct Board Placements; a low residual alone is not a substitute for
+geometric coverage.
 
 ## Configuration
 
@@ -152,8 +153,8 @@ pair keeps the configured port, the second gets `+1`, and so on — because the 
 its port eagerly and two solvers sharing one would leave the second dead at startup, after
 the graph had already reported itself launched.
 
-If the board is being rejected, the banner says which gate refused it and by how much, so
-tune from the reported number rather than by guesswork. A board that reads "held still" but
+If the Calibration Target is being rejected, the banner says which gate refused it and by how much, so
+tune from the reported number rather than by guesswork. A target that reads "held still" but
 never queues is being refused by the novelty gate — move it somewhere new.
 
 ## Security
@@ -185,7 +186,6 @@ The archive is the version-5 `detections.json` described in
 [Exporting to Autoware](./autoware-export.md) — the kept pairs, the solved transform, the
 quality report and the full Target Identity.
 
-The Autoware export is deliberately two clicks. That file reaches a vehicle, so the page
-shows the entry it would write before writing anything, and the existing `.bak` behaviour is
-kept. Changing the queue after previewing invalidates the confirmation: the diff you were
-shown described a different calibration, so you are asked to preview again.
+The Autoware export is deliberately two clicks. The page shows the entry it would write
+before writing anything, and changing the queue after previewing invalidates the confirmation:
+the diff described a different calibration, so you must preview it again.

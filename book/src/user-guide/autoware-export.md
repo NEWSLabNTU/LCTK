@@ -1,107 +1,90 @@
 # Exporting to Autoware
 
-This guide shows how to move a solved LiDAR-camera extrinsic from LCTK into an Autoware
-workspace, using the `lctk_autoware_export` tool.
+This guide shows how to export a solved LiDAR-camera extrinsic into an
+Autoware-style `sensor_kit_calibration.yaml` with `lctk_autoware_export`.
 
-## How Autoware stores extrinsics
+LCTK accepts the target YAML path supplied by the operator. The repository does not
+select an Autoware release or install layout for you.
 
-Autoware's whole static TF tree comes from two YAML files that
-`robot_state_publisher` loads through xacro at launch time:
+## 1. Save a detection archive
 
-| File | Parent frame | Children |
-|------|--------------|----------|
-| `sensors_calibration.yaml` | `base_link` | `sensor_kit_base_link` + vehicle-mounted sensors |
-| `sensor_kit_calibration.yaml` | `sensor_kit_base_link` | every kit sensor (`velodyne_top_base_link`, `camera0/camera_link`, …) |
-
-Both use the same schema — meters and radians, URDF fixed-axis RPY:
-
-```yaml
-sensor_kit_base_link:
-  camera0/camera_link:
-    x: 0.10731
-    y: 0.56343
-    z: -0.27697
-    roll: -0.025
-    pitch: 0.315
-    yaw: 1.035
-```
-
-A LiDAR-camera calibration edits **`sensor_kit_calibration.yaml`** — normally just the
-camera entry, since the lidar is the kit's reference sensor.
-
-**Where the file lives depends on the Autoware version:**
-
-- **≤ 2024.11**: per-vehicle values go to
-  `autoware_individual_params/individual_params/config/$VEHICLE_ID/<kit>/sensor_kit_calibration.yaml`.
-- **≥ 0.45.1 (incl. 1.5.0 and current main)**: `autoware_individual_params` is gone; the file
-  lives at `autoware_launch/sensor_kit/<kit>_launch/<kit>_description/config/sensor_kit_calibration.yaml`,
-  and a per-vehicle copy can be pointed at with the `config_dir:=` launch argument.
-
-The exporter doesn't care which era you're on — point it at the right file.
-
-## Step 1: Save the calibration
-
-Run the pipeline with `solver_mode=manual` and dump the result (via the
-[interactive controller](./lidar-camera.md)'s `p` key, or the service directly):
+Run a LiDAR-camera session in `manual` or `assisted` mode. Both modes provide the
+solver services. The interactive controller can save the archive with its save command,
+or call the dump service directly:
 
 ```bash
 ros2 service call /calibration/<pair>/lidar_to_camera_solver/dump_detections \
     lctk_interfaces/srv/DumpDetections "{file_path: '$HOME/detections.json'}"
 ```
 
-The JSON contains the raw solver `rvec`/`tvec`. This is the exporter's only input format —
-deliberately, because the values on the TF topic carry inverted frame labels (issue M-01)
-while the dump is unambiguous.
+The exporter reads the solved `rvec` and `tvec` from this JSON archive. It accepts
+archive versions 4 and 5. The archive must use the
+`corner_aligned_plate_center_v1` board-frame convention; version 5 also requires a
+structurally valid Target Identity.
 
-## Step 2: Preview the export
+Use the raw archive as the export input. The published ROS transform has correct frame
+labels, but its numeric value is the inverse representation used by the raw solver
+coordinates.
+
+## 2. Preview the export
+
+Supply the target YAML and the existing LiDAR entry that anchors the sensor-kit chain:
 
 ```bash
 ros2 run lctk_autoware_export export \
   --detections ~/detections.json \
-  --target ~/autoware/src/launcher/autoware_launch/sensor_kit/sample_sensor_kit_launch/sample_sensor_kit_description/config/sensor_kit_calibration.yaml \
+  --target /path/to/sensor_kit_calibration.yaml \
   --camera-frame camera0/camera_link \
   --lidar-frame velodyne_top_base_link \
   --dry-run
 ```
 
-- `--lidar-frame` names the **existing** lidar entry in the target file; it anchors the
-  chain from `sensor_kit_base_link` to your camera.
-- `--camera-frame` is the entry to write (created if missing).
-- `--dry-run` prints the six values and touches nothing.
+- `--lidar-frame` names an existing child entry under the kit frame.
+- `--camera-frame` names the entry to create or update.
+- `--dry-run` prints the six exported values and writes nothing.
 
-## Step 3: Write it
+The exporter refuses a missing kit frame, missing LiDAR anchor, unsupported archive, or
+incompatible board-frame convention instead of guessing.
 
-Drop `--dry-run`. The exporter:
+## 3. Write the entry
 
-- patches **only** the target entry — comments, ordering, and every other entry in the
-  file survive byte-for-byte;
-- saves a `sensor_kit_calibration.yaml.bak` next to the target the first time it
-  modifies it;
-- refuses to guess: a missing kit key or lidar entry aborts with the list of available
-  frames instead of writing something wrong.
+Remove `--dry-run` only after reviewing the printed values:
 
-## What the exporter computes
-
-The solver's output relates the **camera optical frame** (z forward) to the LiDAR frame.
-Autoware's entry wants the pose of **`camera_link`** (x forward, REP-103) in
-**`sensor_kit_base_link`**. The exporter composes:
-
-```text
-T(kit → camera_link) = T(kit → lidar)          # read from the target YAML
-                     · T(lidar → optical)      # solver result, inverted
-                     · T(optical → camera_link) # fixed REP-103 rotation
+```bash
+ros2 run lctk_autoware_export export \
+  --detections ~/detections.json \
+  --target /path/to/sensor_kit_calibration.yaml \
+  --camera-frame camera0/camera_link \
+  --lidar-frame velodyne_top_base_link
 ```
 
-and decomposes to fixed-axis RPY. All three conversions are covered by tests, including
-an end-to-end test that pushes an exported file through the real `xacro` pipeline and
-checks the emitted URDF joint reproduces the solved transform.
+The exporter updates only the selected camera entry. It creates a
+`sensor_kit_calibration.yaml.bak`-style backup beside the target the first time it
+writes. The YAML round-trip preserves comments, key order, and unrelated entries, but
+the serializer may change formatting.
 
-## Verify in Autoware
+## Transform composition
 
-Launch Autoware with your vehicle and sensor model, then check the TF:
+The archive's `rvec` and `tvec` map LiDAR coordinates into the camera optical frame,
+`T_optical_from_lidar`. The exporter inverts that matrix and composes it into the
+camera-link entry under the sensor-kit frame:
+
+```
+T_kit_camera_link = T_kit_lidar
+                  · inv(T_optical_from_lidar)
+                  · inv(OPTICAL_IN_CAMERA_LINK)
+```
+
+It then writes translation in metres and fixed-axis roll, pitch, and yaw in radians.
+
+## Verify the result
+
+Use the target system's normal launch and TF tools to inspect the exported entry:
 
 ```bash
 ros2 run tf2_ros tf2_echo sensor_kit_base_link camera0/camera_link
 ```
 
-The translation/rotation should match the exporter's printed values.
+The exporter test suite also checks the frame conversions and a minimal xacro
+round-trip when the ROS `xacro` package is available. That test is not a full test of an
+installed Autoware workspace.

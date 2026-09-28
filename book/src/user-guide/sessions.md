@@ -8,13 +8,9 @@ are aliases over exactly these commands — nothing in LCTK requires `just`.
 
 ## Why a session
 
-Before sessions, a run was described by two files that had to agree but never referenced
-each other: a playback launch file naming a recording and its topics, and a calibration
-config restating those topics by hand. When they disagreed the pipeline still launched
-cleanly, every node came up healthy, and nothing was ever detected. Three tracker findings
-were that one bug in different clothes — a config naming topics no recording published, a
-config whose placeholder topics collided with a different recording's, and a crop box shared
-between two rigs with different geometry.
+Before sessions, a run was described by separate playback and calibration files. A session
+keeps the data source, device topics, target selection, detector tuning, and session-local
+files together, so the launch path can validate them as one unit.
 
 A session closes the gap by making both halves read one file, and by refusing at startup
 what used to fail silently at run time.
@@ -39,13 +35,13 @@ describes it, so copying the directory copies the run. A large recording is stil
 referenced rather than moved — the two-LiDAR bags are gitignored and symlinked in.
 
 The rule for what belongs here is whether the file describes a *recording* or the *world*.
-A crop box says where a board sat during one recording, so it is session-local. A target
-definition describes a physical board that exists independently of any recording, so it
+A crop box says where a Calibration Target sat during one recording, so it is session-local. A target
+definition describes a physical Calibration Target that exists independently of any recording, so it
 stays in the shared library under `lctk_launch/config/`:
 
 | session-local | shared library (`lctk_launch/config/`) |
 |---|---|
-| data source, the recording, topics, frame ids | `targets/` — a physical board |
+| data source, the recording, topics, frame ids | `targets/` — a physical Calibration Target |
 | crop box, camera intrinsics | `board/` — detector tuning per (target, sensor) |
 | sync window, RViz layout | `aruco/` — ArUco detector tuning |
 
@@ -61,7 +57,7 @@ sessions can live anywhere.
 ```yaml
 name: sample3-hollow-velodyne
 description: >
-  A VLP-32C pcap and a camera avi, hollow 1000 board, one board placement.
+  A VLP-32C pcap and a camera avi, hollow 1000 Calibration Target, one Board Placement.
   The recording ships in git, in this session's own data/.
 
 data:
@@ -92,24 +88,26 @@ assisted:                                          # optional, solver_mode=assis
 
 ### `$(session-dir)`
 
-`$(session-dir)` expands to the directory the manifest was loaded from. Use it for every
-session-local file. A manifest that names no absolute path can be copied to another machine,
-or into your own tree, and still run — which is the whole reason a session is a directory
-rather than a file.
+`$(session-dir)` expands to the directory of the manifest that was loaded. Use it for every
+session-local file. Ordinary relative paths still resolve relative to the process working
+directory, so use this substitution when a path must follow the manifest to another machine.
 
-`$(find-pkg-share <pkg>)` works as before, for the shared presets. Using `$(session-dir)` in
-a file that was not loaded from a session directory is refused rather than silently expanded
-to an empty string.
+`$(find-pkg-share <pkg>)` works as before for shared presets. `$(session-dir)` is also
+available when a plain calibration YAML is passed directly; it expands to that YAML's parent
+directory. It is refused only when the value cannot be anchored to a loaded config file.
 
 ### The `data:` section
 
 | `kind` | Required keys | What LCTK starts |
 |---|---|---|
 | `pcap_avi` | `dir` — a directory holding `lidar.pcap` and `video.avi` | the `lctk_sample_data` playback |
-| `bag` | `path` — a rosbag2 directory with a `metadata.yaml` | `ros2 bag play --clock` |
-| `live` | none | nothing; the sensors are already publishing |
+| `bag` | `path` — a rosbag2 directory with a `metadata.yaml` | the `lctk_bag_play` node, waiting for the configured LiDAR and republish subscribers |
+| `live` | none | no sensor playback; configured `data.republish` bridges are still launched |
 
-Optional under any kind: `lidar: {model, rpm}` and `camera: {info_url}`.
+Optional: `lidar: {model, rpm}`; `camera: {info_url}` for `pcap_avi`; and
+`republish: [{from: <compressed-topic>, to: <raw-topic>}]` under any kind. Republish entries
+add an image-transport bridge to the launched graph; they can be useful for live sources as
+well as bags.
 
 A manifest with no `data:` section at all still parses. That is what `calibrate.launch.py`
 accepts today, and it keeps working.
@@ -122,7 +120,7 @@ the run:
 | kind | topics | why |
 |---|---|---|
 | `pcap_avi` | **derived** — and stating one is refused | LCTK drives this playback, so a single source feeds both the player and the calibration graph. A mismatch stops being unlikely and becomes unrepresentable. |
-| `bag` | **stated**, then verified against `metadata.yaml` | The recording fixes the names. Startup refuses a name the bag lacks, and prints the names it has. |
+| `bag` | **stated**, then verified against `metadata.yaml` | Source topics must occur in the recording; configured `data.republish` outputs may satisfy raw image topics produced by a bridge. |
 | `live` | **stated** | There is nothing to check against until the sensor is up. |
 
 Derived names follow one convention, which is exactly what the sample-data playback already
@@ -164,10 +162,9 @@ devices:
 A stated value is checked rather than trusted. Under `kind: bag`, stating `reliable` for a
 topic the recording offers `best_effort` is refused at parse time, naming the topic.
 
-Per-device rather than per-session because a single recording can hold both: `TWO_LIDAR_1`
-records a RELIABLE Falcon beside a BEST_EFFORT VLP-32. Under the old graph-wide `mode`
-argument one answer had to serve both, and `mode=offline` really did leave the VLP-32
-detector without a single cloud while the Falcon one warmed up normally.
+The setting is resolved per device because one recording can offer different reliabilities on
+different topics. There is no graph-wide `mode` argument; transport reliability belongs in the
+manifest or is inferred from the recording.
 
 Only sensor subscriptions take an answer from the session. LCTK's own detection and
 transform topics are pinned RELIABLE inside the nodes — which is what lets two detectors
@@ -180,15 +177,15 @@ source /opt/ros/humble/setup.bash
 source /path/to/LCTK/install/setup.bash
 
 # End to end: the data source, then the calibration graph
-ros2 launch lctk_launch session.launch.py session:=~/calib/rig-a
+ros2 launch lctk_launch session.launch.py session:="$HOME/calib/rig-a"
 
 # A shipped session, from any working directory
 ros2 launch lctk_launch session.launch.py \
     session:=$(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
 
-# Every calibrate argument still applies
+# The session launch forwards the calibration arguments
 ros2 launch lctk_launch session.launch.py \
-    session:=~/calib/rig-a solver_mode:=assisted enable_rviz:=false
+    session:="$HOME/calib/rig-a" solver_mode:=assisted enable_rviz:=false
 
 ros2 launch lctk_launch session.launch.py --show-args
 ```
@@ -211,14 +208,15 @@ A live rig, or a bag you are playing yourself, needs only the calibration half:
 
 ```bash
 # terminal 1 — data only
-ros2 launch lctk_launch session_data.launch.py session:=~/calib/rig-a
+ros2 launch lctk_launch session_data.launch.py session:="$HOME/calib/rig-a"
 
 # terminal 2 — calibration only
-ros2 launch lctk_launch calibrate.launch.py config_file:=~/calib/rig-a/session.yaml
+ros2 launch lctk_launch calibrate.launch.py config_file:="$HOME/calib/rig-a/session.yaml"
 ```
 
 `calibrate.launch.py` keeps its `config_file:=` interface unchanged. A session manifest is a
-valid calibration config; the `data:` section is simply not read by it.
+valid calibration config: it reads and validates the `data:` section, but does not start the
+data source. Use `session.launch.py` when the manifest should launch playback as well.
 
 ### RViz layout
 
@@ -259,9 +257,8 @@ data:     pcap_avi /home/you/LCTK/sessions/sample3-hollow-velodyne/data
 OK
 ```
 
-It answers "why is nothing being detected" before the run rather than after. Every failure
-it reports names the **resolved** absolute path, never the `$(session-dir)` string that
-produced it — the path that was actually tried is what you need to fix it.
+It answers "why is nothing being detected" before the run rather than after. Path and data-file
+errors include the path that was tried; schema errors may instead identify the invalid field.
 
 `new` copies an existing session, skips its `out/`, and refuses to overwrite an existing
 directory.
@@ -283,7 +280,7 @@ directory.
    ```
 5. Run it:
    ```bash
-   ros2 launch lctk_launch session.launch.py session:=~/calib/rig-b
+   ros2 launch lctk_launch session.launch.py session:="$HOME/calib/rig-b"
    ```
 
 ## Where outputs land
@@ -304,32 +301,33 @@ is the point.
 | `session:=` path does not exist | refused, naming the path that was tried |
 | a directory with no `session.yaml` | refused, naming the directory and what was expected |
 | `data.dir` / `data.path` missing on disk | refused, naming the resolved absolute path |
-| `topic:` stated under `kind: pcap_avi` | refused — the topic is derived, and stating it would restore two sources of truth |
-| `topic:` absent under `bag` or `live` | refused, naming the device |
+| `pointcloud_topic`/`image_topic` stated under `kind: pcap_avi` | refused — the topic is derived |
+| a required device topic absent under `bag` or `live` | refused, naming the device |
 | a bag that lacks a named topic | refused, listing the topics the bag does contain |
-| `$(session-dir)` with no session directory | refused, naming the offending value |
+| an unresolvable path substitution | refused, naming the offending value |
 | an unknown key under `data:` | refused, listing the known keys |
 
 ## The shipped sessions
 
 | session | data | notes |
 |---|---|---|
-| `sample1` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
-| `sample2` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
+| `sample1` | `pcap_avi`, own `data/` | ships in git; detection has been checked, but its extrinsic is not a validated calibration |
+| `sample2` | `pcap_avi`, own `data/` | ships in git; detection has been checked, but its extrinsic is not a validated calibration |
 | `sample3-hollow-velodyne` | `pcap_avi`, own `data/` | ships in git; verified end to end; what `just demo` runs |
-| `sample4` | `pcap_avi`, own `data/` | ships in git; **never run**; its pcap is the second LiDAR of the two-LiDAR captures |
-| `sample5` | `pcap_avi`, own `data/` | ships in git; **never run** — target and preset are assumptions |
+| `sample4` | `pcap_avi`, own `data/` | ships in git; detection has been checked, but its extrinsic is not a validated calibration |
+| `sample5` | `pcap_avi`, own `data/` | ships in git; detection has been checked, but its extrinsic is not a validated calibration |
 | `seyond-left` | `live` | Seyond Falcon + left camera; no recording ships |
 | `seyond-right` | `live` | Seyond Falcon + right camera; no recording ships |
-| `solid600-handheld-vlp` | `live` | solid 600 mm target, hand-held, ZED; 50 ms sync window |
+| `solid600-handheld-vlp` | `bag` | solid 600 mm target, hand-held, ZED; recording supplied separately |
+| `solid600-handheld-seyond` | `bag` | solid 600 mm target, hand-held, ZED + Seyond; recording supplied separately |
 | `twolidar-vlp32-falcon` | `bag`, `TWO_LIDAR_1` | the bag is gitignored — see `ros/lctk_sample_data/bags/README.md` |
 | `vehicle-multisensor` | `live` | a schema demonstration; no rig behind it |
+| `vlp32-zed-hollow` | `live` | VLP-32C + ZED; topics are supplied by the live rig |
 
-Each has its own `README.md` saying what the recording is and whether the data ships. Only
-`sample3-hollow-velodyne` has been run end to end; the other four `sampleN` sessions ship a
-playable recording whose board, detector preset and rig geometry nobody has verified. Their
-manifests are bbox-free on purpose: a crop box is per-recording geometry, and a borrowed one
-is what silenced the shipped demo (M-29). Read those READMEs before trusting their values.
+Each has its own `README.md` saying what the recording is and whether the data ships. A
+detection check is not the same as validating an extrinsic against a rig. Read the README
+before using a session whose data is external or whose physical setup is not represented by
+the repository.
 
 ## The `just` shorthand
 
@@ -342,14 +340,10 @@ the installed share directory.
 | `just sessions` | `ros2 run lctk_launch lctk_session list` |
 | `just check <name-or-path>` | `ros2 run lctk_launch lctk_session check …` |
 | `just new <path> [<template>]` | `ros2 run lctk_launch lctk_session new … --from …` |
-| `just run <name-or-path>` | `ros2 launch lctk_launch session.launch.py session:=…` |
+| `just run <name-or-path>` | resolves the name, then runs `session.launch.py` through `play_launch` with the forwarded run settings |
 | `just demo` | `just run sample3-hollow-velodyne` |
-| `just sample-data [<name>]` | `ros2 launch lctk_launch session_data.launch.py session:=…` — playback only |
-| `just lidar-camera [<name>]` | `just run <name>` |
-| `just solid [<name>]` | `just run <name>` |
-| `just two-lidar` | `just run twolidar-vlp32-falcon` |
-| `just assisted [<name>]` | `just solver_mode=assisted run <name>` |
-| `just calibrate <config-path>` | `ros2 launch lctk_launch calibrate.launch.py config_file:=…` |
+| `just sample-data [<name>]` | resolves the name, then runs `session_data.launch.py` through `play_launch` — playback only |
+| `just calibrate <config-path>` | runs `calibrate.launch.py` through `play_launch` with the forwarded run settings |
 
 `just new <path> <template>` takes its template as a second **positional** argument, not as
 `FROM=…`; `FROM=x` would be passed through as the literal string.

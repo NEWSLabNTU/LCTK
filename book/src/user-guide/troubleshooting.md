@@ -1,224 +1,212 @@
 # Troubleshooting
 
-Quick fixes for common LCTK issues.
+Use the current session manifest and the running graph as the source of truth for
+topics, frames, Target Definitions, and Detector Tuning.
 
-## Diagnostic Flowchart
+## Start with validation
 
-```mermaid
-flowchart TD
-    Start[Calibration Not Working] --> Check{What's the issue?}
+Before launching a session:
 
-    Check -->|Build failed| Build[Build Issues]
-    Check -->|No detections| Det[Detection Issues]
-    Check -->|Poor accuracy| Acc[Accuracy Issues]
-
-    Build --> B1{Error type?}
-    B1 -->|memory file not found| B2[Install C++ headers:<br/>apt install libstdc++-12-dev]
-    B1 -->|SFCGAL missing| B3[apt install libsfcgal-dev]
-    B1 -->|Command not found| B4[Run: source install/setup.bash]
-
-    Det --> D1{Which detector?}
-    D1 -->|ArUco markers| D2[Check lighting<br/>Verify marker IDs<br/>Check camera_info]
-    D1 -->|Board in LiDAR| D3[Check ROI/bbox<br/>Increase RANSAC iterations<br/>Check distance 3-8m]
-
-    Acc --> A1[Increase detection count<br/>Multiple board positions<br/>Verify camera intrinsics]
+```bash
+source install/setup.bash
+just check <session-name-or-path>
 ```
 
-## Quick Fixes
+For a bag, this checks that the manifest's device topics occur in `metadata.yaml`.
+It also catches missing data, missing session-local files, and invalid path
+substitutions before the graph starts.
 
-### 1. Build Failures
+If the graph is already running:
 
-**Error: `fatal error: 'memory' file not found`**
 ```bash
-sudo apt-get install libstdc++-12-dev libclang-dev
+ros2 topic list
+ros2 node list
 ```
 
-**Error: `SFCGAL not found`**
-```bash
-sudo apt-get install libsfcgal-dev
-```
+Use the concrete topic and frame names from the manifest. Generic names such as
+`/aruco_detections` or `/calibration_transform` are not the names published by
+the current nodes.
 
-**Error: `command not found` after build**
+## Setup and build failures
+
+### Commands are missing
+
+Source the ROS and workspace environments:
+
 ```bash
+source /opt/ros/humble/setup.bash
 source install/setup.bash
 ```
 
-**Error: ROS 2 daemon unresponsive**
+If the setup script has not completed, rerun it from the repository root. Use flags,
+not positional step names:
+
+```bash
+./setup.sh --status
+./setup.sh --verify
+./setup.sh --dry-run
+```
+
+The default setup plan installs the required system, ROS, Rust, Python, and build
+tools. Optional steps can be selected with `--only` or omitted with `--skip`.
+
+### Missing C/C++ or geometric libraries
+
+Use the setup steps so the repository's pinned dependencies remain consistent:
+
+```bash
+./setup.sh --only build-tools
+./setup.sh --only geometric-libs
+```
+
+### Python packages shadow ROS packages
+
+Do not install ROS/OpenCV dependencies with `pip3 install --user`. User-site
+versions of setuptools, NumPy, SciPy, or pytest plugins can shadow the apt versions
+used by ROS 2 Humble and break builds, imports, or tests.
+
+## No detections
+
+### Check the data source
+
+For a pcap/AVI or bag session, confirm that the data source is part of the launch:
+
+```bash
+just run <session-name-or-path>
+```
+
+For a live session, confirm the sensors are publishing before starting the calibration
+graph. For a plain calibration YAML, play the recording separately and then run
+`just calibrate`.
+
+If the camera publishes `CompressedImage` but the camera detector expects raw
+`Image`, add a `data.republish` bridge to the session or run the corresponding
+`image_transport republish compressed raw` command.
+
+### Check the actual topics
+
+Use the session's device names and marker names:
+
+```bash
+ros2 topic hz /calibration/<camera>/aruco_detections
+ros2 topic hz /calibration/<lidar>_<marker>/calibration_board_detections
+```
+
+For a bag, a missing topic should be fixed in the manifest after inspecting
+`metadata.yaml`. A topic that exists in the bag under a different name is not
+automatically remapped.
+
+### Check the target and detector files
+
+The marker entry must name both:
+
+```yaml
+target_config: $(find-pkg-share lctk_launch)/config/targets/<target>.json5
+detector_config: $(find-pkg-share lctk_launch)/config/board/<target>/<sensor>.json5
+```
+
+If the detector preset selects `detection_mode: "bbox"`, its marker entry must also
+name the session-local crop box:
+
+```yaml
+bbox_config: $(session-dir)/bbox.json5
+```
+
+Do not copy plate geometry into Detector Tuning. The physical target and its
+Target Definition must match.
+
+### Check transport reliability
+
+For bag sessions, inspect the offered QoS profiles in `metadata.yaml`. A manifest
+value of `qos: reliable` is incompatible with a BEST_EFFORT publisher; use the
+recording's offered reliability or state `best_effort` for that device.
+
+### Check Target Identity
+
+The LiDAR detector, camera detector, and solver must use matching Target Identity
+values. If the Target Definition changed, restart the complete session so all
+observers and the solver load the same identity.
+
+## Poor or surprising results
+
+- Confirm the camera intrinsics and camera-info topic/file.
+- Confirm the LiDAR and camera observe the same Calibration Target at the same time.
+- Check that the selected Detector Tuning belongs to the actual sensor.
+- Use distinct Board Placements for manual or assisted capture.
+- Inspect the overlay when `enable_overlay:=true`.
+- Treat a Quality Verdict as a geometric assessment, not proof that the physical
+  transform is correct.
+
+The repository does not define universal distances, detection rates, capture counts,
+or performance thresholds. Record rig-specific operating limits from field data.
+
+## Debugging and logs
+
+Enable debug output with a justfile variable before the recipe:
+
+```bash
+just debug_mode=true calibrate /path/to/session.yaml
+```
+
+Debug topics are namespaced by the device and marker, for example:
+
+```
+/calibration/<lidar>_<marker>/debug/plane_inliers
+/calibration/<lidar>_<marker>/debug/final_board_pose
+/calibration/<camera>/image_with_detections
+```
+
+Use `ros2 topic list` to discover the exact topics emitted by the selected nodes.
+The justfile's launch recipes use `play_launch`; its recorded run data is under
+`play_log/`. ROS node logs are under the system ROS log directory unless
+`ROS_LOG_DIR` is set.
+
+## Runtime issues
+
+### ROS 2 daemon is unresponsive
+
 ```bash
 pkill -9 -f ros2-daemon
 ```
 
-### 2. No Detections
+### Text file busy during a rebuild
 
-#### ArUco Markers Not Detected
+Stop running LCTK nodes, remove only the affected package's build/install entries,
+and rebuild from the repository root:
 
-**Check if images are arriving:**
 ```bash
-ros2 topic hz /sensing/camera/front_center/image_raw
+pkill -9 -f "<node_name>"
+rm -rf build/<package> install/<package>
+just build
 ```
 
-**Common fixes:**
-- Improve lighting (avoid glare and shadows)
-- Verify marker IDs match your Target Definition (`config/targets/<target>.json5`, `fiducial.marker_ids`)
-- Check camera_info is valid (not all zeros)
-- Clean marker surfaces
-- Ensure markers are flat and undistorted
+If interface bindings were changed or a binding path is missing, follow the binding
+cleanup instructions in the repository's build documentation before rebuilding.
 
-#### Board Not Detected in Point Cloud
+### RViz shows no data
 
-**Check if point clouds are arriving:**
+Check:
+
 ```bash
-ros2 topic hz /sensing/lidar/top/pointcloud_raw
-```
-
-**Common fixes:**
-1. **Adjust bounding box** (only applies when the Detector Tuning preset selects
-   `detection_mode: "bbox"`) in the `bbox_config` file, e.g. `config/board/bbox.json5`:
-   ```json5
-   {
-     "pose": {
-       "translation": [3.0, 0.0, 0.0],   // Board 3m in front
-       "rotation": [0.0, 0.0, 0.0, 1.0]  // No tilt
-     },
-     "size_xyz": [6.0, 6.0, 3.0]          // Large search area
-   }
-   ```
-
-2. **Increase RANSAC iterations** in the marker's Detector Tuning preset (e.g.
-   `config/board/hollow_1000/velodyne.json5`):
-   ```json5
-   "plane_ransac_max_iterations": 5000  // From default 2000
-   ```
-
-3. **Check board distance:** Works best at 3-8 meters
-
-4. **Visualize in RViz:**
-   ```bash
-   rviz2
-   # Add PointCloud2 topic, check if board is visible
-   ```
-
-5. **Check the board's mounting and the pose seed.** The detector seeds ICP
-   from a diamond-mounted board (standing on one corner) and the sensor's up
-   axis. If the plate arrives but ICP never converges — no detections, no
-   error — the seed is the usual cause:
-   - `sensor_up_axis` must name the sensor's own up axis (`"z"` for
-     Velodyne, `"x"` for the Seyond Falcon).
-   - `initial_inplane_rotation_deg` must be `0.0` for a diamond-mounted
-     board, which is every rig here. A 45° error is exactly the worst case:
-     it sits halfway between two of the square's symmetric orientations, so
-     ICP has no gradient to follow and silently finds nothing. Do not sweep
-     this parameter; see
-     [Configuration](./configuration.md#sensor_up_axis-and-initial_inplane_rotation_deg).
-
-### 3. Poor Calibration Accuracy
-
-**Symptoms:** Misaligned point clouds on images, high reprojection error
-
-**Solutions:**
-1. **Collect more data:**
-   - Record 3-5 different board positions
-   - Include various distances (3m, 5m, 8m)
-   - Cover different angles
-
-2. **Check camera intrinsics:**
-   ```bash
-   # Verify camera_info.yaml has correct values
-   # Re-calibrate camera if needed
-   ```
-
-3. **Verify board geometry:**
-   - Measure physical board dimensions
-   - Update the Target Definition (`config/targets/<target>.json5`) if dimensions changed —
-     board geometry lives there, not in the Detector Tuning preset
-   - Check cutout (hole) positions and radii under `plate.surface.circular_cutouts`
-
-### 4. Performance Issues
-
-**Slow detection (>2 seconds per frame):**
-```bash
-# Reduce ICP iterations in the marker's Detector Tuning preset
-# (e.g. config/board/hollow_1000/velodyne.json5)
-"max_icp_iterations": 5  # From default 10
-
-# Check CPU usage
-htop
-```
-
-**High memory usage:**
-```bash
-# Monitor memory
-free -h
-
-# Restart nodes if memory leak suspected
-```
-
-### 5. Visualization Issues
-
-**RViz not showing topics:**
-```bash
-# Check ROS domain
 echo $ROS_DOMAIN_ID
-
-# Restart RViz
-pkill rviz2 && rviz2
+ros2 topic list
+ros2 node list
 ```
 
-**Overlay images wrong:**
-- Known issue with 45° tilt (see AGENTS.md)
-- Verify extrinsic transform is being published
-- Check TF tree: `ros2 run tf2_tools view_frames`
+Use the frame IDs and topics from the session manifest. A session may provide its own
+`rviz.rviz`; otherwise pass an explicit `rviz_config:=...` or run `just rviz`.
 
-## Debugging Tools
+## Before reporting a problem
 
-### Check Detection Rates
+Include:
 
-```bash
-# Should all be >1 Hz for successful calibration
-ros2 topic hz /aruco_detections
-ros2 topic hz /calibration_board_detections
-ros2 topic hz /calibration_transform
-```
+1. the session manifest and the selected Target Definition/Detector Tuning paths;
+2. the output of `just check <session>`;
+3. `ros2 topic list` and `ros2 node list`;
+4. the relevant error or refusal message;
+5. whether the data source is live, pcap/AVI, or bag, including bag metadata when
+   applicable.
 
-### Enable Debug Mode
-
-```bash
-just debug_mode=true calibrate /path/to/your_config.yaml
-```
-
-Debug topics show intermediate steps:
-- `/calibration/debug/filtered_points`
-- `/calibration/debug/plane_inliers`
-- `/calibration/debug/initial_board_marker`
-- `/calibration/debug/final_board_pose`
-
-### View Logs
-
-```bash
-# ROS 2 logs
-tail -f ~/.ros/log/latest/<node>-*.log
-
-# Or increase log level
-export RCUTILS_CONSOLE_OUTPUT_FORMAT="[{severity}] [{name}]: {message}"
-export RCUTILS_LOGGING_LEVEL=DEBUG
-```
-
-## Getting Help
-
-If issues persist:
-
-1. **Check configuration files** match your physical setup
-2. **Try sample data first** to isolate hardware issues
-3. **Review AGENTS.md** for known issues
-4. **Report bugs** at GitHub issues with:
-   - Error messages
-   - Configuration files
-   - Output of `ros2 topic list` and `ros2 node list`
-
-## Common Pitfalls
-
-- **Wrong working directory:** Always run from project root (`/home/aeon/repos/LCTK`)
-- **Forgot to source:** Run `source install/setup.bash` after every build
-- **Config file paths:** Use absolute paths or ensure CWD is correct
-- **Board visibility:** Both sensors must see board **simultaneously**
-- **Static board:** Board must be stationary during data capture
+Run commands from your repository checkout, not from a machine-specific path. See
+[Installation](./installation.md), [Calibration Sessions](./sessions.md), and
+[Configuration](./configuration.md) for the supported setup and launch forms.
