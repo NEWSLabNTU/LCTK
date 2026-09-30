@@ -1,138 +1,74 @@
 # Multi-LiDAR Calibration
 
-This guide shows how to calibrate multiple LiDAR sensors using the maintained
-config-driven `lidar_to_lidar_solver` pipeline.
+LCTK estimates the transform between two LiDAR frames by observing the same
+Calibration Target from both sensors at synchronized times.
 
-## Workflow
+## Prepare the session
 
-```mermaid
-graph LR
-    A[(LiDAR 1)] --> C[Target detector 1]
-    B[(LiDAR 2)] --> D[Target detector 2]
-    C -->|3D pose| E[lidar_to_lidar_solver]
-    D -->|3D pose| E
-    E --> F>Transform]
+The shipped example is `twolidar-vlp32-falcon`. It pairs a Velodyne VLP-32C and a
+Seyond Falcon, but its rosbag is not included in the repository. Follow
+`ros/lctk_sample_data/bags/README.md` to obtain the recording and place or link it at
+the path declared in the session.
 
-    classDef sensor fill:#e0e0e0,stroke:#333,color:#000
-    classDef node fill:#4a90d9,stroke:#333,color:#fff
-    classDef output fill:#2d6a4f,stroke:#333,color:#fff
-
-    class A,B sensor
-    class C,D,E node
-    class F output
-```
-
-Each LiDAR detects the same Calibration Target. The solver synchronizes the two
-detection streams and publishes a LiDAR-to-LiDAR transform.
-
-## Shipped session
-
-The maintained example is:
-
-```
-sessions/twolidar-vlp32-falcon/session.yaml
-```
-
-It uses the hollow 1000 mm Target Definition and pairs `top_lidar` with
-`front_lidar`. The recording is not committed to the repository. Obtain it
-according to `ros/lctk_sample_data/bags/README.md`, then make it available at the
-path declared by the session.
-
-The manifest currently declares:
-
-| device | topic | frame |
-|---|---|---|
-| `top_lidar` | `/lidar/vlp32/velodyne_points` | `velodyne` |
-| `front_lidar` | `/lidar/falcon/iv_points` | `seyond` |
-
-Run the session check before launching:
+Before running, confirm that both sensors can see the same target, that both detector
+presets use the same Target Definition, and that the session's topics and frame IDs
+match the recording. Then validate it:
 
 ```bash
-source install/setup.bash
 just check twolidar-vlp32-falcon
 ```
 
+For another pair of LiDARs, create a session based on the example and update the
+devices, pair, target, and detector settings. See [Sessions](./sessions.md) and
+[Configuration](./configuration.md).
+
 ## Run the calibration
 
-When the bag is available at the session's declared path, `just run` starts both the
-bag player and calibration graph:
+With the recording in place, run the session:
 
 ```bash
 just run twolidar-vlp32-falcon
 ```
 
-This recipe uses `play_launch`, so its launch status page is at
-<http://localhost:8000>. The LiDAR-to-LiDAR solver itself has no browser review page;
-inspect its ROS output instead.
-
-The direct form is:
+The session starts the bag and calibration graph. The `just` launch status page is at
+<http://localhost:8000>. If the data is already being published or played, run only the
+calibration graph:
 
 ```bash
-ros2 launch lctk_launch session.launch.py \
-    session:=$(ros2 pkg prefix lctk_launch --share)/sessions/twolidar-vlp32-falcon
+just calibrate /path/to/session/session.yaml
 ```
 
-If data is already being played, start only the calibration graph:
+The solver updates its published transform for each synchronized detection pair; it
+does not accumulate a multi-pose capture set. Move the target through several distinct
+positions and tilts while both LiDARs can see it, and compare the reported transform
+across those views as a consistency check. When the values are consistent, save a
+selected output message with the session and field record.
 
-```bash
-just calibrate /path/to/twolidar-vlp32-falcon/session.yaml
+## Check the output
+
+The solver output is named from the LiDAR device names in the session:
+
+```text
+/calibration/<lidar1>_<lidar2>/lidar_to_lidar_transform
 ```
 
-For a plain calibration YAML, play the recording separately and ensure its topics and
-frames match the YAML.
-
-## Inspect topics and output
-
-The detection streams for the shipped session are:
+For the shipped session:
 
 ```bash
+source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 topic hz /calibration/top_lidar_calibration_board/calibration_board_detections
-ros2 topic hz /calibration/front_lidar_calibration_board/calibration_board_detections
-```
-
-The solver output is:
-
-```bash
 ros2 topic echo /calibration/top_lidar_front_lidar/lidar_to_lidar_transform
 ```
 
-LCTK does not promise a universal detection rate. A missing stream should first be
-checked against the session manifest and the bag metadata.
+To capture one message while the session is running, use `--once` and copy the
+result into the field record:
 
-For RViz, use the exact topics from the manifest:
-
-- `/lidar/vlp32/velodyne_points`
-- `/lidar/falcon/iv_points`
-
-The shipped `twolidar-vlp32-falcon` session can provide its own RViz layout when one
-is present. Otherwise pass an explicit `rviz_config:=...` or use `just rviz` for the
-default calibration layout.
-
-## Solver parameters
-
-`same_face_mode` is a ROS parameter of `lidar_to_lidar_solver`; it is not a key in
-the session YAML schema generated by the current launch planner. The generated node
-plan supplies the topics, frames, remappings, and synchronization settings. Do not
-recommend changing this parameter through the session manifest.
-
-The required `sync:` section controls the synchronization window and queue policy:
-
-```yaml
-sync:
-  tolerance_ms: 100
-  queue_size: 100
-  drop_policy: reject_new
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 topic echo --once /calibration/top_lidar_front_lidar/lidar_to_lidar_transform
 ```
 
-The solver processes synchronized non-empty detection pairs as they arrive. It does not
-use the LiDAR-camera manual capture buffer.
-
-## Practical checks
-
-- Both sensors must observe the same physical Calibration Target.
-- The two detector presets must refer to the same Target Definition.
-- Run `lctk_session check` before a bag-backed run.
-- Confirm the two bag topics in `metadata.yaml` match the manifest.
-- Use multiple distinct Board Placements when collecting data intended for a
-  calibration estimate.
+If no transform appears, check the concrete detection topics and the bag metadata
+against the manifest. Do not assume a fixed detection rate; it depends on the sensors,
+target, and scene. Use [Troubleshooting](./troubleshooting.md) for the next checks.

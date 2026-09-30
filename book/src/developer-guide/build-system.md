@@ -1,231 +1,60 @@
 # Build System
 
-LCTK uses **colcon-cargo-ros2** to build ROS 2 packages written in Rust. This integrates seamlessly with the standard colcon build system.
+The development baseline is Ubuntu 22.04, ROS 2 Humble, and the system Python
+installation. LCTK uses colcon for ROS packages and Cargo for Rust packages; the root
+`justfile` coordinates the supported build.
 
-## Quick Start
+## Set up and build
+
+From the repository root:
 
 ```bash
-# Build everything
+./setup.sh
 just build
-
-# Clean and rebuild
-just clean && just build
-
-# Run tests
-just test
-```
-
-## Build Commands
-
-### Using justfile (Recommended)
-
-```bash
-just build      # Build all packages
-just clean      # Remove build artifacts
-just test       # Run all tests
-just format     # Format code with rustfmt
-just lint       # Every lint (Rust + Python)
-just lint-rust  # Rust only: nightly rustfmt + clippy
-just lint-py    # Python only: ruff, in seconds
-```
-
-### Using colcon Directly
-
-```bash
-source /opt/ros/humble/setup.bash
-colcon build \
-    --base-paths ros \
-    --symlink-install \
-    --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    --cargo-args --profile=test-release
-```
-
-## Project Structure
-
-```
-LCTK/
-├── ros/                    # ROS 2 packages
-│   ├── aruco_locator_node/
-│   ├── lidar_board_detector/
-│   ├── lctk_interfaces/
-│   ├── lctk_launch/
-│   └── ...
-├── rust/                   # Pure Rust libraries
-│   ├── aruco-detector/
-│   ├── calibration-target/          # Target Definitions: geometry, identity
-│   ├── calibration-target-detector/ # Pose estimation against a Target Definition
-│   ├── board-cluster-detector/
-│   └── ...
-├── build/                  # Build artifacts (generated)
-├── install/                # Install directory (generated)
-└── justfile                # Build recipes
-```
-
-## Build Configuration
-
-### justfile Variables
-
-The justfile defines default configuration values:
-
-```just
-debug_mode := "true"
-enable_icp_iteration_debug := "true"
-enable_evaluator := "true"
-enable_overlay := "true"
-log_level := "info"
-rviz_enabled := "false"
-```
-
-Override at runtime:
-
-```bash
-just rviz_enabled=true debug_mode=false demo
-```
-
-### Cargo Profiles
-
-The build uses the `test-release` profile defined in `Cargo.toml`:
-
-```toml
-[profile.test-release]
-inherits = "release"
-debug = true
-```
-
-This provides optimized builds with debug symbols for profiling.
-
-## Incremental Development
-
-### Rebuild Single Package
-
-```bash
-source /opt/ros/humble/setup.bash
-colcon build \
-    --base-paths ros \
-    --packages-select aruco_locator_node \
-    --symlink-install
-```
-
-### Test Pure Rust Libraries
-
-```bash
-# Run tests for a specific library
-cargo test -p calibration-target-detector
-
-# Run all tests with nextest
-cargo nextest run --config build/ros2_cargo_config.toml
-```
-
-### Quick Syntax Check
-
-```bash
-cargo check
-cargo clippy --all-targets
-```
-
-## Environment Setup
-
-### Required Environment
-
-```bash
-source /opt/ros/humble/setup.bash
 source install/setup.bash
 ```
 
-### OpenCV Configuration
+Clone with `git clone --recurse-submodules`; the build requires the repository's Git
+submodules. The setup script installs system and ROS dependencies as well as the Rust,
+Python, and colcon tooling used by the recipes.
 
-The build automatically configures OpenCV:
+Always use `just build` for the workspace build. It sources ROS 2 Humble, checks the
+Python environment, maintains the generated root Cargo configuration and ROS
+interface bindings, and invokes colcon with the repository's required options.
+Direct `colcon build` or `cargo build` can omit required configuration or generated
+interfaces.
 
-```bash
-export OPENCV_PKGCONFIG_NAME=opencv4
-```
+The root Cargo workspace declares Rust 1.85 as its minimum version. It contains the
+`rust/*` crates and selected Rust ROS packages; Python and launch-only ROS packages are
+built through colcon rather than Cargo workspace commands.
 
-## Clean Builds
+## Common commands
 
-### Clean Everything
-
-```bash
-just clean
-# Removes: build/, install/, log/, target/
-```
-
-### Clean Single Package
-
-```bash
-rm -rf build/<package_name> install/<package_name>
-just build
-```
-
-## Common Build Issues
-
-### Cargo Can't Find ROS Packages
-
-**Error:** `error: failed to select a version for 'sensor_msgs'`
-
-**Cause:** Build artifacts are stale or corrupted.
-
-**Fix:**
-```bash
-just clean && just build
-```
-
-### OpenCV Binding Failures
-
-**Error:** `fatal error: 'memory' file not found`
-
-**Fix:**
-```bash
-sudo apt-get install libstdc++-12-dev libclang-dev
-```
-
-### SFCGAL Missing
-
-**Error:** `SFCGAL/capi/sfcgal_c.h: No such file or directory`
-
-**Fix:**
-```bash
-sudo apt-get install libsfcgal-dev
-```
-
-## Colcon Tips
-
-### Flag Order Matters
-
-Always put `--packages-select` **before** `--cmake-args`:
+Run these from the repository root:
 
 ```bash
-# CORRECT
-colcon build --packages-select my_node --cmake-args -DFOO=BAR
-
-# WRONG (--packages-select treated as CMake arg)
-colcon build --cmake-args -DFOO=BAR --packages-select my_node
+just build      # build the ROS workspace
+just test       # run Rust and Python tests
+just lint       # Rust and Python lint checks
+just lint-rust  # nightly rustfmt check and clippy
+just lint-py    # ruff check and format check
+just format     # format Rust and Python sources
+just clean      # remove build/, install/, log/, and target/
 ```
 
-### Useful Flags
+Run only the LCTK sample-session integration checks with `just smoke`. Build the
+documentation from `book/` with `just build` there; see [Testing](./testing.md) for
+which checks belong to each change.
 
-```bash
---symlink-install     # Fast rebuilds (symlink instead of copy)
---continue-on-error   # Build remaining packages on failure
---event-handlers console_direct+  # Verbose output
-```
+## Generated files and dependency state
 
-## Build Performance
+The root `.cargo/config.toml` is generated by the build helpers from ROS package
+configuration. Do not hand-edit it. A stale or missing generated configuration can
+prevent Cargo from resolving ROS message crates; run `just build` to regenerate it.
 
-### Parallel Builds
+Building in the sourced ROS environment may modify workspace lockfiles as generated
+ROS message crates are resolved. Do not commit build-generated `Cargo.lock` churn as a
+dependency update. Intentional dependency updates have a separate procedure in
+`docs/roadmap/phase-4-dependency-updates-and-vulns.md`.
 
-```bash
-export CARGO_BUILD_JOBS=$(nproc)
-```
-
-### Caching with sccache
-
-```bash
-cargo install sccache
-export RUSTC_WRAPPER=sccache
-```
-
-## Next Steps
-
-- [Architecture](./architecture.md) - System design overview
-- [Testing](./testing.md) - Testing strategies
-- [Contributing](./contributing.md) - Development guidelines
+For known build recovery cases, see the repository's `AGENTS.md` under “Known Issues.”

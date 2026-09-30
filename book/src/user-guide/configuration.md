@@ -1,25 +1,13 @@
 # Configuration
 
-LCTK reads a calibration configuration from YAML. A [session](./sessions.md) is the
-preferred form: it combines the calibration configuration with the data source and
-session-local files. A plain YAML is also accepted by `calibrate.launch.py` when the
-data is already being published or played separately.
+Calibration settings are written in YAML. A [session](./sessions.md) adds a data
+source and keeps run-specific files with it. If the data is already being published,
+`calibrate.launch.py` also accepts a plain calibration YAML without a `data:` section.
 
-## Configuration layout
+## Required calibration settings
 
-A session normally looks like this:
-
-```
-my-session/
-  session.yaml
-  bbox.json5          # only for a bbox-mode detector preset
-  camera_info.yaml    # optional camera intrinsics file
-  rviz.rviz           # optional RViz layout
-  out/                # run outputs
-```
-
-Use `$(session-dir)` for files that belong beside the loaded YAML, and
-`$(find-pkg-share lctk_launch)` for files installed with LCTK. For example:
+The example below shows a live LiDAR-camera configuration. Replace the topics, frame
+IDs, target, and detector preset with values that match your rig.
 
 ```yaml
 data:
@@ -31,17 +19,16 @@ devices:
       frame_id: velodyne
       pointcloud_topic: /velodyne_points
   cameras:
-    front_center:
-      frame_id: camera_front_center
+    front:
+      frame_id: camera_link
       image_topic: /camera/image_raw
 
 markers:
   calibration_board:
     target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
     detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
-    aruco_detector_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_detector.json5
     pairs:
-      - [top, front_center]
+      - [top, front]
 
 sync:
   tolerance_ms: 100
@@ -49,58 +36,41 @@ sync:
   drop_policy: reject_new
 ```
 
-The exact device topics and frame IDs belong to the data source. For a bag, LCTK checks
-the stated topics against the bag metadata. For a live source, the topics and camera-info
-publisher are supplied by the running graph. For pcap/AVI playback, a session may set
-`data.camera.info_url` to a session-local camera-info file.
+Every calibration configuration needs a `sync:` section with positive
+`tolerance_ms`, positive `queue_size`, and `drop_policy` set to `reject_new` or
+`drop_oldest`. These settings determine which observations are paired; tune them for
+the timing and motion of your sensors and Calibration Target.
 
-## Target Definition and Detector Tuning
+For `bag` and `live` sources, each LiDAR needs `pointcloud_topic` and each camera needs
+`image_topic`, as well as its `frame_id`. For `pcap_avi`, topics are derived from the
+device names and must not be specified. See [Sessions](./sessions.md) for data-source
+settings and validation.
 
-Calibration configuration is split across files with different responsibilities:
+## Choose the right target and detector files
 
-- **Target Definition** describes the physical Calibration Target: plate geometry,
-  cutout layout, fiducial marker IDs, and the target identity. Shipped examples are
-  under `lctk_launch/config/targets/`.
-- **Detector Tuning** describes how one sensor detects that Target Definition:
-  foreground extraction, crop mode, ICP settings, and sensor orientation. Shipped
-  presets are under `lctk_launch/config/board/<target>/`.
-- **ArUco detector tuning** controls image-side marker detection and is separate from
-  the marker geometry in the Target Definition.
+Each marker entry names two different files:
 
-Change the Target Definition only when the physical target or its fiducial layout
-changes. Change Detector Tuning when the same target needs different sensor-specific
-detection settings.
+- **Target Definition** (`target_config`) describes the physical Calibration Target:
+  its plate, cutouts, fiducial IDs, layout, and Target Identity.
+- **Detector Tuning** (`detector_config`) configures detection of that target for a
+  particular LiDAR or sensor model.
 
-The shipped hollow-target Velodyne preset is:
+Use the Target Definition that matches the physical target and its marker sheet. Use
+the Detector Tuning preset intended for the LiDAR. A per-LiDAR `detector_config` can
+override the marker's preset when a session pairs multiple LiDARs with one target.
 
+The optional `aruco_detector_config` controls camera-side marker detection; it does
+not define the target's marker IDs or placement. Shipped files are under:
+
+```text
+$(find-pkg-share lctk_launch)/config/targets/
+$(find-pkg-share lctk_launch)/config/board/<target>/
+$(find-pkg-share lctk_launch)/config/aruco/
 ```
-$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
-```
 
-It currently selects `bbox_free` detection, uses background subtraction, sets
-`bg_warmup_frames` to 20, skips the RANSAC stage, uses sensor up-axis `z`, and
-allows 100 ICP iterations. These are values of that preset, not universal detector
-defaults. The bbox-mode sample preset has different values and requires a crop-box
-file.
-
-Useful tuning keys are:
-
-- `detection_mode`: `bbox` or `bbox_free`.
-- `sensor_up_axis`: the sensor axis used as the LiDAR orientation reference.
-- `initial_inplane_rotation_deg`: the physical in-plane roll of a target that is
-  not mounted corner-up.
-- `max_icp_iterations` and the other ICP termination settings.
-- Foreground, cluster, and structural acceptance settings appropriate to the selected
-  target and sensor.
-
-Keep geometry such as plate dimensions, cutout positions, and marker placement in the
-Target Definition rather than copying it into a detector preset.
-
-## Bounding boxes
-
-A crop box is session-local because it describes where a Calibration Target appears in
-one recording. It is used only when the selected Detector Tuning preset has
-`detection_mode: "bbox"`:
+Only add `bbox_config` when the selected Detector Tuning uses `detection_mode: "bbox"`.
+The box describes the target's location in a particular recording, so keep it in the
+session directory:
 
 ```yaml
 markers:
@@ -109,110 +79,69 @@ markers:
     bbox_config: $(session-dir)/bbox.json5
 ```
 
-Example `bbox.json5`:
+Do not add a crop box for a `bbox_free` preset. Do not copy target geometry into a
+detector preset.
 
-```json5
-{
-  pose: {
-    translation: [2.0, 0.0, 0.0],
-    rotation: [0.0, 0.0, 0.0, 1.0],
-  },
-  size_xyz: [4.0, 4.0, 2.0],
-}
-```
+## Camera calibration data
 
-Do not add `bbox_config` to a bbox-free preset.
+Camera images must be `sensor_msgs/Image`. When a camera or recording provides only
+compressed images, configure a `data.republish` bridge in the session. Camera
+intrinsics must also be available to the graph. The solver derives the CameraInfo
+topic from the image topic by replacing its final path component with `camera_info`;
+for example, `/camera/image_raw` uses `/camera/camera_info`. Make the camera or bag
+publish CameraInfo on that topic. The manifest has no separate CameraInfo topic key;
+if a driver or recording uses a different name, remap its publisher or playback to the
+derived topic. For pcap/AVI playback, provide a calibration file with
+`data.camera.info_url`.
 
-## Camera intrinsics and ArUco detection
+## Transport reliability
 
-A camera-info file is not universally required by the manifest. The camera may receive
-its `camera_info` topic from the live graph or bag, or a session can provide
-`data.camera.info_url` for the playback path.
+Set `qos: reliable` or `qos: best_effort` on a sensor device when needed. A top-level
+`qos:` supplies a default for devices without an override. For a bag, LCTK can infer
+reliability from the recording's offered QoS when it is not stated. A reliability
+setting that cannot receive from the bag's publisher is rejected during validation.
 
-The marker IDs, dictionary, printed-sheet size, and its placement on the plate belong
-to the Target Definition. The file under `config/aruco/` contains detector settings
-such as corner refinement and adaptive thresholding:
+## Assisted capture settings
 
-```yaml
-markers:
-  calibration_board:
-    aruco_detector_config: $(find-pkg-share lctk_launch)/config/aruco/aruco_detector.json5
-```
+Assisted mode works with defaults when there is no `assisted:` section. The current
+defaults and their roles are:
 
-## Synchronization and transport
+| Setting | Default | Purpose |
+|---|---:|---|
+| `stability_window_s` | `1.0` | Duration used to assess whether the target is still. |
+| `stability_max_translation_m` | `0.005` | Maximum translation span over that window. |
+| `stability_max_rotation_deg` | `0.5` | Maximum rotation span over that window. |
+| `stability_cooldown_s` | `1.0` | Minimum interval between automatic captures. |
+| `novelty_position_tol_m` | `0.05` | Position tolerance for treating a placement as new. |
+| `novelty_orientation_tol_deg` | `5.0` | Orientation tolerance for treating a placement as new. |
+| `review_bind_host` | `127.0.0.1` | Address for the unauthenticated review page. |
+| `review_port` | `8080` | Base review port; additional LiDAR-camera pairs use the next ports. |
 
-Every calibration configuration requires:
+The review page can change the three `stability_*` values while it is running. Tune
+them against your sensor's observed pose noise and review the resulting Captures;
+looser settings may admit a moving target. See [Assisted Capture](./assisted-capture.md)
+for the workflow and network-access warning.
 
-```yaml
-sync:
-  tolerance_ms: 100
-  queue_size: 100
-  drop_policy: reject_new  # or drop_oldest
-```
+## Validate and run
 
-Sensor transport reliability is configured per device with `qos: reliable` or
-`qos: best_effort`, or is resolved from a bag's offered QoS when no value is stated.
-There is no graph-wide `mode` setting for transport.
-
-## Common tasks
-
-Validate a session without starting nodes:
+Validate a session before starting the graph:
 
 ```bash
-source install/setup.bash
-ros2 run lctk_launch lctk_session check /path/to/session
+just check /path/to/session
 ```
 
-Enable debug output for a config-driven calibration run. Justfile variables go before
-the recipe name:
-
-```bash
-just debug_mode=true calibrate /path/to/session.yaml
-```
-
-For an end-to-end session, prefer:
+Run a session and its data source together:
 
 ```bash
 just run /path/to/session
 ```
 
-This starts the session's data source and calibration graph. Use `just calibrate` when
-the data source is already running or is being played separately.
-
-For a plain bag/config workflow:
+When data is already running, start only the calibration graph:
 
 ```bash
-ros2 bag play /path/to/bag --clock
-just calibrate /path/to/config.yaml
+just calibrate /path/to/session/session.yaml
 ```
 
-The config must state the topics and frames that the player publishes.
-
-## Multi-LiDAR configurations
-
-Multi-LiDAR calibration is configured through the same session manifest. The shipped
-example is:
-
-```
-sessions/twolidar-vlp32-falcon/session.yaml
-```
-
-It defines two LiDAR devices, their Target Definition and Detector Tuning, a shared
-synchronization section, and a LiDAR-to-LiDAR pair. See
-[Multi-LiDAR Calibration](./multi-lidar.md) for the runnable workflow.
-
-`same_face_mode` is a parameter of `lidar_to_lidar_solver`; it is not a key in the
-session YAML schema generated by the current launch planner.
-
-## Configuration files
-
-| File | Purpose |
-|---|---|
-| `session.yaml` | Data source, devices, pairs, synchronization, and optional assisted settings |
-| `config/targets/<target>.json5` | Target Definition and Target Identity |
-| `config/board/<target>/<sensor>.json5` | Sensor-specific Detector Tuning |
-| `config/aruco/aruco_detector.json5` | Camera-side ArUco detector tuning |
-| `bbox.json5` | Session-local crop box for bbox-mode detection |
-| `camera_info.yaml` | Optional session-local camera calibration data |
-
-See [Calibration Sessions](./sessions.md) for the complete manifest schema.
+The session CLI also supports listing and scaffolding sessions; see
+[Calibration Sessions](./sessions.md). For pair definitions and the multi-LiDAR
+workflow, see [Multi-LiDAR Calibration](./multi-lidar.md).

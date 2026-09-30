@@ -1,307 +1,70 @@
 # Contributing
 
-Thank you for contributing to LCTK! This guide covers coding standards, workflow, and pull request process.
+The repository's root `AGENTS.md` is the canonical development guide. It records the
+current build and test workflow, coding conventions, issue-tracking rules, and known
+environment pitfalls. Read it before making a change; use this page as a short
+contribution checklist.
 
-## Quick Start
+## Choose and scope the work
+
+- Check `docs/issues/README.md` before taking an issue. Do not take an issue another
+  contributor has marked in progress.
+- Work on a `fix/...`, `feat/...`, or `docs/...` branch.
+- Follow the project's domain vocabulary in `AGENTS.md`. In particular, keep a
+  Target Definition distinct from Detector Tuning, and a numerical solve distinct
+  from its Quality Verdict.
+- Keep changes at the layer that owns the behavior. See
+  [Architecture](./architecture.md) for package responsibilities.
+
+## Build, test, and lint
+
+Use the repository entry points from the project root:
 
 ```bash
-# Fork and clone
-git clone https://github.com/your-username/LCTK.git
-cd LCTK
-
-# Create branch
-git checkout -b feature/my-feature
-
-# Setup environment
-./setup-dev-env.sh -y
 just build
-
-# Make changes, test, commit
-cargo test --workspace
-git add .
-git commit -m "feat: add new feature"
-
-# Push and create PR
-git push origin feature/my-feature
-```
-
-## Coding Standards
-
-### Rust Style
-
-**Use rustfmt:**
-```bash
-cargo fmt --all
-```
-
-**Use clippy:**
-```bash
-cargo clippy --all-targets --all-features
-```
-
-**Naming conventions:**
-- Functions/variables: `snake_case`
-- Types/traits: `PascalCase`
-- Constants: `SCREAMING_SNAKE_CASE`
-
-### Code Patterns
-
-**Named parameters in format strings:**
-```rust
-// GOOD
-println!("{error}");
-
-// BAD
-println!("{}", error);
-```
-
-**Functional struct initialization:**
-```rust
-// GOOD
-let state = State {
-    field1: value1,
-    field2: value2,
-};
-
-// BAD (avoid mutable structs)
-let mut state = State::new();
-state.field1 = value1;
-state.field2 = value2;
-```
-
-**Closure variable cloning:**
-```rust
-// GOOD
-let subscription = {
-    let state = Arc::clone(&state);
-    node.create_subscription::<Message, _>(
-        "topic",
-        move |msg| callback(msg, &state),
-    )?
-};
-
-// BAD (clutters namespace)
-let state_clone = Arc::clone(&state);
-let subscription = node.create_subscription::<Message, _>(
-    "topic",
-    move |msg| callback(msg, &state_clone),
-)?;
-```
-
-**Explicit error handling:**
-```rust
-// GOOD
-let result = operation()?;
-// or
-let result = operation().context("Failed to perform operation")?;
-
-// BAD (silent errors)
-let _ = operation(); // Don't do this!
-```
-
-### Documentation
-
-**Add rustdoc comments:**
-```rust
-/// Detects ArUco markers in an image.
-///
-/// # Arguments
-/// * `image` - Input image as OpenCV Mat
-///
-/// # Returns
-/// Vector of detected markers with corners and IDs
-pub fn detect(&self, image: &Mat) -> Result<Vec<Detection>> {
-    // ...
-}
-```
-
-## Development Workflow
-
-### 1. Branch Strategy
-
-- `main`: Stable, production code
-- `feature/description`: New features
-- `fix/description`: Bug fixes
-
-### 2. Commit Messages
-
-Use conventional commits:
-
-```
-feat: add board detection debug mode
-fix: correct bounding box coordinate calculation
-docs: update calibration workflow guide
-test: add unit tests for plane estimator
-refactor: simplify ArUco detection pipeline
-```
-
-### 3. Testing
-
-**Before committing:**
-```bash
-# Format
-just format
-
-# Lint
-just lint
-
-# Test
 just test
+just lint
+```
 
-# Build
+For Python-only edits, also run `just lint-py`. For focused iteration, `just lint-rust`
+and `just lint-py` run the language-specific checks. See [Build System](./build-system.md)
+and [Testing](./testing.md) for their scope. Do not substitute raw `colcon build` or
+`cargo test` for the workspace recipes.
+
+For book changes, build the mdBook separately:
+
+```bash
+cd book
 just build
 ```
 
-### 4. Pull Request
+Before reporting completion, state which relevant checks passed and which could not be
+run.
 
-**Checklist:**
-- [ ] Code formatted (`cargo fmt`)
-- [ ] No clippy warnings
-- [ ] Tests added for new features
-- [ ] All tests pass
-- [ ] Documentation updated
-- [ ] AGENTS.md updated (if adding known issues/patterns)
+## Coding conventions
 
-**PR Template:**
-```markdown
-## Description
-Brief description of changes
+- Use named Rust format arguments, such as `println!("{error}")`.
+- Prefer direct struct initialization when constructing a value.
+- Clone `Arc` values in the local scope before moving them into closures.
+- Avoid broad Python exception handlers that hide errors.
+- Keep tests attached to the code they exercise and include them in the repository's
+  test entry point.
 
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
+The root `AGENTS.md` has more detailed examples and project-specific rules.
 
-## Testing
-How was this tested?
+## Issues, documentation, and generated files
 
-## Related Issues
-Closes #123
-```
+File each finding as one Markdown document under `docs/issues/` and update the tracker.
+When closing an issue, add a resolution note, move it to `docs/issues/archive/`, and
+repair links affected by the move. `just check-docs` checks relative Markdown links in
+`docs/`, `book/src/`, and selected repository README/CONTRIBUTING files; it does not
+validate heading anchors.
 
-## Common Contribution Areas
+Do not commit build-generated `Cargo.lock` changes as dependency updates. Follow the
+separate dependency-update procedure documented in `docs/roadmap/` and the root
+`AGENTS.md`. The `ros/conflux` submodule is maintained separately; do not commit its
+ignored lockfile churn upstream.
 
-### Good First Issues
-
-- Add unit tests for existing code
-- Improve documentation
-- Fix typos and formatting
-- Add code examples
-
-### High Priority
-
-- Performance optimization
-- Bug fixes in calibration algorithms
-- ROS 2 node stability improvements
-- New sensor support
-
-### Medium Priority
-
-- Additional calibration methods
-- Visualization enhancements
-- Configuration improvements
-- Build system optimization
-
-## Building ROS Packages
-
-**Use justfile for building:**
-
-```bash
-# Build all packages
-just build
-
-# Clean and rebuild
-just clean && just build
-```
-
-See [Build System](./build-system.md) for details.
-
-## Code Review Process
-
-### What Reviewers Look For
-
-1. **Correctness:** Code works as intended
-2. **Tests:** Adequate test coverage
-3. **Style:** Follows coding standards
-4. **Documentation:** Public APIs documented
-5. **Performance:** No obvious inefficiencies
-
-### Responding to Reviews
-
-- Address all comments
-- Ask questions if unclear
-- Make requested changes
-- Mark conversations resolved
-- Thank reviewers!
-
-## Development Tips
-
-### Debugging
-
-```bash
-# Enable debug logging
-export RUST_LOG=debug
-
-# Enable ROS logging
-export RCUTILS_LOGGING_LEVEL=DEBUG
-
-# Run with debugger
-rust-gdb target/debug/my_node
-```
-
-### Performance Profiling
-
-```bash
-# CPU profiling
-perf record -g target/release/my_node
-perf report
-
-# Memory profiling
-valgrind target/release/my_node
-```
-
-### IDE Setup
-
-**VS Code:**
-- Install `rust-analyzer` extension
-- Install `ROS` extension
-- Use workspace settings from `.vscode/settings.json`
-
-**CLion:**
-- Open project root
-- Auto-detects CMake + Cargo
-- Use Rust plugin
-
-## Community Guidelines
-
-### Be Respectful
-
-- Welcome newcomers
-- Be patient with questions
-- Provide constructive feedback
-- Celebrate contributions
-
-### Communication
-
-- **Issues:** Bug reports, feature requests
-- **Discussions:** Questions, ideas, help
-- **PRs:** Code-specific discussion
-
-## Getting Help
-
-**Build issues:** See [Build System](./build-system.md)
-
-**Testing questions:** See [Testing](./testing.md)
-
-**Architecture questions:** See [Architecture](./architecture.md)
-
-**Stuck?** Ask in GitHub Discussions!
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the same license as the project.
-
----
-
-Thank you for making LCTK better! 🚀
+After verification, the repository workflow is to fast-forward the change branch into
+`main`. Fetch and rebase before pushing so the branch includes the latest
+`origin/main`.

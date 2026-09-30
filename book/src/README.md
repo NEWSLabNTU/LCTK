@@ -1,55 +1,41 @@
 # LCTK Documentation
 
-**LiDAR and Camera Toolkit** — Sensor calibration for robotics and autonomous systems.
+LCTK helps robotics teams estimate the transforms between LiDAR and camera sensors,
+and align multiple LiDARs, using observations of a physical Calibration Target.
 
-## What is LCTK?
+## Choose a task
 
-LCTK computes precise transformations between LiDAR and camera sensors by detecting a calibration board visible to both sensors. Use it to:
+### Run a calibration
 
-- **Fuse sensor data** — Project point clouds onto camera images
-- **Calibrate multi-LiDAR setups** — Align multiple LiDAR sensors
-- **Validate alignment** — Verify sensor installation and maintenance
+Start with [Installation](./user-guide/installation.md), then follow the
+[Quick Start](./user-guide/quickstart.md) using the included sample data. For a field
+run, see [LiDAR-Camera Calibration](./user-guide/lidar-camera.md),
+[Multi-LiDAR Calibration](./user-guide/multi-lidar.md), and the
+[Field Validation Runbook](./user-guide/field-validation.md).
 
-## Quick Overview
+### Connect a new rig
 
-```mermaid
-graph LR
-    A[(Camera)] --> B[ArUco Detector]
-    C[(LiDAR)] --> D[Board Detector]
-    B -->|2D corners| E[Extrinsic Solver]
-    D -->|3D pose| E
-    E --> F>Transform]
+Use [Calibration Sessions](./user-guide/sessions.md) to describe the data source and
+sensors, then see [Configuration](./user-guide/configuration.md) for Target Definitions,
+Detector Tuning, camera inputs, and synchronization. Use
+[Troubleshooting](./user-guide/troubleshooting.md) when a session does not behave as
+expected.
 
-    classDef sensor fill:#e0e0e0,stroke:#333,color:#000
-    classDef node fill:#4a90d9,stroke:#333,color:#fff
-    classDef output fill:#2d6a4f,stroke:#333,color:#fff
+### Review and use results
 
-    class A,C sensor
-    class B,D,E node
-    class F output
-```
-
-The calibration pipeline detects a physical board from both sensors and computes the transformation that aligns their coordinate frames.
-
-## Getting Started
-
-1. **[Installation](./user-guide/installation.md)** — Set up LCTK on Ubuntu 22.04
-2. **[Quick Start](./user-guide/quickstart.md)** — Run your first calibration in 5 minutes
-3. **[LiDAR-Camera Calibration](./user-guide/lidar-camera.md)** — Full workflow guide
+[Assisted Capture](./user-guide/assisted-capture.md) describes automatic capture and
+browser review. [Exporting to Autoware](./user-guide/autoware-export.md) covers previewing,
+writing, and checking the exported transform.
 
 ## Requirements
 
-- **Ubuntu 22.04 LTS** with ROS 2 Humble
-- **Calibration board**: 1m × 1m with 4 circular holes (150mm radius)
-- **Sensors**: Velodyne LiDAR, camera with known intrinsics
+The current source installation path uses Ubuntu 22.04 LTS and ROS 2 Humble. It clones
+and builds the LCTK repository; see [Installation](./user-guide/installation.md).
+Choose a Target Definition that matches the physical Calibration Target used by the rig.
+The shipped examples use different targets and sensors, so no single board or sensor
+setup is universal.
 
-## Documentation Structure
+## Developer Guide
 
-| Section | Description |
-|---------|-------------|
-| **User Guide** | Installation, calibration workflows, configuration |
-| **Developer Guide** | Architecture, build system, contributing |
-
----
-
-*LCTK is open source. See [Contributing](./developer-guide/contributing.md) to get involved.*
+For architecture, building, testing, and contributing, see the
+[Developer Guide](./developer-guide/architecture.md).

@@ -1,134 +1,97 @@
 # LiDAR-Camera Calibration
 
-This guide shows the current session-driven workflow for estimating the transform
-between a LiDAR frame and a camera frame.
+LCTK estimates the transform between a LiDAR frame and a camera frame by observing
+the same physical Calibration Target in both sensors. Use the
+[Quick Start](./quickstart.md) for the included sample; this guide covers a rig or
+recording of your own.
 
-## Workflow
+## Before you run
 
-```mermaid
-graph LR
-    A[(Camera)] --> C[ArUco detector]
-    B[(LiDAR)] --> D[Calibration Target detector]
-    C -->|2D corners| F[Extrinsic solver]
-    D -->|3D pose| F
-    F --> G>Transform]
+- Mount or hold a Calibration Target that matches the selected Target Definition,
+  including its marker layout and orientation.
+- Ensure the camera and LiDAR have overlapping views of the target and usable
+  timestamps.
+- Check that the session names the correct sensor topics, frame IDs, target, and
+  sensor-specific Detector Tuning. See [Sessions](./sessions.md) and
+  [Configuration](./configuration.md).
+- For a bag, make sure the recording is available where the manifest expects it.
 
-    classDef sensor fill:#e0e0e0,stroke:#333,color:#000
-    classDef node fill:#4a90d9,stroke:#333,color:#fff
-    classDef output fill:#2d6a4f,stroke:#333,color:#fff
-
-    class A,B sensor
-    class C,D,F node
-    class G output
-```
-
-The camera detector supplies image-space fiducial corners. The LiDAR detector supplies
-a pose for the same Calibration Target. The extrinsic solver uses synchronized
-observations from both sensors.
-
-## Calibration Target
-
-The shipped `sample3-hollow-velodyne` session uses the hollow 1000 mm Target
-Definition:
-
-```
-$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
-```
-
-Other sessions use other Target Definitions, including the solid 600 mm target. Do
-not treat the hollow target, its dimensions, or its fiducial layout as universal
-requirements. The physical target, its mounting, and the selected Target Definition
-must agree.
-
-The selected Detector Tuning preset supplies sensor-specific settings such as the
-orientation reference and ICP parameters. The Target Definition supplies the physical
-geometry and marker layout.
-
-## Run the shipped example
-
-The shipped session includes its pcap and camera recording:
+Validate the session before starting the graph:
 
 ```bash
+just check /path/to/session
+```
+
+## Run and capture
+
+For a live rig, start the sensors first. For a bag or pcap/AVI recording, the session
+launch starts playback as well. Run assisted capture and disable the optional quality
+judge unless the session has matching ground-truth data:
+
+```bash
+just solver_mode=assisted enable_judge=false run /path/to/session
+```
+
+The launch status page is at <http://localhost:8000>; assisted review is at
+<http://localhost:8080>. In the review page, move the target through several distinct
+positions and tilts, pausing at each one. The system captures synchronized observations
+when it considers the target still and in a new placement. Review the evidence, remove
+captures that are blurred, occluded, or otherwise unsuitable, and assess the current
+estimate and Quality Verdict before using it. The verdict describes how strongly the
+collected geometry constrains the estimate; it is not a physical validation of the rig.
+
+If you prefer to choose each capture yourself, use manual mode and the interactive
+controller:
+
+```bash
+just solver_mode=manual enable_judge=false run /path/to/session
+```
+
+In another terminal:
+
+```bash
+just extrinsic-solver-controller
+```
+
+The controller exposes the capture-buffer operations for the running solver. The
+assisted and manual workflows are described in more detail in
+[Assisted Capture](./assisted-capture.md) and the [Field Validation Runbook](./field-validation.md).
+
+## Inspect the transform and visualize the fit
+
+The output topic is derived from the sensor names in the session:
+
+```text
+/calibration/<lidar>_<camera>/extrinsic_transform
+```
+
+For example, the sample session publishes
+`/calibration/top_front_center/extrinsic_transform`. Inspect your session's concrete
+name with `ros2 topic list`, then read the transform (replace the sample topic if
+needed):
+
+```bash
+source /opt/ros/humble/setup.bash
 source install/setup.bash
-just check sample3-hollow-velodyne
-just demo
-```
-
-`just demo` starts playback and calibration through `play_launch`. Its status page
-is at <http://localhost:8000>; the justfile defaults to assisted solver mode, whose
-review page is at <http://localhost:8080>.
-
-The direct launch form starts the same session without `play_launch`:
-
-```bash
-ros2 launch lctk_launch session.launch.py \
-    session:=$(ros2 pkg prefix lctk_launch --share)/sessions/sample3-hollow-velodyne
-```
-
-Direct launch defaults to continuous mode. It does not create the `:8000`
-`play_launch` status page. Pass `solver_mode:=assisted` if you want the solver
-review page.
-
-For your own sensors or recording, scaffold a session and edit its manifest. See
-[Calibration Sessions](./sessions.md).
-
-## Inspect the graph
-
-Topic names are derived from the session's device and marker names. In
-`sample3-hollow-velodyne`, the relevant topics are:
-
-```bash
-source install/setup.bash
-
 ros2 topic echo /calibration/top_front_center/extrinsic_transform
-ros2 topic hz /calibration/front_center/aruco_detections
-ros2 topic hz /calibration/top_calibration_board/calibration_board_detections
 ```
 
-The `hz` commands report what the running graph is receiving; LCTK does not promise a
-universal detection rate.
+The `just` run commands enable the point-cloud overlay and RViz by default. The default
+RViz layout displays the overlay image on `/calibration/pointcloud_overlay`; a
+session-specific `rviz.rviz` may use a different layout. For direct `ros2 launch`,
+enable the overlay explicitly with `enable_overlay:=true`.
+The overlay helps check the estimated alignment, but a plausible image alone does not
+prove the transform is correct. Check frame IDs, Target Identity, repeatability, and
+independent field measurements as part of validation.
 
-When direct launch is used, enable the overlay explicitly:
+## Choosing settings
 
-```bash
-ros2 launch lctk_launch session.launch.py \
-    session:=/path/to/session \
-    enable_overlay:=true
-```
+Target geometry belongs in the Target Definition. Detector Tuning is selected for the
+target and LiDAR model; do not reuse a preset just because its filename looks similar.
+For a `bbox` preset, the session also needs a crop box measured for that recording. A
+`bbox_free` preset does not use one.
 
-The overlay is enabled by default by the `just` recipes. When enabled, inspect
-`/calibration/pointcloud_overlay` and the camera image with projected LiDAR points.
-
-## Detector tuning
-
-The hollow-target Velodyne preset is:
-
-```
-$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
-```
-
-Its current values include:
-
-- `detection_mode: "bbox_free"`;
-- `skip_ransac: true`, so the RANSAC iteration settings are not used by this preset;
-- `sensor_up_axis: "z"`;
-- `initial_inplane_rotation_deg: 0.0`;
-- `max_icp_iterations: 100`.
-
-Other presets have different values. For example, the bbox-mode Velodyne preset
-requires a session-local `bbox_config`, and the Seyond presets use a different
-sensor-up-axis convention. Change the preset only with the corresponding physical
-sensor and Target Definition.
-
-## Practical checks
-
-- Ensure both sensors observe the same Calibration Target at overlapping times.
-- Confirm the camera image and camera-info topics are available.
-- Confirm the LiDAR topic and frame ID in the session manifest.
-- Run `lctk_session check` before launching a bag-backed session.
-- Capture distinct Board Placements when using manual or assisted multi-pose solving.
-- Treat the resulting Quality Verdict as separate from whether the numerical solve
-  returned an estimate.
-
-For configuration details, see [Configuration](./configuration.md). For failures, see
-[Troubleshooting](./troubleshooting.md).
+Camera images must be available as raw `sensor_msgs/Image` messages. If a camera or bag
+provides compressed images, configure a republish bridge in the session. The full
+session schema and the available target/detector files are documented in
+[Configuration](./configuration.md).
