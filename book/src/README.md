@@ -11,7 +11,9 @@ Start with [Installation](./user-guide/installation.md), then follow the
 [Quick Start](./user-guide/quickstart.md) using the included sample data. For a field
 run, see [LiDAR-Camera Calibration](./user-guide/lidar-camera.md),
 [Multi-LiDAR Calibration](./user-guide/multi-lidar.md), and the
-[Field Validation Runbook](./user-guide/field-validation.md).
+[Field Validation Runbook](./user-guide/field-validation.md). For a hands-on
+LiDAR-camera walkthrough, see the
+[LiDAR-Camera Workshop](./user-guide/lidar-camera-workshop.md).
 
 ### Connect a new rig
 
