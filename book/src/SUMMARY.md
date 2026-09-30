@@ -10,6 +10,7 @@
 
 - [Installation](./user-guide/installation.md)
 - [Quick Start](./user-guide/quickstart.md)
+- [LiDAR-Camera Workshop](./user-guide/lidar-camera-workshop.md)
 
 ## Run and assess a calibration
 
