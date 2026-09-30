@@ -12,7 +12,7 @@ set tempdir := "tmp"
 debug_mode := "true"
 log_level := "info"
 rviz_enabled := "true"
-solver_mode := "continuous"
+solver_mode := "assisted"
 enable_overlay := "true"
 enable_judge := "true"
 
