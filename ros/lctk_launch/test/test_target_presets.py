@@ -22,7 +22,7 @@ PRESETS = {
         # test_hollow_presets_preserve_the_current_sensor_operating_values.
         "velodyne_bbox": "bbox",
     },
-    "solid_600": {"velodyne": "bbox_free", "seyond": "bbox_free"},
+    "solid_600": {"velodyne": "bbox_free", "robin": "bbox_free", "seyond": "bbox_free"},
 }
 REMOVED_PHYSICAL_KEYS = {
     "board_width",
