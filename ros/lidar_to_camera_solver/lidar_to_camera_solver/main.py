@@ -1611,13 +1611,7 @@ class LidarToCameraSolver(Node):
                 projection = normalize_camera_projection(projection)
             except (TypeError, ValueError):
                 projection = None
-        if buffer is None:
-            response.success = False
-            response.message = "No camera info available"
-            response.num_detections = 0
-            response.buffer_size = 0
-            return response
-        if projection is None:
+        if buffer is not None and projection is None:
             response.success = False
             response.message = "No valid CameraInfo projection available"
             response.num_detections = 0
@@ -1629,7 +1623,7 @@ class LidarToCameraSolver(Node):
                 f"Cannot load before Target Identity agreement: {identity_error}"
             )
             response.num_detections = 0
-            response.buffer_size = buffer.snapshot().frame_count
+            response.buffer_size = buffer.snapshot().frame_count if buffer else 0
             return response
         try:
             with open(request.file_path) as file:
@@ -1640,7 +1634,7 @@ class LidarToCameraSolver(Node):
             response.success = False
             response.message = f"File not found: {request.file_path}"
             response.num_detections = 0
-            response.buffer_size = buffer.snapshot().frame_count
+            response.buffer_size = buffer.snapshot().frame_count if buffer else 0
             return response
         except (
             OSError,
@@ -1652,7 +1646,7 @@ class LidarToCameraSolver(Node):
             response.success = False
             response.message = f"Failed to load detections: {error!s}"
             response.num_detections = 0
-            response.buffer_size = buffer.snapshot().frame_count
+            response.buffer_size = buffer.snapshot().frame_count if buffer else 0
             return response
         # Keep the generation check and restore under the same node lock.  If
         # identity/session invalidation wins first, the archive must not refill
@@ -1664,7 +1658,7 @@ class LidarToCameraSolver(Node):
                     "Cannot load: calibration session changed while reading; retry"
                 )
                 response.num_detections = 0
-                response.buffer_size = buffer.snapshot().frame_count
+                response.buffer_size = buffer.snapshot().frame_count if buffer else 0
                 return response
             identity_error = self.identity_gate.error
             if identity_error is not None:
@@ -1673,19 +1667,37 @@ class LidarToCameraSolver(Node):
                     f"Cannot load before Target Identity agreement: {identity_error}"
                 )
                 response.num_detections = 0
-                response.buffer_size = buffer.snapshot().frame_count
+                response.buffer_size = buffer.snapshot().frame_count if buffer else 0
                 return response
+            # CameraInfo may have arrived while the archive was being read.
+            # Prefer the now-current buffer instead of constructing a stale one.
+            buffer = self.detection_buffer
             current_projection = getattr(self, "_camera_projection", None)
             try:
                 current_projection = normalize_camera_projection(current_projection)
             except (TypeError, ValueError):
                 current_projection = None
-            if current_projection != archive.camera_projection:
+            if (
+                current_projection is not None
+                and current_projection != archive.camera_projection
+            ):
                 response.success = False
                 response.message = "Cannot load: archive camera projection does not match current CameraInfo"
                 response.num_detections = 0
-                response.buffer_size = buffer.snapshot().frame_count
+                response.buffer_size = buffer.snapshot().frame_count if buffer else 0
                 return response
+            if buffer is None:
+                # A v6 archive carries normalized K, image dimensions, and the
+                # camera frame. Use them to restore offline when no CameraInfo
+                # has created the runtime Detection Buffer yet.
+                projection = current_projection or archive.camera_projection
+                camera_matrix = np.asarray(projection["k"], dtype=np.float64).reshape(
+                    3, 3
+                )
+                buffer = self._new_buffer(camera_matrix)
+                created_buffer = True
+            else:
+                created_buffer = False
             current_snapshot = buffer.snapshot()
             active_frames = (
                 getattr(self, "_bound_lidar_frame", None),
@@ -1704,6 +1716,13 @@ class LidarToCameraSolver(Node):
                 response.buffer_size = current_snapshot.frame_count
                 return response
             update = buffer.restore(archive.pairs, append=request.append)
+            if update.accepted and created_buffer:
+                # Do not bind runtime state until the archive has passed the
+                # Detection Buffer's structural validation.
+                self.detection_buffer = buffer
+                if current_projection is None:
+                    self._camera_projection = archive.camera_projection
+                    self._camera_matrix = camera_matrix.copy()
             if update.accepted and update.changed:
                 self._review_capture_changed()
                 self._mark_scene_mutation_locked()

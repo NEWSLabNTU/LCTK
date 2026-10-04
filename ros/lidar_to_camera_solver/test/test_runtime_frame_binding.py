@@ -26,7 +26,13 @@ from lidar_to_camera_solver.detection_format import (
 )
 from lidar_to_camera_solver.main import LidarToCameraSolver
 from sensor_msgs.msg import CameraInfo
-from vision_msgs.msg import Detection2DArray, Detection3DArray
+from vision_msgs.msg import (
+    Detection2D,
+    Detection2DArray,
+    Detection3D,
+    Detection3DArray,
+    ObjectHypothesisWithPose,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 TARGET = load_target(ROOT / "ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5")
@@ -127,6 +133,30 @@ def _pair(*, camera="camera_optical", lidar="lidar_top"):
     aruco.header.frame_id = camera
     board = Detection3DArray()
     board.header.frame_id = lidar
+    return aruco, board
+
+
+def _valid_pair(*, camera="camera_optical", lidar="lidar_top"):
+    """Build one restorable Capture with marker 24 and a finite board pose."""
+    aruco, board = _pair(camera=camera, lidar=lidar)
+    aruco.header.stamp.sec = board.header.stamp.sec = 1
+
+    aruco_detection = Detection2D()
+    aruco_detection.id = "aruco_24"
+    for x, y, _z in TARGET.marker_corners_by_id[24]:
+        corner = ObjectHypothesisWithPose()
+        corner.pose.pose.position.x = 500.0 * x / 3.0 + 320.0
+        corner.pose.pose.position.y = 500.0 * y / 3.0 + 240.0
+        aruco_detection.results.append(corner)
+    aruco.detections.append(aruco_detection)
+
+    board_detection = Detection3D()
+    board_pose = ObjectHypothesisWithPose()
+    board_pose.pose.pose.position.z = 3.0
+    board_pose.pose.pose.orientation.w = 1.0
+    board_pose.pose.covariance = [0.0] * 36
+    board_detection.results.append(board_pose)
+    board.detections.append(board_detection)
     return aruco, board
 
 
@@ -349,6 +379,81 @@ def test_load_rejects_archive_with_different_camera_projection_without_restore(
     assert "projection does not match" in response.message
     assert buffer.restores == 0
     assert buffer.snapshot().frame_count == 0
+
+
+def test_load_archive_without_camera_info_uses_saved_projection(tmp_path):
+    solver = _solver()
+    archived_pair = _valid_pair(camera="archived_camera", lidar="archived_lidar")
+    archive_projection = {
+        "model": PROJECTION_MODEL,
+        "frame_id": "archived_camera",
+        "width": 640,
+        "height": 480,
+        "k": K,
+    }
+    path = tmp_path / "offline.json"
+    _write_archive(path, projection=archive_projection, pairs=[archived_pair])
+    solver.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(to_msg=lambda: Time())
+    )
+    response = _load(solver, path, append=False)
+
+    assert response.success is True
+    assert response.num_detections == 1
+    assert response.buffer_size == 1
+    assert solver.camera_info is None
+    assert solver._camera_projection == archive_projection
+    assert np.array_equal(solver._camera_matrix, np.asarray(K).reshape(3, 3))
+    assert solver._bound_camera_frame == "archived_camera"
+    assert solver._bound_lidar_frame == "archived_lidar"
+    assert solver.detection_buffer.snapshot().frame_count == 1
+    assert solver.detection_buffer.snapshot().estimate is not None
+
+
+def test_rejected_cold_start_archive_does_not_bind_projection(tmp_path):
+    solver = _solver()
+    first_projection = {
+        "model": PROJECTION_MODEL,
+        "frame_id": "empty_archive_camera",
+        "width": 640,
+        "height": 480,
+        "k": K,
+    }
+    first_path = tmp_path / "empty.json"
+    _write_archive(
+        first_path,
+        projection=first_projection,
+        pairs=[_pair(camera="empty_archive_camera", lidar="empty_archive_lidar")],
+    )
+
+    rejected = _load(solver, first_path, append=False)
+
+    assert rejected.success is False
+    assert "No board detection available" in rejected.message
+    assert solver.detection_buffer is None
+    assert solver._camera_projection is None
+    assert solver._camera_matrix is None
+
+    second_projection = {
+        **first_projection,
+        "frame_id": "valid_archive_camera",
+    }
+    second_path = tmp_path / "valid.json"
+    _write_archive(
+        second_path,
+        projection=second_projection,
+        pairs=[_valid_pair(camera="valid_archive_camera", lidar="valid_archive_lidar")],
+    )
+    solver.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(to_msg=lambda: Time())
+    )
+
+    accepted = _load(solver, second_path, append=False)
+
+    assert accepted.success is True
+    assert solver._camera_projection == second_projection
+    assert solver._bound_camera_frame == "valid_archive_camera"
+    assert solver._bound_lidar_frame == "valid_archive_lidar"
 
 
 def test_append_rejects_archive_from_another_lidar_frame_without_restore(tmp_path):
