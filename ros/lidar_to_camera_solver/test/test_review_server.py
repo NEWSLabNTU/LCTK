@@ -36,6 +36,8 @@ class FakeFacade:
     def __init__(self):
         self.dropped = []
         self.exported = []
+        self.loaded = []
+        self.load_result = (True, "loaded")
         self.autoware_calls = []
         self.mutate_during_preview = False
         self.param_calls = []
@@ -90,6 +92,10 @@ class FakeFacade:
     def export_archive(self, path):
         self.exported.append(path)
         return True, f"wrote {path}"
+
+    def load_archive(self, path):
+        self.loaded.append(path)
+        return self.load_result
 
     def export_autoware(self, dry_run):
         self.autoware_calls.append(dry_run)
@@ -636,6 +642,82 @@ def test_export_archive_requires_a_path(client):
     payload = json.loads(response.data)
     assert payload["ok"] is False
     assert "path" in payload["detail"]
+
+
+def test_load_archive_passes_the_path_to_the_facade(client):
+    response = client.post(
+        "/api/archive/load",
+        data=json.dumps({"path": "/tmp/detections.json"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert json.loads(response.data) == {"ok": True, "detail": "loaded"}
+    assert client.facade.loaded == ["/tmp/detections.json"]
+
+
+@pytest.mark.parametrize(
+    ("body", "detail_fragment"),
+    [
+        (None, "JSON object"),
+        ([{"path": "/tmp/detections.json"}], "JSON object"),
+        ({}, "path"),
+        ({"path": None}, "string"),
+        ({"path": 17}, "string"),
+        ({"path": " \t "}, "blank"),
+    ],
+)
+def test_load_archive_rejects_malformed_paths_without_calling_facade(
+    client, body, detail_fragment
+):
+    response = client.post("/api/archive/load", json=body)
+
+    payload = json.loads(response.data)
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert detail_fragment in payload["detail"]
+    assert client.facade.loaded == []
+
+
+def test_a_successful_load_invalidates_a_pending_autoware_confirmation(client):
+    preview = client.post("/api/export/autoware/preview")
+    token = json.loads(preview.data)["confirmation_token"]
+
+    loaded = client.post(
+        "/api/archive/load",
+        data=json.dumps({"path": "/tmp/detections.json"}),
+        content_type="application/json",
+    )
+    write = client.post(
+        "/api/export/autoware/write",
+        data=json.dumps({"confirmation_token": token}),
+        content_type="application/json",
+    )
+
+    assert json.loads(loaded.data)["ok"] is True
+    assert json.loads(write.data)["ok"] is False
+    assert client.facade.autoware_calls == [True]
+
+
+def test_a_rejected_load_keeps_a_pending_autoware_confirmation(client):
+    preview = client.post("/api/export/autoware/preview")
+    token = json.loads(preview.data)["confirmation_token"]
+    client.facade.load_result = (False, "archive rejected")
+
+    loaded = client.post(
+        "/api/archive/load",
+        data=json.dumps({"path": "/tmp/detections.json"}),
+        content_type="application/json",
+    )
+    write = client.post(
+        "/api/export/autoware/write",
+        data=json.dumps({"confirmation_token": token}),
+        content_type="application/json",
+    )
+
+    assert json.loads(loaded.data)["ok"] is False
+    assert json.loads(write.data)["ok"] is True
+    assert client.facade.autoware_calls == [True, False]
 
 
 def test_autoware_preview_does_not_write(client):

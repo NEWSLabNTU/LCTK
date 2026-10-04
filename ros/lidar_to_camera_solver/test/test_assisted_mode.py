@@ -496,6 +496,24 @@ def facade_harness(**kwargs) -> LidarToCameraSolver:
     return solver
 
 
+def test_load_archive_replaces_through_the_existing_load_callback():
+    solver = facade_harness()
+    callback_requests = []
+
+    def load_callback(request, response):
+        callback_requests.append(request)
+        response.success = True
+        response.message = "loaded archive"
+        return response
+
+    solver.load_detections_callback = load_callback
+
+    assert solver.load_archive("/tmp/calibration.json") == (True, "loaded archive")
+    assert len(callback_requests) == 1
+    assert callback_requests[0].file_path == "/tmp/calibration.json"
+    assert callback_requests[0].append is False
+
+
 def test_state_is_json_shaped_before_anything_has_been_captured():
     solver = facade_harness()
     state = solver.state()

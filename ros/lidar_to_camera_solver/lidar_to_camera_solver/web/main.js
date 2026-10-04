@@ -52,6 +52,7 @@ if (canvas) {
     },
     onDrop: (id) => session.drop(id),
     onExportArchive: (path) => api.exportArchive(path),
+    onLoadArchive: (path) => session.loadArchive(path),
     onAutowarePreview: async () => {
       const result = await api.autowarePreview();
       session.app.autowarePreview = result.ok ? result.entry : null;

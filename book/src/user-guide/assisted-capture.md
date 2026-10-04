@@ -49,6 +49,18 @@ assisted:
   review_archive_path: $(session-dir)/out/detections.json
 ```
 
+To restore a saved Detection Archive, open the menu and choose **Load archive…**
+directly below **Export archive…**. Enter its path on the machine running the solver;
+the configured export path is offered as a starting point. Loading replaces the
+current Detection Buffer and asks for confirmation when Captures already exist.
+Cancel leaves the current buffer in place.
+
+The running solver checks the archive against its Target Definition and current
+CameraInfo. A successful load refreshes the Capture list, estimate, and scene;
+saved Captures may have no image or cloud evidence. The action notice explains a
+rejected archive or a failed review refresh. Load only archives recorded with the
+same physical sensor mounting and compatible camera settings.
+
 A numerical estimate and its Quality Verdict answer different questions. The estimate
 is the transform computed from the current Detection Buffer; the verdict describes how
 well those observations constrain it. Neither replaces checking the result against the
@@ -59,8 +71,8 @@ real rig and independent observations. See the [Field Validation Runbook](./fiel
 The review page has no authentication and defaults to listening on `127.0.0.1`, so it
 is available only on the machine running LCTK. If you change `review_bind_host` to
 allow access from another machine, anyone who can reach that port can view captures
-and calibration results and may trigger configured exports. Use only a network you
-trust. The setting is under the session's optional `assisted:` section; see
+and calibration results, load Detection Archives, and trigger configured exports.
+Use only a network you trust. The setting is under the session's optional `assisted:` section; see
 [Configuration](./configuration.md).
 
 ## Export

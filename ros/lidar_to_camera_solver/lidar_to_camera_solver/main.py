@@ -2448,6 +2448,20 @@ class LidarToCameraSolver(Node):
         response = self.dump_detections_callback(request, DumpDetections.Response())
         return bool(response.success), response.message
 
+    def load_archive(self, path: str) -> tuple[bool, str]:
+        """Replace the Detection Buffer through its existing load callback.
+
+        The callback owns archive validation, restore, solve, and publication
+        invariants, so the review server uses this adapter instead of loading
+        archive contents through a second code path.
+        """
+
+        request = LoadDetections.Request()
+        request.file_path = path
+        request.append = False
+        response = self.load_detections_callback(request, LoadDetections.Response())
+        return bool(response.success), response.message
+
     def export_autoware(self, dry_run: bool) -> tuple[bool, str, dict | None]:
         if dry_run:
             # Clear before every attempt. A failed or stale diff must never

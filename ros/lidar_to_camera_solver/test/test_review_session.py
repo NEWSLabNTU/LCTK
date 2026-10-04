@@ -346,3 +346,211 @@ def test_captures_sse_hint_fetches_only_capture_projection():
         """
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_load_archive_replaces_review_and_invalidates_old_evidence_requests():
+    result = run_module(
+        """
+        import assert from 'node:assert/strict';
+        import { ReviewSession } from './review_session.js';
+        let loaded = false;
+        let resolvePreview;
+        let closed = 0;
+        let opened = 0;
+        const stateEtags = [];
+        const api = {
+          autowareToken: 'old-confirmation',
+          state: async (etag) => {
+            stateEtags.push(etag);
+            return {ok: true, etag: loaded ? 'new' : 'old', payload: {
+              session_epoch: 'same-epoch', scene_revision: loaded ? 2 : 1,
+              captures_revision: loaded ? 2 : 1,
+              pairs: [{id: loaded ? 9 : 3, evidence_revision: 1, has_preview: !loaded}],
+            }};
+          },
+          scene: async () => ({ok: true, payload: {scene_revision: loaded ? 2 : 1, captures: []}}),
+          preview: () => new Promise((resolve) => { resolvePreview = resolve; }),
+          loadArchive: async (path) => {
+            assert.equal(path, '/srv/archive.json');
+            loaded = true;
+            return {ok: true, detail: 'Loaded captures'};
+          },
+          openEvents: () => { opened += 1; return {close: () => {closed += 1;}}; },
+        };
+        const session = new ReviewSession(api);
+        await session.start();
+        session.select(3);
+        session.app.autowarePreview = {old: true};
+        const result = await session.loadArchive('/srv/archive.json');
+        resolvePreview(new Blob(['old image']));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.equal(result.ok, true);
+        assert.deepEqual(session.app.state.pairs.map((pair) => pair.id), [9]);
+        assert.equal(session.app.selectedId, null);
+        assert.equal(session.app.preview.status, 'idle');
+        assert.equal(session.app.clouds.size, 0);
+        assert.equal(session.app.autowarePreview, null);
+        assert.equal(api.autowareToken, null);
+        assert.deepEqual(stateEtags, [null, null]);
+        assert.equal(closed, 1);
+        assert.equal(opened, 2);
+        session.stopEvents();
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_failed_archive_load_preserves_review_and_confirmation():
+    result = run_module(
+        """
+        import assert from 'node:assert/strict';
+        import { ReviewSession } from './review_session.js';
+        let stateCalls = 0;
+        const api = {
+          autowareToken: 'keep-confirmation',
+          state: async () => { stateCalls += 1; return {ok: true, payload: {pairs: [{id: 3}]}}; },
+          scene: async () => ({ok: true, payload: {captures: []}}),
+          loadArchive: async () => ({ok: false, detail: 'Wrong Target Identity'}),
+        };
+        const session = new ReviewSession(api);
+        await session.refreshState();
+        session.select(3);
+        session.app.autowarePreview = {keep: true};
+        const state = session.app.state;
+        const result = await session.loadArchive('/srv/wrong.json');
+        assert.equal(result.ok, false);
+        assert.equal(session.app.state, state);
+        assert.equal(session.app.selectedId, 3);
+        assert.deepEqual(session.app.autowarePreview, {keep: true});
+        assert.equal(api.autowareToken, 'keep-confirmation');
+        assert.equal(stateCalls, 1);
+        session.stopEvents();
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_committed_archive_with_failed_refresh_reports_and_retries_bootstrap():
+    result = run_module(
+        """
+        import assert from 'node:assert/strict';
+        import { ReviewSession } from './review_session.js';
+        let loaded = false;
+        let refreshAttempts = 0;
+        let opened = 0;
+        const api = {
+          autowareToken: 'old-confirmation',
+          state: async () => {
+            if (loaded && ++refreshAttempts === 1) return {ok: false, detail: 'Connection lost'};
+            return {ok: true, payload: {pairs: [{id: loaded ? 9 : 3}]}};
+          },
+          scene: async () => ({ok: true, payload: {captures: []}}),
+          loadArchive: async () => { loaded = true; return {ok: true, detail: 'Loaded captures'}; },
+          openEvents: () => { opened += 1; return {close() {}}; },
+        };
+        const session = new ReviewSession(api, {revisionsRetryMs: 100});
+        await session.start();
+        session.app.autowarePreview = {old: true};
+        const result = await session.loadArchive('/srv/archive.json');
+        assert.equal(result.ok, true, 'the archive replacement already committed');
+        assert.match(result.detail, /archive loaded.*review refresh failed/i);
+        assert.equal(session.app.state, null);
+        assert.equal(session.app.autowarePreview, null);
+        assert.equal(api.autowareToken, null);
+        assert.equal(opened, 1, 'events wait for the new authoritative state');
+        await new Promise((resolve) => setTimeout(resolve, 160));
+        assert.equal(session.app.state.pairs[0].id, 9);
+        assert.equal(opened, 2);
+        session.stopEvents();
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_archive_cloud_hydration_does_not_wait_for_previous_buffer_clouds():
+    result = run_module(
+        """
+        import assert from 'node:assert/strict';
+        import { ReviewSession } from './review_session.js';
+        let loaded = false;
+        let resolveOldCloud;
+        const cloudCalls = [];
+        const api = {
+          state: async () => ({ok: true, payload: {session_epoch: 'same-epoch',
+            scene_revision: loaded ? 2 : 1, pairs: [{id: loaded ? 9 : 3, evidence_revision: 1}]}}),
+          scene: async () => ({ok: true, payload: {session_epoch: 'same-epoch',
+            scene_revision: loaded ? 2 : 1, captures: [{id: loaded ? 9 : 3}]}}),
+          cloud: (id) => {
+            cloudCalls.push(id);
+            return id === 3 ? new Promise((resolve) => {resolveOldCloud = resolve;})
+              : Promise.resolve(new ArrayBuffer(12));
+          },
+          loadArchive: async () => {loaded = true; return {ok: true, detail: 'Loaded'};},
+        };
+        const session = new ReviewSession(api);
+        await session.refreshState();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        void session.hydrateClouds();
+        await session.loadArchive('/srv/archive.json');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        void session.hydrateClouds();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.deepEqual(cloudCalls, [3, 9], 'new evidence must not wait for old requests');
+        resolveOldCloud(new ArrayBuffer(12));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.equal(session.app.clouds.has(3), false);
+        assert.equal(session.app.clouds.has(9), true);
+        session.stopEvents();
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_rejected_preload_projection_requests_cannot_change_restored_review():
+    result = run_module(
+        """
+        import assert from 'node:assert/strict';
+        import { ReviewSession } from './review_session.js';
+        for (const kind of ['live', 'captures', 'scene']) {
+          let loaded = false;
+          let rejectOld;
+          let sceneCalls = 0;
+          const scheduledRetries = [];
+          globalThis.setTimeout = (callback, delay) => {
+            scheduledRetries.push({callback, delay});
+            return scheduledRetries.length;
+          };
+          globalThis.clearTimeout = () => {};
+          const api = {
+            state: async () => ({ok: true, payload: {session_epoch: 'same-epoch',
+              live_revision: loaded ? 2 : 1, captures_revision: loaded ? 2 : 1,
+              scene_revision: loaded ? 2 : 1, pairs: [{id: loaded ? 9 : 3}]}}),
+            scene: () => {
+              sceneCalls += 1;
+              if (kind === 'scene' && sceneCalls === 1) {
+                return new Promise((resolve, reject) => {rejectOld = reject;});
+              }
+              return Promise.resolve({ok: true, payload: {session_epoch: 'same-epoch',
+                scene_revision: loaded ? 2 : 1, captures: []}});
+            },
+            live: () => new Promise((resolve, reject) => {rejectOld = reject;}),
+            captures: () => new Promise((resolve, reject) => {rejectOld = reject;}),
+            loadArchive: async () => {loaded = true; return {ok: true, detail: 'Loaded'};},
+          };
+          const session = new ReviewSession(api);
+          await session.refreshState();
+          let oldRequest;
+          if (kind === 'live') oldRequest = session.refreshLive();
+          if (kind === 'captures') oldRequest = session.refreshCaptures();
+          await session.loadArchive('/srv/archive.json');
+          rejectOld(new Error('old request connection lost'));
+          if (oldRequest) await oldRequest;
+          await Promise.resolve();
+          assert.equal(session.app.state.pairs[0].id, 9);
+          assert.equal(session.app.notice, '', `${kind}: stale failure changed the notice`);
+          assert.equal(scheduledRetries.length, 0, `${kind}: stale failure scheduled a retry`);
+          session.stopEvents();
+        }
+        """
+    )
+    assert result.returncode == 0, result.stderr or result.stdout

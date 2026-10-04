@@ -139,6 +139,7 @@ export class ReviewSession {
     this.eventSource = null;
     this.fallbackTimer = null;
     this.eventWatchdog = null;
+    this.bootstrapRetryTimer = null;
     this.syncStarted = false;
     this._needsBootstrap = false;
     this._desiredRevisions = {};
@@ -183,6 +184,7 @@ export class ReviewSession {
     this.previewFailures.clear();
     this.cloudCache.clear();
     this.cloudPending.clear();
+    this.cloudHydrationPromise = null;
     this.cloudFailures.clear();
     this.pairGenerations.clear();
     this.app.clouds.clear();
@@ -536,6 +538,7 @@ export class ReviewSession {
       try {
         raw = await fetcher.call(this.api, this[etagName]);
       } catch (error) {
+        if (requestGeneration !== this[generationName]) return false;
         this.app.notice = `server unavailable: ${error instanceof Error ? error.message : String(error)}`;
         this._emit({ notice: true, live: true });
         this._scheduleProjectionRetry(kind);
@@ -764,6 +767,8 @@ export class ReviewSession {
   }
 
   stopEvents() {
+    if (this.bootstrapRetryTimer != null) clearTimeout(this.bootstrapRetryTimer);
+    this.bootstrapRetryTimer = null;
     if (this.eventWatchdog != null) clearTimeout(this.eventWatchdog);
     this.eventWatchdog = null;
     this._stopFallback();
@@ -787,6 +792,9 @@ export class ReviewSession {
       try {
         raw = await this.api.scene(this.sceneEtag);
       } catch (_error) {
+        if (requestGeneration !== this.sceneGeneration ||
+            expectedStateGeneration !== this.stateGeneration ||
+            expectedEpoch !== this.epoch) return false;
         this._scheduleProjectionRetry("scene");
         return false;
       }
@@ -917,6 +925,7 @@ export class ReviewSession {
   }
 
   async _hydrateCloudsOnce() {
+    const generation = this.assetGeneration;
     const captures = (this.app.scene?.captures || []).map((capture) => {
       const id = numberId(capture?.id);
       const pair = this._activePair(id);
@@ -931,7 +940,7 @@ export class ReviewSession {
 
     let next = 0;
     const worker = async () => {
-      while (next < captures.length) {
+      while (next < captures.length && generation === this.assetGeneration) {
         const index = next++;
         const task = captures[index];
         try {
@@ -1130,6 +1139,47 @@ export class ReviewSession {
       return;
     }
     await this.refreshState();
+  }
+
+  async loadArchive(path) {
+    let result;
+    try {
+      result = await this.api.loadArchive(path);
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+    if (!result?.ok) return result;
+    this.stopEvents();
+    this.app.autowarePreview = null;
+    this.api.autowareToken = null;
+    this.reset();
+    const refreshed = await this.refreshState();
+    if (refreshed && this.app.state) {
+      this.startEvents();
+      return result;
+    }
+    const detail = `Archive loaded, but review refresh failed: ${this.app.notice || "request failed"}. Retrying.`;
+    this.app.notice = detail;
+    this._emit({ notice: true });
+    this._retryArchiveBootstrap();
+    return { ...result, detail };
+  }
+
+  _retryArchiveBootstrap() {
+    const generation = this.stateGeneration;
+    this.bootstrapRetryTimer = setTimeout(async () => {
+      this.bootstrapRetryTimer = null;
+      if (generation !== this.stateGeneration) return;
+      const refreshed = await this.refreshState();
+      if (generation !== this.stateGeneration) return;
+      if (refreshed && this.app.state) {
+        this.app.notice = "Review refreshed after loading archive.";
+        this._emit({ notice: true });
+        this.startEvents();
+      } else {
+        this._retryArchiveBootstrap();
+      }
+    }, this.revisionsRetryMs);
   }
 
   async drop(id) {

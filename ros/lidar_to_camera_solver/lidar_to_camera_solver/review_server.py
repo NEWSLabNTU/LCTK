@@ -84,6 +84,11 @@ class NodeFacade(Protocol):
 
     def export_archive(self, path: str) -> tuple[bool, str]: ...
 
+    def load_archive(self, path: str) -> tuple[bool, str]:
+        """Replace the current Detection Buffer from an archive on disk."""
+
+        ...
+
     def export_autoware(self, dry_run: bool) -> tuple[bool, str, dict | None]: ...
 
 
@@ -650,6 +655,27 @@ def create_app(
         if not path:
             return jsonify({"ok": False, "detail": "no 'path' given for the archive"})
         ok, detail = facade.export_archive(path)
+        return jsonify({"ok": ok, "detail": detail})
+
+    @app.post("/api/archive/load")
+    def load_archive() -> Response:
+        """Replace the current Detection Buffer from an archive path."""
+
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(
+                {"ok": False, "detail": "request body must be a JSON object"}
+            )
+        path = payload.get("path")
+        if not isinstance(path, str):
+            return jsonify({"ok": False, "detail": "archive 'path' must be a string"})
+        if not path.strip():
+            return jsonify({"ok": False, "detail": "archive 'path' must not be blank"})
+        with pending_lock:
+            ok, detail = facade.load_archive(path)
+            if ok:
+                pending["token"] = None
+                pending["scene_revision"] = None
         return jsonify({"ok": ok, "detail": detail})
 
     @app.post("/api/export/autoware/preview")

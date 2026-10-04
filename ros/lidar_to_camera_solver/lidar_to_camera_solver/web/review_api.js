@@ -130,6 +130,10 @@ export class ReviewApi {
     return this._post(`/api/pair/${encodeURIComponent(id)}/drop`);
   }
 
+  async loadArchive(path) {
+    return this._post("/api/archive/load", { path });
+  }
+
   async exportArchive(path) {
     return this._post("/api/export/archive", { path });
   }

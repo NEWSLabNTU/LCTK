@@ -280,12 +280,24 @@ export class Chrome {
       });
     }
 
-    const items = this._all("#menu .item");
-    if (items[0]) items[0].addEventListener("click", () => {
+    const archive = this._query("#exportArchive");
+    if (archive) archive.addEventListener("click", () => {
       const path = (this._app?.live || this._app?.state)?.export?.archive_path || "";
       if (this._app) this._runAction("onExportArchive", this._app, path);
     });
-    if (items[1]) items[1].addEventListener("click", () => {
+    const load = this._query("#loadArchive");
+    if (load) load.addEventListener("click", () => {
+      if (!this._app || this._actionBusy) return;
+      const initial = (this._app.live || this._app.state)?.export?.archive_path || "";
+      const answer = globalThis.prompt("Archive path on the solver machine:", initial);
+      const path = typeof answer === "string" ? answer.trim() : "";
+      if (!path) return;
+      const captures = (this._app.captures || this._app.state)?.pairs || [];
+      if (captures.length && !globalThis.confirm("Replace the current Captures with this archive?")) return;
+      this._runAction("onLoadArchive", this._app, path);
+    });
+    const autoware = this._query("#exportAutoware");
+    if (autoware) autoware.addEventListener("click", () => {
       if (!this._app) return;
       const availability = this._autowareAvailability(this._app);
       if (!availability.available) {
@@ -450,11 +462,13 @@ export class Chrome {
   }
 
   _runAction(name, app, ...args) {
+    if (this._actionBusy) return undefined;
     const submittedDraft = name === "onSetParams" ? this._readParamDraft() : null;
+    this._actionBusy = true;
+    this._renderParams(app);
+    this._renderExportAvailability(app);
     const result = this._call(name, app, ...args);
     if (result && typeof result.then === "function") {
-      this._actionBusy = true;
-      this._renderParams(app);
       result.then((value) => {
         if (name === "onSetParams" && value?.ok === true) {
           const currentDraft = this._readParamDraft();
@@ -470,14 +484,23 @@ export class Chrome {
             }
           }
         }
+        if (name === "onLoadArchive" && value?.ok === true) {
+          this._autowareEntry = null;
+          this._autowareAvailabilityText = "";
+          this._query("#autoware")?.replaceChildren();
+        }
         this._showActionResult(value);
       }).catch((error) => {
         this._showActionError(error);
       }).finally(() => {
         this._actionBusy = false;
         this._renderParams(app);
+        this._renderExportAvailability(app);
       });
     } else {
+      this._actionBusy = false;
+      this._renderParams(app);
+      this._renderExportAvailability(app);
       this._showActionResult(result);
     }
     return result;
@@ -844,7 +867,9 @@ export class Chrome {
   }
 
   _renderExportAvailability(app) {
-    const item = this._all("#menu .item")[1];
+    const load = this._query("#loadArchive");
+    if (load) load.disabled = this._actionBusy;
+    const item = this._query("#exportAutoware");
     const box = this._query("#autoware");
     const availability = this._autowareAvailability(app);
     if (item) {
