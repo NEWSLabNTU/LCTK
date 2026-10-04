@@ -1,6 +1,6 @@
 """Patch an Autoware ``sensor_kit_calibration.yaml`` with an LCTK-solved extrinsic.
 
-Input is ``lidar_to_camera_solver``'s ``dump_detections`` JSON (version 4), whose
+Input is ``lidar_to_camera_solver``'s ``dump_detections`` JSON (version 6), whose
 ``transform`` holds the raw solver rvec/tvec (``T_optical<-lidar``). The re-labeled
 TF topic is deliberately not an input — see M-01 and the Phase 6 design doc.
 """
@@ -12,6 +12,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from lctk_quality.projection_metadata import (
+    archive_frames,
+    normalize_camera_projection,
+)
 from ruamel.yaml import YAML
 
 from .archive_contract import archive_export_error
@@ -25,26 +29,22 @@ class ExportError(Exception):
 
 
 #: The dump format this exporter understands, and the board-frame convention its poses
-#: must have been produced in. Kept as literals rather than imported from
-#: `lidar_to_camera_solver` so this package stays independently installable; the pytest
-#: suite runs both and would catch a divergence.
-# v4 is legacy but its solved transform remains exportable.  v5 adds a structural
-# Target Identity, checked by ``archive_export_error`` without loading a target file.
-SUPPORTED_FORMAT_VERSION = 5
+#: must have been produced in. The identity check is structural so this package stays
+#: independently installable without loading a target file.
+SUPPORTED_FORMAT_VERSION = 6
 SUPPORTED_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
 
 
 def check_format_version(path, data):
-    """H-11: refuse a dump whose format or frame convention this build cannot vouch for.
-
-    This exporter writes into a `sensor_kit_calibration.yaml` that ends up on a vehicle,
-    which makes it the single most important place for the check to exist. It had none:
-    it read only `transform.rvec`/`transform.tvec`, and its own fixtures declared
-    `"version": 2` and passed.
-    """
+    """Refuse archives whose format, projection, or frames cannot be validated."""
     error = archive_export_error(data, expected_frame=SUPPORTED_FRAME_CONVENTION)
     if error is not None:
         raise ExportError(f"{path}: {error}")
+    try:
+        projection = normalize_camera_projection(data.get("camera_projection"))
+        archive_frames(data, projection)
+    except ValueError as error:
+        raise ExportError(f"{path}: {error}") from error
 
 
 def load_solver_transform(path):
@@ -52,14 +52,42 @@ def load_solver_transform(path):
     data = json.loads(Path(path).read_text())
     check_format_version(path, data)
     transform = data.get("transform")
-    if not transform or "rvec" not in transform or "tvec" not in transform:
+    if (
+        not isinstance(transform, dict)
+        or "rvec" not in transform
+        or "tvec" not in transform
+    ):
         raise ExportError(
             f"{path}: no solved transform found. Produce the file with the "
             "lidar_to_camera_solver's dump_detections service after a successful solve."
         )
-    rvec = np.asarray(transform["rvec"], dtype=np.float64).reshape(3)
-    tvec = np.asarray(transform["tvec"], dtype=np.float64).reshape(3)
+    rvec = _load_transform_vector(path, transform["rvec"], "rvec")
+    tvec = _load_transform_vector(path, transform["tvec"], "tvec")
     return rvec, tvec
+
+
+def _load_transform_vector(path, value, name):
+    """Parse one saved 3-vector without accepting coercions or reshaping."""
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or any(
+            isinstance(component, bool) or not isinstance(component, (int, float))
+            for component in value
+        )
+    ):
+        raise ExportError(
+            f"{path}: transform.{name} must be a three-element numeric vector"
+        )
+    try:
+        vector = np.asarray(value, dtype=np.float64)
+    except (OverflowError, TypeError, ValueError) as error:
+        raise ExportError(
+            f"{path}: transform.{name} must contain representable numeric values"
+        ) from error
+    if not np.all(np.isfinite(vector)):
+        raise ExportError(f"{path}: transform.{name} must contain only finite values")
+    return vector
 
 
 def patch_calibration(

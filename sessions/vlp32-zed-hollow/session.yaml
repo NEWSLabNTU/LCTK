@@ -5,8 +5,9 @@ description: >
   board placement each, and a multi-pose calibration means replaying several of
   them by hand into a graph that stays up. Naming one bag here would pin the
   session to a single placement, which is not the workflow. The recordings also
-  carry /iv_points from a Seyond Falcon; switch pointcloud_topic, frame_id and
-  detector_config to exercise that preset instead.
+  carry /iv_points from a Seyond Falcon; switch pointcloud_topic and
+  detector_config to exercise that preset instead. Sensor headers supply frame
+  labels at runtime.
 
 data:
   kind: live
@@ -21,11 +22,9 @@ data:
 devices:
   lidars:
     vlp32_lidar:
-      frame_id: velodyne
       pointcloud_topic: /velodyne_points
   cameras:
     zed_camera:
-      frame_id: zed_left_camera_frame_optical
       image_topic: /sensing/camera/zed/rgb/color/rect/image
 
 markers:

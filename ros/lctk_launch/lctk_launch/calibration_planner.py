@@ -285,23 +285,15 @@ def _find_chain(
     return path_up + list(reversed(path_down))
 
 
-def format_plan(
-    plan: CalibrationPlan,
-    device_frame_ids: dict[str, str] | None = None,
-) -> str:
+def format_plan(plan: CalibrationPlan) -> str:
     """
     Format a calibration plan as an ASCII tree for display.
 
     Args:
         plan: The calibration plan to format.
-        device_frame_ids: Optional mapping of device names to frame_ids for display.
-
     Returns:
         Multi-line string with ASCII tree representation.
     """
-    if device_frame_ids is None:
-        device_frame_ids = {}
-
     # Build edge lookup: (parent, child) → (marker, edge_type)
     edge_info: dict[tuple[str, str], tuple[str, str]] = {}
     for edge in plan.tree_edges:
@@ -315,22 +307,14 @@ def format_plan(
     num_val = len(plan.validation_edges)
     lines.append(f"TF Tree ({num_tree} edge{'s' if num_tree != 1 else ''}):")
 
-    def _format_node(node: str) -> str:
-        frame_id = device_frame_ids.get(node, "")
-        if frame_id:
-            return f"{frame_id} [{node}]"
-        return node
-
     def _render_tree(node: str, prefix: str, is_last: bool, is_root: bool) -> None:
         if is_root:
-            lines.append(f"  {_format_node(node)}")
+            lines.append(f"  {node}")
         else:
             connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
             marker, _ = edge_info.get((parent_map[node], node), ("?", "?"))
             arrow_label = f"{parent_map[node]}-{node} via {marker}"
-            lines.append(
-                f"  {prefix}{connector}{_format_node(node)}   \u2190 {arrow_label}"
-            )
+            lines.append(f"  {prefix}{connector}{node}   \u2190 {arrow_label}")
 
         children = plan.tree.get(node, [])
         for i, child in enumerate(children):

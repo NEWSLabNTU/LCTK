@@ -6,8 +6,9 @@ source and keeps run-specific files with it. If the data is already being publis
 
 ## Required calibration settings
 
-The example below shows a live LiDAR-camera configuration. Replace the topics, frame
-IDs, target, and detector preset with values that match your rig.
+The example below shows a live LiDAR-camera configuration. Replace the topics, target,
+and detector preset with values that match your rig. Sensor frame labels come from the
+message headers at runtime; the manifest has no frame override.
 
 ```yaml
 data:
@@ -16,11 +17,9 @@ data:
 devices:
   lidars:
     top:
-      frame_id: velodyne
       pointcloud_topic: /velodyne_points
   cameras:
     front:
-      frame_id: camera_link
       image_topic: /camera/image_raw
 
 markers:
@@ -42,9 +41,11 @@ Every calibration configuration needs a `sync:` section with positive
 the timing and motion of your sensors and Calibration Target.
 
 For `bag` and `live` sources, each LiDAR needs `pointcloud_topic` and each camera needs
-`image_topic`, as well as its `frame_id`. For `pcap_avi`, topics are derived from the
-device names and must not be specified. See [Sessions](./sessions.md) for data-source
-settings and validation.
+`image_topic`. At runtime LCTK takes frame labels from the synchronized sensor message
+headers. For `pcap_avi`, topics are derived from the device names and must not be
+specified; generated frame labels use the LiDAR device name and the camera device name
+with `_optical_frame` appended. See [Sessions](./sessions.md) for data-source settings
+and validation.
 
 ## Choose the right target and detector files
 

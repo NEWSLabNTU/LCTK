@@ -1,10 +1,9 @@
-"""Pure compatibility rules for solved detection archives.
+"""Pure compatibility rules for version-6 Detection Archives.
 
 This module deliberately does not load a Target Definition or import ROS.  The
 caller supplies its already-validated local Target Identity when it wants to
-restore an archive.  Keeping that comparison here makes the v4/v5 boundary
-testable without changing the live solver restore path before its migration
-packet lands.
+restore an archive. Keeping that comparison here makes version and identity
+compatibility testable without importing ROS or decoding sensor messages.
 """
 
 from __future__ import annotations
@@ -13,9 +12,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-ARCHIVE_V4 = 4
-ARCHIVE_V5 = 5
-MIGRATION_COMMAND = "ros2 run lidar_to_camera_solver migrate_detections"
+ARCHIVE_V6 = 6
 _IDENTITY_FIELDS = (
     "schema_version",
     "target_id",
@@ -57,10 +54,8 @@ def target_identity_error(
 def archive_restore_error(data: object, local_identity: object) -> str | None:
     """Return why an archive cannot be restored against ``local_identity``.
 
-    Version 4 has sufficient solved-transform provenance for export, but lacks
-    Target Identity and is never restorable after target selection is required.
-    Version 5 is restorable only when every identity field exactly matches the
-    local validated target.
+    Version 6 is restorable only when its projection and frame provenance are
+    valid and every identity field exactly matches the local validated target.
     """
     if not isinstance(data, Mapping):
         return "Detection archive must be an object"
@@ -68,24 +63,17 @@ def archive_restore_error(data: object, local_identity: object) -> str | None:
     if not isinstance(version, int) or isinstance(version, bool):
         return (
             f"Detection archive version {version!r} is not restorable; "
-            "expected integer 5"
+            f"expected integer {ARCHIVE_V6}"
         )
-    if version == ARCHIVE_V4:
-        return (
-            "Detection archive version 4 has no Target Identity and cannot be "
-            "restored. Explicitly migrate it with: "
-            f"{MIGRATION_COMMAND} --input <file> --output <file> "
-            "--target-config <target-config>"
-        )
-    if version < ARCHIVE_V5:
+    if version < ARCHIVE_V6:
         return (
             f"Detection archive version {version!r} is an unsupported past "
-            "version; expected integer 5"
+            f"version; expected integer {ARCHIVE_V6}"
         )
-    if version > ARCHIVE_V5:
+    if version > ARCHIVE_V6:
         return (
             f"Detection archive version {version!r} is an unsupported future "
-            "version; expected integer 5"
+            f"version; expected integer {ARCHIVE_V6}"
         )
 
     archived_identity = data.get("target_identity")
@@ -131,9 +119,7 @@ def _positive_int(value: object) -> bool:
 
 
 __all__ = [
-    "ARCHIVE_V4",
-    "ARCHIVE_V5",
-    "MIGRATION_COMMAND",
+    "ARCHIVE_V6",
     "archive_restore_error",
     "target_identity_error",
 ]

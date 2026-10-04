@@ -1,20 +1,12 @@
-"""The saved-detection file format, version 5.
+"""The saved-detection file format, version 6.
 
-A saved calibration is a stored *pose*, and Phase 1 changed what a board pose means.
-Version 3 files record no convention at all — the board-local corners are recomputed at
-load time from `aruco_pattern.json5` — so a file written before the change and one
-written after are indistinguishable, and either reloads under whatever convention the
-loading build believes in. Version 4 records the convention that produced it;
-version 5 also records the exact Target Identity and is the only format the
-solver restores.
+A saved calibration is a stored pose. Version 4 records the board-frame convention
+and retains pose covariance; version 5 adds the exact Target Identity. Version 6
+also binds observations to camera projection metadata and sensor frames, and is the
+only format the solver restores.
 
-Version 3 is therefore **rejected** rather than migrated on load: automatic migration
-would make a file's meaning depend on which build opened it, which is the same class of
-silent difference this whole phase exists to remove.
-
-Version 4 also stores the board pose's 6x6 covariance, which version 3 dropped. Without
-it a reloaded buffer solves with uniform weight 1.0 and quietly differs from the live
-buffer it was saved from.
+Archives from versions before 6 are unsupported. The solver does not migrate them;
+their camera projection and frame provenance cannot be recovered reliably.
 """
 
 from pathlib import Path
@@ -28,7 +20,6 @@ from lidar_to_camera_solver.detection_format import (
     FORMAT_VERSION,
     deserialize_detection3d_array,
     format_version_error,
-    migrate_v3_to_v4,
     serialize_detection3d_array,
 )
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
@@ -72,39 +63,76 @@ def board_msg(covariance):
     return msg
 
 
-def test_the_format_version_is_five():
-    assert FORMAT_VERSION == 5
+def test_the_format_version_is_six():
+    assert FORMAT_VERSION == 6
 
 
-@pytest.mark.parametrize("version", [4, 5])
-def test_structurally_known_archive_versions_are_accepted(version):
-    data = {"version": version, "board_frame_convention": BOARD_FRAME_CONVENTION}
-    if version == 5:
-        data["target_identity"] = IDENTITY
-    assert format_version_error(data) is None
+def test_version_six_requires_consistent_camera_projection_and_detection_frames():
+    archive = {
+        "version": 6,
+        "board_frame_convention": BOARD_FRAME_CONVENTION,
+        "target_identity": IDENTITY,
+        "camera_projection": {
+            "model": "undistorted_pixels_using_k",
+            "frame_id": "camera_optical",
+            "width": 640,
+            "height": 480,
+            "k": [500.0, 0.0, 320.0, 0.0, 500.0, 240.0, 0.0, 0.0, 1.0],
+        },
+        "num_detections": 1,
+        "detections": [
+            {
+                "aruco": {"header": {"frame_id": "camera_optical"}},
+                "board": {"header": {"frame_id": "lidar_top"}},
+            }
+        ],
+    }
+
+    assert format_version_error(archive) is None
+    archive["detections"][0]["board"]["header"]["frame_id"] = ""
+    assert "frame" in format_version_error(archive)
 
 
-def test_a_version_3_file_is_rejected_and_points_at_the_conversion_command():
-    """Rejected, not silently reinterpreted: a stale calibration must not quietly
-    become a wrong one."""
+def test_version_six_is_the_only_supported_archive_version():
+    archive = {
+        "version": 6,
+        "board_frame_convention": BOARD_FRAME_CONVENTION,
+        "target_identity": IDENTITY,
+        "camera_projection": {
+            "model": "undistorted_pixels_using_k",
+            "frame_id": "camera_optical",
+            "width": 640,
+            "height": 480,
+            "k": [500.0, 0.0, 320.0, 0.0, 500.0, 240.0, 0.0, 0.0, 1.0],
+        },
+        "num_detections": 0,
+        "detections": [],
+    }
+
+    assert format_version_error(archive) is None
+    for version in (4, 5):
+        assert "version 6" in format_version_error({**archive, "version": version})
+
+
+def test_a_version_3_file_is_rejected_without_a_migration_path():
     message = format_version_error({"version": 3})
 
     assert message is not None
-    assert "3" in message and "4" in message
-    assert "migrate_detections" in message, "the message must name the way out"
+    assert "version 6" in message
+    assert "migrate_detections" not in message
 
 
-@pytest.mark.parametrize("version", [0, 1, 2, 3, 6])
+@pytest.mark.parametrize("version", [0, 1, 2, 3, 4, 5, 7])
 def test_other_versions_are_rejected(version):
     assert format_version_error({"version": version}) is not None
 
 
-def test_a_version_5_file_carrying_the_wrong_convention_is_rejected():
+def test_a_version_6_file_carrying_the_wrong_convention_is_rejected():
     """The version says how the file is laid out; the tag says what the poses mean.
     Both have to agree with this build."""
     message = format_version_error(
         {
-            "version": 5,
+            "version": 6,
             "board_frame_convention": "edge_aligned_corner_origin_v0",
             "target_identity": IDENTITY,
         }
@@ -115,8 +143,8 @@ def test_a_version_5_file_carrying_the_wrong_convention_is_rejected():
     assert BOARD_FRAME_CONVENTION in message
 
 
-def test_a_version_5_file_without_a_convention_tag_is_rejected():
-    assert format_version_error({"version": 5, "target_identity": IDENTITY}) is not None
+def test_a_version_6_file_without_a_convention_tag_is_rejected():
+    assert format_version_error({"version": 6, "target_identity": IDENTITY}) is not None
 
 
 def test_the_board_pose_covariance_survives_a_round_trip():
@@ -144,21 +172,3 @@ def test_the_pose_survives_a_round_trip():
     assert (pose.position.x, pose.position.y, pose.position.z) == (1.5, -0.25, 0.75)
     assert pose.orientation.w == 1.0
     assert restored.header.frame_id == "velodyne_top"
-
-
-def test_migration_stamps_the_convention_the_operator_asserted():
-    """The conversion is an operator's claim about a file's provenance, so the
-    convention is named explicitly rather than assumed."""
-    migrated = migrate_v3_to_v4(
-        {"version": 3, "num_detections": 0, "detections": []},
-        convention=BOARD_FRAME_CONVENTION,
-    )
-
-    assert migrated["version"] == 4
-    assert migrated["board_frame_convention"] == BOARD_FRAME_CONVENTION
-    assert format_version_error(migrated) is None
-
-
-def test_migration_refuses_anything_but_a_version_3_file():
-    with pytest.raises(ValueError, match="version 3"):
-        migrate_v3_to_v4({"version": 4}, convention=BOARD_FRAME_CONVENTION)

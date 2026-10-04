@@ -18,11 +18,16 @@ ros2 run lctk_autoware_export export \
   --dry-run          # print the entry first; drop the flag to write
 ```
 
-- `--detections`: version 4 or 5 JSON from `lidar_to_camera_solver`'s `dump_detections` service
-  (manual mode; contains the raw solver `rvec`/`tvec`). Only the solved transform's provenance is
-  needed here, not a Target Identity match, so both versions are accepted; version 5's
-  `target_identity` is validated structurally but not resolved against a target file. The
-  re-labeled TF topic is deliberately not accepted as input (M-01).
+- `--detections`: a version-6 Detection Archive created by the current writer (assisted
+  **Export archive** action or the manual dump service). The exporter checks the Target
+  Identity structure, camera projection metadata, and consistent sensor-header frames
+  before reading the saved raw solver `rvec`/`tvec`. It does not resolve the identity
+  against a Target Definition. Older versions are rejected. The re-labeled TF topic is
+  deliberately not accepted as input (M-01).
+- Camera detections must use the frame saved in `camera_projection.frame_id`; all archived
+  LiDAR detections must consistently use one distinct, nonempty frame. The
+  `--camera-frame` value remains the Autoware camera-link YAML key and may differ from
+  the image optical frame.
 - `--lidar-frame`: existing entry in the target YAML, used as the
   `sensor_kit_base_link -> lidar` anchor of the chain.
 - Writes are comment-preserving (`ruamel.yaml` round-trip) and create

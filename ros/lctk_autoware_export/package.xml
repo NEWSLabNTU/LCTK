@@ -9,6 +9,7 @@
 
   <depend>python3-numpy</depend>
   <depend>python3-ruamel.yaml</depend>
+  <depend>lctk_quality</depend>
 
   <test_depend>python3-pytest</test_depend>
 

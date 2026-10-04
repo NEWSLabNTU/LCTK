@@ -20,8 +20,9 @@ ros2 run lctk_launch lctk_session new ~/calib/my-rig \
     --from "$(ros2 pkg prefix lctk_launch --share)/sessions/seyond-left"
 ```
 
-Confirm the data source, topic and frame IDs, camera image type, Target Definition,
-Detector Tuning, and synchronization settings. If the selected Detector Tuning uses
+Confirm the data source, topics, camera image type, Target Definition, Detector Tuning,
+and synchronization settings. Frame labels are taken from sensor message headers at
+runtime. If the selected Detector Tuning uses
 `detection_mode: "bbox"`, provide a crop box measured for this recording; `bbox_free`
 presets do not use one. See
 [Sessions](./sessions.md) and [Configuration](./configuration.md).
@@ -45,8 +46,9 @@ just solver_mode=assisted enable_judge=false run ~/calib/my-rig
 The launch status page is at <http://localhost:8000>; assisted review is at
 <http://localhost:8080>. Confirm that the camera image and LiDAR detections are
 arriving, and that both sensors see the same physical Calibration Target. Use
-`just check` to confirm the configured sensor topics and frames; use the manifest and
-`ros2 topic list` for the corresponding detector and solver topics.
+`just check` to confirm the configured sensor topics, and inspect sensor message headers
+to confirm their frame labels. Use the manifest and `ros2 topic list` for the
+corresponding detector and solver topics.
 
 If your workflow requires operator-selected captures, use `solver_mode=manual` and
 the interactive controller instead. See the manual workflow in
@@ -71,6 +73,10 @@ projected point cloud with the camera image where available, and check the resul
 observations not used to estimate it. Repeat the capture if the estimate changes
 substantially when poor observations are removed or when the target is measured at
 different placements.
+
+For a held-out reprojection report from separately captured Detection Archives, follow
+[Extrinsic Validation](./extrinsic-validation.md). It reports geometric error and
+placement coverage without changing the saved candidate transform.
 
 The repository does not define universal placement counts, distances, residual limits,
 or acceptable repeatability for every rig. Establish those acceptance limits for the

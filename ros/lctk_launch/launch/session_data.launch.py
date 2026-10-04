@@ -23,6 +23,7 @@ from lctk_launch.session import (
     derived_camera_topics,
     derived_lidar_topics,
     parse_data,
+    pcap_avi_frame_ids,
     resolve_session,
 )
 
@@ -133,8 +134,9 @@ def generate_data_source(context, *args, **kwargs) -> list:
             f"data.kind 'pcap_avi' plays exactly one lidar and one camera; this "
             f"session declares {len(lidars)} lidar(s) and {len(cameras)} camera(s)"
         )
-    lidar_name, lidar_config = lidars[0]
-    camera_name, camera_config = cameras[0]
+    lidar_name = lidars[0][0]
+    camera_name = cameras[0][0]
+    lidar_frame_id, camera_frame_id = pcap_avi_frame_ids(lidar_name, camera_name)
     lidar_topics = derived_lidar_topics(lidar_name)
     camera_topics = derived_camera_topics(camera_name)
 
@@ -161,11 +163,11 @@ def generate_data_source(context, *args, **kwargs) -> list:
                 "video_file": str(source.directory / "video.avi"),
                 "pointcloud_topic": lidar_topics["pointcloud"],
                 "velodyne_packets_topic": lidar_topics["packets"],
-                "lidar_frame_id": lidar_config["frame_id"],
+                "lidar_frame_id": lidar_frame_id,
                 "rpm": str(source.lidar_rpm),
                 "camera_name": camera_name,
                 "camera_namespace": camera_topics["namespace"],
-                "camera_frame_id": camera_config["frame_id"],
+                "camera_frame_id": camera_frame_id,
                 **({"camera_info_url": info_url} if info_url else {}),
             }.items(),
         ),

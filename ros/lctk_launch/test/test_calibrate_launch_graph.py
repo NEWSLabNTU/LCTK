@@ -64,10 +64,8 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /velodyne_points
-      frame_id: velodyne
     front_lidar:
       pointcloud_topic: /iv_points
-      frame_id: seyond
 
 markers:
   calibration_target:
@@ -109,10 +107,8 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /velodyne_points
-      frame_id: velodyne
     front_lidar:
       pointcloud_topic: /iv_points
-      frame_id: seyond
 
 markers:
   calibration_target:
@@ -158,11 +154,9 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /sensing/lidar/top/pointcloud_raw
-      frame_id: velodyne_top
   cameras:
     front_center:
       image_topic: /sensing/camera/front_center/image_raw
-      frame_id: camera_front_center
 
 markers:
   calibration_target:
@@ -201,14 +195,11 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /sensing/lidar/top/pointcloud_raw
-      frame_id: velodyne_top
     front_lidar:
       pointcloud_topic: /sensing/lidar/front/pointcloud_raw
-      frame_id: velodyne_front
   cameras:
     front_center:
       image_topic: /sensing/camera/front_center/image_raw
-      frame_id: camera_front_center
 
 markers:
   calibration_target:
@@ -261,10 +252,8 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /velodyne_points
-      frame_id: velodyne
     front_lidar:
       pointcloud_topic: /iv_points
-      frame_id: seyond
       detector_config: {front_lidar_override}
 
 markers:
@@ -885,14 +874,11 @@ devices:
   lidars:
     L1:
       pointcloud_topic: /sensing/lidar/front/points
-      frame_id: lidar_front
     L2:
       pointcloud_topic: /sensing/lidar/rear/points
-      frame_id: lidar_rear
   cameras:
     C1:
       image_topic: /sensing/camera/front_left/image
-      frame_id: camera_front_left
 
 reference_frame: L1
 

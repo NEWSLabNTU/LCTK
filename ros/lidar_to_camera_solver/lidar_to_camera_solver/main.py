@@ -41,6 +41,10 @@ from lctk_quality.placements import (
     Placement,
     board_normal,
 )
+from lctk_quality.projection_metadata import (
+    archive_frames,
+    normalize_camera_projection,
+)
 from lctk_sync import DetectionPairSource, PairSourceConfig
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -361,8 +365,6 @@ class LidarToCameraSolver(Node):
         self._declare_parameters()
 
         self.solver_mode = parse_solver_mode(self._string_parameter("solver_mode"))
-        self.parent_frame = self._string_parameter("parent_frame")
-        self.child_frame = self._string_parameter("child_frame")
         camera_topic = self._string_parameter("camera_topic")
         target_config_file = self._string_parameter("target_config")
         publishing_rate = self._double_parameter("publishing_rate")
@@ -399,6 +401,9 @@ class LidarToCameraSolver(Node):
         self.detection_buffer: DetectionBuffer | None = None
         self.camera_info: CameraInfo | None = None
         self._camera_matrix: np.ndarray | None = None
+        self._camera_projection: dict | None = None
+        self._bound_lidar_frame: str | None = None
+        self._bound_camera_frame: str | None = None
         self.current_rvec: np.ndarray | None = None
         self.current_tvec: np.ndarray | None = None
         self.last_transform: TransformStamped | None = None
@@ -524,15 +529,12 @@ class LidarToCameraSolver(Node):
             f"Solver mode: {self.solver_mode}\n"
             f"Minimum frames before solving: {self.solve_min_frames}\n"
             f"Camera info: {camera_info_topic}\n"
-            f"Target: {self.target.target_id}@{self.target.revision}\n"
-            f"Transform: {self.parent_frame} -> {self.child_frame}"
+            f"Target: {self.target.target_id}@{self.target.revision}"
         )
 
     def _declare_parameters(self) -> None:
         parameters = (
             ("solver_mode", "continuous"),
-            ("parent_frame", "lidar"),
-            ("child_frame", "camera"),
             ("camera_topic", ""),
             ("target_config", ""),
             ("debug_mode", True),
@@ -726,45 +728,89 @@ class LidarToCameraSolver(Node):
         )
 
     def camera_info_callback(self, msg: CameraInfo):
-        """Start a session lazily; changed intrinsics start a clean session."""
-        camera_matrix = np.asarray(msg.k, dtype=np.float64).reshape(3, 3)
-        replacement = self._new_buffer(camera_matrix)
+        """Bind one camera projection; any projection change starts a clean epoch."""
+        try:
+            projection = normalize_camera_projection(
+                {
+                    "model": "undistorted_pixels_using_k",
+                    "frame_id": msg.header.frame_id,
+                    "width": msg.width,
+                    "height": msg.height,
+                    "k": list(msg.k),
+                }
+            )
+            camera_matrix = np.asarray(projection["k"], dtype=np.float64).reshape(3, 3)
+        except (AttributeError, TypeError, ValueError, OverflowError) as error:
+            projection = None
+            camera_matrix = None
+            self.get_logger().warn(f"Ignoring invalid CameraInfo projection: {error!s}")
+
+        replacement = None if camera_matrix is None else self._new_buffer(camera_matrix)
+        reset_review = False
         with self.state_lock:
-            if self._evidence_store is not None:
-                self._evidence_store.observe_intrinsics(camera_matrix, msg.d)
-            if self._camera_matrix is not None and np.array_equal(
-                camera_matrix, self._camera_matrix
-            ):
-                metadata_changed = self.camera_info is None or any(
-                    getattr(self.camera_info, name, None) != getattr(msg, name, None)
-                    for name in ("width", "height")
-                )
+            old_projection = getattr(self, "_camera_projection", None)
+            if projection is not None and old_projection == projection:
                 self.camera_info = msg
-                if metadata_changed:
-                    self._mark_scene_mutation_locked()
+                self._camera_matrix = camera_matrix.copy()
+                if self._evidence_store is not None:
+                    self._evidence_store.observe_intrinsics(camera_matrix, msg.d)
                 return
-            changed = self._camera_matrix is not None
-            self.camera_info = msg
-            self._camera_matrix = camera_matrix.copy()
-            self.detection_buffer = replacement
-            self._prune_review_evidence_locked()
-            self._clear_adjustment_locked()
-            self._review_capture_changed()
-            self._mark_scene_mutation_locked()
+
+            changed = old_projection is not None
+            if projection is None and old_projection is None:
+                self.camera_info = None
+                self._camera_matrix = None
+                self._camera_projection = None
+                return
+
+            self.camera_info = msg if projection is not None else None
+            self._camera_matrix = (
+                None if camera_matrix is None else camera_matrix.copy()
+            )
+            self._camera_projection = projection
+            if projection is not None and self._evidence_store is not None:
+                self._evidence_store.observe_intrinsics(camera_matrix, msg.d)
             if changed:
-                self._identity_generation += 1
-                self.pair_source.discard_cached_pair()
-        if changed:
+                self._invalidate_frame_epoch_locked(replacement_buffer=replacement)
+                reset_review = True
+            else:
+                self.detection_buffer = replacement
+                self._review_capture_changed()
+                self._mark_scene_mutation_locked()
+        if reset_review:
             model = getattr(self, "_review_read_model", None)
             reset = getattr(model, "reset", None)
             if callable(reset):
                 reset()
         if changed:
             self.get_logger().warn(
-                "Camera intrinsic matrix changed; started a new calibration session"
+                "Camera projection changed; started a new calibration session"
             )
-        else:
+        elif projection is not None:
             self.get_logger().debug(f"Camera info received: {msg.width}x{msg.height}")
+
+    def _invalidate_frame_epoch_locked(
+        self, *, replacement_buffer: DetectionBuffer | None = None
+    ) -> None:
+        """Clear every result tied to the previous runtime sensor-frame epoch."""
+        buffer = self.detection_buffer
+        if buffer is not None:
+            update = buffer.clear()
+            if bool(getattr(update, "changed", True)):
+                self._review_capture_changed()
+        self.detection_buffer = replacement_buffer
+        self._bound_lidar_frame = None
+        self._bound_camera_frame = None
+        self._identity_generation += 1
+        self.pair_source.discard_cached_pair()
+        self._clear_adjustment_locked()
+        stillness = getattr(self, "_stillness", None)
+        reset = getattr(stillness, "reset", None)
+        if callable(reset):
+            reset()
+        self._prune_review_evidence_locked()
+        self._review_capture_changed()
+        self._mark_scene_mutation_locked()
 
     def _publishing_timer_callback(self, expected_generation: int | None = None):
         with self.state_lock:
@@ -1010,7 +1056,7 @@ class LidarToCameraSolver(Node):
             f"{self._status_text(update.snapshot)}"
         )
 
-    def _admit_detection_pair(self, _messages: tuple[object, ...]) -> str | None:
+    def _admit_detection_pair(self, messages: tuple[object, ...]) -> str | None:
         """Reject a pair before :class:`DetectionPairSource` mutates its cache.
 
         ``DetectionPairSource`` calls this while holding ``admission_lock``.  The
@@ -1018,7 +1064,55 @@ class LidarToCameraSolver(Node):
         again would couple this callback to a reentrant-lock implementation.
         """
 
-        return self.identity_gate.error
+        identity_error = self.identity_gate.error
+        if identity_error is not None:
+            return identity_error
+        if len(messages) != 2:
+            return "Synchronized detections must contain camera and LiDAR messages"
+        try:
+            camera_frame = messages[0].header.frame_id
+            lidar_frame = messages[1].header.frame_id
+        except AttributeError:
+            if (
+                getattr(self, "_bound_lidar_frame", None) is not None
+                or getattr(self, "_bound_camera_frame", None) is not None
+            ):
+                self._invalidate_frame_epoch_locked(
+                    replacement_buffer=self.detection_buffer
+                )
+            return "Detection headers must contain frame_id"
+
+        bound_lidar = getattr(self, "_bound_lidar_frame", None)
+        bound_camera = getattr(self, "_bound_camera_frame", None)
+        if (bound_lidar, bound_camera) != (None, None) and (
+            bound_lidar != lidar_frame or bound_camera != camera_frame
+        ):
+            # Even malformed replacement labels close the old epoch. A stale
+            # estimate must not keep publishing after the observed header identity
+            # changes, whether the new pair is admissible or not.
+            self._invalidate_frame_epoch_locked(
+                replacement_buffer=self.detection_buffer
+            )
+
+        if not all(
+            isinstance(frame, str) and frame.strip()
+            for frame in (lidar_frame, camera_frame)
+        ):
+            return "Detection header frame_id values must be nonempty"
+        projection = getattr(self, "_camera_projection", None)
+        if projection is None:
+            return "CameraInfo projection is not available or valid"
+        if camera_frame != projection["frame_id"]:
+            return "ArUco detection frame does not match CameraInfo frame"
+        if camera_frame == lidar_frame:
+            return "LiDAR and camera detection frames must be distinct"
+
+        binding_changed = (bound_lidar, bound_camera) != (lidar_frame, camera_frame)
+        self._bound_lidar_frame = lidar_frame
+        self._bound_camera_frame = camera_frame
+        if binding_changed:
+            self._mark_scene_mutation_locked()
+        return None
 
     def _review_sync_status_changed(self) -> None:
         """Publish a live-review invalidation after a synchronized group changes."""
@@ -1402,6 +1496,22 @@ class LidarToCameraSolver(Node):
             generation = self._identity_generation
             identity_error = self.identity_gate.error
             local_identity = self.target.identity
+            bound_frames = (
+                getattr(self, "_bound_lidar_frame", None),
+                getattr(self, "_bound_camera_frame", None),
+            )
+            projection = getattr(self, "_camera_projection", None)
+            try:
+                projection = normalize_camera_projection(projection)
+            except (TypeError, ValueError) as error:
+                projection_error = str(error)
+            else:
+                projection_error = None
+        if projection_error is not None:
+            response.success = False
+            response.message = f"Cannot save detections: {projection_error}"
+            response.num_detections = 0
+            return response
         if snapshot is None or (snapshot.frame_count == 0 and adjusted_rvec is None):
             response.success = False
             response.message = (
@@ -1420,9 +1530,15 @@ class LidarToCameraSolver(Node):
             archive = encode_detection_archive(
                 snapshot,
                 local_identity=local_identity,
+                camera_projection=projection,
                 adjusted_rvec=adjusted_rvec,
                 adjusted_tvec=adjusted_tvec,
             )
+            lidar_frame, camera_frame = archive_frames(archive, projection)
+            if snapshot.frame_count and (lidar_frame, camera_frame) != bound_frames:
+                raise ValueError(
+                    "Detection Buffer sensor frames do not match the current frame binding"
+                )
         except (TypeError, ValueError) as error:
             response.success = False
             response.message = f"Failed to save detections: {error!s}"
@@ -1490,11 +1606,22 @@ class LidarToCameraSolver(Node):
             buffer = self.detection_buffer
             generation = self._identity_generation
             identity_error = self.identity_gate.error
+            projection = getattr(self, "_camera_projection", None)
+            try:
+                projection = normalize_camera_projection(projection)
+            except (TypeError, ValueError):
+                projection = None
         if buffer is None:
             response.success = False
             response.message = "No camera info available"
             response.num_detections = 0
             response.buffer_size = 0
+            return response
+        if projection is None:
+            response.success = False
+            response.message = "No valid CameraInfo projection available"
+            response.num_detections = 0
+            response.buffer_size = buffer.snapshot().frame_count
             return response
         if identity_error is not None:
             response.success = False
@@ -1548,10 +1675,62 @@ class LidarToCameraSolver(Node):
                 response.num_detections = 0
                 response.buffer_size = buffer.snapshot().frame_count
                 return response
+            current_projection = getattr(self, "_camera_projection", None)
+            try:
+                current_projection = normalize_camera_projection(current_projection)
+            except (TypeError, ValueError):
+                current_projection = None
+            if current_projection != archive.camera_projection:
+                response.success = False
+                response.message = "Cannot load: archive camera projection does not match current CameraInfo"
+                response.num_detections = 0
+                response.buffer_size = buffer.snapshot().frame_count
+                return response
+            current_snapshot = buffer.snapshot()
+            active_frames = (
+                getattr(self, "_bound_lidar_frame", None),
+                getattr(self, "_bound_camera_frame", None),
+            )
+            archived_frames = (archive.lidar_frame_id, archive.camera_frame_id)
+            if (
+                request.append
+                and current_snapshot.frame_count > 0
+                and archive.pairs
+                and active_frames != archived_frames
+            ):
+                response.success = False
+                response.message = "Cannot append: archive sensor frames do not match the current buffer"
+                response.num_detections = 0
+                response.buffer_size = current_snapshot.frame_count
+                return response
             update = buffer.restore(archive.pairs, append=request.append)
             if update.accepted and update.changed:
                 self._review_capture_changed()
                 self._mark_scene_mutation_locked()
+            if update.accepted:
+                if request.append and (
+                    current_snapshot.frame_count > 0 or not archive.pairs
+                ):
+                    next_frames = active_frames
+                else:
+                    next_frames = (
+                        archive.lidar_frame_id,
+                        archive.camera_frame_id if archive.pairs else None,
+                    )
+                if next_frames != active_frames:
+                    # An archive from a different sensor frame begins a new
+                    # runtime epoch. The newly restored pairs stay in the buffer,
+                    # while pending live callbacks and the old publication are
+                    # invalidated before this lock is released.
+                    self._identity_generation += 1
+                    generation = self._identity_generation
+                    self.pair_source.discard_cached_pair()
+                    self._clear_adjustment_locked()
+                    stillness = getattr(self, "_stillness", None)
+                    reset = getattr(stillness, "reset", None)
+                    if callable(reset):
+                        reset()
+                self._bound_lidar_frame, self._bound_camera_frame = next_frames
         response.num_detections = len(archive.pairs)
         response.buffer_size = update.snapshot.frame_count
         if not update.accepted:
@@ -1560,7 +1739,11 @@ class LidarToCameraSolver(Node):
                 f"Failed to load detections: {self._rejection_text(update)}"
             )
             return response
-        if not self._apply_update(update, expected_generation=generation):
+        if not self._apply_update(
+            update,
+            expected_generation=generation,
+            expected_revision=update.snapshot.revision,
+        ):
             response.success = False
             response.message = "Load invalidated by a target or session reset; retry"
             response.buffer_size = (
@@ -1575,6 +1758,7 @@ class LidarToCameraSolver(Node):
                 if (
                     generation != self._identity_generation
                     or self.identity_gate.error is not None
+                    or buffer.snapshot().revision != update.snapshot.revision
                 ):
                     response.success = False
                     response.message = (
@@ -1834,7 +2018,8 @@ class LidarToCameraSolver(Node):
             array_key("_camera_matrix"),
             getattr(camera, "width", None),
             getattr(camera, "height", None),
-            getattr(self, "parent_frame", ""),
+            getattr(self, "_bound_lidar_frame", ""),
+            getattr(self, "_bound_camera_frame", ""),
         )
 
     def _review_scene_revision_locked(self, model, snapshot):
@@ -1879,7 +2064,7 @@ class LidarToCameraSolver(Node):
             ),
             image_size=image_size,
             target=getattr(self, "target", None),
-            world_frame_id=str(getattr(self, "parent_frame", "")),
+            world_frame_id=str(getattr(self, "_bound_lidar_frame", None) or ""),
         )
 
     def _review_state(self, read_model):
@@ -2424,6 +2609,17 @@ class LidarToCameraSolver(Node):
     def _create_transform_message(
         self, rvec: np.ndarray, tvec: np.ndarray
     ) -> TransformStamped:
+        lidar_frame = getattr(self, "_bound_lidar_frame", None)
+        camera_frame = getattr(self, "_bound_camera_frame", None)
+        if (
+            not isinstance(lidar_frame, str)
+            or not lidar_frame.strip()
+            or not isinstance(camera_frame, str)
+            or not camera_frame.strip()
+        ):
+            raise ValueError("A LiDAR and camera detection frame are required")
+        if lidar_frame == camera_frame:
+            raise ValueError("LiDAR and camera detection frames must be distinct")
         rotation_matrix, _ = cv2.Rodrigues(rvec)
 
         # M-01: publish with ROS TF semantics.
@@ -2443,8 +2639,8 @@ class LidarToCameraSolver(Node):
         message = TransformStamped()
         message.header = Header()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = self.parent_frame
-        message.child_frame_id = self.child_frame
+        message.header.frame_id = lidar_frame
+        message.child_frame_id = camera_frame
         translation = tvec.ravel()
         message.transform.translation = Vector3(
             x=float(translation[0]),

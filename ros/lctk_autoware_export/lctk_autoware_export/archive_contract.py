@@ -1,8 +1,8 @@
 """Pure archive checks used before an Autoware transform export.
 
 The exporter needs only a solved transform's provenance, not a local Target
-Definition.  It therefore validates a v5 identity structurally but deliberately
-does not attempt to load or compare a target manifest.
+Definition. It therefore validates the v6 Target Identity structurally but
+deliberately does not attempt to load or compare a target manifest.
 """
 
 from __future__ import annotations
@@ -10,8 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
-ARCHIVE_V4 = 4
-ARCHIVE_V5 = 5
+ARCHIVE_V6 = 6
 _IDENTITY_FIELDS = {
     "schema_version",
     "target_id",
@@ -44,9 +43,9 @@ def target_identity_error(identity: object) -> str | None:
 def archive_export_error(data: object, *, expected_frame: str) -> str | None:
     """Return why an archive is unsafe to export, or ``None``.
 
-    Both v4 and v5 solved archives remain exportable.  Only v5 carries a Target
-    Identity, and validating it here is intentionally structural: this package
-    must remain usable without a target-manifest installation.
+    Only version 6 archives are exportable. The Target Identity check is
+    intentionally structural: this package must remain usable without a
+    target-manifest installation.
     """
     if not isinstance(data, Mapping):
         return "detection archive must be an object"
@@ -54,13 +53,9 @@ def archive_export_error(data: object, *, expected_frame: str) -> str | None:
     if (
         not isinstance(version, int)
         or isinstance(version, bool)
-        or version
-        not in (
-            ARCHIVE_V4,
-            ARCHIVE_V5,
-        )
+        or version != ARCHIVE_V6
     ):
-        return f"detection file version {version!r}, expected 4 or 5"
+        return f"detection file version {version!r}, expected {ARCHIVE_V6}"
     convention = data.get("board_frame_convention")
     if not isinstance(convention, str) or convention != expected_frame:
         return (
@@ -68,16 +63,15 @@ def archive_export_error(data: object, *, expected_frame: str) -> str | None:
             "The stored transform means something else; exporting it would put a "
             "wrong extrinsic on a vehicle."
         )
-    if version == ARCHIVE_V5:
-        identity = data.get("target_identity")
-        error = target_identity_error(identity)
-        if error is not None:
-            return error
-        if identity["board_frame_convention"] != convention:
-            return (
-                "target_identity.board_frame_convention conflicts with the "
-                "detection archive board_frame_convention"
-            )
+    identity = data.get("target_identity")
+    error = target_identity_error(identity)
+    if error is not None:
+        return error
+    if identity["board_frame_convention"] != convention:
+        return (
+            "target_identity.board_frame_convention conflicts with the "
+            "detection archive board_frame_convention"
+        )
     return None
 
 
@@ -85,4 +79,4 @@ def _positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
-__all__ = ["ARCHIVE_V4", "ARCHIVE_V5", "archive_export_error", "target_identity_error"]
+__all__ = ["ARCHIVE_V6", "archive_export_error", "target_identity_error"]

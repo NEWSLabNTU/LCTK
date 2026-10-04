@@ -116,6 +116,20 @@ A versioned saved representation of a Detection Buffer, its Quality Verdict, and
 Adjusted Transform.
 _Avoid_: Dump file, saved buffer
 
+**Candidate Transform**:
+The fixed extrinsic selected for validation, including a saved manual adjustment.
+
+**Validation Dataset**:
+Detection Pairs from separate reserved recordings with unchanged sensor mounting and camera settings.
+
+**Validation Reprojection Error**:
+Euclidean pixel distance between an observed corner and its corresponding target corner projected
+using the Candidate Transform.
+
+**Validation Report**:
+Reprojection metrics, coverage, provenance, and scoring completeness. It does not establish absolute
+extrinsic accuracy.
+
 **Assisted Review Session**:
 The browser's coherent view of one current Detection Buffer, its Quality Verdict, live stillness and
 synchronization status, and the matched evidence for its Captures. Evidence may be absent while a
@@ -662,7 +676,6 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /sensing/lidar/top/pointcloud_raw
-      frame_id: velodyne_top
       # Optional per-device override. Needed only when one recording holds
       # topics with different offered QoS, or on a live rig whose driver
       # publishes RELIABLE and you want every message.
@@ -670,7 +683,6 @@ devices:
   cameras:
     front_center:
       image_topic: /sensing/camera/front_center/image_raw
-      frame_id: camera_front_center
 
 markers:
   calibration_board:
@@ -700,6 +712,11 @@ sync:
   queue_size: 100       # Positive integer buffer size per stream
   drop_policy: reject_new   # "reject_new" or "drop_oldest"
 ```
+
+Sensor coordinate labels come from synchronized detection headers, not session `frame_id` overrides.
+CameraInfo must identify the same camera optical frame. Frame, K, or image-dimension changes start a
+new capture epoch and invalidate prior estimates. `pcap_avi` session publishers generate the LiDAR
+frame from its device name and the camera frame from its device name plus `_optical_frame`.
 
 A per-lidar `detector_config` under `devices.lidars.<name>` overrides the marker-level one. That is
 how two differently-sampled LiDARs (a spinning VLP-32C and a solid-state Falcon, say) share one
@@ -868,10 +885,10 @@ demo`), then `just extrinsic-solver-controller`.
 - `reset_transform` - Reset manual adjustments (re-solve from buffer)
 - `get_pose_info` - Get solved pose, current pose, and adjustment delta
 
-**Detection File Format** (version 5):
+**Detection Archive Format** (version 6):
 ```json
 {
-  "version": 5,
+  "version": 6,
   "board_frame_convention": "corner_aligned_plate_center_v1",
   "target_identity": {
     "schema_version": 1,
@@ -879,6 +896,13 @@ demo`), then `just extrinsic-solver-controller`.
     "revision": 1,
     "semantic_sha256": "<64 lowercase hex chars>",
     "board_frame_convention": "corner_aligned_plate_center_v1"
+  },
+  "camera_projection": {
+    "model": "undistorted_pixels_using_k",
+    "frame_id": "camera_optical_frame",
+    "width": 1920,
+    "height": 1080,
+    "k": [1000, 0, 960, 0, 1000, 540, 0, 0, 1]
   },
   "num_detections": 5,
   "detections": [...],
@@ -888,46 +912,23 @@ demo`), then `just extrinsic-solver-controller`.
   }
 }
 ```
-Version 5 adds the full **Target Identity** — `schema_version`, `target_id`, `revision`,
-`semantic_sha256` and `board_frame_convention` — binding the archive to the exact Target
-Definition it was captured against. A solver restores a version-5 archive only when every
-identity field exactly matches its locally selected target; a mismatch is refused, not
-silently reinterpreted.
+Version 6 records the exact Target Identity, consistent sensor header frames, image dimensions,
+and K describing the saved undistorted pixel corners. Projection uses K with zero distortion;
+the detector already applied CameraInfo D with P equal to K. A solver restores only when the
+Target Identity exactly matches its selected target. K, dimensions, and frames must match the
+capture epoch. Projection provenance, Captures, and the selected transform are snapshotted together.
 
-Version 4 (H-11) records the board-frame convention that produced the file and keeps the
-board pose's 6x6 covariance (v3 dropped it, so a reloaded buffer silently solved with
-uniform weight). It has no Target Identity and **cannot be restored** into a running
-solver's buffer — it remains useful only for migration and for `lctk_autoware_export`,
-which needs the solved transform's provenance, not a target match. Version 3 (H-10)
-persists the real ArUco corner pixels inside each 2D detection's `results`. `transform` is
-the raw solver output (`T_optical←lidar`), the input the Autoware exporter consumes. A
-saved calibration also carries its own quality record (H-09).
+All maintained consumers require version 6. Older archives are rejected without migration or an
+external CameraInfo fallback. `lctk_autoware_export` validates identity structurally without loading
+a target; it also checks projection metadata and header consistency. Saved board pose covariance
+and optional quality remain in the archive. The raw transform is `T_optical←lidar`.
 
-**Versions below the current one are rejected, not migrated on load** — a v3 file cannot
-say which board frame produced it, and a v4 file cannot say which target it was captured
-against; reinterpreting either would make the file's meaning depend on the build that
-opened it. Reaching version 5 from a version-3 file takes two explicit hops, each naming a
-different operator claim:
-```bash
-# 1. version 3 -> 4: name the board-frame convention the file was CAPTURED in
-ros2 run lidar_to_camera_solver migrate_detections \
-    --input ~/detections-v3.json --output ~/detections-v4.json \
-    --assume-convention corner_aligned_plate_center_v1
-
-# 2. version 4 -> 5: bind the Target Definition the file was CAPTURED against
-ros2 run lidar_to_camera_solver migrate_detections \
-    --input ~/detections-v4.json --output ~/detections-v5.json \
-    --target-config /path/to/config/targets/<target>.json5
-```
-A file already at version 4 needs only the second hop. Migrating straight from version 3 to
-5 in one invocation is refused — each hop is a distinct claim the operator must make
-explicitly. Step 2 checks that every marker ID the archive actually observed belongs to the
-selected target (catching an obviously wrong selection), but it cannot prove which physical
-target produced the recording; that remains the operator's assertion.
-
-`lctk_autoware_export` accepts both version 4 and version 5 archives — it needs the solved
-transform, not a target match — and enforces the same board-frame-convention gate, because
-it writes into a file that reaches a vehicle.
+For the held-out validation exercise, read
+`docs/superpowers/specs/2026-10-04-extrinsic-validation-design.md`. Shared pipeline updates and the
+exercise documentation are published; `lctk_extrinsic_validation` stays on its own local feature
+branch so students can implement the evaluator. `just test` includes that optional package when
+present. Validation fixes the saved transform and reports placement-balanced pixel RMS, coverage,
+and completeness; it does not estimate absolute extrinsic accuracy.
 
 **Two directions coexist deliberately, and mixing them is the M-01 bug:**
 

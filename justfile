@@ -234,7 +234,12 @@ test: _check-rust-tests-collectable
     # `pytest-3` script but no bare `pytest` on PATH, so the plain name exits 127 and the
     # Python half never runs. Same failure class as M-18 -- a suite that silently is not
     # reached. Must be the system python3 (see _check-python-env).
-    python3 -m pytest setup/test/ ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ -v --no-header
+    # The validator is an optional local reference/student package, absent from main.
+    validation_tests=()
+    if [[ -d ros/lctk_extrinsic_validation/test ]]; then
+        validation_tests+=(ros/lctk_extrinsic_validation/test/)
+    fi
+    python3 -m pytest setup/test/ ros/lctk_target/test/ ros/lctk_launch/test/ ros/lctk_sync/test/ ros/lidar_to_camera_solver/test/ ros/lidar_to_lidar_solver/test/ ros/lctk_quality/test/ ros/lctk_autoware_export/test/ ros/calibration_judge/test/ "${validation_tests[@]}" -v --no-header
 
 # Launch a session's data playback only: just sample-data [<path-or-name>]
 #

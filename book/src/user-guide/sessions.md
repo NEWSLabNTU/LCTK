@@ -57,11 +57,9 @@ data:
 devices:
   lidars:
     top:
-      frame_id: velodyne
       pointcloud_topic: /velodyne_points
   cameras:
     front:
-      frame_id: camera_link
       image_topic: /camera/image_raw
 
 markers:
@@ -77,9 +75,11 @@ sync:
   drop_policy: reject_new
 ```
 
-For `live` and `bag` data, state the topic and frame for each sensor. For
+For `live` and `bag` data, state each sensor topic. Frame labels are taken from the
+sensor message headers at runtime, so do not add `frame_id` to the session. For
 `pcap_avi`, LCTK derives the point-cloud and image topics from the device names, so do
-not add `pointcloud_topic` or `image_topic` to those devices.
+not add `pointcloud_topic` or `image_topic` to those devices. Its generated frame labels
+use the LiDAR device name and the camera device name with `_optical_frame` appended.
 
 ## Choose a data source
 
@@ -111,9 +111,11 @@ are checked against its metadata; republished output topics are also accepted.
 
 ## Topics, frames, and reliability
 
-Sensor topic names and `frame_id` values must match what the live rig publishes or the
-recording contains. For a bag, inspect `metadata.yaml` or run `just check` to catch
-topic mismatches before starting the graph.
+Sensor topic names must match what the live rig publishes or the recording contains.
+Frame labels come from publisher headers, not session overrides. For a bag, inspect
+`metadata.yaml` or run `just check` to catch topic mismatches before starting the graph;
+check sensor message headers while the publisher or bag is running to confirm its frame
+labels. Session checking reports that runtime frames come from sensor headers.
 
 Transport reliability can be stated per sensor with `qos: reliable` or
 `qos: best_effort`; a top-level `qos:` supplies a session-wide default. For bag data,

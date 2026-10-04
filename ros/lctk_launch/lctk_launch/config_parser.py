@@ -26,6 +26,7 @@ from lctk_launch.session import (
     derived_camera_topics,
     derived_lidar_topics,
     parse_data,
+    pcap_avi_frame_ids,
     reject_unknown_keys,
     resolve_config_path,
     verify_bag_topics,
@@ -71,13 +72,12 @@ _TOP_LEVEL_KEYS = {
 }
 _DEVICES_KEYS = {"lidars", "cameras"}
 _LIDAR_DEVICE_KEYS = {
-    "frame_id",
     "pointcloud_topic",
     "detector_config",
     "bbox_config",
     "qos",
 }
-_CAMERA_DEVICE_KEYS = {"frame_id", "image_topic", "qos"}
+_CAMERA_DEVICE_KEYS = {"image_topic", "qos"}
 _MARKER_KEYS = {
     "target_config",
     "detector_config",
@@ -119,7 +119,6 @@ class LidarDevice:
 
     name: str
     pointcloud_topic: str
-    frame_id: str
     detector_config_override: str | None = None
     bbox_config_override: str | None = None  # Per-lidar bbox_config, overrides marker's
     # Reliability this device's topic is subscribed with. Holds the manifest's
@@ -134,7 +133,6 @@ class CameraDevice:
 
     name: str
     image_topic: str
-    frame_id: str
     qos: str | None = None
 
 
@@ -232,7 +230,6 @@ class ArucoLocatorNode:
     namespace: str
     camera_name: str
     image_topic: str
-    frame_id: str
     target_config: str
     target_identity: TargetIdentity
     aruco_detector_config: str
@@ -251,8 +248,6 @@ class LidarCameraSolverNode:
     lidar_name: str
     camera_name: str
     marker_name: str
-    parent_frame: str  # LiDAR frame
-    child_frame: str  # Camera frame
     board_detections_topic: str
     aruco_detections_topic: str
     camera_topic: str  # For camera_info derivation
@@ -274,8 +269,6 @@ class LidarLidarSolverNode:
     lidar1_name: str
     lidar2_name: str
     marker_name: str
-    lidar1_frame: str
-    lidar2_frame: str
     lidar1_detections_topic: str
     lidar2_detections_topic: str
     output_topic: str
@@ -357,6 +350,13 @@ class CalibrationConfigParser:
             self._default_qos = parse_reliability(raw_qos, "the session")
 
         self._parse_devices(raw_config.get("devices", {}))
+        if (
+            self._data is not None
+            and self._data.kind == "pcap_avi"
+            and len(self.lidars) == 1
+            and len(self.cameras) == 1
+        ):
+            pcap_avi_frame_ids(next(iter(self.lidars)), next(iter(self.cameras)))
         self._verify_data_topics()
         self._resolve_transport()
 
@@ -569,15 +569,8 @@ class CalibrationConfigParser:
             reference_frame=self._reference_frame,
         )
 
-        # Build device → frame_id map for display
-        device_frame_ids: dict[str, str] = {}
-        for name, lidar in self.lidars.items():
-            device_frame_ids[name] = lidar.frame_id
-        for name, camera in self.cameras.items():
-            device_frame_ids[name] = camera.frame_id
-
         pipeline.calibration_plan = plan
-        pipeline.calibration_plan_text = format_plan(plan, device_frame_ids)
+        pipeline.calibration_plan_text = format_plan(plan)
 
     def _device_topic(self, kind_of: str, name: str, stated: str | None) -> str:
         """Derive, or require, a device's topic according to the data source.
@@ -684,7 +677,6 @@ class CalibrationConfigParser:
                 pointcloud_topic=self._device_topic(
                     "lidar", name, config.get("pointcloud_topic")
                 ),
-                frame_id=config["frame_id"],
                 detector_config_override=detector_config_override,
                 bbox_config_override=bbox_config_override,
                 qos=self._stated_qos(config, f"lidar '{name}'"),
@@ -698,7 +690,6 @@ class CalibrationConfigParser:
                 image_topic=self._device_topic(
                     "camera", name, config.get("image_topic")
                 ),
-                frame_id=config["frame_id"],
                 qos=self._stated_qos(config, f"camera '{name}'"),
             )
 
@@ -954,7 +945,6 @@ class CalibrationConfigParser:
                     namespace=namespace,
                     camera_name=camera_name,
                     image_topic=camera.image_topic,
-                    frame_id=camera.frame_id,
                     target_config=self.markers[
                         next(
                             pair.marker
@@ -997,7 +987,6 @@ class CalibrationConfigParser:
         marker_name: str,
     ) -> None:
         """Add a lidar-camera solver node to the config."""
-        lidar = self.lidars[lidar_name]
         camera = self.cameras[camera_name]
         marker = self.markers[marker_name]
 
@@ -1018,8 +1007,6 @@ class CalibrationConfigParser:
                 lidar_name=lidar_name,
                 camera_name=camera_name,
                 marker_name=marker_name,
-                parent_frame=lidar.frame_id,
-                child_frame=camera.frame_id,
                 board_detections_topic=board_topic,
                 aruco_detections_topic=aruco_topic,
                 camera_topic=camera.image_topic,
@@ -1038,9 +1025,6 @@ class CalibrationConfigParser:
         marker_name: str,
     ) -> None:
         """Add a lidar-lidar solver node to the config."""
-        lidar1 = self.lidars[lidar1_name]
-        lidar2 = self.lidars[lidar2_name]
-
         node_name = f"solver_{lidar1_name}_{lidar2_name}"
         namespace = f"calibration/{lidar1_name}_{lidar2_name}"
 
@@ -1060,8 +1044,6 @@ class CalibrationConfigParser:
                 lidar1_name=lidar1_name,
                 lidar2_name=lidar2_name,
                 marker_name=marker_name,
-                lidar1_frame=lidar1.frame_id,
-                lidar2_frame=lidar2.frame_id,
                 lidar1_detections_topic=lidar1_topic,
                 lidar2_detections_topic=lidar2_topic,
                 output_topic=output_topic,

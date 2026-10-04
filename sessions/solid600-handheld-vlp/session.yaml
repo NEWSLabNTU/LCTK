@@ -20,11 +20,9 @@ data:
 devices:
   lidars:
     top_lidar:
-      frame_id: velodyne
       pointcloud_topic: /velodyne_points
   cameras:
     front_center:
-      frame_id: zed_left_camera_frame_optical
       image_topic: /sensing/camera/zed/rgb/color/rect/image
 
 markers:

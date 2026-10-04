@@ -181,9 +181,14 @@ class _Logger:
 class _PairSource:
     def __init__(self):
         self.discarded = 0
+        self.cached_pair = None
 
     def discard_cached_pair(self):
         self.discarded += 1
+        self.cached_pair = None
+
+    def is_cached_pair(self, messages):
+        return self.cached_pair is messages
 
 
 class _Broadcaster:
@@ -207,9 +212,10 @@ class _Clock:
         return Time(nanoseconds=20_000_000_000, clock_type=ClockType.ROS_TIME)
 
 
-def _detection(stamp, position):
+def _detection(stamp, position, frame_id=""):
     message = Detection3DArray()
     message.header.stamp.sec = stamp
+    message.header.frame_id = frame_id
     detection = Detection3D()
     detection.bbox.center.position.x = position[0]
     detection.bbox.center.position.y = position[1]
@@ -232,10 +238,11 @@ def test_stable_identity_preserves_latest_pair_transform_policy_and_direction():
     solver.pair_source = _PairSource()
     solver.state_lock = threading.RLock()
     solver._identity_generation = 0
+    solver.lidar1_frame = None
+    solver.lidar2_frame = None
+    solver._frame_generation = 0
     solver.same_face_mode = True
     solver.max_message_age_ms = 0.0
-    solver.lidar1_frame = "lidar1"
-    solver.lidar2_frame = "lidar2"
     solver.transform_pub = _Publisher()
     solver.publish_tf = False
     solver._clock = _Clock()
@@ -244,22 +251,269 @@ def test_stable_identity_preserves_latest_pair_transform_policy_and_direction():
     solver.get_logger = lambda: solver._logger
 
     first = (
-        _detection(10, (1.0, 2.0, 3.0)),
-        _detection(10, (0.0, 0.0, 3.0)),
+        _detection(10, (1.0, 2.0, 3.0), "publisher_lidar_1"),
+        _detection(10, (0.0, 0.0, 3.0), "publisher_lidar_2"),
     )
     second = (
-        _detection(11, (4.0, 5.0, 3.0)),
-        _detection(11, (0.0, 0.0, 3.0)),
+        _detection(11, (4.0, 5.0, 3.0), "publisher_lidar_1"),
+        _detection(11, (0.0, 0.0, 3.0), "publisher_lidar_2"),
     )
+    solver.pair_source.cached_pair = first
     LidarToLidarSolver._handle_sync_group(solver, first)
+    solver.pair_source.cached_pair = second
     LidarToLidarSolver._handle_sync_group(solver, second)
 
     assert solver.stats.synced_pairs == 2
     assert len(solver.transform_pub.published) == 2
-    assert solver.current_transform.header.frame_id == "lidar1"
-    assert solver.current_transform.child_frame_id == "lidar2"
+    assert solver.current_transform.header.frame_id == "publisher_lidar_1"
+    assert solver.current_transform.child_frame_id == "publisher_lidar_2"
     assert solver.current_transform.transform.translation.x == pytest.approx(4.0)
     assert solver.current_transform.transform.translation.y == pytest.approx(5.0)
+
+
+@pytest.mark.parametrize(
+    "frames",
+    [("", "lidar2"), ("lidar", "lidar")],
+)
+def test_solver_rejects_empty_or_repeated_header_frames(frames):
+    from lidar_to_lidar_solver.main import LidarToLidarSolver
+
+    solver = object.__new__(LidarToLidarSolver)
+    solver.target_identity_gate = TargetIdentityGate()
+    solver.target_identity_gate.update(0, identity())
+    solver.target_identity_gate.update(1, identity())
+    solver.stats = SyncStatistics()
+    solver.current_transform = None
+    solver.pair_source = _PairSource()
+    solver.state_lock = threading.RLock()
+    solver._identity_generation = 0
+    solver.lidar1_frame = None
+    solver.lidar2_frame = None
+    solver._frame_generation = 0
+    solver._logger = _Logger()
+    solver.get_logger = lambda: solver._logger
+
+    pair = (
+        _detection(10, (1.0, 2.0, 3.0), frames[0]),
+        _detection(10, (0.0, 0.0, 3.0), frames[1]),
+    )
+    solver.pair_source.cached_pair = pair
+    LidarToLidarSolver._handle_sync_group(solver, pair)
+
+    assert solver.current_transform is None
+    assert solver.lidar1_frame is None
+    assert solver.lidar2_frame is None
+    assert solver.stats.synced_pairs == 0
+    assert solver.stats.frame_rejections == 1
+    assert solver.pair_source.discarded == 1
+
+
+def test_frame_epoch_change_clears_old_output_and_suppresses_stale_work():
+    from lidar_to_lidar_solver.main import LidarToLidarSolver
+
+    solver = object.__new__(LidarToLidarSolver)
+    solver.target_identity_gate = TargetIdentityGate()
+    solver.target_identity_gate.update(0, identity())
+    solver.target_identity_gate.update(1, identity())
+    solver.stats = SyncStatistics()
+    solver.current_transform = None
+    solver.pair_source = _PairSource()
+    solver.state_lock = threading.RLock()
+    solver._identity_generation = 0
+    solver.lidar1_frame = None
+    solver.lidar2_frame = None
+    solver._frame_generation = 0
+    solver.same_face_mode = True
+    solver.max_message_age_ms = 0.0
+    solver.transform_pub = _Publisher()
+    solver.publish_tf = False
+    solver._clock = _Clock()
+    solver.get_clock = lambda: solver._clock
+    solver._logger = _Logger()
+    solver.get_logger = lambda: solver._logger
+
+    replacement_pair = (
+        _detection(11, (2.0, 0.0, 3.0), "new_lidar_1"),
+        _detection(11, (0.0, 0.0, 3.0), "new_lidar_2"),
+    )
+    nested = False
+
+    def compute_with_frame_change(pose1, _pose2):
+        nonlocal nested
+        if not nested:
+            nested = True
+            assert (
+                LidarToLidarSolver._admit_sync_group(solver, replacement_pair) is None
+            )
+            solver.pair_source.cached_pair = replacement_pair
+            LidarToLidarSolver._handle_sync_group(solver, replacement_pair)
+        transform = Transform()
+        transform.translation.x = pose1.position.x
+        transform.rotation.w = 1.0
+        return transform
+
+    solver.compute_transform = compute_with_frame_change
+    first_pair = (
+        _detection(10, (1.0, 0.0, 3.0), "old_lidar_1"),
+        _detection(10, (0.0, 0.0, 3.0), "old_lidar_2"),
+    )
+    assert LidarToLidarSolver._admit_sync_group(solver, first_pair) is None
+    solver.pair_source.cached_pair = first_pair
+    LidarToLidarSolver._handle_sync_group(solver, first_pair)
+
+    assert solver.stats.synced_pairs == 1
+    assert solver.stats.frame_rejections == 1
+    assert solver.pair_source.discarded == 1
+    assert len(solver.transform_pub.published) == 1
+    assert solver.current_transform.header.frame_id == "new_lidar_1"
+    assert solver.current_transform.child_frame_id == "new_lidar_2"
+    assert solver.current_transform.transform.translation.x == pytest.approx(2.0)
+
+
+def test_pair_source_admission_invalidates_estimate_without_numerical_callback(
+    monkeypatch,
+):
+    """The source caches changed frames only after admission clears old output."""
+    import lctk_sync.pair_source as pair_source_module
+    from lctk_sync import DetectionPairSource, PairSourceConfig
+    from lidar_to_lidar_solver.main import LidarToLidarSolver
+
+    class FakeSyncGroup:
+        def __init__(self, topics, messages):
+            self._topics = topics
+            self._messages = messages
+
+        def get(self, topic):
+            return self._messages[topic]
+
+        def topics(self):
+            return self._topics
+
+    synchronizers = []
+
+    class FakeSynchronizer:
+        def __init__(self, *_args, **_kwargs):
+            self.callback = None
+            synchronizers.append(self)
+
+        def add_subscription(self, *_args):
+            pass
+
+        def on_synchronized(self, callback):
+            self.callback = callback
+            return callback
+
+        def emit(self, topics, messages):
+            self.callback(FakeSyncGroup(topics, messages))
+
+    class FakeNode:
+        def __init__(self):
+            self.logger = _Logger()
+
+        def get_logger(self):
+            return self.logger
+
+    monkeypatch.setattr(pair_source_module, "ROS2Synchronizer", FakeSynchronizer)
+
+    solver = object.__new__(LidarToLidarSolver)
+    solver.target_identity_gate = TargetIdentityGate()
+    solver.target_identity_gate.update(0, identity())
+    solver.target_identity_gate.update(1, identity())
+    solver.stats = SyncStatistics()
+    solver.current_transform = object()
+    solver.state_lock = threading.RLock()
+    solver.lidar1_frame = "lidar_1_v1"
+    solver.lidar2_frame = "lidar_2_v1"
+    solver._frame_generation = 0
+    solver._logger = _Logger()
+    solver.get_logger = lambda: solver._logger
+    topics = ("lidar1", "lidar2")
+    source = DetectionPairSource(
+        FakeNode(),
+        topics=topics,
+        msg_types=(Detection3DArray, Detection3DArray),
+        config=PairSourceConfig(stats_interval_s=0.0, epoch_check_interval_s=0.0),
+        admit_pair=solver._admit_sync_group,
+        admission_lock=solver.state_lock,
+    )
+    solver.pair_source = source
+
+    changed_pair = (
+        _detection(12, (1.0, 0.0, 3.0), "lidar_1_v2"),
+        _detection(12, (0.0, 0.0, 3.0), "lidar_2_v2"),
+    )
+    synchronizers[0].emit(topics, dict(zip(topics, changed_pair)))
+
+    outcome = source.take_fresh_pair()
+    assert outcome.ok
+    assert outcome.messages == changed_pair
+    assert source.is_cached_pair(outcome.messages)
+    assert solver.current_transform is None
+    assert (solver.lidar1_frame, solver.lidar2_frame) == (
+        "lidar_1_v2",
+        "lidar_2_v2",
+    )
+    assert solver._frame_generation == 1
+    assert solver.stats.synced_pairs == 0
+
+
+def test_delayed_callback_cannot_rebind_frames_after_new_pair_is_admitted():
+    """A queued old pair cannot undo the frame binding made at admission."""
+    from lidar_to_lidar_solver.main import LidarToLidarSolver
+
+    solver = object.__new__(LidarToLidarSolver)
+    solver.target_identity_gate = TargetIdentityGate()
+    solver.target_identity_gate.update(0, identity())
+    solver.target_identity_gate.update(1, identity())
+    solver.stats = SyncStatistics()
+    solver.current_transform = object()
+    solver.pair_source = _PairSource()
+    solver.state_lock = threading.RLock()
+    solver._identity_generation = 0
+    solver.lidar1_frame = "lidar_1_v1"
+    solver.lidar2_frame = "lidar_2_v1"
+    solver._frame_generation = 0
+    solver.same_face_mode = True
+    solver.max_message_age_ms = 0.0
+    solver.transform_pub = _Publisher()
+    solver.publish_tf = False
+    solver._clock = _Clock()
+    solver.get_clock = lambda: solver._clock
+    solver._logger = _Logger()
+    solver.get_logger = lambda: solver._logger
+
+    def valid_transform(*_poses):
+        transform = Transform()
+        transform.rotation.w = 1.0
+        return transform
+
+    solver.compute_transform = valid_transform
+
+    old_pair = (
+        _detection(10, (1.0, 0.0, 3.0), "lidar_1_v1"),
+        _detection(10, (0.0, 0.0, 3.0), "lidar_2_v1"),
+    )
+    new_pair = (
+        _detection(11, (2.0, 0.0, 3.0), "lidar_1_v2"),
+        _detection(11, (0.0, 0.0, 3.0), "lidar_2_v2"),
+    )
+
+    # Pair A was queued for the push callback when pair B passed admission.
+    solver.pair_source.cached_pair = old_pair
+    assert LidarToLidarSolver._admit_sync_group(solver, new_pair) is None
+    solver.pair_source.cached_pair = new_pair
+
+    LidarToLidarSolver._handle_sync_group(solver, old_pair)
+
+    assert (solver.lidar1_frame, solver.lidar2_frame) == (
+        "lidar_1_v2",
+        "lidar_2_v2",
+    )
+    assert solver._frame_generation == 1
+    assert solver.current_transform is None
+    assert solver.stats.synced_pairs == 0
+    assert solver.transform_pub.published == []
+    assert solver.pair_source.is_cached_pair(new_pair)
 
 
 def test_identity_change_clears_cached_pair_and_old_tf_output():
@@ -302,7 +556,9 @@ def test_solver_rejects_pair_before_mutating_solver_state():
     solver._logger = _Logger()
     solver.get_logger = lambda: solver._logger
 
-    LidarToLidarSolver._handle_sync_group(solver, (object(), object()))
+    rejected_pair = (object(), object())
+    solver.pair_source.cached_pair = rejected_pair
+    LidarToLidarSolver._handle_sync_group(solver, rejected_pair)
 
     assert solver.current_transform is None
     assert solver.stats.synced_pairs == 0
@@ -324,10 +580,11 @@ def test_identity_update_during_compute_cannot_resurrect_transform_or_tf():
     solver.pair_source = _PairSource()
     solver.state_lock = threading.RLock()
     solver._identity_generation = 0
+    solver.lidar1_frame = None
+    solver.lidar2_frame = None
+    solver._frame_generation = 0
     solver.same_face_mode = True
     solver.max_message_age_ms = 0.0
-    solver.lidar1_frame = "lidar1"
-    solver.lidar2_frame = "lidar2"
     solver.transform_pub = _Publisher()
     solver.publish_tf = True
     solver.tf_broadcaster = _Broadcaster()
@@ -349,9 +606,10 @@ def test_identity_update_during_compute_cannot_resurrect_transform_or_tf():
 
     solver.compute_transform = blocked_compute
     pair = (
-        _detection(10, (1.0, 2.0, 3.0)),
-        _detection(10, (0.0, 0.0, 3.0)),
+        _detection(10, (1.0, 2.0, 3.0), "lidar1"),
+        _detection(10, (0.0, 0.0, 3.0), "lidar2"),
     )
+    solver.pair_source.cached_pair = pair
     pair_thread = threading.Thread(
         target=LidarToLidarSolver._handle_sync_group,
         args=(solver, pair),

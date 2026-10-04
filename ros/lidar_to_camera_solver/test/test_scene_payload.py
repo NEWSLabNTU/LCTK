@@ -29,7 +29,10 @@ def _board_message(position=(0.7, -0.4, 4.2), orientation=(0.0, 0.0, 0.0, 1.0)):
         ),
     )
     result = SimpleNamespace(pose=SimpleNamespace(pose=pose, covariance=[0.0] * 36))
-    return SimpleNamespace(detections=[SimpleNamespace(results=[result])])
+    return SimpleNamespace(
+        header=SimpleNamespace(frame_id="velodyne"),
+        detections=[SimpleNamespace(results=[result])],
+    )
 
 
 def _aruco_message():
@@ -41,7 +44,10 @@ def _aruco_message():
         )
         for x, y in ((120.0, 100.0), (220.0, 100.0), (220.0, 200.0), (120.0, 200.0))
     ]
-    return SimpleNamespace(detections=[SimpleNamespace(id="aruco_24", results=results)])
+    return SimpleNamespace(
+        header=SimpleNamespace(frame_id="camera_optical"),
+        detections=[SimpleNamespace(id="aruco_24", results=results)],
+    )
 
 
 def _camera_info():
@@ -56,7 +62,8 @@ def _solver(*, orientation=(0.0, 0.0, 0.0, 1.0)):
     solver = object.__new__(LidarToCameraSolver)
     solver.state_lock = threading.RLock()
     solver._scene_revision = 0
-    solver.parent_frame = "velodyne"
+    solver._bound_lidar_frame = "velodyne"
+    solver._bound_camera_frame = "camera_optical"
     solver.target = TARGET
     solver.camera_info = _camera_info()
     solver._camera_matrix = matrix

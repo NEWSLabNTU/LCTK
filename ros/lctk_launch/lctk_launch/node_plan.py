@@ -255,8 +255,6 @@ def _lidar_camera_solvers(pipeline, settings, sync, log_arguments) -> list[PlanE
                 namespace=solver.namespace,
                 parameters={
                     "solver_mode": settings.solver_mode,
-                    "parent_frame": solver.parent_frame,
-                    "child_frame": solver.child_frame,
                     "camera_topic": solver.camera_topic,
                     # Keep the solver-side identity endpoints relative and
                     # remap each one to its corresponding observer below.
@@ -318,8 +316,6 @@ def _lidar_lidar_solvers(pipeline, sync, log_arguments) -> list[PlanEntry]:
                 parameters={
                     "lidar1_detections_topic": solver.lidar1_detections_topic,
                     "lidar2_detections_topic": solver.lidar2_detections_topic,
-                    "lidar1_frame": solver.lidar1_frame,
-                    "lidar2_frame": solver.lidar2_frame,
                     # The same `sync:` section the LiDAR-camera solvers read.
                     # This used to hardcode a 0.0 window, which conflux reads as
                     # INFINITE: it then pairs by arrival order instead of by

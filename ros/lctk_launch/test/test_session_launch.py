@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from lctk_launch.session import DEFAULT_RVIZ_CONFIG_PARTS
+from lctk_launch.session import DEFAULT_RVIZ_CONFIG_PARTS, SessionError
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DATA_LAUNCH = PACKAGE_ROOT / "launch" / "session_data.launch.py"
@@ -57,9 +57,9 @@ data:
   dir: $(session-dir)/data
 devices:
   lidars:
-    top: { frame_id: velodyne_top }
+    top: {}
   cameras:
-    front_center: { frame_id: camera_front_center }
+    front_center: {}
 markers:
   calibration_board:
     target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
@@ -84,8 +84,8 @@ def test_pcap_avi_includes_the_playback_launch_with_derived_topics(
             arguments.update({k: v for k, v in action.launch_arguments})
     assert arguments["pointcloud_topic"] == "/sensing/lidar/top/pointcloud_raw"
     assert arguments["camera_namespace"] == "/sensing/camera/front_center"
-    assert arguments["lidar_frame_id"] == "velodyne_top"
-    assert arguments["camera_frame_id"] == "camera_front_center"
+    assert arguments["lidar_frame_id"] == "top"
+    assert arguments["camera_frame_id"] == "front_center_optical_frame"
     assert arguments["pcap_file"].endswith("/data/lidar.pcap")
     assert arguments["video_file"].endswith("/data/video.avi")
 
@@ -99,9 +99,9 @@ name: live
 data: { kind: live }
 devices:
   lidars:
-    top: { frame_id: velodyne_top, pointcloud_topic: /points }
+    top: { pointcloud_topic: /points }
   cameras:
-    front_center: { frame_id: cam, image_topic: /image }
+    front_center: { image_topic: /image }
 markers:
   calibration_board:
     target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
@@ -119,6 +119,38 @@ sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
 def test_a_missing_session_is_refused(data_launch, tmp_path):
     with pytest.raises(Exception, match="no session"):
         data_launch.generate_data_source(_Context(tmp_path / "absent"))
+
+
+def test_pcap_avi_rejects_generated_sensor_frame_collision(data_launch, tmp_path):
+    directory = tmp_path / "collision"
+    directory.mkdir()
+    (directory / "data").mkdir()
+    (directory / "data" / "lidar.pcap").write_bytes(b"")
+    (directory / "data" / "video.avi").write_bytes(b"")
+    (directory / "session.yaml").write_text(
+        """
+name: collision
+data:
+  kind: pcap_avi
+  dir: $(session-dir)/data
+devices:
+  lidars:
+    front_camera_optical_frame: {}
+  cameras:
+    front_camera: {}
+markers:
+  calibration_board:
+    target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
+    detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5
+    pairs:
+      - [front_camera_optical_frame, front_camera]
+sync: { tolerance_ms: 100, queue_size: 100, drop_policy: reject_new }
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SessionError, match="generated sensor frame collision"):
+        data_launch.generate_data_source(_Context(directory))
 
 
 SESSION_LAUNCH = PACKAGE_ROOT / "launch" / "session.launch.py"
@@ -280,7 +312,7 @@ name: bagged
 data: { kind: bag, path: $(session-dir)/bag }
 devices:
   lidars:
-    top: { frame_id: velodyne_top, pointcloud_topic: /points }
+    top: { pointcloud_topic: /points }
 markers:
   calibration_board:
     target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5

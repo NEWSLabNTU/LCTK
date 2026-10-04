@@ -40,9 +40,15 @@ def _check(spec: str) -> int:
     print(f"manifest: {session.manifest}")
     print(f"data:     {source.kind} {source.directory or source.path or '(live)'}")
     for name, lidar in pipeline.lidars.items():
-        print(f"  lidar  {name}: {lidar.pointcloud_topic}  frame={lidar.frame_id}")
+        print(
+            f"  lidar  {name}: {lidar.pointcloud_topic}  "
+            "frame: sensor message header at runtime"
+        )
     for name, camera in pipeline.cameras.items():
-        print(f"  camera {name}: {camera.image_topic}  frame={camera.frame_id}")
+        print(
+            f"  camera {name}: {camera.image_topic}  "
+            "frame: sensor message header at runtime"
+        )
     if source.kind == "bag":
         print(f"  bag records: {', '.join(bag_topics(source.path))}")
     print("OK")

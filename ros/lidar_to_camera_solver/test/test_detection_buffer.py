@@ -41,6 +41,13 @@ TARGET = load_target(
     / "solid_600_aruco_1_v1.json5"
 )
 IDENTITY = TARGET.identity
+CAMERA_PROJECTION = {
+    "model": "undistorted_pixels_using_k",
+    "frame_id": "camera_optical",
+    "width": 1280,
+    "height": 720,
+    "k": K.reshape(-1).tolist(),
+}
 MARKERS = {
     1: [
         (-0.22, -0.22, 0.0),
@@ -124,6 +131,7 @@ def make_pair(
     )
 
     aruco = Detection2DArray()
+    aruco.header.frame_id = "camera_optical"
     for marker_id, local in MARKERS.items():
         world = (board_rotation @ np.asarray(local).T).T + projected_position
         pixels, _ = cv2.projectPoints(
@@ -146,6 +154,7 @@ def make_pair(
         aruco.detections.append(detection)
 
     board = Detection3DArray()
+    board.header.frame_id = "lidar_top"
     detection = Detection3D()
     result = ObjectHypothesisWithPose()
     result.pose = PoseWithCovariance()
@@ -475,6 +484,7 @@ def test_complete_archive_round_trip_keeps_pairs_quality_and_adjustment():
         encode_detection_archive(
             snapshot,
             local_identity=IDENTITY,
+            camera_projection=CAMERA_PROJECTION,
             adjusted_rvec=adjusted_rvec,
             adjusted_tvec=adjusted_tvec,
         ),
@@ -486,6 +496,9 @@ def test_complete_archive_round_trip_keeps_pairs_quality_and_adjustment():
     assert archive.quality.is_degenerate == snapshot.estimate.quality.is_degenerate
     assert np.array_equal(archive.adjusted_transform.rvec, adjusted_rvec)
     assert np.array_equal(archive.adjusted_transform.tvec, adjusted_tvec)
+    assert archive.camera_projection == CAMERA_PROJECTION
+    assert archive.lidar_frame_id == "lidar_top"
+    assert archive.camera_frame_id == "camera_optical"
 
     replacement = select_loaded_adjustment(archive, snapshot, append=False)
     appended = select_loaded_adjustment(archive, snapshot, append=True)
@@ -502,11 +515,13 @@ def test_archive_round_trip_records_the_exact_target_identity():
     encoded = encode_detection_archive(
         snapshot,
         local_identity=IDENTITY,
+        camera_projection=CAMERA_PROJECTION,
         adjusted_rvec=None,
         adjusted_tvec=None,
     )
 
-    assert encoded["version"] == 5
+    assert encoded["version"] == 6
+    assert encoded["camera_projection"] == CAMERA_PROJECTION
     assert encoded["target_identity"] == {
         "schema_version": IDENTITY.schema_version,
         "target_id": IDENTITY.target_id,
@@ -524,6 +539,7 @@ def test_identity_mismatch_is_rejected_before_pair_decoding(monkeypatch):
     encoded = encode_detection_archive(
         snapshot,
         local_identity=IDENTITY,
+        camera_projection=CAMERA_PROJECTION,
         adjusted_rvec=None,
         adjusted_tvec=None,
     )
@@ -546,6 +562,7 @@ def test_identity_mismatch_leaves_prior_buffer_snapshot_unchanged():
     encoded = encode_detection_archive(
         before,
         local_identity=IDENTITY,
+        camera_projection=CAMERA_PROJECTION,
         adjusted_rvec=None,
         adjusted_tvec=None,
     )
@@ -569,7 +586,7 @@ def test_archive_adjustment_is_never_restored_without_current_solve():
     not_ready = buffer.capture(make_pair()).snapshot
     archive = decode_detection_archive(
         {
-            "version": 5,
+            "version": 6,
             "board_frame_convention": "corner_aligned_plate_center_v1",
             "target_identity": {
                 "schema_version": IDENTITY.schema_version,
@@ -578,6 +595,7 @@ def test_archive_adjustment_is_never_restored_without_current_solve():
                 "semantic_sha256": IDENTITY.semantic_sha256,
                 "board_frame_convention": IDENTITY.board_frame_convention,
             },
+            "camera_projection": CAMERA_PROJECTION,
             "num_detections": 0,
             "detections": [],
             "transform": {"rvec": [0.1, 0.2, 0.3], "tvec": [1.0, 2.0, 3.0]},
@@ -592,7 +610,7 @@ def test_malformed_archive_is_rejected_before_any_restore():
     with pytest.raises(ValueError, match="count mismatch"):
         decode_detection_archive(
             {
-                "version": 5,
+                "version": 6,
                 "board_frame_convention": "corner_aligned_plate_center_v1",
                 "target_identity": {
                     "schema_version": IDENTITY.schema_version,
@@ -601,6 +619,7 @@ def test_malformed_archive_is_rejected_before_any_restore():
                     "semantic_sha256": IDENTITY.semantic_sha256,
                     "board_frame_convention": IDENTITY.board_frame_convention,
                 },
+                "camera_projection": CAMERA_PROJECTION,
                 "num_detections": 1,
                 "detections": [],
             },

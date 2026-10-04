@@ -157,14 +157,14 @@ def test_the_solid_session_keeps_its_tighter_sync_window():
 
 def test_the_right_camera_session_names_its_camera_right():
     """The example this replaces called the device `left_camera` while giving it
-    the right camera's topic and frame -- a copy-paste from the left example.
+    the right camera's topic -- a copy-paste from the left example.
     The device name reaches generated node names and namespaces, so the wrong
     one made a right-camera calibration report itself as left."""
     pipeline = parse_config(_manifest("seyond-right"))
     assert list(pipeline.cameras) == ["right_camera"]
     camera = pipeline.cameras["right_camera"]
     assert camera.image_topic == "/camera/right/image_raw"
-    assert camera.frame_id == "camera_right"
+    assert not hasattr(camera, "frame_id")
 
 
 def test_every_shipped_session_documents_itself():

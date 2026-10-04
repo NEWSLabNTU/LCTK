@@ -59,6 +59,19 @@ def test_a_lidar_camera_session_produces_the_four_expected_nodes():
     assert not nodes_named(plan, "lidar_to_lidar_solver")
 
 
+def test_solver_node_plan_does_not_configure_sensor_frame_labels():
+    plan = plan_for("vehicle-multisensor")
+    camera_solver = nodes_named(plan, "lidar_to_camera_solver")[0]
+    lidar_solver = nodes_named(plan, "lidar_to_lidar_solver")[0]
+
+    camera_parameters = parameters_of(camera_solver)
+    lidar_parameters = parameters_of(lidar_solver)
+    assert "parent_frame" not in camera_parameters
+    assert "child_frame" not in camera_parameters
+    assert "lidar1_frame" not in lidar_parameters
+    assert "lidar2_frame" not in lidar_parameters
+
+
 @needs_two_lidar_bag
 def test_two_lidars_produce_two_detectors_and_a_lidar_lidar_solver():
     plan = plan_for("twolidar-vlp32-falcon")

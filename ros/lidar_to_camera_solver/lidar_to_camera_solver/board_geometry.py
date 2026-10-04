@@ -18,9 +18,8 @@ import cv2
 import numpy as np
 from lctk_target import TargetIdentity, ValidatedTarget, load_target
 
-# This is the frame in which both observer adapters publish board poses.  The
-# value remains exported because the archive codec and migration command still
-# use it while archive v5 is being completed in W4-Eb/W4-Ec.
+# This is the frame in which both observer adapters publish board poses. The
+# archive codec records it as part of Target Identity.
 BOARD_FRAME_CONVENTION = "corner_aligned_plate_center_v1"
 
 LIDAR_TARGET_IDENTITY_TOPIC = "lidar_target_identity"

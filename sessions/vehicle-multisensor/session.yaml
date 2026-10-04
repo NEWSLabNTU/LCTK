@@ -8,13 +8,13 @@ data:
 
 devices:
   lidars:
-    L1: { frame_id: lidar_front, pointcloud_topic: /sensing/lidar/front/points }
-    L2: { frame_id: lidar_rear, pointcloud_topic: /sensing/lidar/rear/points }
+    L1: { pointcloud_topic: /sensing/lidar/front/points }
+    L2: { pointcloud_topic: /sensing/lidar/rear/points }
   cameras:
-    C1: { frame_id: camera_front_left, image_topic: /sensing/camera/front_left/image }
-    C2: { frame_id: camera_front_right, image_topic: /sensing/camera/front_right/image }
-    C3: { frame_id: camera_rear_left, image_topic: /sensing/camera/rear_left/image }
-    C4: { frame_id: camera_rear_right, image_topic: /sensing/camera/rear_right/image }
+    C1: { image_topic: /sensing/camera/front_left/image }
+    C2: { image_topic: /sensing/camera/front_right/image }
+    C3: { image_topic: /sensing/camera/rear_left/image }
+    C4: { image_topic: /sensing/camera/rear_right/image }
 
 reference_frame: L1
 

@@ -68,6 +68,9 @@ module is the wrong shape).
 | [0006](./0006-one-manifest-one-strictness.md) | One manifest, one strictness: every section refuses a key nothing reads | accepted |
 | [0007](./0007-node-plan-is-a-value.md) | The calibration graph is built as a value, and the launch file only realises it | accepted |
 | [0008](./0008-revisioned-assisted-review-session.md) | The assisted review page is a revisioned session with progressive evidence hydration | accepted |
+| [0009](./0009-evaluate-fixed-extrinsics-on-held-out-observations.md) | Evaluate a fixed extrinsic against held-out observations | accepted |
+| [0010](./0010-archives-own-projection-provenance.md) | Detection Archives own their projection provenance | accepted |
+| [0011](./0011-sensor-headers-own-frame-binding.md) | Sensor detection headers own solver frame binding | accepted |
 
 Reviews:
 

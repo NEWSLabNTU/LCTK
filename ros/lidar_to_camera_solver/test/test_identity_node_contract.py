@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import rclpy
 from lctk_interfaces.msg import CalibrationTargetIdentity
+from lctk_quality.projection_metadata import PROJECTION_MODEL
 from lctk_sync import DetectionPairSource, PairSourceConfig
 from lctk_sync.epoch import EpochRecovery
 from lctk_target import load_target
@@ -120,6 +121,15 @@ def solver_harness(*, ready: bool) -> LidarToCameraSolver:
         solver.identity_gate.update("lidar", identity())
         solver.identity_gate.update("camera", identity())
     solver.detection_buffer = _Buffer()
+    solver._camera_projection = {
+        "model": PROJECTION_MODEL,
+        "frame_id": "camera_optical",
+        "width": 640,
+        "height": 480,
+        "k": [500.0, 0.0, 320.0, 0.0, 500.0, 240.0, 0.0, 0.0, 1.0],
+    }
+    solver._bound_lidar_frame = "lidar_top"
+    solver._bound_camera_frame = "camera_optical"
     solver.pair_source = _PairSource()
     solver.current_rvec = np.ones(3)
     solver.current_tvec = np.ones(3)
@@ -168,7 +178,7 @@ def _one_pair_snapshot() -> BufferSnapshot:
     aruco = Detection2DArray()
     aruco.header.frame_id = "camera_optical"
     board = Detection3DArray()
-    board.header.frame_id = "lidar"
+    board.header.frame_id = "lidar_top"
     pair = DetectionPair(aruco=aruco, board=board)
     return BufferSnapshot(
         revision=1,
@@ -245,6 +255,8 @@ def test_dump_succeeds_with_open_gate_and_writes_local_target_identity(tmp_path)
     assert destination.exists()
     written = json.loads(destination.read_text())
     assert written["target_identity"] == identity_fields(solver.target.identity)
+    assert written["version"] == 6
+    assert written["camera_projection"] == solver._camera_projection
 
 
 def test_dump_creates_a_missing_destination_parent(tmp_path):
@@ -405,7 +417,15 @@ def test_delayed_continuous_pair_is_rejected_after_target_session_reset():
     def message(stamp):
         return SimpleNamespace(
             header=SimpleNamespace(
-                stamp=SimpleNamespace(sec=stamp, nanosec=0),
+                stamp=SimpleNamespace(sec=stamp, nanosec=0), frame_id="camera_optical"
+            ),
+            detections=[object()],
+        )
+
+    def board_message(stamp):
+        return SimpleNamespace(
+            header=SimpleNamespace(
+                stamp=SimpleNamespace(sec=stamp, nanosec=0), frame_id="lidar_top"
             ),
             detections=[object()],
         )
@@ -431,7 +451,7 @@ def test_delayed_continuous_pair_is_rejected_after_target_session_reset():
     source._epoch_recovery = EpochRecovery()
     solver.pair_source = source
 
-    group = Group({"aruco": message(10), "board": message(10)})
+    group = Group({"aruco": message(10), "board": board_message(10)})
     worker = threading.Thread(target=source._handle_group, args=(group,))
     worker.start()
     assert callback_started.wait(timeout=2.0)
@@ -477,9 +497,11 @@ def _spin_until(node, predicate, timeout_s=2.0):
 def _publish_pair(aruco_publisher, board_publisher, stamp: int) -> None:
     aruco = Detection2DArray()
     aruco.header.stamp.sec = stamp
+    aruco.header.frame_id = "camera_optical"
     aruco.detections = [Detection2D()]
     board = Detection3DArray()
     board.header.stamp.sec = stamp
+    board.header.frame_id = "lidar_top"
     board.detections = [Detection3D()]
     aruco_publisher.publish(aruco)
     board_publisher.publish(board)

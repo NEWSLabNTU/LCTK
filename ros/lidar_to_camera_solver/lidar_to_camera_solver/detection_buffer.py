@@ -23,9 +23,9 @@ from lctk_quality import (
     compute_diversity,
     distinct_placements,
 )
+from lctk_quality.correspondence import transform_marker_corners
 from lctk_quality.placements import Placement
 from scipy.optimize import least_squares
-from scipy.spatial.transform import Rotation
 
 # Review URLs must not change owners after deletion, restoration, or a new buffer.
 # These process-local IDs are not archive data; manual services still use indexes.
@@ -447,8 +447,6 @@ class DetectionBuffer:
         saw_real_corners = False
         saw_configured_marker = False
 
-        rotation = Rotation.from_quat(board.orientation).as_matrix()
-        position = np.asarray(board.position, dtype=np.float64)
         for detection in getattr(detached.aruco, "detections", ()):
             results = getattr(detection, "results", ())
             if len(results) < 4:
@@ -468,7 +466,12 @@ class DetectionBuffer:
             )
             if pixels.shape != (4, 2) or not np.all(np.isfinite(pixels)):
                 continue
-            world_corners = (rotation @ local_corners.T).T + position
+            world_corners, pixels = transform_marker_corners(
+                local_corners,
+                board.position,
+                board.orientation,
+                pixels,
+            )
             object_points.extend(world_corners)
             image_points.extend(pixels)
             marker_corners_world.append(_readonly_array(world_corners))

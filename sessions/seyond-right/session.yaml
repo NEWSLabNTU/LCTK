@@ -8,11 +8,9 @@ data:
 devices:
   lidars:
     seyond_lidar:
-      frame_id: seyond
       pointcloud_topic: /lidar/falcon/iv_points
   cameras:
     right_camera:
-      frame_id: camera_right
       image_topic: /camera/right/image_raw
 
 markers:

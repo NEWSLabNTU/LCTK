@@ -11,8 +11,9 @@ recording of your own.
   including its marker layout and orientation.
 - Ensure the camera and LiDAR have overlapping views of the target and usable
   timestamps.
-- Check that the session names the correct sensor topics, frame IDs, target, and
-  sensor-specific Detector Tuning. See [Sessions](./sessions.md) and
+- Check that the session names the correct sensor topics, target, and sensor-specific
+  Detector Tuning. Frame labels come from sensor message headers at runtime. See
+  [Sessions](./sessions.md) and
   [Configuration](./configuration.md).
 - For a bag, make sure the recording is available where the manifest expects it.
 
@@ -56,6 +57,7 @@ just extrinsic-solver-controller
 The controller exposes the capture-buffer operations for the running solver. The
 assisted and manual workflows are described in more detail in
 [Assisted Capture](./assisted-capture.md) and the [Field Validation Runbook](./field-validation.md).
+For a held-out reprojection check, see [Extrinsic Validation](./extrinsic-validation.md).
 
 ## Inspect the transform and visualize the fit
 

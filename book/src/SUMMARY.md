@@ -17,6 +17,7 @@
 - [Multi-LiDAR Calibration](./user-guide/multi-lidar.md)
 - [Assisted Capture](./user-guide/assisted-capture.md)
 - [Field Validation](./user-guide/field-validation.md)
+- [Extrinsic Validation](./user-guide/extrinsic-validation.md)
 - [Exporting to Autoware](./user-guide/autoware-export.md)
 - [Troubleshooting](./user-guide/troubleshooting.md)
 

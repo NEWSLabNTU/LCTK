@@ -211,8 +211,8 @@ def test_sample_data_node_parity():
     solver = pipeline.lidar_camera_solvers[0]
     assert solver.lidar_name == "top"
     assert solver.camera_name == "front_center"
-    assert solver.parent_frame == "velodyne_top"
-    assert solver.child_frame == "camera_front_center"
+    assert not hasattr(solver, "parent_frame")
+    assert not hasattr(solver, "child_frame")
 
     # Correct topic wiring: solver subscribes to detector/locator output topics
     assert solver.board_detections_topic == detector.output_topic
@@ -258,15 +258,8 @@ def test_two_lidar_node_parity():
     assert len(pipeline.lidar_lidar_solvers) == 1
     solver = pipeline.lidar_lidar_solvers[0]
     assert {solver.lidar1_name, solver.lidar2_name} == {"top_lidar", "front_lidar"}
-    # Frame ids come from the session manifest, which describes the real
-    # two-LiDAR rig (VLP-32C + Seyond Falcon). The recorded bags publish
-    # exactly these frames.
-    frames = {
-        solver.lidar1_name: solver.lidar1_frame,
-        solver.lidar2_name: solver.lidar2_frame,
-    }
-    assert frames["top_lidar"] == "velodyne"
-    assert frames["front_lidar"] == "seyond"
+    assert not hasattr(solver, "lidar1_frame")
+    assert not hasattr(solver, "lidar2_frame")
 
     # Correct topic wiring: solver subscribes to detector output topics
     detector_by_lidar = {d.lidar_name: d for d in pipeline.lidar_board_detectors}
@@ -363,11 +356,9 @@ devices:
   lidars:
     top_lidar:
       pointcloud_topic: /lidar/points
-      frame_id: velodyne_top
   cameras:
     front_center:
       image_topic: /camera/image_raw
-      frame_id: camera_front_center
 
 markers:
   calibration_board:
@@ -415,14 +406,11 @@ devices:
   lidars:
     lidar_a:
       pointcloud_topic: /lidar/a
-      frame_id: lidar_a_frame
     lidar_b:
       pointcloud_topic: /lidar/b
-      frame_id: lidar_b_frame
   cameras:
     camera:
       image_topic: /camera/image
-      frame_id: camera_frame
 markers:
   target_a:
     target_config: {first_target}
@@ -525,7 +513,6 @@ devices:
   lidars:
     lidar:
       pointcloud_topic: /lidar
-      frame_id: lidar_frame
 markers:
   board:
     type: hollow_board
@@ -554,7 +541,6 @@ devices:
   lidars:
     lidar:
       pointcloud_topic: /lidar
-      frame_id: lidar_frame
 markers:
   board:
     type: hollow_board
@@ -578,7 +564,6 @@ devices:
   lidars:
     lidar:
       pointcloud_topic: /lidar
-      frame_id: lidar_frame
       board_config: /tmp/legacy-board.json5
       detector_config: /tmp/detector.json5
 markers: {}
@@ -607,7 +592,6 @@ devices:
   lidars:
     lidar:
       pointcloud_topic: /lidar
-      frame_id: lidar_frame
       board_config: /tmp/legacy-board.json5
 markers: {}
 """
@@ -662,7 +646,6 @@ devices:
   lidars:
     lidar:
       pointcloud_topic: /lidar
-      frame_id: lidar_frame
       {device_override}
 markers:
   board:
@@ -813,7 +796,6 @@ devices:
   lidars:
     lidar:
       pointcloud_topic: /lidar
-      frame_id: lidar_frame
 markers:
   board:
     target_config: {TARGETS / "hollow_1000_aruco_4_v1.json5"}
@@ -879,8 +861,7 @@ def test_pcap_avi_derives_device_topics(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
-        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+        "devices:\n  lidars:\n    top: {}\n  cameras:\n    front_center: {}\n",
     )
     pipeline = parse_config(str(manifest))
     assert (
@@ -899,9 +880,9 @@ def test_pcap_avi_refuses_a_stated_topic(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /my/topic\n"
-        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+        "  cameras:\n    front_center:\n",
     )
     with pytest.raises((ValueError, SessionError), match="derived"):
         parse_config(str(manifest))
@@ -911,8 +892,7 @@ def test_live_requires_a_stated_topic(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: live\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
-        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+        "devices:\n  lidars:\n    top: {}\n  cameras:\n    front_center: {}\n",
     )
     with pytest.raises((ValueError, SessionError), match="pointcloud_topic"):
         parse_config(str(manifest))
@@ -925,8 +905,7 @@ def test_session_dir_resolves_in_a_marker_path(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
-        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n",
+        "devices:\n  lidars:\n    top: {}\n  cameras:\n    front_center: {}\n",
     )
     text = manifest.read_text(encoding="utf-8").replace(
         "    pairs:", "    bbox_config: $(session-dir)/bbox.json5\n    pairs:"
@@ -941,9 +920,9 @@ def test_a_config_without_a_data_section_still_parses(tmp_path):
     manifest = write_session(
         tmp_path,
         "",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n"
-        "  cameras:\n    front_center:\n      frame_id: camera_front_center\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     pipeline = parse_config(str(manifest))
@@ -1001,9 +980,9 @@ def test_a_bag_session_naming_a_topic_the_bag_lacks_is_refused_at_parse_time(tmp
     manifest = write_session(
         tmp_path,
         "data:\n  kind: bag\n  path: $(session-dir)/bag\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /velodyne_points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     with pytest.raises((ValueError, SessionError)) as excinfo:
@@ -1019,9 +998,9 @@ def test_a_bag_session_whose_topics_match_parses(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: bag\n  path: $(session-dir)/bag\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /lidar/vlp32/velodyne_points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     pipeline = parse_config(str(manifest))
@@ -1070,9 +1049,9 @@ def test_assisted_paths_get_the_same_substitution_as_every_other_path(tmp_path):
 name: a-session
 devices:
   lidars:
-    top: {frame_id: velodyne, pointcloud_topic: /points}
+    top: {pointcloud_topic: /points}
   cameras:
-    cam: {frame_id: optical, image_topic: /image}
+    cam: {image_topic: /image}
 markers:
   board:
     target_config: $(find-pkg-share lctk_launch)/config/targets/solid_600_aruco_1_v1.json5
@@ -1121,13 +1100,11 @@ data: {{ kind: bag, path: $(session-dir)/bag }}
 devices:
   lidars:
     top:
-      frame_id: velodyne_top
       pointcloud_topic: /lidar/vlp32/velodyne_points
     falcon:
-      frame_id: falcon
       pointcloud_topic: /lidar/falcon/iv_points
   cameras:
-    front_center: {{ frame_id: cam, image_topic: /image }}
+    front_center: {{ image_topic: /image }}
 markers:
   calibration_board:
     target_config: {target}
@@ -1162,10 +1139,10 @@ def test_stating_reliable_against_a_best_effort_recording_is_refused(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: bag\n  path: $(session-dir)/bag\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /lidar/vlp32/velodyne_points\n"
         "      qos: reliable\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     with pytest.raises(Exception, match="receives nothing"):
@@ -1181,9 +1158,9 @@ def test_a_session_default_applies_and_a_device_overrides_it(tmp_path):
     manifest = write_session(
         tmp_path,
         "qos: best_effort\ndata:\n  kind: bag\n  path: $(session-dir)/bag\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /lidar/vlp32/velodyne_points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n      qos: reliable\n",
     )
     pipeline = parse_config(str(manifest))
@@ -1198,9 +1175,9 @@ def test_a_live_session_defaults_to_best_effort(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: live\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     pipeline = parse_config(str(manifest))
@@ -1212,9 +1189,9 @@ def test_an_unknown_qos_value_is_refused(tmp_path):
     manifest = write_session(
         tmp_path,
         "data:\n  kind: live\n",
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n      qos: sensor_data\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     with pytest.raises(ValueError, match="expected one of"):
@@ -1235,9 +1212,9 @@ def _live_session(tmp_path, top="", devices=None, markers=None, sync=None):
     target = "$(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5"
     detector = "$(find-pkg-share lctk_launch)/config/board/hollow_1000/velodyne.json5"
     devices = devices or (
-        "devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        "devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n"
     )
     markers = markers or (
@@ -1266,7 +1243,42 @@ def test_a_stray_top_level_key_is_refused(tmp_path):
 def test_name_and_description_stay_accepted(tmp_path):
     """Read by nothing, carried by every shipped manifest, and worth keeping."""
     manifest = _live_session(tmp_path, top="description: a rig\n")
-    assert parse_config(str(manifest)).lidars["top"].frame_id == "velodyne_top"
+    pipeline = parse_config(str(manifest))
+    assert list(pipeline.lidars) == ["top"]
+    assert not hasattr(pipeline.lidars["top"], "frame_id")
+
+
+def test_device_frame_override_is_rejected(tmp_path):
+    manifest = _live_session(
+        tmp_path,
+        devices="devices:\n  lidars:\n    top:\n      frame_id: guessed_lidar\n"
+        "      pointcloud_topic: /points\n"
+        "  cameras:\n    front_center:\n      frame_id: guessed_camera\n"
+        "      image_topic: /image\n",
+    )
+
+    with pytest.raises(
+        (ValueError, SessionError), match="frame_id.*unknown|unknown.*frame_id"
+    ):
+        parse_config(str(manifest))
+
+
+def test_pcap_avi_rejects_generated_device_frame_collision(tmp_path):
+    make_pcap_dir(tmp_path / "rig")
+    manifest = write_session(
+        tmp_path,
+        "data:\n  kind: pcap_avi\n  dir: $(session-dir)/data\n",
+        "devices:\n  lidars:\n    front_camera_optical_frame: {}\n"
+        "  cameras:\n    front_camera: {}\n",
+    )
+    contents = manifest.read_text(encoding="utf-8").replace(
+        "- [top, front_center]",
+        "- [front_camera_optical_frame, front_camera]",
+    )
+    manifest.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(SessionError, match="generated sensor frame collision"):
+        parse_config(str(manifest))
 
 
 def test_a_mistyped_sync_key_is_refused_by_name(tmp_path):
@@ -1288,9 +1300,9 @@ def test_a_mistyped_sync_key_is_refused_by_name(tmp_path):
 def test_a_mistyped_device_key_is_refused(tmp_path):
     manifest = _live_session(
         tmp_path,
-        devices="devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        devices="devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n      detecter_config: /x.json5\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     with pytest.raises((ValueError, SessionError), match="detecter_config"):
@@ -1300,9 +1312,9 @@ def test_a_mistyped_device_key_is_refused(tmp_path):
 def test_a_mistyped_camera_key_is_refused(tmp_path):
     manifest = _live_session(
         tmp_path,
-        devices="devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        devices="devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n      qos_profile: reliable\n",
     )
     with pytest.raises((ValueError, SessionError), match="qos_profile"):
@@ -1325,9 +1337,9 @@ def test_a_mistyped_marker_key_is_refused(tmp_path):
 def test_a_stray_devices_section_key_is_refused(tmp_path):
     manifest = _live_session(
         tmp_path,
-        devices="devices:\n  lidar:\n    top:\n      frame_id: velodyne_top\n"
+        devices="devices:\n  lidar:\n    top:\n"
         "      pointcloud_topic: /points\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     with pytest.raises((ValueError, SessionError)) as excinfo:
@@ -1347,9 +1359,9 @@ def test_a_retired_key_still_gets_its_own_message(tmp_path):
     """
     manifest = _live_session(
         tmp_path,
-        devices="devices:\n  lidars:\n    top:\n      frame_id: velodyne_top\n"
+        devices="devices:\n  lidars:\n    top:\n"
         "      pointcloud_topic: /points\n      board_config: /x.json5\n"
-        "  cameras:\n    front_center:\n      frame_id: cam\n"
+        "  cameras:\n    front_center:\n"
         "      image_topic: /image\n",
     )
     with pytest.raises((ValueError, SessionError)) as excinfo:

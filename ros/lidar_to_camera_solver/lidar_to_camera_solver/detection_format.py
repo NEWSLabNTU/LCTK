@@ -1,31 +1,7 @@
-"""The saved-detection file format: serialization, version 5, and its version check.
+"""Detection Archive v6 serialization, validation, and restoration.
 
-A dump file stores board *poses*, and Phase 1 changed what a board pose means. Version
-3 recorded no convention — board-local marker corners are recomputed at load time from
-``aruco_pattern.json5`` — so files written before and after that change are
-indistinguishable, and either reloads under whatever convention the loading build
-believes in.
-
-Version 4 fixed two things:
-
-- it records the frame convention that produced it, using the same identifier the
-  detector publishes, so there is one vocabulary rather than two;
-- it stores the board pose's 6x6 covariance, which version 3 dropped. Without it a
-  reloaded buffer solves with uniform weight 1.0 and quietly differs from the live
-  buffer it was saved from (M-13).
-
-Version 5 retains those fields and adds the full Target Identity.  A solver restores
-only a version-5 archive whose identity exactly matches its locally selected target;
-version 4 remains useful to migration and transform-export tooling but is not restored
-implicitly.
-
-Version 3 files are **rejected**, not migrated on load. Automatic migration would make
-a file's meaning depend on which build opened it — the same class of silent difference
-this phase exists to remove. `migrate_v3_to_v4` is the explicit way out, and it makes
-the operator name the convention they are asserting.
-
-Like `board_geometry`, this module imports nothing from ``rclpy``: the whole format is
-functions over plain values.
+Like ``board_geometry``, this module imports nothing from ``rclpy``: the format is
+functions over plain values, with ROS message creation deferred until restore.
 """
 
 from __future__ import annotations
@@ -33,24 +9,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from lctk_quality.projection_metadata import (
+    archive_frames,
+    normalize_camera_projection,
+)
 
 from lidar_to_camera_solver.archive_contract import (
-    ARCHIVE_V4,
-    ARCHIVE_V5,
-    MIGRATION_COMMAND,
+    ARCHIVE_V6,
     archive_restore_error,
     target_identity_error,
 )
 from lidar_to_camera_solver.board_geometry import (
     BOARD_FRAME_CONVENTION,
     TargetIdentity,
-    ValidatedTarget,
     identity_fields,
     parse_target_identity,
 )
 
-#: Version 5 binds every captured pair to the exact Target Definition that produced it.
-FORMAT_VERSION = ARCHIVE_V5
+#: Version 6 binds observations to their camera projection and exact Target Definition.
+FORMAT_VERSION = ARCHIVE_V6
 
 
 @dataclass(frozen=True)
@@ -85,50 +62,28 @@ class AdjustedTransform:
 @dataclass(frozen=True)
 class DetectionArchive:
     target_identity: TargetIdentity
+    camera_projection: dict
+    lidar_frame_id: str | None
+    camera_frame_id: str
     pairs: tuple[object, ...]
     quality: ArchivedQuality | None
     adjusted_transform: AdjustedTransform | None
 
 
 def format_version_error(data: dict) -> str | None:
-    """Check archive layout and board-frame metadata.
-
-    Version 4 remains structurally understood for migration and export, while only
-    version 5 can pass the restore gate.  Target Identity equality is checked by
-    :func:`archive_restore_error`, which has the local target needed for that decision.
-    """
+    """Check the version-6 envelope, projection provenance, and sensor frames."""
     if not isinstance(data, dict):
         return "Detection archive must be an object"
 
     version = data.get("version", 0)
-    if not isinstance(version, int) or isinstance(version, bool):
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version != FORMAT_VERSION
+    ):
         return (
-            f"Unsupported detection file version {version!r}; expected a literal "
-            "integer 4 or 5"
-        )
-
-    if version not in (ARCHIVE_V4, ARCHIVE_V5):
-        detail = ""
-        if version == 3:
-            detail = (
-                " Version 3 predates the corner-aligned board frame, so its poses may "
-                "be wrong by a silent 45-degree in-plane rotation and a ~707 mm origin "
-                "shift."
-            )
-        elif version in (1, 2):
-            detail = (
-                f" Version {version} also carries no real ArUco corners, only the "
-                "axis-aligned bounding box (C-01)."
-            )
-        elif version < ARCHIVE_V4:
-            detail = " This is an unsupported past archive layout."
-        else:
-            detail = " This is an unsupported future archive layout."
-        return (
-            f"Unsupported detection file version {version}; this build reads archive "
-            f"versions 4 and {FORMAT_VERSION}.{detail} Convert a file you still trust "
-            f"with: {MIGRATION_COMMAND} --input <file> --output <file> "
-            f"--assume-convention {BOARD_FRAME_CONVENTION}"
+            f"Unsupported detection archive version {version!r}; "
+            f"this build requires version {FORMAT_VERSION}"
         )
 
     convention = data.get("board_frame_convention")
@@ -145,115 +100,13 @@ def format_version_error(data: dict) -> str | None:
             "The stored poses mean something else; re-capture rather than reuse them."
         )
 
-    return None
-
-
-def migrate_v3_to_v4(data: dict, *, convention: str) -> dict:
-    """Convert a parsed version-3 dump to version 4.
-
-    The operator names the convention rather than the tool assuming one: converting is
-    a claim about where the file came from, and only the person who captured it knows.
-    The board-pose covariances version 3 discarded cannot be recovered; they stay
-    all-zero, which every reader already treats as "unknown", NOT as "exact".
-    """
-    version = data.get("version", 0)
-    if version != 3:
-        raise ValueError(
-            f"migrate_v3_to_v4 expects a version 3 file, got version {version}"
-        )
-
-    migrated = dict(data)
-    # This is intentionally literal.  v3 data has the v4 layout after migration;
-    # a later current format must not relabel it as carrying fields it never gained.
-    migrated["version"] = 4
-    migrated["board_frame_convention"] = convention
-    return migrated
-
-
-def _parse_marker_id(value: object) -> int:
-    """Parse one ``Detection2D.id`` field into a bare integer marker ID.
-
-    ``aruco_locator_node`` writes ``"aruco_<id>"``; a hand-built or older fixture
-    may carry a bare integer or numeric string instead. Anything else raises
-    ``ValueError``: ``detection_buffer._marker_id`` can afford to skip an
-    unparseable id on a live ROS message, because skipping one detection there
-    only loses data, but silently skipping one here would quietly weaken the
-    one check this migration performs.
-    """
-    candidate = value
-    if isinstance(candidate, str) and candidate.startswith("aruco_"):
-        candidate = candidate.removeprefix("aruco_")
     try:
-        if isinstance(candidate, bool) or not isinstance(candidate, (int, str)):
-            raise TypeError("marker id must be an int or a numeric string")
-        return int(candidate)
+        projection = normalize_camera_projection(data.get("camera_projection"))
+        archive_frames(data, projection)
     except (TypeError, ValueError) as error:
-        raise ValueError(f"malformed marker id {value!r}") from error
+        return str(error)
 
-
-def _observed_marker_ids(data: dict) -> set[int]:
-    """Return every marker ID observed across the archive's ArUco detections.
-
-    An archive with no ArUco detections at all still passes vacuously -- there
-    is then nothing to contradict the operator's target selection -- but once a
-    detection exists, its id must parse or this raises naming every offending
-    raw value, rather than silently dropping it from the check.
-    """
-    ids: set[int] = set()
-    malformed: list[object] = []
-    for pair in data.get("detections") or ():
-        if not isinstance(pair, dict):
-            continue
-        aruco = pair.get("aruco")
-        if not isinstance(aruco, dict):
-            continue
-        for detection in aruco.get("detections") or ():
-            if not isinstance(detection, dict):
-                continue
-            raw_id = detection.get("id")
-            try:
-                ids.add(_parse_marker_id(raw_id))
-            except ValueError:
-                malformed.append(raw_id)
-    if malformed:
-        offending = ", ".join(repr(value) for value in malformed)
-        raise ValueError(f"archive has malformed marker id(s): {offending}")
-    return ids
-
-
-def migrate_v4_to_v5(data: dict, *, target: ValidatedTarget) -> dict:
-    """Bind an operator-selected Target Definition to a version-4 archive.
-
-    Binding a target's identity to an archive is an operator claim about where the
-    archive came from, not something this function can prove. What it *can* check
-    is that every marker ID the archive actually observed is one ``target`` defines;
-    an archive that observed a marker ID the selected target does not have is
-    definitely wrong, so that case is rejected. Passing this check is compatibility
-    of IDs, not proof of physical provenance -- the operator's selection remains the
-    real assertion. Every other field is copied through unchanged; only ``version``
-    and the added ``target_identity`` differ from the input.
-    """
-    version = data.get("version", 0)
-    if version != 4:
-        raise ValueError(
-            f"migrate_v4_to_v5 expects a version 4 file, got version {version}"
-        )
-
-    observed = _observed_marker_ids(data)
-    known = set(target.marker_corners_by_id)
-    unknown = sorted(observed - known)
-    if unknown:
-        offending = ", ".join(str(marker_id) for marker_id in unknown)
-        raise ValueError(
-            f"archive observes marker ID(s) {offending} that target "
-            f"'{target.target_id}' does not define (it has marker ID(s) "
-            f"{sorted(known)}); this target does not match the recording"
-        )
-
-    migrated = dict(data)
-    migrated["version"] = 5
-    migrated["target_identity"] = identity_fields(target.identity)
-    return migrated
+    return None
 
 
 def serialize_detection2d_array(msg) -> dict:
@@ -423,10 +276,11 @@ def encode_detection_archive(
     snapshot,
     *,
     local_identity: object,
+    camera_projection: object,
     adjusted_rvec: np.ndarray | None,
     adjusted_tvec: np.ndarray | None,
 ) -> dict:
-    """Encode one complete version-5 archive from a detached buffer snapshot.
+    """Encode one complete version-6 archive from a detached buffer snapshot.
 
     The identity is an explicit input rather than a module default.  This keeps a
     saved archive bound to the Target Definition selected by the running solver.
@@ -437,10 +291,12 @@ def encode_detection_archive(
     if identity_error is not None:
         raise ValueError(identity_error)
     identity = parse_target_identity(local_identity, label="local target identity")
+    projection = normalize_camera_projection(camera_projection)
     data = {
         "version": FORMAT_VERSION,
         "board_frame_convention": identity.board_frame_convention,
         "target_identity": identity_fields(identity),
+        "camera_projection": projection,
         "num_detections": snapshot.frame_count,
         "detections": [
             {
@@ -450,6 +306,7 @@ def encode_detection_archive(
             for pair in snapshot.pairs
         ],
     }
+    archive_frames(data, projection)
 
     if (adjusted_rvec is None) != (adjusted_tvec is None):
         raise ValueError("adjusted rvec and tvec must be present together")
@@ -499,7 +356,7 @@ def encode_detection_archive(
 
 
 def decode_detection_archive(data: dict, *, local_identity: object) -> DetectionArchive:
-    """Validate and decode a v5 archive without touching live state.
+    """Validate and decode a v6 archive without touching live state.
 
     Target Identity is checked before reading any Capture payload.  The caller can
     therefore use this function as the precondition for an atomic buffer restore.
@@ -510,6 +367,9 @@ def decode_detection_archive(data: dict, *, local_identity: object) -> Detection
     error = format_version_error(data)
     if error is not None:
         raise ValueError(error)
+
+    camera_projection = normalize_camera_projection(data["camera_projection"])
+    lidar_frame_id, camera_frame_id = archive_frames(data, camera_projection)
 
     target_identity = parse_target_identity(
         data["target_identity"], label="target_identity"
@@ -545,13 +405,21 @@ def decode_detection_archive(data: dict, *, local_identity: object) -> Detection
 
     quality = _decode_quality(data.get("quality"))
     transform = _decode_transform(data.get("transform"))
-    return DetectionArchive(target_identity, tuple(pairs), quality, transform)
+    return DetectionArchive(
+        target_identity=target_identity,
+        camera_projection=camera_projection,
+        lidar_frame_id=lidar_frame_id,
+        camera_frame_id=camera_frame_id,
+        pairs=tuple(pairs),
+        quality=quality,
+        adjusted_transform=transform,
+    )
 
 
 def select_loaded_adjustment(
     archive: DetectionArchive, snapshot, *, append: bool
 ) -> AdjustedTransform | None:
-    """Apply version-5 adjustment anchoring rules after a successful restore."""
+    """Apply version-6 adjustment anchoring rules after a successful restore."""
     estimate = snapshot.estimate
     if estimate is None:
         return None
@@ -640,7 +508,6 @@ def _decode_quality(data: object) -> ArchivedQuality | None:
 
 __all__ = [
     "FORMAT_VERSION",
-    "MIGRATION_COMMAND",
     "AdjustedTransform",
     "ArchivedQuality",
     "DetectionArchive",
@@ -649,8 +516,6 @@ __all__ = [
     "deserialize_detection3d_array",
     "encode_detection_archive",
     "format_version_error",
-    "migrate_v3_to_v4",
-    "migrate_v4_to_v5",
     "select_loaded_adjustment",
     "serialize_detection2d_array",
     "serialize_detection3d_array",

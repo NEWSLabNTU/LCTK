@@ -1,0 +1,453 @@
+"""Runtime frame and camera-projection binding for the LiDAR-camera solver."""
+
+import copy
+import json
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+from builtin_interfaces.msg import Time
+from lctk_autoware_export.export import ExportError, check_format_version
+from lctk_interfaces.msg import CalibrationTargetIdentity
+from lctk_quality.projection_metadata import PROJECTION_MODEL
+from lctk_target import load_target
+from lidar_to_camera_solver.board_geometry import TargetIdentityGate, identity_fields
+from lidar_to_camera_solver.detection_buffer import (
+    BufferSnapshot,
+    BufferUpdate,
+    DetectionPair,
+    Empty,
+)
+from lidar_to_camera_solver.detection_format import (
+    decode_detection_archive,
+    encode_detection_archive,
+)
+from lidar_to_camera_solver.main import LidarToCameraSolver
+from sensor_msgs.msg import CameraInfo
+from vision_msgs.msg import Detection2DArray, Detection3DArray
+
+ROOT = Path(__file__).resolve().parents[3]
+TARGET = load_target(ROOT / "ros/lctk_launch/config/targets/solid_600_aruco_1_v1.json5")
+K = [500.0, 0.0, 320.0, 0.0, 500.0, 240.0, 0.0, 0.0, 1.0]
+
+
+class _Logger:
+    def __init__(self):
+        self.messages = []
+
+    def debug(self, message, **_kwargs):
+        self.messages.append(message)
+
+    def warn(self, message, **_kwargs):
+        self.messages.append(message)
+
+
+class _PairSource:
+    def __init__(self):
+        self.discarded = 0
+
+    def discard_cached_pair(self):
+        self.discarded += 1
+
+
+class _ArchiveBuffer:
+    def __init__(self, snapshot):
+        self._snapshot = snapshot
+        self.restores = 0
+
+    def snapshot(self):
+        return self._snapshot
+
+    def clear(self):
+        self._snapshot = _snapshot(revision=self._snapshot.revision + 1)
+        return BufferUpdate(accepted=True, changed=True, snapshot=self._snapshot)
+
+    def restore(self, pairs, *, append):
+        self.restores += 1
+        next_pairs = (*self._snapshot.pairs, *pairs) if append else tuple(pairs)
+        self._snapshot = BufferSnapshot(
+            revision=self._snapshot.revision + 1,
+            pairs=next_pairs,
+            placements=(),
+            correspondence_count=0,
+            outcome=Empty(),
+        )
+        return BufferUpdate(accepted=True, changed=True, snapshot=self._snapshot)
+
+
+def _solver():
+    solver = object.__new__(LidarToCameraSolver)
+    solver.target = TARGET
+    solver.marker_corners_by_id = TARGET.marker_corners_by_id
+    solver.solve_min_frames = 1
+    solver.min_normal_spread_deg = 0.0
+    solver.min_depth_range_m = 0.0
+    solver.enforce_pose_diversity = False
+    solver.state_lock = threading.RLock()
+    solver.identity_gate = TargetIdentityGate(TARGET.identity)
+    message = CalibrationTargetIdentity(**identity_fields(TARGET.identity))
+    solver.identity_gate.update("lidar", message)
+    solver.identity_gate.update("camera", message)
+    solver._identity_generation = 0
+    solver._scene_revision = 0
+    solver._autoware_pending_export = None
+    solver._camera_projection = None
+    solver._bound_lidar_frame = None
+    solver._bound_camera_frame = None
+    solver.camera_info = None
+    solver._camera_matrix = None
+    solver.detection_buffer = None
+    solver.pair_source = _PairSource()
+    solver._evidence_store = None
+    solver._review_capture_ids = set()
+    solver._review_read_model = None
+    solver._stillness = None
+    solver.current_rvec = None
+    solver.current_tvec = None
+    solver.last_transform = None
+    solver.publishing_enabled = False
+    solver._logger = _Logger()
+    solver.get_logger = lambda: solver._logger
+    return solver
+
+
+def _camera_info(*, frame="camera_optical", width=640, height=480, k=K):
+    message = CameraInfo()
+    message.header.frame_id = frame
+    message.width = width
+    message.height = height
+    message.k = list(k)
+    return message
+
+
+def _pair(*, camera="camera_optical", lidar="lidar_top"):
+    aruco = Detection2DArray()
+    aruco.header.frame_id = camera
+    board = Detection3DArray()
+    board.header.frame_id = lidar
+    return aruco, board
+
+
+def _snapshot(pairs=(), *, revision=0):
+    return BufferSnapshot(
+        revision=revision,
+        pairs=tuple(DetectionPair(aruco=aruco, board=board) for aruco, board in pairs),
+        placements=(),
+        correspondence_count=0,
+        outcome=Empty(),
+    )
+
+
+def _write_archive(path, *, projection, pairs=()):
+    archive = encode_detection_archive(
+        _snapshot(pairs),
+        local_identity=TARGET.identity,
+        camera_projection=projection,
+        adjusted_rvec=None,
+        adjusted_tvec=None,
+    )
+    path.write_text(json.dumps(archive))
+
+
+def _load(solver, path, *, append):
+    request = SimpleNamespace(file_path=str(path), append=append)
+    response = SimpleNamespace(
+        success=None, message=None, num_detections=None, buffer_size=None
+    )
+    return LidarToCameraSolver.load_detections_callback(solver, request, response)
+
+
+def test_admission_requires_camera_info_and_binds_actual_detection_headers():
+    solver = _solver()
+    aruco, board = _pair()
+
+    assert "CameraInfo" in solver._admit_detection_pair((aruco, board))
+
+    solver.camera_info_callback(_camera_info())
+    assert solver._admit_detection_pair((aruco, board)) is None
+    assert solver._bound_lidar_frame == "lidar_top"
+    assert solver._bound_camera_frame == "camera_optical"
+    assert solver._camera_projection == {
+        "model": PROJECTION_MODEL,
+        "frame_id": "camera_optical",
+        "width": 640,
+        "height": 480,
+        "k": K,
+    }
+
+
+def test_empty_or_camera_info_mismatched_detection_frames_are_rejected():
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+
+    aruco, board = _pair(camera="", lidar="lidar_top")
+    assert "nonempty" in solver._admit_detection_pair((aruco, board))
+
+    aruco, board = _pair(camera="other_camera", lidar="lidar_top")
+    assert "CameraInfo" in solver._admit_detection_pair((aruco, board))
+
+    assert solver._admit_detection_pair(_pair()) is None
+    old_buffer = _ArchiveBuffer(_snapshot([_pair()]))
+    solver.detection_buffer = old_buffer
+    solver.current_rvec = np.ones((3, 1))
+    solver.current_tvec = np.ones((3, 1))
+    solver.last_transform = object()
+    solver.publishing_enabled = True
+    generation = solver._identity_generation
+    aruco, board = _pair(camera="other_camera", lidar="lidar_top")
+
+    assert "CameraInfo" in solver._admit_detection_pair((aruco, board))
+    assert solver._identity_generation == generation + 1
+    assert old_buffer.snapshot().frame_count == 0
+    assert solver.last_transform is None
+    assert solver.current_rvec is None
+    assert solver.current_tvec is None
+    assert not solver.publishing_enabled
+    assert solver._bound_lidar_frame is None
+    assert solver._bound_camera_frame is None
+
+    assert solver._admit_detection_pair(_pair()) is None
+    old_buffer._snapshot = _snapshot([_pair()], revision=old_buffer.snapshot().revision)
+    solver.current_rvec = np.ones((3, 1))
+    solver.last_transform = object()
+    solver.publishing_enabled = True
+    generation = solver._identity_generation
+    aruco, board = _pair(camera="", lidar="lidar_top")
+
+    assert "nonempty" in solver._admit_detection_pair((aruco, board))
+    assert solver._identity_generation == generation + 1
+    assert old_buffer.snapshot().frame_count == 0
+    assert solver.last_transform is None
+    assert solver.current_rvec is None
+    assert solver.current_tvec is None
+    assert not solver.publishing_enabled
+
+
+def test_lidar_frame_change_clears_old_estimate_before_binding_new_pair():
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    assert solver._admit_detection_pair(_pair()) is None
+    old_buffer = _ArchiveBuffer(_snapshot([_pair()]))
+    solver.detection_buffer = old_buffer
+    solver.current_rvec = np.ones((3, 1))
+    solver.current_tvec = np.ones((3, 1))
+    solver.last_transform = object()
+    solver.publishing_enabled = True
+    old_generation = solver._identity_generation
+
+    assert solver._admit_detection_pair(_pair(lidar="lidar_reconfigured")) is None
+
+    assert solver._identity_generation == old_generation + 1
+    assert solver.current_rvec is None
+    assert solver.current_tvec is None
+    assert solver.last_transform is None
+    assert not solver.publishing_enabled
+    assert old_buffer.snapshot().frame_count == 0
+    assert solver._bound_lidar_frame == "lidar_reconfigured"
+    assert solver._bound_camera_frame == "camera_optical"
+    assert solver.pair_source.discarded == 1
+
+
+def test_camera_projection_frame_or_dimensions_change_starts_new_epoch():
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    assert solver._admit_detection_pair(_pair()) is None
+    solver.current_rvec = np.ones((3, 1))
+    solver.last_transform = object()
+    solver.publishing_enabled = True
+    old_generation = solver._identity_generation
+    old_buffer = _ArchiveBuffer(_snapshot([_pair()]))
+    solver.detection_buffer = old_buffer
+
+    solver.camera_info_callback(_camera_info(frame="camera_replaced"))
+
+    assert solver._identity_generation == old_generation + 1
+    assert solver.detection_buffer is not old_buffer
+    assert old_buffer.snapshot().frame_count == 0
+    assert solver.current_rvec is None
+    assert solver.last_transform is None
+    assert not solver.publishing_enabled
+    assert solver._camera_projection["frame_id"] == "camera_replaced"
+    assert solver._camera_projection["width"] == 640
+    assert solver._bound_lidar_frame is None
+    assert solver._bound_camera_frame is None
+    assert solver.pair_source.discarded == 1
+
+
+def test_camera_info_dimension_change_starts_new_epoch():
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    old_generation = solver._identity_generation
+    old_buffer = solver.detection_buffer
+
+    solver.camera_info_callback(_camera_info(width=800))
+
+    assert solver._identity_generation == old_generation + 1
+    assert solver.detection_buffer is not old_buffer
+    assert solver._camera_projection["width"] == 800
+
+
+def test_camera_info_intrinsic_change_starts_new_epoch():
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    old_generation = solver._identity_generation
+    old_buffer = solver.detection_buffer
+    changed_k = list(K)
+    changed_k[0] = 510.0
+
+    solver.camera_info_callback(_camera_info(k=changed_k))
+
+    assert solver._identity_generation == old_generation + 1
+    assert solver.detection_buffer is not old_buffer
+    assert solver._camera_projection["k"][0] == 510.0
+
+
+def test_transform_labels_use_bound_sensor_headers():
+    solver = _solver()
+    solver._bound_lidar_frame = "lidar_from_detection"
+    solver._bound_camera_frame = "camera_from_detection"
+    solver.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(to_msg=lambda: Time())
+    )
+
+    message = solver._create_transform_message(np.zeros(3), np.zeros(3))
+
+    assert message.header.frame_id == "lidar_from_detection"
+    assert message.child_frame_id == "camera_from_detection"
+
+
+def test_transform_cannot_be_created_without_two_distinct_bound_frames():
+    solver = _solver()
+    solver._bound_lidar_frame = "lidar"
+    solver._bound_camera_frame = "lidar"
+
+    try:
+        solver._create_transform_message(np.zeros(3), np.zeros(3))
+    except ValueError as error:
+        assert "distinct" in str(error)
+    else:
+        raise AssertionError("invalid runtime sensor frame binding was published")
+
+
+def test_load_rejects_archive_with_different_camera_projection_without_restore(
+    tmp_path,
+):
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    buffer = _ArchiveBuffer(_snapshot())
+    solver.detection_buffer = buffer
+    archive_projection = dict(solver._camera_projection)
+    archive_projection["frame_id"] = "other_camera"
+    path = tmp_path / "projection.json"
+    _write_archive(path, projection=archive_projection)
+
+    response = _load(solver, path, append=False)
+
+    assert response.success is False
+    assert "projection does not match" in response.message
+    assert buffer.restores == 0
+    assert buffer.snapshot().frame_count == 0
+
+
+def test_append_rejects_archive_from_another_lidar_frame_without_restore(tmp_path):
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    active_pair = _pair(lidar="lidar_current")
+    buffer = _ArchiveBuffer(_snapshot([active_pair]))
+    solver.detection_buffer = buffer
+    solver._bound_lidar_frame = "lidar_current"
+    solver._bound_camera_frame = "camera_optical"
+    archived_pair = _pair(lidar="lidar_archive")
+    path = tmp_path / "other_lidar.json"
+    _write_archive(path, projection=solver._camera_projection, pairs=[archived_pair])
+
+    response = _load(solver, path, append=True)
+
+    assert response.success is False
+    assert "sensor frames do not match" in response.message
+    assert buffer.restores == 0
+    assert buffer.snapshot().frame_count == 1
+
+
+def test_replacement_load_binds_frames_from_archive_headers(tmp_path):
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    buffer = _ArchiveBuffer(_snapshot())
+    solver.detection_buffer = buffer
+    pair = _pair(lidar="lidar_archived")
+    path = tmp_path / "replacement.json"
+    _write_archive(path, projection=solver._camera_projection, pairs=[pair])
+
+    response = _load(solver, path, append=False)
+
+    assert response.success is True
+    assert solver._bound_lidar_frame == "lidar_archived"
+    assert solver._bound_camera_frame == "camera_optical"
+    assert buffer.restores == 1
+    assert solver.pair_source.discarded == 1
+
+
+def test_solver_and_exporter_accept_the_same_v6_archive():
+    archive = encode_detection_archive(
+        _snapshot([_pair()]),
+        local_identity=TARGET.identity,
+        camera_projection={
+            "model": PROJECTION_MODEL,
+            "frame_id": "camera_optical",
+            "width": 640,
+            "height": 480,
+            "k": K,
+        },
+        adjusted_rvec=None,
+        adjusted_tvec=None,
+    )
+
+    decoded = decode_detection_archive(archive, local_identity=TARGET.identity)
+
+    assert decoded.camera_frame_id == "camera_optical"
+    assert decoded.lidar_frame_id == "lidar_top"
+    assert check_format_version("valid-v6.json", archive) is None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "diagnostic"),
+    [
+        ("version", "version"),
+        ("projection_model", "camera_projection.model"),
+        ("projection_frame", "Camera detection frame"),
+        ("empty_header", "nonempty"),
+        ("count", "count mismatch"),
+    ],
+)
+def test_solver_and_exporter_reject_the_same_malformed_v6_archive(mutation, diagnostic):
+    archive = encode_detection_archive(
+        _snapshot([_pair()]),
+        local_identity=TARGET.identity,
+        camera_projection={
+            "model": PROJECTION_MODEL,
+            "frame_id": "camera_optical",
+            "width": 640,
+            "height": 480,
+            "k": K,
+        },
+        adjusted_rvec=None,
+        adjusted_tvec=None,
+    )
+    archive = copy.deepcopy(archive)
+    if mutation == "version":
+        archive["version"] = 5
+    elif mutation == "projection_model":
+        archive["camera_projection"]["model"] = "raw_distorted_pixels"
+    elif mutation == "projection_frame":
+        archive["camera_projection"]["frame_id"] = "stale_camera"
+    elif mutation == "empty_header":
+        archive["detections"][0]["board"]["header"]["frame_id"] = ""
+    else:
+        archive["num_detections"] += 1
+
+    with pytest.raises(ValueError, match=diagnostic):
+        decode_detection_archive(archive, local_identity=TARGET.identity)
+    with pytest.raises(ExportError, match=diagnostic):
+        check_format_version("invalid-v6.json", archive)

@@ -48,6 +48,7 @@ class SyncStatistics:
     last_translation: tuple[float, float, float] | None = None
     last_rotation_rpy_deg: tuple[float, float, float] | None = None
     identity_rejections: int = 0
+    frame_rejections: int = 0
 
 
 class LidarToLidarSolver(Node):
@@ -64,8 +65,6 @@ class LidarToLidarSolver(Node):
         # Declare parameters
         self.declare_parameter("lidar1_detections_topic", "lidar1/board_detections")
         self.declare_parameter("lidar2_detections_topic", "lidar2/board_detections")
-        self.declare_parameter("lidar1_frame", "lidar1")
-        self.declare_parameter("lidar2_frame", "lidar2")
         # The pairing window, in ms. It must be positive: 0 used to mean "infinite",
         # which makes conflux pair by arrival order rather than by time, and two streams
         # at different rates then drift apart without bound. `PairSourceConfig` rejects
@@ -89,8 +88,6 @@ class LidarToLidarSolver(Node):
         # Get parameters
         self.lidar1_topic = self.get_parameter("lidar1_detections_topic").value
         self.lidar2_topic = self.get_parameter("lidar2_detections_topic").value
-        self.lidar1_frame = self.get_parameter("lidar1_frame").value
-        self.lidar2_frame = self.get_parameter("lidar2_frame").value
         sync_tolerance_ms = self.get_parameter("sync_tolerance_ms").value
         sync_queue_size = self.get_parameter("sync_queue_size").value
         sync_drop_policy_str = self.get_parameter("sync_drop_policy").value
@@ -106,6 +103,9 @@ class LidarToLidarSolver(Node):
         self.target_identity_gate = TargetIdentityGate()
         self.state_lock = threading.RLock()
         self._identity_generation = 0
+        self.lidar1_frame: str | None = None
+        self.lidar2_frame: str | None = None
+        self._frame_generation = 0
 
         # This node has no sensor subscription: both inputs are detection
         # topics LCTK's own board detectors publish, and those are pinned
@@ -181,26 +181,36 @@ class LidarToLidarSolver(Node):
         # Log configuration
         self.get_logger().info(f"LiDAR 1 topic: {self.lidar1_topic}")
         self.get_logger().info(f"LiDAR 2 topic: {self.lidar2_topic}")
-        self.get_logger().info(f"LiDAR 1 frame: {self.lidar1_frame}")
-        self.get_logger().info(f"LiDAR 2 frame: {self.lidar2_frame}")
         self.get_logger().info(f"Same face mode: {self.same_face_mode}")
         self.get_logger().info("LidarToLidarSolver initialized")
 
     def _handle_sync_group(self, messages: tuple[Any, ...]):
-        """Called for every usable pair, in `topics` order (lidar1, lidar2).
+        """Process a current accepted pair in `topics` order (lidar1, lidar2).
 
         Empty detection arrays never reach here: `require_non_empty` drops those groups
-        in `DetectionPairSource`, which reports them.
+        in `DetectionPairSource`, which reports them. A delayed callback is ignored if
+        a newer pair or invalidation has replaced its cache entry.
         """
         with self.state_lock:
+            if not self.pair_source.is_cached_pair(messages):
+                self.stats.dropped_stale += 1
+                self.get_logger().debug(
+                    "Discarded synchronized callback because a newer pair or "
+                    "an invalidation replaced it in the source cache"
+                )
+                return
+
             identity = self.target_identity_gate.compare()
             identity_generation = self._identity_generation
             if not identity.accepted:
                 self._reject_identity_pair(identity)
                 return
-
-        msg1: Detection3DArray = messages[0]
-        msg2: Detection3DArray = messages[1]
+            msg1: Detection3DArray = messages[0]
+            msg2: Detection3DArray = messages[1]
+            frame_pair = (msg1.header.frame_id, msg2.header.frame_id)
+            frame_generation = self._bind_frame_pair(frame_pair)
+            if frame_generation is None:
+                return
 
         # Check message staleness (wall clock based)
         now = self.get_clock().now()
@@ -248,14 +258,24 @@ class LidarToLidarSolver(Node):
             ):
                 self._reject_identity_pair(identity)
                 return
+            if frame_generation != self._frame_generation or frame_pair != (
+                self.lidar1_frame,
+                self.lidar2_frame,
+            ):
+                self.stats.frame_rejections += 1
+                self.get_logger().warn(
+                    "Discarded synchronized pair because its LiDAR frame epoch "
+                    "changed while the transform was being computed"
+                )
+                return
 
             self.stats.last_timestamp_diff_ms = timestamp_diff_ms
 
             # Create TransformStamped message
             transform_stamped = TransformStamped()
             transform_stamped.header.stamp = self.get_clock().now().to_msg()
-            transform_stamped.header.frame_id = self.lidar1_frame
-            transform_stamped.child_frame_id = self.lidar2_frame
+            transform_stamped.header.frame_id = frame_pair[0]
+            transform_stamped.child_frame_id = frame_pair[1]
             transform_stamped.transform = transform
 
             # Update state
@@ -287,16 +307,67 @@ class LidarToLidarSolver(Node):
                 f"(dt={self.stats.last_timestamp_diff_ms:.1f}ms)"
             )
 
-    def _admit_sync_group(self, _messages: tuple[Any, ...]) -> str | None:
+    def _bind_frame_pair(self, frame_pair: tuple[str, str]) -> int | None:
+        """Bind ordered frames from the input headers, clearing state on change.
+
+        Called with ``state_lock`` held. A valid pair after a frame change may
+        establish the replacement binding, but any calculation already running
+        in the old frame epoch will fail the generation check before publishing.
+        """
+        current = (
+            (self.lidar1_frame, self.lidar2_frame)
+            if self.lidar1_frame is not None and self.lidar2_frame is not None
+            else None
+        )
+        frame_changed = current is not None and frame_pair != current
+        if frame_changed:
+            self._frame_generation += 1
+            self.lidar1_frame = None
+            self.lidar2_frame = None
+            self.current_transform = None
+            self.pair_source.discard_cached_pair()
+            self.get_logger().warn(
+                "Cleared cached LiDAR-to-LiDAR output after input header frames "
+                f"changed from {current!r} to {frame_pair!r}"
+            )
+
+        valid_labels = all(
+            isinstance(label, str) and bool(label.strip()) for label in frame_pair
+        )
+        if not valid_labels or frame_pair[0] == frame_pair[1]:
+            self.stats.frame_rejections += 1
+            if not frame_changed:
+                self.pair_source.discard_cached_pair()
+            self.get_logger().warn(
+                "Rejected synchronized pair: LiDAR header frame IDs must be "
+                f"nonempty and distinct, got {frame_pair!r}"
+            )
+            return None
+
+        if current is None or frame_pair != current:
+            self.lidar1_frame, self.lidar2_frame = frame_pair
+        return self._frame_generation
+
+    def _admit_sync_group(self, messages: tuple[Any, ...]) -> str | None:
         """Gate a pair before ``DetectionPairSource`` caches it."""
         # DetectionPairSource invokes this callback while holding ``state_lock``
         # (its ``admission_lock``).  Do not acquire it again here: the public
         # source contract accepts any context-manager lock, not only RLock.
         identity = self.target_identity_gate.compare()
-        if identity.accepted:
-            return None
-        self.stats.identity_rejections += 1
-        return f"target identity {identity.status.value}: {identity.reason}"
+        if not identity.accepted:
+            self.stats.identity_rejections += 1
+            return f"target identity {identity.status.value}: {identity.reason}"
+
+        frame_pair = (
+            messages[0].header.frame_id,
+            messages[1].header.frame_id,
+        )
+        if self._bind_frame_pair(frame_pair) is None:
+            return (
+                "LiDAR header frame IDs must be nonempty and distinct, "
+                f"got {frame_pair!r}"
+            )
+        return None
 
     def _reject_identity_pair(self, identity: IdentityComparison) -> None:
         """Reject a raced pair without changing transform state."""

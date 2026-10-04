@@ -12,7 +12,8 @@
 
     The node publishes:
     - /lidar_to_lidar_transform (geometry_msgs/TransformStamped)
-    - TF transform from lidar1_frame to lidar2_frame (if publish_tf is true)
+    - TF transform from the first input's header frame to the second input's
+      header frame (if publish_tf is true)
 -->
 <launch>
     <!-- Topic arguments -->
@@ -34,15 +35,6 @@
     <arg name="lidar2_target_identity_topic"
          default="/sensing/lidar/front/target_identity"
          description="Latched Target Identity topic from second LiDAR"/>
-
-    <!-- Frame arguments -->
-    <arg name="lidar1_frame"
-         default="lidar_top"
-         description="TF frame ID for the first LiDAR"/>
-
-    <arg name="lidar2_frame"
-         default="lidar_front"
-         description="TF frame ID for the second LiDAR"/>
 
     <!-- Synchronization arguments -->
     <arg name="sync_mode"
@@ -87,10 +79,6 @@
         <!-- Relative solver endpoints, routed to detector identity publishers. -->
         <remap from="lidar1_target_identity" to="$(var lidar1_target_identity_topic)"/>
         <remap from="lidar2_target_identity" to="$(var lidar2_target_identity_topic)"/>
-
-        <!-- Frames -->
-        <param name="lidar1_frame" value="$(var lidar1_frame)"/>
-        <param name="lidar2_frame" value="$(var lidar2_frame)"/>
 
         <!-- Synchronization -->
         <param name="sync_mode" value="$(var sync_mode)"/>

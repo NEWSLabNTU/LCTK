@@ -40,8 +40,8 @@ class _FakeClock:
 
 def make_solver():
     solver = S.__new__(S)
-    solver.parent_frame = "lidar"
-    solver.child_frame = "camera"
+    solver._bound_lidar_frame = "lidar"
+    solver._bound_camera_frame = "camera"
     solver.get_clock = lambda: _FakeClock()
     return solver
 

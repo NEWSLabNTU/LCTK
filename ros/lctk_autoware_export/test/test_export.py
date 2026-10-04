@@ -30,6 +30,47 @@ def solve_for_forward_camera():
     return (axis * angle).tolist(), T_solve[:3, 3].tolist()
 
 
+def solved_archive(rvec, tvec):
+    return {
+        "version": 6,
+        "board_frame_convention": "corner_aligned_plate_center_v1",
+        "target_identity": {
+            "schema_version": 1,
+            "target_id": "solid_600_aruco_1",
+            "revision": 1,
+            "semantic_sha256": "9cf600d684a91ab3df6fdf549d71460fc6fc5321a037d5f61393bbd9db5b04fb",
+            "board_frame_convention": "corner_aligned_plate_center_v1",
+        },
+        "camera_projection": {
+            "model": "undistorted_pixels_using_k",
+            "frame_id": "camera_optical",
+            "width": 1920,
+            "height": 1080,
+            "k": [1000.0, 0.0, 960.0, 0.0, 1000.0, 540.0, 0.0, 0.0, 1.0],
+        },
+        "num_detections": 1,
+        "detections": [
+            {
+                "aruco": {
+                    "header": {
+                        "stamp": {"sec": 1, "nanosec": 2},
+                        "frame_id": "camera_optical",
+                    },
+                    "detections": [],
+                },
+                "board": {
+                    "header": {
+                        "stamp": {"sec": 1, "nanosec": 2},
+                        "frame_id": "velodyne",
+                    },
+                    "detections": [],
+                },
+            }
+        ],
+        "transform": {"rvec": rvec, "tvec": tvec},
+    }
+
+
 @pytest.fixture
 def target(tmp_path):
     dst = tmp_path / "sensor_kit_calibration.yaml"
@@ -41,15 +82,7 @@ def target(tmp_path):
 def detections(tmp_path):
     rvec, tvec = solve_for_forward_camera()
     p = tmp_path / "detections.json"
-    p.write_text(
-        json.dumps(
-            {
-                "version": 4,
-                "board_frame_convention": "corner_aligned_plate_center_v1",
-                "transform": {"rvec": rvec, "tvec": tvec},
-            }
-        )
-    )
+    p.write_text(json.dumps(solved_archive(rvec, tvec)))
     return p
 
 
@@ -60,15 +93,10 @@ def test_load_solver_transform(detections):
 
 def test_load_solver_transform_missing_transform(tmp_path):
     p = tmp_path / "detections.json"
-    p.write_text(
-        json.dumps(
-            {
-                "version": 4,
-                "board_frame_convention": "corner_aligned_plate_center_v1",
-                "detections": [],
-            }
-        )
-    )
+    rvec, tvec = solve_for_forward_camera()
+    archive = solved_archive(rvec, tvec)
+    del archive["transform"]
+    p.write_text(json.dumps(archive))
     with pytest.raises(ExportError, match="dump_detections"):
         load_solver_transform(p)
 
@@ -88,15 +116,9 @@ def test_load_solver_transform_refuses_an_older_format(tmp_path):
 def test_load_solver_transform_refuses_a_stale_frame_convention(tmp_path):
     rvec, tvec = solve_for_forward_camera()
     p = tmp_path / "detections.json"
-    p.write_text(
-        json.dumps(
-            {
-                "version": 4,
-                "board_frame_convention": "edge_aligned_corner_origin_v0",
-                "transform": {"rvec": rvec, "tvec": tvec},
-            }
-        )
-    )
+    archive = solved_archive(rvec, tvec)
+    archive["board_frame_convention"] = "edge_aligned_corner_origin_v0"
+    p.write_text(json.dumps(archive))
     with pytest.raises(ExportError, match="edge_aligned_corner_origin_v0"):
         load_solver_transform(p)
 

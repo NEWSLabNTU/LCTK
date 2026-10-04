@@ -236,14 +236,15 @@ def test_format_simple():
     assert "TF Tree" in text
 
 
-def test_format_with_frame_ids():
-    """Format output includes frame IDs when provided."""
+def test_format_uses_logical_device_names():
+    """The plan shows the manifest's logical devices, not sensor frames."""
     pairs, lidars, cameras, ref = _simple_pair()
     plan = compute_plan(pairs, lidars, cameras, ref)
-    text = format_plan(plan, {"L1": "lidar_front", "C1": "camera_left"})
+    text = format_plan(plan)
 
-    assert "lidar_front" in text
-    assert "camera_left" in text
+    assert "L1" in text
+    assert "C1" in text
+    assert "lidar_front" not in text
 
 
 def test_format_validation_edges():
@@ -260,18 +261,10 @@ def test_format_vehicle():
     """Format the full vehicle plan for visual inspection."""
     pairs, lidars, cameras, ref = _vehicle_setup()
     plan = compute_plan(pairs, lidars, cameras, ref)
-    frame_ids = {
-        "L1": "lidar_front",
-        "L2": "lidar_rear",
-        "C1": "camera_front_left",
-        "C2": "camera_front_right",
-        "C3": "camera_rear_left",
-        "C4": "camera_rear_right",
-    }
-    text = format_plan(plan, frame_ids)
+    text = format_plan(plan)
 
     # Should have all devices mentioned
-    for name in frame_ids.values():
+    for name in ("L1", "L2", "C1", "C2", "C3", "C4"):
         assert name in text, f"Missing {name} in formatted plan"
 
     print()

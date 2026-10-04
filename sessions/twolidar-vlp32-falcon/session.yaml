@@ -12,10 +12,8 @@ data:
 devices:
   lidars:
     top_lidar:
-      frame_id: velodyne
       pointcloud_topic: /lidar/vlp32/velodyne_points
     front_lidar:
-      frame_id: seyond
       pointcloud_topic: /lidar/falcon/iv_points
       detector_config: $(find-pkg-share lctk_launch)/config/board/hollow_1000/seyond.json5
 

@@ -12,9 +12,9 @@ data:
 
 devices:
   lidars:
-    top: { frame_id: velodyne_top }
+    top: {}
   cameras:
-    front_center: { frame_id: camera_front_center }
+    front_center: {}
 
 markers:
   calibration_board:

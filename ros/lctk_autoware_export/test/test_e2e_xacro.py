@@ -26,9 +26,47 @@ from lctk_autoware_export.frames import (
 xacro = pytest.importorskip("xacro", reason="ROS xacro not on PYTHONPATH")
 
 FIXTURES = Path(__file__).parent / "fixtures"
-ARCHIVE_FIXTURES = (
-    Path(__file__).resolve().parents[3] / "fixtures" / "detection_archives"
-)
+
+
+def solved_archive(rvec, tvec, *, width=1920):
+    return {
+        "version": 6,
+        "board_frame_convention": "corner_aligned_plate_center_v1",
+        "target_identity": {
+            "schema_version": 1,
+            "target_id": "solid_600_aruco_1",
+            "revision": 1,
+            "semantic_sha256": "9cf600d684a91ab3df6fdf549d71460fc6fc5321a037d5f61393bbd9db5b04fb",
+            "board_frame_convention": "corner_aligned_plate_center_v1",
+        },
+        "camera_projection": {
+            "model": "undistorted_pixels_using_k",
+            "frame_id": "camera_optical",
+            "width": width,
+            "height": 1080,
+            "k": [1000.0, 0.0, 960.0, 0.0, 1000.0, 540.0, 0.0, 0.0, 1.0],
+        },
+        "num_detections": 1,
+        "detections": [
+            {
+                "aruco": {
+                    "header": {
+                        "stamp": {"sec": 1, "nanosec": 2},
+                        "frame_id": "camera_optical",
+                    },
+                    "detections": [],
+                },
+                "board": {
+                    "header": {
+                        "stamp": {"sec": 1, "nanosec": 2},
+                        "frame_id": "velodyne",
+                    },
+                    "detections": [],
+                },
+            }
+        ],
+        "transform": {"rvec": rvec, "tvec": tvec},
+    }
 
 
 def test_exported_yaml_round_trips_through_xacro(tmp_path):
@@ -45,16 +83,7 @@ def test_exported_yaml_round_trips_through_xacro(tmp_path):
     )
     detections = tmp_path / "detections.json"
     detections.write_text(
-        json.dumps(
-            {
-                "version": 4,
-                "board_frame_convention": "corner_aligned_plate_center_v1",
-                "transform": {
-                    "rvec": (axis * angle).tolist(),
-                    "tvec": T_solve[:3, 3].tolist(),
-                },
-            }
-        )
+        json.dumps(solved_archive((axis * angle).tolist(), T_solve[:3, 3].tolist()))
     )
 
     config_dir = tmp_path / "config"
@@ -98,22 +127,24 @@ def test_exported_yaml_round_trips_through_xacro(tmp_path):
     np.testing.assert_allclose(T_urdf, T_expected, atol=1e-9)
 
 
-def test_paired_archives_produce_identical_xacro_transforms(tmp_path):
-    """The v5 identity must not change an already-solved export transform."""
+def test_archive_projection_metadata_does_not_change_export_transform(tmp_path):
+    """Version-6 provenance does not change the saved Autoware transform."""
+    rvec = [0.1, -0.2, 0.3]
+    tvec = [1.25, -0.5, 2.75]
     transforms = []
-    for name in ("solved_v4.json", "solved_v5.json"):
+    for name, width in (("first.json", 1920), ("second.json", 1280)):
         detections = tmp_path / name
-        detections.write_text((ARCHIVE_FIXTURES / name).read_text())
+        detections.write_text(json.dumps(solved_archive(rvec, tvec, width=width)))
         config_dir = tmp_path / name.removesuffix(".json")
         config_dir.mkdir()
         target = config_dir / "sensor_kit_calibration.yaml"
         shutil.copy(FIXTURES / "sensor_kit_calibration.yaml", target)
 
-        rvec, tvec = load_solver_transform(detections)
+        loaded_rvec, loaded_tvec = load_solver_transform(detections)
         patch_calibration(
             target,
-            rvec=rvec,
-            tvec=tvec,
+            rvec=loaded_rvec,
+            tvec=loaded_tvec,
             camera_frame="camera0/camera_link",
             lidar_frame="velodyne_top_base_link",
         )

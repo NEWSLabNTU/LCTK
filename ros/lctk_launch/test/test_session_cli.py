@@ -13,9 +13,9 @@ data:
   dir: $(session-dir)/data
 devices:
   lidars:
-    top: { frame_id: velodyne_top }
+    top: {}
   cameras:
-    front_center: { frame_id: camera_front_center }
+    front_center: {}
 markers:
   calibration_board:
     target_config: $(find-pkg-share lctk_launch)/config/targets/hollow_1000_aruco_4_v1.json5
@@ -47,6 +47,13 @@ def test_check_reports_the_derived_topics(tmp_path, capsys):
     directory = make_session(tmp_path)
     main(["check", str(directory)])
     assert "/sensing/lidar/top/pointcloud_raw" in capsys.readouterr().out
+
+
+def test_check_reports_sensor_frames_as_header_owned_at_runtime(tmp_path, capsys):
+    directory = make_session(tmp_path)
+    assert main(["check", str(directory)]) == 0
+    output = capsys.readouterr().out
+    assert output.count("frame: sensor message header at runtime") == 2
 
 
 def test_check_fails_when_the_data_is_missing(tmp_path, capsys):

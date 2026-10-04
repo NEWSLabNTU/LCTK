@@ -25,9 +25,11 @@ ros2 service call \
   "{file_path: '/home/you/calib/detections.json'}"
 ```
 
-The exporter accepts Detection Archives in format version 4 or 5 that use the
-supported board-frame convention. It refuses archives it cannot validate. Use the raw
-archive; do not manually invert or edit its transform.
+The exporter accepts only version-6 Detection Archives with the supported board-frame
+convention, valid Target Identity and camera-projection metadata. It checks that every
+camera detection header matches the saved optical frame and that all LiDAR detection
+headers use one consistent, distinct frame. Older archive versions are rejected. Use
+the raw archive; do not manually invert or edit its transform.
 
 ## Preview the entry
 
@@ -43,9 +45,12 @@ ros2 run lctk_autoware_export export \
   --dry-run
 ```
 
-The preview prints translation and rotation values and writes nothing. Check that the
-camera and LiDAR frame names match entries in the target YAML. The LiDAR entry must
-already exist under the kit frame.
+The preview prints translation and rotation values and writes nothing. The archive's
+camera header names the optical frame used for the solved transform; `--camera-frame`
+names the Autoware camera-link entry and may differ because the exporter applies the
+existing optical-to-camera-link convention. `--lidar-frame` names the existing YAML
+entry that anchors the chain and must represent the LiDAR coordinates in the archive.
+The LiDAR entry must already exist under the kit frame.
 
 The exporter uses `sensor_kit_base_link` as its default kit frame. If your YAML uses a
 different root key, pass `--kit-frame <frame>` and use that frame as the parent in the
@@ -73,3 +78,5 @@ ros2 run tf2_ros tf2_echo sensor_kit_base_link camera0/camera_link
 
 For capture review and field checks before export, see the
 [Field Validation Runbook](./field-validation.md).
+For a held-out reprojection check against separately captured observations, see
+[Extrinsic Validation](./extrinsic-validation.md).

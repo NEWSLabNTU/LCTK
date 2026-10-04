@@ -24,7 +24,9 @@ expected.
 ### Review and use results
 
 [Assisted Capture](./user-guide/assisted-capture.md) describes automatic capture and
-browser review. [Exporting to Autoware](./user-guide/autoware-export.md) covers previewing,
+browser review. [Extrinsic Validation](./user-guide/extrinsic-validation.md) checks a
+saved candidate against held-out observations. The
+[Exporting to Autoware](./user-guide/autoware-export.md) guide covers previewing,
 writing, and checking the exported transform.
 
 ## Requirements
