@@ -22,7 +22,8 @@ recording. Find their topic names and types with:
 ros2 topic list -t
 ```
 
-You will also need each sensor message's `header.frame_id` for the session.
+Record each sensor's `header.frame_id` to check the publishers. LCTK binds frame labels
+from message headers at runtime; they are not session settings.
 
 Read the frame IDs while the drivers are publishing:
 
@@ -77,8 +78,7 @@ same topics, mixing the empty-scene warm-up with a second data source.
 ## 3. Configure a session for the recording
 
 Create a session directory and save a `session.yaml` like this. Replace the sample
-topics and frame IDs with values from your bag; select the detector preset for your
-LiDAR.
+topics with the values from your bag; select the detector preset for your LiDAR.
 
 ```bash
 mkdir -p ~/calib/lab1/session
@@ -96,11 +96,9 @@ data:
 devices:
   lidars:
     top:
-      frame_id: velodyne
       pointcloud_topic: /velodyne_points
   cameras:
     front:
-      frame_id: <camera-image-frame>
       image_topic: /camera/image_raw
 
 markers:
@@ -125,7 +123,7 @@ After saving the manifest, validate it:
 just check ~/calib/lab1/session
 ```
 
-For a Seyond Falcon, use its frame and topic and the `solid_600/seyond.json5`
+For a Seyond Falcon, use its topic and the `solid_600/seyond.json5`
 detector preset instead. The shipped solid-600 detector presets are experimental
 starting points, not field-validated settings; validate the result independently
 before deployment.
@@ -135,14 +133,23 @@ must contain the compressed input topic and the corresponding CameraInfo topic. 
 session uses `data.kind: live` because the bag is supplied externally; `just run` with
 `data.kind: bag` would start playback itself. Since this workflow supplies playback
 manually, `just check` can check the session configuration but cannot compare its
-topics or QoS with the bag. Use `ros2 bag info` and check the session topic and frame
-values against the recording. Leave per-device `qos` unset unless you need an explicit
+topics or QoS with the bag. Use `ros2 bag info` to check the session topics against the
+recording, and inspect message headers while playing to confirm the frame labels. Leave
+per-device `qos` unset unless you need an explicit
 override; this `live` session uses the default BEST_EFFORT subscription and cannot
 infer reliability from bag metadata. If you set `qos`, compare it with the recorded
 `offered_qos_profiles` in the bag's `metadata.yaml`.
 
-Use each sensor message's `header.frame_id` in the manifest. `ros2 bag info` lists
-topic names and message types/counts, but not the frame IDs inside those messages.
+This manifest names topics but has no frame overrides. While the bag is playing, inspect
+the message headers to confirm the LiDAR and camera labels:
+
+```bash
+ros2 topic echo /velodyne_points --once --field header.frame_id
+ros2 topic echo /camera/image_raw --once --field header.frame_id
+```
+
+`ros2 bag info` lists topic names and message types/counts, but not the frame IDs inside
+those messages.
 
 ## 4. Launch assisted calibration
 
@@ -224,3 +231,5 @@ Check the frames and values in the preview. Then run the same command without
 its first write. The CLI exports the solved transform stored in the Detection Archive;
 it does not apply a separately adjusted transform from the review page. See
 [Exporting to Autoware](./autoware-export.md) for kit-frame options and verification.
+For an offline check against separately captured observations, see
+[Extrinsic Validation](./extrinsic-validation.md).
