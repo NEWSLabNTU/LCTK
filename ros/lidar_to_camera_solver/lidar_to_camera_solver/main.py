@@ -539,7 +539,7 @@ class LidarToCameraSolver(Node):
             ("target_config", ""),
             ("debug_mode", True),
             ("publishing_rate", 10.0),
-            ("min_frames_required", 2),
+            ("min_frames_required", 1),
             ("min_normal_spread_deg", 20.0),
             ("min_depth_range_m", 1.0),
             ("enforce_pose_diversity", False),
