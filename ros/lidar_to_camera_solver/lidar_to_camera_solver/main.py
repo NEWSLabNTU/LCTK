@@ -1,5 +1,6 @@
 """ROS adapter for continuous, manual and assisted LiDAR-to-camera calibration."""
 
+import copy
 import json
 import math
 import os
@@ -399,6 +400,8 @@ class LidarToCameraSolver(Node):
         # Buffer owns captures, solve state, quality, and its own lock. This lock owns
         # only node-level adjustment/publication state.
         self.detection_buffer: DetectionBuffer | None = None
+        self._pinned_camera_info: CameraInfo | None = None
+        self._intrinsic_update_reported = False
         self.camera_info: CameraInfo | None = None
         self._camera_matrix: np.ndarray | None = None
         self._camera_projection: dict | None = None
@@ -728,7 +731,7 @@ class LidarToCameraSolver(Node):
         )
 
     def camera_info_callback(self, msg: CameraInfo):
-        """Bind one camera projection; any projection change starts a clean epoch."""
+        """Pin first valid intrinsics; frame or image-size changes start a clean epoch."""
         try:
             projection = normalize_camera_projection(
                 {
@@ -745,9 +748,33 @@ class LidarToCameraSolver(Node):
             camera_matrix = None
             self.get_logger().warn(f"Ignoring invalid CameraInfo projection: {error!s}")
 
-        replacement = None if camera_matrix is None else self._new_buffer(camera_matrix)
         reset_review = False
         with self.state_lock:
+            if projection is not None:
+                pinned = getattr(self, "_pinned_camera_info", None)
+                if pinned is None:
+                    pinned = copy.deepcopy(msg)
+                    self._pinned_camera_info = pinned
+                    self.get_logger().info(
+                        "Camera intrinsics pinned to first valid CameraInfo for this solver run"
+                    )
+                elif (
+                    list(msg.k) != list(pinned.k) or list(msg.d) != list(pinned.d)
+                ) and not getattr(self, "_intrinsic_update_reported", False):
+                    self._intrinsic_update_reported = True
+                    self.get_logger().info(
+                        "Ignoring updated camera intrinsics; using first valid CameraInfo"
+                    )
+                msg = copy.deepcopy(msg)
+                msg.k = list(pinned.k)
+                msg.d = list(pinned.d)
+                projection["k"] = list(pinned.k)
+                camera_matrix = np.asarray(projection["k"], dtype=np.float64).reshape(
+                    3, 3
+                )
+            replacement = (
+                None if camera_matrix is None else self._new_buffer(camera_matrix)
+            )
             old_projection = getattr(self, "_camera_projection", None)
             if projection is not None and old_projection == projection:
                 self.camera_info = msg

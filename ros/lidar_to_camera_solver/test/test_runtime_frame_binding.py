@@ -43,6 +43,9 @@ class _Logger:
     def __init__(self):
         self.messages = []
 
+    def info(self, message, **_kwargs):
+        self.messages.append(message)
+
     def debug(self, message, **_kwargs):
         self.messages.append(message)
 
@@ -319,19 +322,65 @@ def test_camera_info_dimension_change_starts_new_epoch():
     assert solver._camera_projection["width"] == 800
 
 
-def test_camera_info_intrinsic_change_starts_new_epoch():
+def test_camera_info_intrinsic_updates_preserve_captures_and_estimate():
+    from unittest.mock import Mock
+
+    solver = _solver()
+    solver._evidence_store = Mock()
+    solver._review_read_model = Mock()
+    first = _camera_info()
+    first.d = [0.1, 0.0, 0.0, 0.0, 0.0]
+    solver.camera_info_callback(first)
+    buffer = _ArchiveBuffer(_snapshot([_pair()]))
+    solver.detection_buffer = buffer
+    transform = object()
+    solver.last_transform = transform
+    solver.current_rvec = np.ones((3, 1))
+    solver.publishing_enabled = True
+    generation = solver._identity_generation
+    scene_revision = solver._scene_revision
+    changed_k = list(K)
+    changed_k[0] += 0.01
+    for k in (K, changed_k, changed_k):
+        update = _camera_info(k=k)
+        update.d = [0.2, 0.0, 0.0, 0.0, 0.0]
+        solver.camera_info_callback(update)
+
+    assert solver._identity_generation == generation
+    assert solver._scene_revision == scene_revision
+    assert solver.detection_buffer is buffer
+    assert buffer.snapshot().frame_count == 1
+    assert solver.last_transform is transform
+    assert solver.current_rvec is not None
+    assert solver.publishing_enabled
+    assert solver._camera_projection["k"] == K
+    np.testing.assert_array_equal(solver._camera_matrix, np.asarray(K).reshape(3, 3))
+    assert list(solver.camera_info.d) == list(first.d)
+    for call in solver._evidence_store.observe_intrinsics.call_args_list:
+        np.testing.assert_array_equal(call.args[0], np.asarray(K).reshape(3, 3))
+        np.testing.assert_array_equal(call.args[1], first.d)
+    solver._review_read_model.reset.assert_not_called()
+
+
+def test_intrinsic_pin_survives_frame_reset_and_is_local_to_solver():
     solver = _solver()
     solver.camera_info_callback(_camera_info())
-    old_generation = solver._identity_generation
-    old_buffer = solver.detection_buffer
     changed_k = list(K)
-    changed_k[0] = 510.0
+    changed_k[0] += 1.0
+    solver.camera_info_callback(_camera_info(frame="camera_replaced", k=changed_k))
+    assert solver._camera_projection["frame_id"] == "camera_replaced"
+    assert solver._camera_projection["k"] == K
+    other = _solver()
+    other.camera_info_callback(_camera_info(k=changed_k))
+    assert other._camera_projection["k"] == changed_k
 
-    solver.camera_info_callback(_camera_info(k=changed_k))
 
-    assert solver._identity_generation == old_generation + 1
-    assert solver.detection_buffer is not old_buffer
-    assert solver._camera_projection["k"][0] == 510.0
+def test_invalid_first_camera_info_does_not_pin_intrinsics():
+    solver = _solver()
+    solver.camera_info_callback(_camera_info(k=[0.0] * 9))
+    assert solver._camera_projection is None
+    solver.camera_info_callback(_camera_info())
+    assert solver._camera_projection["k"] == K
 
 
 def test_transform_labels_use_bound_sensor_headers():
@@ -408,6 +457,46 @@ def test_load_archive_without_camera_info_uses_saved_projection(tmp_path):
     assert solver._bound_lidar_frame == "archived_lidar"
     assert solver.detection_buffer.snapshot().frame_count == 1
     assert solver.detection_buffer.snapshot().estimate is not None
+
+
+def test_archive_load_cannot_replace_pinned_intrinsics(tmp_path):
+    solver = _solver()
+    solver.camera_info_callback(_camera_info())
+    projection = copy.deepcopy(solver._camera_projection)
+    projection["k"][0] += 1.0
+    path = tmp_path / "different-intrinsics.json"
+    _write_archive(path, projection=projection)
+
+    response = _load(solver, path, append=False)
+
+    assert not response.success
+    assert "projection does not match" in response.message
+    assert solver._camera_projection["k"] == K
+    assert list(solver._pinned_camera_info.k) == K
+
+
+def test_first_camera_info_after_offline_archive_establishes_pin(tmp_path):
+    solver = _solver()
+    projection = {
+        "model": PROJECTION_MODEL,
+        "frame_id": "camera_optical",
+        "width": 640,
+        "height": 480,
+        "k": K,
+    }
+    path = tmp_path / "offline.json"
+    _write_archive(path, projection=projection, pairs=[_valid_pair()])
+    solver.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(to_msg=lambda: Time())
+    )
+    assert _load(solver, path, append=False).success
+    changed_k = list(K)
+    changed_k[0] += 1.0
+    solver.camera_info_callback(_camera_info(k=changed_k))
+    assert solver._camera_projection["k"] == changed_k
+    assert list(solver._pinned_camera_info.k) == changed_k
+    solver.camera_info_callback(_camera_info())
+    assert solver._camera_projection["k"] == changed_k
 
 
 def test_rejected_cold_start_archive_does_not_bind_projection(tmp_path):
